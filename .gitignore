@@ -41,6 +41,7 @@ yolo*.pt
 datasetPCB_for_net_norm_masks/
 datasets/
 data/
+!Docs
 
 # Images (unless you want to track sample images, but typically ignored)
 *.png
