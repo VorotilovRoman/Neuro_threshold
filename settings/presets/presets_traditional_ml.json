@@ -1,0 +1,34 @@
+{
+    "123": {
+        "model": "XGBoost",
+        "n_clusters": 2,
+        "svm_kernel": "linear",
+        "svm_c": 10,
+        "rf_trees": 50,
+        "xgb_trees": 50,
+        "invert": false,
+        "close_factor": 0.0,
+        "open_factor": 0.0,
+        "draw_mode": "None",
+        "use_hull": false,
+        "model_paths": {
+            "XGBoost": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/xgboost.pkl"
+        }
+    },
+    "321": {
+        "model": "MeanShift",
+        "n_clusters": 2,
+        "svm_kernel": "linear",
+        "svm_c": 10,
+        "rf_trees": 50,
+        "xgb_trees": 50,
+        "invert": false,
+        "close_factor": 0.0,
+        "open_factor": 0.0,
+        "draw_mode": "None",
+        "use_hull": false,
+        "model_paths": {
+            "MeanShift": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/mean-shift.pkl"
+        }
+    }
+}

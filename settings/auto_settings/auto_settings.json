@@ -1,0 +1,86 @@
+{
+    "Simple Threshold": {
+        "enabled": true,
+        "start": 1,
+        "end": 254,
+        "step": 100
+    },
+    "Otsu": {
+        "enabled": false
+    },
+    "Triangle": {
+        "enabled": false
+    },
+    "Adaptive Mean": {
+        "enabled": false,
+        "window_start": 3,
+        "window_end": 201,
+        "window_step": 100,
+        "c_start": -20,
+        "c_end": 20,
+        "c_step": 10
+    },
+    "Adaptive Gauss": {
+        "enabled": false,
+        "window_start": 3,
+        "window_end": 201,
+        "window_step": 10,
+        "c_start": -20,
+        "c_end": 20,
+        "c_step": 5
+    },
+    "Niblack": {
+        "enabled": false,
+        "window_start": 3,
+        "window_end": 201,
+        "window_step": 10,
+        "k_start": -1.0,
+        "k_end": 1.0,
+        "k_step": 0.1
+    },
+    "Sauvola": {
+        "enabled": false,
+        "window_start": 3,
+        "window_end": 201,
+        "window_step": 10,
+        "k_start": -1.0,
+        "k_end": 1.0,
+        "k_step": 0.1,
+        "r_start": 1,
+        "r_end": 255,
+        "r_step": 20
+    },
+    "ISODATA": {
+        "enabled": false,
+        "init_start": 0,
+        "init_end": 255,
+        "init_step": 1
+    },
+    "Background Symmetry": {
+        "enabled": false,
+        "excess_start": 0.01,
+        "excess_end": 1.0,
+        "excess_step": 0.1
+    },
+    "Row Adaptive": {
+        "enabled": false,
+        "window_start": 10,
+        "window_end": 500,
+        "window_step": 100,
+        "k_start": 0.0,
+        "k_end": 1.0,
+        "k_step": 0.1
+    },
+    "Morphology": {
+        "enabled": false,
+        "invert_enabled": true,
+        "close_enabled": false,
+        "close_start": 0.0,
+        "close_end": 0.1,
+        "close_step": 0.05,
+        "open_enabled": false,
+        "open_start": 0.0,
+        "open_end": 0.1,
+        "open_step": 0.05
+    }
+}

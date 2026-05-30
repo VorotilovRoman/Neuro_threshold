@@ -1,0 +1,21 @@
+{
+    "default": {
+        "method": "Sobel",
+        "sobel_kernel": 3,
+        "sobel_scale": 1,
+        "lap_kernel": 3,
+        "lap_scale": 1,
+        "canny_thresh1": 50,
+        "canny_thresh2": 150,
+        "canny_aperture": 3,
+        "threshold": 127,
+        "fill_contours": true,
+        "min_area_percent": 0.0,
+        "invert": false,
+        "close_factor": 0.0,
+        "open_factor": 0.0,
+        "kernel_shape": "Rectangle",
+        "draw_mode": "None",
+        "use_hull": false
+    }
+}

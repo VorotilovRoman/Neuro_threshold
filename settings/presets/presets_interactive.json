@@ -1,0 +1,9 @@
+{
+    "default": {
+        "invert": false,
+        "close_factor": 0.0,
+        "open_factor": 0.0,
+        "draw_mode": "None",
+        "use_hull": false
+    }
+}

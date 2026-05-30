@@ -1,0 +1,37 @@
+{
+    "theme": "dark",
+    "primary_color": [
+        61,
+        98,
+        105
+    ],
+    "colors": {
+        "annotation": [
+            0,
+            0,
+            255
+        ],
+        "selected": [
+            0,
+            0,
+            136
+        ],
+        "crosshair": [
+            0,
+            0,
+            255
+        ],
+        "edit_points": [
+            255,
+            166,
+            0
+        ],
+        "label_text": [
+            0,
+            0,
+            255
+        ]
+    },
+    "font_size_mode": "auto",
+    "line_thickness_mode": "small"
+}

@@ -1,0 +1,23 @@
+numpy==2.4.3
+opencv-python==4.13.0.92
+scipy==1.17.1
+scikit-image==0.26.0
+scikit-learn==1.8.0
+joblib==1.5.3
+networkx==3.6.1
+pandas==3.0.2
+tqdm==4.67.3
+requests==2.33.1
+PyYAML==6.0.3
+Pillow==12.1.1
+
+# PyTorch с поддержкой CUDA 13 (особая сборка)
+torch==2.11.0+cu130
+torchvision==0.26.0+cu130
+
+ultralytics==8.4.36
+onnxruntime==1.25.1
+albumentations==2.0.8
+PyQt5==5.15.11
+matplotlib==3.10.8
+seaborn==0.13.2

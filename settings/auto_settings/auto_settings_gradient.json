@@ -1,0 +1,80 @@
+{
+    "Sobel": {
+        "enabled": true,
+        "ksize_start": 3,
+        "ksize_end": 5,
+        "ksize_step": 2,
+        "scale_start": 1,
+        "scale_end": 2,
+        "scale_step": 1
+    },
+    "Scharr": {
+        "enabled": false,
+        "scale_start": 1,
+        "scale_end": 3,
+        "scale_step": 1
+    },
+    "Laplacian": {
+        "enabled": false,
+        "ksize_start": 3,
+        "ksize_end": 7,
+        "ksize_step": 2,
+        "scale_start": 1,
+        "scale_end": 3,
+        "scale_step": 1
+    },
+    "Canny": {
+        "enabled": true,
+        "thresh1_start": 30,
+        "thresh1_end": 150,
+        "thresh1_step": 20,
+        "thresh2_start": 100,
+        "thresh2_end": 250,
+        "thresh2_step": 30,
+        "aperture_start": 3,
+        "aperture_end": 5,
+        "aperture_step": 2
+    },
+    "Prewitt": {
+        "enabled": false
+    },
+    "Roberts": {
+        "enabled": false
+    },
+    "Kirsch": {
+        "enabled": true
+    },
+    "Binarization": {
+        "enabled": false,
+        "threshold_start": 0,
+        "threshold_end": 255,
+        "threshold_step": 10
+    },
+    "ObjectFiltering": {
+        "enabled": true,
+        "fill_contours": [
+            false
+        ],
+        "min_area_percent_start": 0.0,
+        "min_area_percent_end": 0.1,
+        "min_area_percent_step": 0.01
+    },
+    "Morphology": {
+        "enabled": true,
+        "close_enabled": false,
+        "close_start": 0.0,
+        "close_end": 0.05,
+        "close_step": 0.01,
+        "open_enabled": false,
+        "open_start": 0.0,
+        "open_end": 0.05,
+        "open_step": 0.01,
+        "kernel_shapes": [
+            "Rectangle"
+        ]
+    },
+    "Invert": [
+        false,
+        true
+    ]
+}

@@ -1,0 +1,26 @@
+{
+    "default": {
+        "method": "Simple Threshold",
+        "params": {
+            "threshold": 127
+        },
+        "invert": false,
+        "close_factor": 0.0,
+        "open_factor": 0.0,
+        "draw_mode": "Bounding Box (Detect)",
+        "use_hull": false,
+        "kernel_shape": "Rectangle"
+    },
+    "1": {
+        "method": "Simple Threshold",
+        "params": {
+            "threshold": 127
+        },
+        "invert": false,
+        "close_factor": 0.04,
+        "open_factor": 0.0,
+        "draw_mode": "Segmentation (Polygon)",
+        "use_hull": false,
+        "kernel_shape": "Rectangle"
+    }
+}
