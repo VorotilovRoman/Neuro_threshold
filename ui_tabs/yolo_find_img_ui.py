@@ -68,6 +68,36 @@ class setup_yolo_find_img_ui(object):
 
         right_layout.addWidget(self.target_group)
 
+        # ========== Группа дополнительных критериев ==========
+        self.criteria_group = QGroupBox("Дополнительные критерии")
+        criteria_layout = QVBoxLayout(self.criteria_group)
+
+        margin_layout = QHBoxLayout()
+        margin_layout.addWidget(QLabel("Мин. расстояние от бокса до края кадра (px):"))
+        self.edge_margin_spin = QSpinBox()
+        self.edge_margin_spin.setRange(0, 2000)
+        self.edge_margin_spin.setValue(0)
+        self.edge_margin_spin.setToolTip(
+            "0 — критерий отключён.\n"
+            "N > 0 — каждый объект целевого класса должен быть удалён не менее\n"
+            "чем на N пикселей от всех четырёх краёв кадра\n"
+            "(сверху, снизу, слева, справа)."
+        )
+        margin_layout.addWidget(self.edge_margin_spin)
+        margin_layout.addStretch()
+        criteria_layout.addLayout(margin_layout)
+
+        margin_hint = QLabel(
+            "0 — критерий выключен. При N > 0 в результаты попадут только снимки,\n"
+            "где хотя бы один объект целевого класса целиком лежит внутри\n"
+            "«безопасной зоны» шириной N пикселей от каждого края."
+        )
+        margin_hint.setStyleSheet("QLabel { color: #666; font-size: 11px; }")
+        margin_hint.setWordWrap(True)
+        criteria_layout.addWidget(margin_hint)
+
+        right_layout.addWidget(self.criteria_group)
+
         # Прогресс-бар и кнопки управления
         progress_layout = QHBoxLayout()
         self.progress_bar = QProgressBar()

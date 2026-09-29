@@ -33,7 +33,14 @@ class ScanThread(QThread):
     file_done = pyqtSignal(str, float, bool)
     finished = pyqtSignal(list)
 
-    def __init__(self, root_dir, model_path, target_class, conf, iou, imgsz, device):
+    def __init__(self, root_dir, model_path, target_class, conf, iou, imgsz, device,
+                 edge_margin=0):
+        """
+        edge_margin: минимальное расстояние (в пикселях) от бокса объекта
+                     до каждого из четырёх краёв кадра.
+                     0 — критерий отключён (бокс может касаться/выходить за край).
+                     N > 0 — бокс должен быть на расстоянии >= N px от всех краёв.
+        """
         super().__init__()
         self.root_dir = root_dir
         self.model_path = model_path
@@ -42,11 +49,27 @@ class ScanThread(QThread):
         self.iou = iou
         self.imgsz = imgsz
         self.device = device
+        self.edge_margin = int(edge_margin)
         self._is_canceled = False
 
     def cancel(self):
         self._is_canceled = True
         self.log_msg.emit("Отмена сканирования...")
+
+    def _box_meets_margin(self, x1, y1, x2, y2, w, h):
+        """
+        True, если бокс отстоит от всех четырёх краёв кадра не меньше,
+        чем на self.edge_margin пикселей.
+        """
+        m = self.edge_margin
+        if m <= 0:
+            return True
+        # Расстояния от бокса до краёв кадра
+        dist_left   = x1
+        dist_top    = y1
+        dist_right  = w - x2
+        dist_bottom = h - y2
+        return (dist_left >= m) and (dist_top >= m) and (dist_right >= m) and (dist_bottom >= m)
 
     def run(self):
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
@@ -61,6 +84,14 @@ class ScanThread(QThread):
         if total == 0:
             self.finished.emit([])
             return
+
+        if self.edge_margin > 0:
+            self.log_msg.emit(
+                f"Доп. критерий: бокс объекта должен быть не ближе {self.edge_margin} px "
+                f"к каждому краю кадра"
+            )
+        else:
+            self.log_msg.emit("Доп. критерий отступа от краёв кадра отключён (0 px)")
 
         results = []
         self.log_msg.emit(f"Загрузка модели YOLO: {self.model_path}")
@@ -87,16 +118,29 @@ class ScanThread(QThread):
                 elif img.shape[2] != 3:
                     img = img[:, :, :3]
 
-                results_yolo = model(img, conf=self.conf, iou=self.iou, imgsz=self.imgsz, device=self.device)
+                img_h, img_w = img.shape[:2]
+
+                results_yolo = model(img, conf=self.conf, iou=self.iou,
+                                     imgsz=self.imgsz, device=self.device)
                 max_conf = 0.0
                 contains_target = False
+
                 if results_yolo[0].boxes is not None:
                     for box in results_yolo[0].boxes:
                         cls = int(box.cls[0])
                         conf_val = float(box.conf[0])
-                        if cls == self.target_class:
-                            contains_target = True
-                            max_conf = max(max_conf, conf_val)
+                        if cls != self.target_class:
+                            continue
+
+                        # Проверка расстояния до краёв кадра
+                        xyxy = box.xyxy[0].tolist()
+                        x1, y1, x2, y2 = xyxy
+                        if not self._box_meets_margin(x1, y1, x2, y2, img_w, img_h):
+                            continue
+
+                        contains_target = True
+                        max_conf = max(max_conf, conf_val)
+
                 if contains_target:
                     results.append((img_path, max_conf))
                 self.file_done.emit(img_path, max_conf, contains_target)
@@ -272,6 +316,8 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         device = self.device_combo.currentText()
         device = self.resolve_device(device)
 
+        edge_margin = self.edge_margin_spin.value()
+
         self.log("=" * 50)
         self.log("ЗАПУСК СКАНИРОВАНИЯ")
         self.log(f"Модель: {model_path}")
@@ -279,6 +325,10 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.log(f"Параметры: conf={conf}, iou={iou}, imgsz={imgsz}")
         self.log(f"Используется устройство: {device}")
         self.log(f"Корневая папка: {self.current_root_dir}")
+        if edge_margin > 0:
+            self.log(f"Мин. расстояние от бокса до края кадра: {edge_margin} px")
+        else:
+            self.log("Критерий отступа от краёв кадра отключён")
 
         self.results_list.clear()
         self._clear_thumbnail_grid()
@@ -299,7 +349,8 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             conf=conf,
             iou=iou,
             imgsz=imgsz,
-            device=device
+            device=device,
+            edge_margin=edge_margin,
         )
         self.scan_thread.progress.connect(self.update_progress)
         self.scan_thread.log_msg.connect(self.log)
@@ -377,7 +428,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.log("Список отсортирован по убыванию уверенности.")
 
     # --------------------------------------------------------
-    # Миниатюры (исправленная версия)
+    # Миниатюры
     # --------------------------------------------------------
     def generate_thumbnails_sync(self):
         if not self.result_file_paths:
@@ -456,7 +507,6 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         cb.stateChanged.connect(lambda state, fp=file_path: self.on_thumbnail_checkbox_changed(fp, state))
         layout.addWidget(cb, alignment=Qt.AlignTop | Qt.AlignHCenter)
 
-        # Используем ClickableLabel вместо обычного QLabel
         label = ClickableLabel()
         label.setPixmap(pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         label.setAlignment(Qt.AlignCenter)
