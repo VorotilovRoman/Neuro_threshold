@@ -14,8 +14,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 # ================== КОНФИГ ==================
-DATA_DIR     = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\output"
-OUT_DIR      = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\output\runs_ae_def"
+DATA_DIR     = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\Good_ball"
+OUT_DIR      = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\Good_ball\runs_ae_def"
 
 # --- Геометрия ---
 # ГЛАВНОЕ ИЗМЕНЕНИЕ: вход вчетверо больше.
@@ -23,12 +23,12 @@ OUT_DIR      = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_b
 # Стало 256×384 → бутылочное горлышко 16×24 (та же ячейка 16×16 px,
 # но мелкий дефект при ресайзе занимает больше пикселей — он «выживает»).
 IMG_H        = 256
-IMG_W        = 384
+IMG_W        = 256
 KEEP_ASPECT  = True
 PAD_VALUE    = 0
 
 # --- Цвет ---
-COLOR_MODE   = "color"              # "color" | "grayscale"
+COLOR_MODE   = "grayscale"              # "color" | "grayscale"
 IN_CHANNELS  = 3 if COLOR_MODE == "color" else 1
 
 # --- Тип автоэнкодера ---
@@ -65,7 +65,7 @@ AUG_CONTRAST     = 0.10     # было 0.15
 LATENT_DIM   = 256
 # Батч уменьшен: вход вчетверо тяжелее, при BATCH=16 рискуем OOM.
 BATCH_SIZE   = 8
-EPOCHS       = 200                  # чуть больше эпох — задача сложнее
+EPOCHS       = 1000                  # чуть больше эпох — задача сложнее
 LR           = 1e-3
 WEIGHT_DECAY = 1e-5
 VAL_SPLIT    = 0.1

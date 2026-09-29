@@ -648,6 +648,25 @@ class YoloInspectWindow(QMainWindow):
         )
         al.addWidget(self.chk_auto_rotate)
 
+        # Строка «Заливка фона» — активна только при включённой авто-обрезке.
+        fill_row = QHBoxLayout()
+        fill_row.addWidget(QLabel("Заливка фона:"))
+        self.fill_combo = QComboBox()
+        self.fill_combo.addItem("Нет", "none")
+        self.fill_combo.addItem("Чёрный", "black")
+        self.fill_combo.addItem("Белый", "white")
+        self.fill_combo.setCurrentIndex(0)
+        self.fill_combo.setEnabled(False)   # включается при chk_auto_crop
+        self.fill_combo.setToolTip(
+            "Действует только при включённой «Авто-обрезке по объекту».\n"
+            "Нет — фон сохраняется как есть.\n"
+            "Чёрный/Белый — всё вне выбранного объекта (для сегментации —\n"
+            "вне маски) закрашивается выбранным цветом."
+        )
+        fill_row.addWidget(self.fill_combo)
+        fill_row.addStretch()
+        al.addLayout(fill_row)
+
         manual_label = QLabel("Ручные трансформации:")
         manual_label.setStyleSheet("QLabel { color: #666; margin-top: 4px; }")
         al.addWidget(manual_label)
@@ -718,9 +737,13 @@ class YoloInspectWindow(QMainWindow):
         self.btn_reset.clicked.connect(self.reset_view)
         self.btn_save.clicked.connect(self.save_image)
 
+        self.chk_auto_crop.toggled.connect(self._on_auto_crop_toggled)
         self.chk_auto_crop.toggled.connect(self._on_auto_transform_changed)
         self.chk_auto_rotate.toggled.connect(self._on_auto_transform_changed)
         self.crop_padding_spin.valueChanged.connect(self._on_padding_changed)
+
+        # Изменение режима заливки — пересобрать вид (обработчик в yolo_test.py).
+        self.fill_combo.currentIndexChanged.connect(self._on_auto_transform_changed)
 
         # Тумблер отображения разметки YOLO — обработчик в yolo_test.py.
         self.chk_show_boxes.toggled.connect(self._on_show_boxes_changed)
@@ -768,6 +791,12 @@ class YoloInspectWindow(QMainWindow):
         self.btn_clear_ae.setEnabled(self.ae_model is not None)
         self.btn_save_errmap.setEnabled(self._error_bgr is not None)
 
+    def _on_auto_crop_toggled(self, checked: bool):
+        """Заливка фона активна только при включённой авто-обрезке."""
+        try:
+            self.fill_combo.setEnabled(bool(checked))
+        except Exception:
+            pass
     # --------------------------------------------------------
     # Чтение изображений (TIFF — через PIL/tifffile, остальное — cv2)
     # --------------------------------------------------------

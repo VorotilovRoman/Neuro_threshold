@@ -10,7 +10,8 @@
     – инференс YOLO,
     – применение AE/VAE и рендер карты ошибок,
     – авто- и ручные трансформации снимка,
-    – выбор объектов и работа с устройствами.
+    – заливку фона за пределами объекта,
+    – выбор объектов и работу с устройствами.
 
 UI-слой (разметка окна, загрузка моделей и изображений, сохранение,
 зум/панорама) — в yolo_test_ui.py.
@@ -773,6 +774,80 @@ class YoloInspectWindow(_YoloInspectWindow):
         self._update_actions_enabled()
 
     # --------------------------------------------------------
+    # Заливка фона за пределами объекта
+    # --------------------------------------------------------
+    def _get_fill_mode(self) -> str:
+        """Возвращает режим заливки: 'none' | 'black' | 'white'."""
+        combo = getattr(self, "fill_combo", None)
+        if combo is None:
+            return "none"
+        try:
+            data = combo.currentData()
+        except Exception:
+            data = None
+        if data in ("none", "black", "white"):
+            return data
+        try:
+            idx = int(combo.currentIndex())
+            return ["none", "black", "white"][idx] if 0 <= idx < 3 else "none"
+        except Exception:
+            return "none"
+
+    def _fill_outside_object(self, img, det,
+                             rotation_matrix=None,
+                             crop_offset=(0, 0)):
+        """
+        Заливает пиксели ВНЕ области выбранного объекта цветом из fill_combo.
+        Для 'seg' используется det['mask_xy'] (точный полигон сегментации);
+        для 'obb'/'detect' — четырёхугольник det['corners'].
+
+        rotation_matrix — матрица 2x3 из cv2.getRotationMatrix2D, если
+            перед кропом был поворот (иначе None).
+        crop_offset — (x, y) левого верхнего угла кропа в системе координат
+            после поворота.
+        """
+        fill_mode = self._get_fill_mode()
+        if fill_mode == "none":
+            return img
+        color_val = 0 if fill_mode == "black" else 255
+
+        H, W = img.shape[:2]
+
+        # 1. Полигон объекта в исходных координатах original_image
+        if det.get("kind") == "seg" and det.get("mask_xy"):
+            poly = np.asarray(det["mask_xy"], dtype=np.float32).reshape(-1, 2)
+        else:
+            poly = np.asarray(det["corners"], dtype=np.float32).reshape(-1, 2)
+
+        if poly.shape[0] < 3:
+            return img
+
+        # 2. Поворот (если был)
+        if rotation_matrix is not None:
+            ones = np.ones((poly.shape[0], 1), dtype=np.float32)
+            poly_h = np.hstack([poly, ones])              # (N, 3)
+            poly = (rotation_matrix @ poly_h.T).T          # (N, 2)
+
+        # 3. Смещение из-за кропа
+        ox, oy = crop_offset
+        poly = poly.copy()
+        poly[:, 0] -= float(ox)
+        poly[:, 1] -= float(oy)
+
+        # 4. Маска области объекта
+        mask = np.zeros((H, W), dtype=np.uint8)
+        pts = np.round(poly).astype(np.int32).reshape(-1, 1, 2)
+        cv2.fillPoly(mask, [pts], 255)
+
+        # 5. Заливка снаружи
+        outside = (mask == 0)
+        if img.ndim == 2:
+            img[outside] = color_val
+        else:
+            img[outside] = (color_val,) * img.shape[2]
+        return img
+
+    # --------------------------------------------------------
     # Авто-трансформации (единая точка входа)
     # --------------------------------------------------------
     def _crop_to_detection(self, img, det):
@@ -785,7 +860,14 @@ class YoloInspectWindow(_YoloInspectWindow):
         yi2 = min(H, int(round(y2)) + padding)
         if xi2 <= xi1 or yi2 <= yi1:
             return img
-        return img[yi1:yi2, xi1:xi2].copy()
+        cropped = img[yi1:yi2, xi1:xi2].copy()
+        # Заливка фона за пределами объекта (если включена).
+        cropped = self._fill_outside_object(
+            cropped, det,
+            rotation_matrix=None,
+            crop_offset=(xi1, yi1),
+        )
+        return cropped
 
     def _rotate_with_optional_crop(self, img, det, auto_crop):
         angle_deg = det["angle_deg"]
@@ -819,6 +901,12 @@ class YoloInspectWindow(_YoloInspectWindow):
             yi2 = min(rotated.shape[0], y2n)
             if xi2 > xi1 and yi2 > yi1:
                 rotated = rotated[yi1:yi2, xi1:xi2].copy()
+                # Заливка фона за пределами объекта (если включена).
+                rotated = self._fill_outside_object(
+                    rotated, det,
+                    rotation_matrix=M,
+                    crop_offset=(xi1, yi1),
+                )
         return rotated
 
     def _apply_auto_transforms(self):
@@ -951,6 +1039,8 @@ class YoloInspectWindow(_YoloInspectWindow):
                     "conf": float(conf_all[i]),
                     "xyxy": xyxy,
                     "corners": box_pts,
+                    # Точный полигон сегментации — нужен для заливки фона.
+                    "mask_xy": poly.tolist() if poly is not None else None,
                     "angle_deg": angle_deg,
                     "center": (cx, cy),
                 })

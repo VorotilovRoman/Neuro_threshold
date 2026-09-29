@@ -14,8 +14,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 # ================== КОНФИГ ==================
-DATA_DIR     = r"C:\Users\prodis\Pictures\filters\crop_filters\BD"
-OUT_DIR      = r"C:\Users\prodis\Pictures\filters\crop_filters\BD\runs_u_ae"
+DATA_DIR     = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\Good_ball"
+OUT_DIR      = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\Good_ball\runs_ae_def"
 
 # --- Геометрия ---
 # ВАЖНО: вход должен быть кратен 8 (U-Net делает 3 пула, а не 4).
@@ -25,7 +25,7 @@ KEEP_ASPECT  = True
 PAD_VALUE    = 0
 
 # --- Цвет ---
-COLOR_MODE   = "color"              # "color" | "grayscale"
+COLOR_MODE   = "grayscale"              # "color" | "grayscale"
 IN_CHANNELS  = 3 if COLOR_MODE == "color" else 1
 
 # --- Тип автоэнкодера ---
