@@ -680,6 +680,27 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def move_selected_files(self):
         self._copy_move_files(copy=False)
 
+    # --------------------------------------------------------
+    # Копирование/перемещение с защитой от перезаписи
+    # --------------------------------------------------------
+    @staticmethod
+    def _unique_dst(dst):
+        """
+        Возвращает первое свободное имя файла:
+            /path/cat.jpg  →  /path/cat.jpg (если свободно)
+                            →  /path/cat_1.jpg
+                            →  /path/cat_2.jpg ...
+        """
+        if not os.path.exists(dst):
+            return dst
+        base, ext = os.path.splitext(dst)
+        i = 1
+        while True:
+            candidate = f"{base}_{i}{ext}"
+            if not os.path.exists(candidate):
+                return candidate
+            i += 1
+
     def _copy_move_files(self, copy=True):
         target_dir = self.target_folder_edit.text().strip()
         if not target_dir:
@@ -702,36 +723,61 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.log(f"{operation} {len(selected)} файлов в {target_dir}")
 
         success = 0
+        renamed = 0
         errors = 0
+        successfully_processed = []   # для удаления из UI при перемещении
+
         for src in selected:
-            dst = os.path.join(target_dir, os.path.basename(src))
+            base_name = os.path.basename(src)
+            dst_initial = os.path.join(target_dir, base_name)
+            dst = self._unique_dst(dst_initial)
+
+            if os.path.abspath(dst) == os.path.abspath(src):
+                # src уже лежит в target_dir под тем же именем — не копируем на себя
+                self.log(f"Пропущен (источник уже в целевой папке): {base_name}")
+                continue
+
             try:
                 if copy:
                     shutil.copy2(src, dst)
                 else:
                     shutil.move(src, dst)
                 success += 1
-                self.log(f"{'Скопирован' if copy else 'Перемещён'}: {os.path.basename(src)}")
+                successfully_processed.append(src)
+
+                if dst != dst_initial:
+                    renamed += 1
+                    self.log(f"{'Скопирован' if copy else 'Перемещён'} "
+                             f"(переименован → {os.path.basename(dst)}): {base_name}")
+                else:
+                    self.log(f"{'Скопирован' if copy else 'Перемещён'}: {base_name}")
             except Exception as e:
-                self.log(f"Ошибка {os.path.basename(src)}: {e}")
+                self.log(f"Ошибка {base_name}: {e}")
                 errors += 1
 
-        QMessageBox.information(self, "Результат", f"{operation} завершено.\nУспешно: {success}\nОшибок: {errors}")
-        self.log(f"{operation} завершено. Успешно: {success}, ошибок: {errors}")
+        # Итоговое сообщение
+        msg_lines = [f"{operation} завершено.",
+                     f"Успешно: {success}",
+                     f"Переименовано (во избежание перезаписи): {renamed}",
+                     f"Ошибок: {errors}"]
+        QMessageBox.information(self, "Результат", "\n".join(msg_lines))
+        self.log(f"{operation} завершено. Успешно: {success}, "
+                 f"переименовано: {renamed}, ошибок: {errors}")
 
         if not copy:
-            new_result_paths = []
-            for fp, conf in self.result_file_paths:
-                if fp not in selected:
-                    new_result_paths.append((fp, conf))
-            self.result_file_paths = new_result_paths
+            # При перемещении удаляем успешно перенесённые файлы из результатов
+            processed_set = set(successfully_processed)
+            self.result_file_paths = [
+                (fp, conf) for fp, conf in self.result_file_paths
+                if fp not in processed_set
+            ]
 
             for i in range(self.results_list.count() - 1, -1, -1):
                 item = self.results_list.item(i)
-                if item.data(Qt.UserRole) in selected:
+                if item.data(Qt.UserRole) in processed_set:
                     self.results_list.takeItem(i)
 
-            for fp in selected:
+            for fp in processed_set:
                 if fp in self.thumbnail_widgets:
                     _, _, container = self.thumbnail_widgets[fp]
                     container.deleteLater()
@@ -742,6 +788,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             if self.is_thumbnail_mode and self.thumbnail_widgets:
                 self.relayout_thumbnails()
             self.update_select_all_state()
+
 
     def closeEvent(self, event):
         self.log("Закрытие приложения, остановка потоков...")
