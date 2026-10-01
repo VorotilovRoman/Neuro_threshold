@@ -1,5 +1,7 @@
+# ui/image_navigation.py
 from import_libs_external import *
 
+from utils.settings import settings
 
 class ImageNavigationWidget(QWidget):
     load_images = pyqtSignal()
@@ -82,3 +84,129 @@ class ImageNavigationWidget(QWidget):
         # Обновляем состояние кнопок (обычно это делает родитель, но можно и здесь)
         self._prev_btn.setEnabled(total > 0 and idx > 0)
         self._next_btn.setEnabled(total > 0 and idx < total - 1)
+
+
+# ============================================================
+# Горячие клавиши навигации по снимкам (Num+4 / Num+6 и др.)
+# ============================================================
+from PyQt5.QtCore import QEvent, QObject
+
+
+def parse_key_spec(spec):
+    """
+    Парсит строку вида:
+        "4"          -> (Qt.Key_4, False)
+        "Num+4"      -> (Qt.Key_4, True)
+        "Keypad+6"   -> (Qt.Key_6, True)
+        "Left"       -> (Qt.Key_Left, False)
+        "Space"      -> (Qt.Key_Space, False)
+    Возвращает (Qt.Key, requires_keypad_modifier) либо (None, False).
+    """
+    if not spec:
+        return None, False
+    s = str(spec).strip()
+    low = s.lower()
+
+    requires_keypad = False
+    for prefix in ("num+", "numpad+", "keypad+", "kp+"):
+        if low.startswith(prefix):
+            requires_keypad = True
+            s = s[len(prefix):]
+            low = s.lower()
+            break
+
+    # Односимвольная цифра или буква
+    if len(s) == 1:
+        key = getattr(Qt, f"Key_{s.upper()}", None)
+        if key is not None:
+            return key, requires_keypad
+
+    # Именованные константы
+    for name in (f"Key_{s}", f"Key_{s.capitalize()}", f"Key_{s.upper()}"):
+        key = getattr(Qt, name, None)
+        if key is not None:
+            return key, requires_keypad
+
+    return None, False
+
+
+class NavigationShortcutInstaller(QObject):
+    """
+    Устанавливает горячие клавиши prev/next для конкретной вкладки.
+
+    Логика:
+      • event filter ставится на QApplication — ловит все нажатия клавиш
+        независимо от того, на каком дочернем виджете фокус;
+      • срабатывает только если вкладка сейчас активна в QTabWidget;
+      • при фокусе в QLineEdit/QSpinBox/QTextEdit не-numpad клавиши
+        игнорируются, чтобы не мешать вводу;
+      • настройки перечитываются по сигналу settings.settings_changed.
+    """
+    def __init__(self, tab_widget, prev_callback, next_callback, parent=None):
+        super().__init__(parent or tab_widget)
+        self._tab = tab_widget
+        self._prev_cb = prev_callback
+        self._next_cb = next_callback
+        self._prev_key = (Qt.Key_4, True)
+        self._next_key = (Qt.Key_6, True)
+        self._reload_from_settings()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+        try:
+            settings.settings_changed.connect(self._on_settings_changed)
+        except Exception:
+            pass
+
+    # --- Настройки ---
+    def _reload_from_settings(self):
+        cfg = settings.current.get("navigation_shortcuts", {}) or {}
+        pk, pkp = parse_key_spec(cfg.get("prev", "Num+4"))
+        nk, nkp = parse_key_spec(cfg.get("next", "Num+6"))
+        self._prev_key = (pk if pk is not None else Qt.Key_4, pkp)
+        self._next_key = (nk if nk is not None else Qt.Key_6, nkp)
+
+    def _on_settings_changed(self, *_):
+        self._reload_from_settings()
+
+    # --- Проверки ---
+    def _is_active_tab(self):
+        # Ищем QTabWidget, в котором живёт эта вкладка
+        p = self._tab
+        while p is not None:
+            if isinstance(p, QTabWidget):
+                try:
+                    return p.currentWidget() is self._tab
+                except Exception:
+                    return False
+            p = p.parentWidget()
+        # Если QTabWidget не найден (окно как отдельное) — просто по видимости
+        return self._tab.isVisible()
+
+    @staticmethod
+    def _focus_is_text_input():
+        from PyQt5.QtWidgets import QAbstractSpinBox
+        w = QApplication.focusWidget()
+        return isinstance(w, (QLineEdit, QTextEdit, QAbstractSpinBox))
+
+    # --- Обработчик ---
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress and self._is_active_tab():
+            key = event.key()
+            mods = event.modifiers()
+            is_keypad = bool(mods & Qt.KeypadModifier)
+
+            pk, pkp = self._prev_key
+            nk, nkp = self._next_key
+
+            # Prev
+            if key == pk and (not pkp or is_keypad):
+                if pkp or not self._focus_is_text_input():
+                    self._prev_cb()
+                    return True
+            # Next
+            if key == nk and (not nkp or is_keypad):
+                if nkp or not self._focus_is_text_input():
+                    self._next_cb()
+                    return True
+        return super().eventFilter(obj, event)

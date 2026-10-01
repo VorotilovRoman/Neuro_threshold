@@ -5,7 +5,8 @@ from path_setup import setup_project_path
 setup_project_path()
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QComboBox, QPushButton, QColorDialog, QMessageBox)
+                             QComboBox, QPushButton, QColorDialog, QMessageBox,
+                             QLineEdit)
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt
 from utils.settings import settings, apply_theme
@@ -76,6 +77,31 @@ class SettingsWidget(QWidget):
         thickness_layout.addWidget(self.thickness_combo)
         layout.addLayout(thickness_layout)
 
+        # Горячие клавиши навигации
+        nav_group = QWidget()
+        nav_layout = QVBoxLayout(nav_group)
+        nav_layout.addWidget(QLabel("Горячие клавиши навигации по снимкам:"))
+
+        prev_layout = QHBoxLayout()
+        prev_layout.addWidget(QLabel("Предыдущий:"))
+        self.nav_prev_edit = QLineEdit()
+        self.nav_prev_edit.setPlaceholderText("например: Num+4")
+        prev_layout.addWidget(self.nav_prev_edit)
+        nav_layout.addLayout(prev_layout)
+
+        next_layout = QHBoxLayout()
+        next_layout.addWidget(QLabel("Следующий:"))
+        self.nav_next_edit = QLineEdit()
+        self.nav_next_edit.setPlaceholderText("например: Num+6")
+        next_layout.addWidget(self.nav_next_edit)
+        nav_layout.addLayout(next_layout)
+
+        hint = QLabel('Формат: "Num+4" — numpad, "4" — верхний ряд, "Left"/"Right" — стрелки.')
+        hint.setWordWrap(True)
+        nav_layout.addWidget(hint)
+
+        layout.addWidget(nav_group)
+
         # Кнопка сброса
         reset_btn = QPushButton("Сбросить на значения по умолчанию")
         reset_btn.clicked.connect(self.reset_settings)
@@ -121,6 +147,10 @@ class SettingsWidget(QWidget):
             self.thickness_combo.setCurrentText("средний")
         elif thick_mode == "large":
             self.thickness_combo.setCurrentText("большой")
+        # Горячие клавиши навигации
+        nav = curr.get("navigation_shortcuts", {}) or {}
+        self.nav_prev_edit.setText(str(nav.get("prev", "Num+4")))
+        self.nav_next_edit.setText(str(nav.get("next", "Num+6")))
 
     def on_primary_color_clicked(self):
         current = settings.get_primary_color()
@@ -189,7 +219,11 @@ class SettingsWidget(QWidget):
             "primary_color": primary_color,
             "colors": colors,
             "font_size_mode": font_mode,
-            "line_thickness_mode": thick_mode
+            "line_thickness_mode": thick_mode,
+            "navigation_shortcuts": {
+                "prev": self.nav_prev_edit.text().strip() or "Num+4",
+                "next": self.nav_next_edit.text().strip() or "Num+6",
+            },
         }
         settings.save(new_settings)
         apply_theme(QApplication.instance())

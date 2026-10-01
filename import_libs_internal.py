@@ -95,7 +95,7 @@ from utils.augmentation_random import apply_complex_augmentations, apply_complex
 
 
 # ========== UI компоненты ==========
-from ui.image_navigation import ImageNavigationWidget
+from ui.image_navigation import ImageNavigationWidget, NavigationShortcutInstaller
 from ui.log_widget import LogWidget
 from ui.control_buttons import ControlButtons
 

@@ -33,5 +33,9 @@
         ]
     },
     "font_size_mode": "auto",
-    "line_thickness_mode": "small"
+    "line_thickness_mode": "small",
+    "navigation_shortcuts": {
+        "prev": "Left",
+        "next": "Right"
+    }
 }

@@ -45,7 +45,7 @@ class ImagePlayer(QMainWindow):
             self.demo_window.log("Пресеты обновлены при переключении вкладки")
 
     def _add_tab(self, widget, title):
-        """Добавляет вкладку, извлекая centralWidget если widget — QMainWindow.
+        """Добавляет вкладку, извлекает centralWidget если widget — QMainWindow.
            Возвращает индекс добавленной вкладки."""
         if isinstance(widget, QMainWindow):
             content = widget.centralWidget()
@@ -54,9 +54,15 @@ class ImagePlayer(QMainWindow):
         else:
             content = widget
         index = self.tab_widget.addTab(content, title)
-        # Если это демо-окно, запоминаем индекс
         if widget is self.demo_window:
             self.demo_tab_index = index
+
+        # --- Устанавливаем горячие клавиши навигации (Num+4 / Num+6) ---
+        prev_cb = getattr(widget, 'prev_image', None) or getattr(widget, 'prev', None)
+        next_cb = getattr(widget, 'next_image', None) or getattr(widget, 'next', None)
+        if callable(prev_cb) and callable(next_cb):
+            NavigationShortcutInstaller(content, prev_cb, next_cb, parent=self)
+
         return index
 
     def _create_selected_tabs(self):

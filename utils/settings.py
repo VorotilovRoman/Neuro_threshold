@@ -34,7 +34,11 @@ class SettingsManager(QObject):
                 "label_text": [255, 0, 0]
             },
             "font_size_mode": "auto",
-            "line_thickness_mode": "auto"
+            "line_thickness_mode": "auto",
+            "navigation_shortcuts": {
+                "prev": "Num+4",
+                "next": "Num+6"
+            }
         }
         self.current = self.load()
 
