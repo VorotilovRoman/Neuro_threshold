@@ -1,17 +1,37 @@
+# yolo_find_img.py
 from import_libs_internal import *
 from import_libs_methods_ui import setup_yolo_find_img_ui
 
 TEMP_THUMB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_thumbs")
 
+
 # ------------------------------------------------------------
-# ClickableLabel – безопасная обработка двойного клика
+# ClickableLabel — одиночный/двойной клик + контекстное меню
 # ------------------------------------------------------------
 class ClickableLabel(QLabel):
-    """QLabel, который обрабатывает двойной клик и вызывает callback с путём файла."""
+    """
+    QLabel, который:
+      • по одиночному клику — вызывает click callback,
+      • по двойному клику — вызывает open callback,
+      • по правому клику — вызывает context callback.
+    Разделение одиночного и двойного клика — через QTimer.
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self._file_path = ""
         self._open_callback = None
+        self._click_callback = None
+        self._context_callback = None
+
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(QApplication.doubleClickInterval())
+        self._click_timer.timeout.connect(self._emit_clicked)
+
+        self._suppress_next_release = False
+
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._emit_context)
 
     def set_file_path(self, file_path: str):
         self._file_path = file_path
@@ -19,10 +39,35 @@ class ClickableLabel(QLabel):
     def set_open_callback(self, callback):
         self._open_callback = callback
 
+    def set_click_callback(self, callback):
+        self._click_callback = callback
+
+    def set_context_callback(self, callback):
+        self._context_callback = callback
+
+    def _emit_clicked(self):
+        if self._file_path and self._click_callback:
+            self._click_callback(self._file_path)
+
+    def _emit_context(self, pos):
+        if self._file_path and self._context_callback:
+            self._context_callback(self._file_path, self.mapToGlobal(pos))
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._file_path:
+            if self._suppress_next_release:
+                self._suppress_next_release = False
+            else:
+                self._click_timer.start()
+        super().mouseReleaseEvent(event)
+
     def mouseDoubleClickEvent(self, event):
+        self._click_timer.stop()
+        self._suppress_next_release = True
         if self._open_callback and self._file_path:
             self._open_callback(self._file_path)
         super().mouseDoubleClickEvent(event)
+
 
 # ------------------------------------------------------------
 # Поток для сканирования
@@ -34,12 +79,12 @@ class ScanThread(QThread):
     finished = pyqtSignal(list)
 
     def __init__(self, root_dir, model_path, target_class, conf, iou, imgsz, device,
-                 edge_margin=0):
+                 edge_margin=0, min_object_size_percent=0.0):
         """
-        edge_margin: минимальное расстояние (в пикселях) от бокса объекта
-                     до каждого из четырёх краёв кадра.
-                     0 — критерий отключён (бокс может касаться/выходить за край).
-                     N > 0 — бокс должен быть на расстоянии >= N px от всех краёв.
+        edge_margin              — мин. расстояние (px) от бокса до каждого края кадра;
+                                   0 — критерий отключён.
+        min_object_size_percent  — мин. площадь бокса в % от площади кадра;
+                                   0 — критерий отключён.
         """
         super().__init__()
         self.root_dir = root_dir
@@ -50,6 +95,7 @@ class ScanThread(QThread):
         self.imgsz = imgsz
         self.device = device
         self.edge_margin = int(edge_margin)
+        self.min_object_size_percent = float(min_object_size_percent)
         self._is_canceled = False
 
     def cancel(self):
@@ -57,19 +103,25 @@ class ScanThread(QThread):
         self.log_msg.emit("Отмена сканирования...")
 
     def _box_meets_margin(self, x1, y1, x2, y2, w, h):
-        """
-        True, если бокс отстоит от всех четырёх краёв кадра не меньше,
-        чем на self.edge_margin пикселей.
-        """
+        """True, если бокс отстоит от всех четырёх краёв кадра >= edge_margin px."""
         m = self.edge_margin
         if m <= 0:
             return True
-        # Расстояния от бокса до краёв кадра
-        dist_left   = x1
-        dist_top    = y1
-        dist_right  = w - x2
-        dist_bottom = h - y2
-        return (dist_left >= m) and (dist_top >= m) and (dist_right >= m) and (dist_bottom >= m)
+        return (x1 >= m) and (y1 >= m) and (w - x2 >= m) and (h - y2 >= m)
+
+    def _box_meets_min_size(self, x1, y1, x2, y2, w, h):
+        """True, если площадь бокса >= min_object_size_percent от площади кадра."""
+        m = self.min_object_size_percent
+        if m <= 0:
+            return True
+        img_area = float(w) * float(h)
+        if img_area <= 0:
+            return True
+        bw = max(0.0, x2 - x1)
+        bh = max(0.0, y2 - y1)
+        box_area = bw * bh
+        percent = 100.0 * box_area / img_area
+        return percent >= m
 
     def run(self):
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
@@ -92,6 +144,14 @@ class ScanThread(QThread):
             )
         else:
             self.log_msg.emit("Доп. критерий отступа от краёв кадра отключён (0 px)")
+
+        if self.min_object_size_percent > 0:
+            self.log_msg.emit(
+                f"Доп. критерий: площадь бокса объекта ≥ "
+                f"{self.min_object_size_percent:.2f}% от площади кадра"
+            )
+        else:
+            self.log_msg.emit("Доп. критерий минимальной площади объекта отключён (0 %)")
 
         results = []
         self.log_msg.emit(f"Загрузка модели YOLO: {self.model_path}")
@@ -132,10 +192,12 @@ class ScanThread(QThread):
                         if cls != self.target_class:
                             continue
 
-                        # Проверка расстояния до краёв кадра
                         xyxy = box.xyxy[0].tolist()
                         x1, y1, x2, y2 = xyxy
+
                         if not self._box_meets_margin(x1, y1, x2, y2, img_w, img_h):
+                            continue
+                        if not self._box_meets_min_size(x1, y1, x2, y2, img_w, img_h):
                             continue
 
                         contains_target = True
@@ -146,11 +208,16 @@ class ScanThread(QThread):
                 self.file_done.emit(img_path, max_conf, contains_target)
 
             except Exception as e:
-                self.log_msg.emit(f"Критическая ошибка при обработке {os.path.basename(img_path)}: {e}")
+                self.log_msg.emit(
+                    f"Критическая ошибка при обработке {os.path.basename(img_path)}: {e}"
+                )
                 continue
 
-        self.log_msg.emit(f"Сканирование завершено. Найдено файлов с целевой меткой: {len(results)}")
+        self.log_msg.emit(
+            f"Сканирование завершено. Найдено файлов с целевой меткой: {len(results)}"
+        )
         self.finished.emit(results)
+
 
 # ------------------------------------------------------------
 # Главное окно
@@ -179,11 +246,18 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.toggle_view_btn.clicked.connect(self.toggle_view_mode)
         self.sort_btn.clicked.connect(self.sort_by_confidence)
         self.results_list.itemDoubleClicked.connect(self.open_file_from_list)
+        self.toggle_log_btn.clicked.connect(self.toggle_log)
+        self.thumb_size_combo.currentIndexChanged.connect(self._on_thumb_size_changed)
+
+        # Текущий размер миниатюры (px) — синхронизируется с combo
+        self._thumb_size_px = 180
 
         # Настройка дерева файлов
         self.file_model = QFileSystemModel()
         self.file_model.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot | QDir.Files)
-        self.file_model.setNameFilters(["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tif", "*.tiff", "*.webp"])
+        self.file_model.setNameFilters(
+            ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tif", "*.tiff", "*.webp"]
+        )
         self.file_model.setNameFilterDisables(False)
         self.file_model.setRootPath("")
         self.file_tree.setModel(self.file_model)
@@ -214,6 +288,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.is_thumbnail_mode = False
         self.stacked_view.setCurrentIndex(0)
         self.toggle_view_btn.setText("Режим: миниатюры")
+        self.log_widget.setVisible(False)
 
         self._ensure_temp_dir()
         self._clear_temp_thumbs()
@@ -242,6 +317,28 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
                 except:
                     pass
             self.log(f"Очищена временная папка (удалено {count} файлов)")
+
+    def toggle_log(self, checked):
+        self.log_widget.setVisible(checked)
+        self.toggle_log_btn.setText("Скрыть лог" if checked else "Показать лог")
+
+    def _on_thumb_size_changed(self, idx):
+        sizes = [120, 180, 260]
+        self._thumb_size_px = sizes[max(0, min(idx, len(sizes) - 1))]
+        if self.is_thumbnail_mode and self.thumbnail_widgets:
+            self._rerender_thumbnails()
+
+    def _rerender_thumbnails(self):
+        """Меняет масштаб уже загруженных миниатюр без перечитывания файлов."""
+        size = self._thumb_size_px
+        for fp, (cb, label, container) in self.thumbnail_widgets.items():
+            pixmap = self.thumbnail_pixmaps.get(fp)
+            if pixmap and not pixmap.isNull():
+                label.setPixmap(pixmap.scaled(
+                    size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                ))
+            container.setMaximumSize(size + 30, size + 90)
+        self.relayout_thumbnails()
 
     # --------------------------------------------------------
     # Классы модели
@@ -276,6 +373,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             return
         self.current_root_dir = folder
         self.file_tree.setRootIndex(self.file_model.index(folder))
+        self.current_folder_label.setText(folder)
+        self.current_folder_label.setStyleSheet("QLabel { color: #444; font-size: 11px; }")
+        self.current_folder_label.setToolTip(folder)
         self.log(f"Выбрана папка: {folder}")
 
     def open_file_from_tree(self, index):
@@ -295,6 +395,18 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def open_file(self, file_path):
         self.log(f"Открытие файла: {file_path}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+
+    def _open_in_explorer(self, file_path):
+        try:
+            folder = os.path.dirname(os.path.abspath(file_path))
+            if sys.platform == 'win32':
+                os.startfile(folder)
+            elif sys.platform == 'darwin':
+                os.system(f'open "{folder}"')
+            else:
+                os.system(f'xdg-open "{folder}"')
+        except Exception as e:
+            self.log(f"Не удалось открыть проводник: {e}")
 
     # --------------------------------------------------------
     # Сканирование
@@ -317,6 +429,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         device = self.resolve_device(device)
 
         edge_margin = self.edge_margin_spin.value()
+        min_object_size = float(self.min_object_size_spin.value())
 
         self.log("=" * 50)
         self.log("ЗАПУСК СКАНИРОВАНИЯ")
@@ -329,6 +442,10 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             self.log(f"Мин. расстояние от бокса до края кадра: {edge_margin} px")
         else:
             self.log("Критерий отступа от краёв кадра отключён")
+        if min_object_size > 0:
+            self.log(f"Минимальная площадь объекта: {min_object_size:.2f}% от площади кадра")
+        else:
+            self.log("Критерий минимальной площади объекта отключён")
 
         self.results_list.clear()
         self._clear_thumbnail_grid()
@@ -351,6 +468,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             imgsz=imgsz,
             device=device,
             edge_margin=edge_margin,
+            min_object_size_percent=min_object_size,
         )
         self.scan_thread.progress.connect(self.update_progress)
         self.scan_thread.log_msg.connect(self.log)
@@ -393,8 +511,13 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.toggle_view_btn.setEnabled(True)
         self.sort_btn.setEnabled(True)
         self.progress_bar.setFormat("Готово")
-        self.log(f"Сканирование завершено. Найдено файлов с меткой {self.target_class_spin.value()}: {len(result_files)}")
-        QMessageBox.information(self, "Результат", f"Найдено {len(result_files)} файлов.\nСписок отображён на правой панели.")
+        self.log(f"Сканирование завершено. Найдено файлов с меткой "
+                 f"{self.target_class_spin.value()}: {len(result_files)}")
+        QMessageBox.information(
+            self, "Результат",
+            f"Найдено {len(result_files)} файлов.\n"
+            f"Список отображён на правой панели."
+        )
 
         if len(result_files) > 0 and not self.is_thumbnail_mode:
             self.log("Автоматическое переключение в режим миниатюр...")
@@ -467,23 +590,30 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
                     error_count += 1
                     continue
 
+                # Больший исходник — для возможности переключения размера без перечитывания
                 h, w = img.shape[:2]
-                scale = 150 / max(h, w)
-                new_w = int(w * scale)
-                new_h = int(h * scale)
-                img_resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                max_side = max(self._thumb_size_px, 260)
+                scale = max_side / max(h, w)
+                if scale < 1.0:
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    img_resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                else:
+                    img_resized = img
                 cv2.imwrite(thumb_path, img_resized)
                 self.add_thumbnail_widget(file_path, thumb_path, conf)
                 success_count += 1
 
                 if (idx + 1) % 50 == 0:
-                    self.log(f"Сгенерировано миниатюр: {success_count}/{total} (кеш: {cache_hit_count})")
+                    self.log(f"Сгенерировано миниатюр: {success_count}/{total} "
+                             f"(кеш: {cache_hit_count})")
             except Exception as e:
                 self.log(f"Ошибка для {os.path.basename(file_path)}: {e}")
                 error_count += 1
 
         self.progress_bar.setFormat("Готово")
-        self.log(f"Генерация миниатюр завершена. Успешно: {success_count}, кэш: {cache_hit_count}, ошибок: {error_count}")
+        self.log(f"Генерация миниатюр завершена. Успешно: {success_count}, "
+                 f"кеш: {cache_hit_count}, ошибок: {error_count}")
         self.relayout_thumbnails()
         self.thumbnail_container.adjustSize()
         self.scroll_area.update()
@@ -496,28 +626,50 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
 
         self.thumbnail_pixmaps[file_path] = pixmap
 
+        size = self._thumb_size_px
+
         container = QFrame()
+        container.setFrameShape(QFrame.Box)
+        container.setStyleSheet(
+            "QFrame { border: 1px solid #bbb; border-radius: 4px; "
+            "background: palette(base); }"
+        )
+        container.setMaximumSize(size + 30, size + 90)
+
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         cb = QCheckBox()
         cb.setChecked(False)
         cb.setFocusPolicy(Qt.NoFocus)
-        cb.stateChanged.connect(lambda state, fp=file_path: self.on_thumbnail_checkbox_changed(fp, state))
-        layout.addWidget(cb, alignment=Qt.AlignTop | Qt.AlignHCenter)
+        cb.setToolTip("Отметить файл для копирования/перемещения")
+        cb.stateChanged.connect(
+            lambda state, fp=file_path: self.on_thumbnail_checkbox_changed(fp, state)
+        )
+        layout.addWidget(cb, alignment=Qt.AlignTop | Qt.AlignRight)
 
         label = ClickableLabel()
-        label.setPixmap(pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        label.setPixmap(pixmap.scaled(
+            size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ))
         label.setAlignment(Qt.AlignCenter)
-        label.setToolTip(f"{file_path}\nУверенность: {confidence:.3f}")
+        label.setToolTip(
+            f"{file_path}\nУверенность: {confidence:.3f}\n\n"
+            f"Клик — выбрать/снять, двойной клик — открыть, ПКМ — меню."
+        )
+        label.setCursor(QCursor(Qt.PointingHandCursor))
         label.set_file_path(file_path)
         label.set_open_callback(self.open_file)
-        layout.addWidget(label)
+        label.set_click_callback(self._toggle_thumbnail_by_path)
+        label.set_context_callback(self._show_thumbnail_context_menu)
+        layout.addWidget(label, alignment=Qt.AlignCenter)
 
         name_label = QLabel(os.path.basename(file_path))
         name_label.setAlignment(Qt.AlignCenter)
         name_label.setWordWrap(True)
+        name_label.setStyleSheet("QLabel { font-size: 10px; }")
+        name_label.setToolTip(file_path)
         layout.addWidget(name_label)
 
         conf_label = QLabel(f"conf: {confidence:.3f}")
@@ -525,17 +677,50 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         conf_label.setStyleSheet("QLabel { font-size: 10px; color: #888; }")
         layout.addWidget(conf_label)
 
-        container.setFrameShape(QFrame.Box)
-        container.setMaximumSize(180, 240)
-
         self.thumbnail_widgets[file_path] = (cb, label, container)
+
+        # Обновляем состояние чекбокса по данным results_list
+        for i in range(self.results_list.count()):
+            it = self.results_list.item(i)
+            if it.data(Qt.UserRole) == file_path and it.checkState() == Qt.Checked:
+                cb.blockSignals(True)
+                cb.setChecked(True)
+                cb.blockSignals(False)
+                break
 
         row = len(self.thumbnail_widgets) // 4
         col = len(self.thumbnail_widgets) % 4
         self.thumbnail_grid.addWidget(container, row, col)
-        self.thumbnail_grid.update()
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
-        QApplication.processEvents()
+
+    def _toggle_thumbnail_by_path(self, file_path):
+        """Переключает чекбокс миниатюры и связанной строки в списке."""
+        entry = self.thumbnail_widgets.get(file_path)
+        if not entry:
+            return
+        cb, _, _ = entry
+        cb.blockSignals(True)
+        cb.setChecked(not cb.isChecked())
+        cb.blockSignals(False)
+        self.on_thumbnail_checkbox_changed(file_path, cb.checkState())
+
+    def _show_thumbnail_context_menu(self, file_path, global_pos):
+        menu = QMenu(self)
+        act_open = menu.addAction("Открыть файл")
+        act_open_ext = menu.addAction("Открыть в проводнике")
+        menu.addSeparator()
+        act_copy_path = menu.addAction("Скопировать путь")
+        menu.addSeparator()
+        act_toggle = menu.addAction("Отметить / снять")
+        action = menu.exec_(global_pos)
+        if action == act_open:
+            self.open_file(file_path)
+        elif action == act_open_ext:
+            self._open_in_explorer(file_path)
+        elif action == act_copy_path:
+            QApplication.clipboard().setText(file_path)
+            self.log(f"Путь скопирован: {file_path}")
+        elif action == act_toggle:
+            self._toggle_thumbnail_by_path(file_path)
 
     def _clear_thumbnail_grid(self):
         for i in reversed(range(self.thumbnail_grid.count())):
@@ -553,21 +738,26 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def relayout_thumbnails(self):
         if not self.thumbnail_widgets:
             return
-        width = self.thumbnail_container.width()
-        item_width = 190
-        cols = max(1, width // item_width)
+        size = self._thumb_size_px
+        item_w = size + 30
+        item_h = size + 90
+
+        width = max(1, self.thumbnail_container.width())
+        cols = max(1, width // item_w)
         rows = (len(self.thumbnail_widgets) + cols - 1) // cols
-        item_height = 240
-        total_height = rows * item_height + 20
+        total_height = rows * item_h + 20
         self.thumbnail_container.setMinimumHeight(total_height)
+
         for i in reversed(range(self.thumbnail_grid.count())):
             widget = self.thumbnail_grid.itemAt(i).widget()
             if widget:
                 widget.setParent(None)
+
         for idx, (file_path, (cb, label, container)) in enumerate(self.thumbnail_widgets.items()):
             row = idx // cols
             col = idx % cols
             self.thumbnail_grid.addWidget(container, row, col)
+
         self.thumbnail_grid.update()
 
     # --------------------------------------------------------
@@ -680,9 +870,6 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def move_selected_files(self):
         self._copy_move_files(copy=False)
 
-    # --------------------------------------------------------
-    # Копирование/перемещение с защитой от перезаписи
-    # --------------------------------------------------------
     @staticmethod
     def _unique_dst(dst):
         """
@@ -725,7 +912,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         success = 0
         renamed = 0
         errors = 0
-        successfully_processed = []   # для удаления из UI при перемещении
+        successfully_processed = []
 
         for src in selected:
             base_name = os.path.basename(src)
@@ -733,7 +920,6 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             dst = self._unique_dst(dst_initial)
 
             if os.path.abspath(dst) == os.path.abspath(src):
-                # src уже лежит в target_dir под тем же именем — не копируем на себя
                 self.log(f"Пропущен (источник уже в целевой папке): {base_name}")
                 continue
 
@@ -755,7 +941,6 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
                 self.log(f"Ошибка {base_name}: {e}")
                 errors += 1
 
-        # Итоговое сообщение
         msg_lines = [f"{operation} завершено.",
                      f"Успешно: {success}",
                      f"Переименовано (во избежание перезаписи): {renamed}",
@@ -765,7 +950,6 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
                  f"переименовано: {renamed}, ошибок: {errors}")
 
         if not copy:
-            # При перемещении удаляем успешно перенесённые файлы из результатов
             processed_set = set(successfully_processed)
             self.result_file_paths = [
                 (fp, conf) for fp, conf in self.result_file_paths
@@ -789,7 +973,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
                 self.relayout_thumbnails()
             self.update_select_all_state()
 
-
+    # --------------------------------------------------------
+    # Завершение
+    # --------------------------------------------------------
     def closeEvent(self, event):
         self.log("Закрытие приложения, остановка потоков...")
         if self.scan_thread and self.scan_thread.isRunning():
@@ -797,6 +983,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             self.scan_thread.wait(2000)
         self._clear_temp_thumbs()
         event.accept()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

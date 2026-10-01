@@ -1,34 +1,45 @@
 from import_libs_internal import *
 
+
 class setup_yolo_find_img_ui(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("FindImagesWindow")
         MainWindow.setWindowTitle("YOLO Find Images by Label")
-        MainWindow.setMinimumSize(1000, 700)
+        MainWindow.setMinimumSize(1150, 780)
 
         self.centralwidget = QWidget(MainWindow)
         MainWindow.setCentralWidget(self.centralwidget)
 
         main_layout = QVBoxLayout(self.centralwidget)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(6)
+        main_layout.setSpacing(0)
 
-        # Горизонтальный сплиттер
+        # ==================== ГОРИЗОНТАЛЬНЫЙ СПЛИТТЕР ====================
         h_splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(h_splitter, 1)
 
         # ========== ЛЕВАЯ ПАНЕЛЬ: дерево файлов ==========
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setContentsMargins(6, 6, 6, 6)
+        left_layout.setSpacing(6)
 
-        self.select_folder_btn = QPushButton("Выбрать папку")
-        left_layout.addWidget(self.select_folder_btn)
+        left_header = QHBoxLayout()
+        left_header.addWidget(QLabel("Файловая система"))
+        left_header.addStretch()
+        self.select_folder_btn = QPushButton("Выбрать папку…")
+        left_header.addWidget(self.select_folder_btn)
+        left_layout.addLayout(left_header)
+
+        self.current_folder_label = QLabel("Папка не выбрана")
+        self.current_folder_label.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
+        self.current_folder_label.setWordWrap(True)
+        left_layout.addWidget(self.current_folder_label)
 
         self.file_tree = QTreeView()
         self.file_tree.setHeaderHidden(True)
         self.file_tree.setIndentation(14)
-        left_layout.addWidget(self.file_tree)
+        left_layout.addWidget(self.file_tree, 1)
 
         h_splitter.addWidget(left_widget)
 
@@ -36,116 +47,171 @@ class setup_yolo_find_img_ui(object):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(6, 6, 6, 6)
-        right_layout.setSpacing(8)
+        right_layout.setSpacing(6)
 
-        # Группа настроек YOLO
+        # Вертикальный сплиттер: сверху — настройки, снизу — результаты
+        right_v_splitter = QSplitter(Qt.Vertical)
+        right_layout.addWidget(right_v_splitter, 1)
+
+        # ==================== ВЕРХ: НАСТРОЙКИ ====================
+        top_settings_widget = QWidget()
+        top_settings_layout = QVBoxLayout(top_settings_widget)
+        top_settings_layout.setContentsMargins(0, 0, 0, 0)
+        top_settings_layout.setSpacing(6)
+
+        # --- YOLO + цель поиска в одной горизонтальной строке ---
+        settings_h_row = QHBoxLayout()
+        settings_h_row.setSpacing(6)
+
         self.yolo_group = QGroupBox("Параметры YOLO")
         yolo_layout = QVBoxLayout(self.yolo_group)
         self.yolo_settings = YOLOInferenceSettings()
         yolo_layout.addWidget(self.yolo_settings)
-        right_layout.addWidget(self.yolo_group)
+        settings_h_row.addWidget(self.yolo_group, 3)
 
-        # Группа цели поиска
         self.target_group = QGroupBox("Целевая метка")
         target_layout = QVBoxLayout(self.target_group)
+        target_layout.setSpacing(4)
 
         id_layout = QHBoxLayout()
         id_layout.addWidget(QLabel("Class ID:"))
         self.target_class_spin = QSpinBox()
         self.target_class_spin.setRange(0, 999)
         self.target_class_spin.setValue(0)
-        self.target_class_spin.setToolTip("ID класса, который нужно найти (0, 1, 2, ...)")
+        self.target_class_spin.setToolTip("ID класса, который нужно найти в изображениях")
         id_layout.addWidget(self.target_class_spin)
         id_layout.addStretch()
         target_layout.addLayout(id_layout)
 
-        self.class_list_label = QLabel("Доступные классы модели:")
+        target_layout.addWidget(QLabel("Доступные классы модели:"))
         self.class_list_widget = QListWidget()
-        self.class_list_widget.setMaximumHeight(150)
+        self.class_list_widget.setMaximumHeight(110)
         self.class_list_widget.setToolTip("Список классов, которые умеет распознавать модель")
-        target_layout.addWidget(self.class_list_label)
-        target_layout.addWidget(self.class_list_widget)
+        target_layout.addWidget(self.class_list_widget, 1)
 
-        right_layout.addWidget(self.target_group)
+        settings_h_row.addWidget(self.target_group, 2)
+        top_settings_layout.addLayout(settings_h_row)
 
-        # ========== Группа дополнительных критериев ==========
+        # --- Дополнительные критерии ---
         self.criteria_group = QGroupBox("Дополнительные критерии")
-        criteria_layout = QVBoxLayout(self.criteria_group)
+        criteria_layout = QGridLayout(self.criteria_group)
+        criteria_layout.setVerticalSpacing(6)
+        criteria_layout.setHorizontalSpacing(8)
 
-        margin_layout = QHBoxLayout()
-        margin_layout.addWidget(QLabel("Мин. расстояние от бокса до края кадра (px):"))
+        criteria_layout.addWidget(QLabel("Мин. отступ от краёв кадра (px):"), 0, 0)
         self.edge_margin_spin = QSpinBox()
         self.edge_margin_spin.setRange(0, 2000)
         self.edge_margin_spin.setValue(0)
+        self.edge_margin_spin.setFixedWidth(120)
         self.edge_margin_spin.setToolTip(
             "0 — критерий отключён.\n"
-            "N > 0 — каждый объект целевого класса должен быть удалён не менее\n"
-            "чем на N пикселей от всех четырёх краёв кадра\n"
-            "(сверху, снизу, слева, справа)."
+            "N > 0 — бокс объекта должен быть не ближе N px к каждому краю кадра."
         )
-        margin_layout.addWidget(self.edge_margin_spin)
-        margin_layout.addStretch()
-        criteria_layout.addLayout(margin_layout)
+        criteria_layout.addWidget(self.edge_margin_spin, 0, 1)
 
-        margin_hint = QLabel(
-            "0 — критерий выключен. При N > 0 в результаты попадут только снимки,\n"
-            "где хотя бы один объект целевого класса целиком лежит внутри\n"
-            "«безопасной зоны» шириной N пикселей от каждого края."
+        criteria_layout.addWidget(QLabel("Минимальный размер объекта:"), 1, 0)
+        self.min_object_size_spin = QDoubleSpinBox()
+        self.min_object_size_spin.setRange(0.0, 100.0)
+        self.min_object_size_spin.setDecimals(2)
+        self.min_object_size_spin.setSingleStep(0.1)
+        self.min_object_size_spin.setValue(0.0)
+        self.min_object_size_spin.setSuffix(" %")
+        self.min_object_size_spin.setFixedWidth(120)
+        self.min_object_size_spin.setToolTip(
+            "0 — критерий отключён.\n"
+            "N > 0 — площадь бокса объекта должна быть ≥ N% от площади кадра.\n"
+            "Например, 0.5 — объект занимает не меньше 0.5% площади снимка."
         )
-        margin_hint.setStyleSheet("QLabel { color: #666; font-size: 11px; }")
-        margin_hint.setWordWrap(True)
-        criteria_layout.addWidget(margin_hint)
+        criteria_layout.addWidget(self.min_object_size_spin, 1, 1)
 
-        right_layout.addWidget(self.criteria_group)
+        hint = QLabel(
+            "Оба критерия применяются одновременно. Снимок попадает в результаты, "
+            "если хотя бы один объект целевого класса удовлетворяет обоим условиям."
+        )
+        hint.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
+        hint.setWordWrap(True)
+        criteria_layout.addWidget(hint, 2, 0, 1, 2)
+        criteria_layout.setColumnStretch(2, 1)
+        top_settings_layout.addWidget(self.criteria_group)
 
-        # Прогресс-бар и кнопки управления
+        # --- Прогресс + кнопки ---
         progress_layout = QHBoxLayout()
+        progress_layout.setSpacing(6)
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("Готов к работе")
-        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.progress_bar, 1)
+
         self.stop_btn = QPushButton("Стоп")
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet("QPushButton { background-color: #e74c3c; color: white; }")
+        self.stop_btn.setStyleSheet(
+            "QPushButton { background-color: #e74c3c; color: white; font-weight: 600; padding: 6px 14px; }"
+        )
         progress_layout.addWidget(self.stop_btn)
-        right_layout.addLayout(progress_layout)
 
-        # Кнопка запуска сканирования
         self.scan_btn = QPushButton("Начать поиск")
-        self.scan_btn.setStyleSheet("QPushButton { background-color: #3498db; color: white; font-weight: 600; }")
-        right_layout.addWidget(self.scan_btn)
+        self.scan_btn.setStyleSheet(
+            "QPushButton { background-color: #3498db; color: white; font-weight: 600; padding: 6px 18px; }"
+        )
+        progress_layout.addWidget(self.scan_btn)
 
-        # Список результатов (найденные файлы) с чекбоксами и переключением режима
-        results_group = QGroupBox("Найденные файлы (содержат метку)")
+        top_settings_layout.addLayout(progress_layout)
+
+        right_v_splitter.addWidget(top_settings_widget)
+
+        # ==================== НИЗ: РЕЗУЛЬТАТЫ ====================
+        bottom_results_widget = QWidget()
+        bottom_results_layout = QVBoxLayout(bottom_results_widget)
+        bottom_results_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_results_layout.setSpacing(6)
+
+        results_group = QGroupBox("Найденные файлы")
         results_layout = QVBoxLayout(results_group)
+        results_layout.setSpacing(6)
 
-        # Верхняя панель с чекбоксом "All", кнопкой сортировки и кнопкой переключения режима
+        # --- Панель управления результатами ---
         results_top_layout = QHBoxLayout()
-        self.select_all_checkbox = QCheckBox("All")
-        self.select_all_checkbox.setToolTip("Выделить/снять все файлы")
+        results_top_layout.setSpacing(6)
+
+        self.select_all_checkbox = QCheckBox("Выделить всё")
+        self.select_all_checkbox.setToolTip("Отметить/снять все файлы")
         results_top_layout.addWidget(self.select_all_checkbox)
 
-        self.sort_btn = QPushButton("Сортировать по убыванию уверенности")
-        self.sort_btn.setToolTip("Пересортировать список файлов по максимальной уверенности предсказания")
+        self.sort_btn = QPushButton("↓ Сортировать по уверенности")
+        self.sort_btn.setToolTip("Отсортировать по убыванию максимальной уверенности")
         results_top_layout.addWidget(self.sort_btn)
 
         results_top_layout.addStretch()
+
+        results_top_layout.addWidget(QLabel("Размер миниатюр:"))
+        self.thumb_size_combo = QComboBox()
+        self.thumb_size_combo.addItems(["Мелкие", "Средние", "Крупные"])
+        self.thumb_size_combo.setCurrentIndex(1)
+        self.thumb_size_combo.setFixedWidth(110)
+        self.thumb_size_combo.setToolTip(
+            "Мелкие — ~120px, Средние — ~180px, Крупные — ~260px"
+        )
+        results_top_layout.addWidget(self.thumb_size_combo)
+
         self.toggle_view_btn = QPushButton("Режим: миниатюры")
         self.toggle_view_btn.setCheckable(True)
-        self.toggle_view_btn.setToolTip("Переключить отображение между списком и миниатюрами")
+        self.toggle_view_btn.setToolTip("Переключить между списком и сеткой миниатюр")
         results_top_layout.addWidget(self.toggle_view_btn)
+
         results_layout.addLayout(results_top_layout)
 
-        # QStackedWidget для двух режимов
+        # --- Переключаемое представление ---
         self.stacked_view = QStackedWidget()
         results_layout.addWidget(self.stacked_view, 1)
 
-        # Страница 0: список
+        # Список
         self.results_list = QListWidget()
-        self.results_list.setToolTip("Файлы, в которых обнаружен объект с указанным class ID")
+        self.results_list.setToolTip(
+            "Файлы, в которых обнаружен объект с указанным class ID"
+        )
         self.results_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.stacked_view.addWidget(self.results_list)
 
-        # Страница 1: миниатюры
+        # Миниатюры
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -154,40 +220,45 @@ class setup_yolo_find_img_ui(object):
         self.thumbnail_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.thumbnail_grid = QGridLayout(self.thumbnail_container)
         self.thumbnail_grid.setSpacing(10)
-        self.thumbnail_grid.setAlignment(Qt.AlignTop)
+        self.thumbnail_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.scroll_area.setWidget(self.thumbnail_container)
         self.stacked_view.addWidget(self.scroll_area)
 
-        # Панель копирования/перемещения
-        copy_group = QGroupBox("Копирование/перемещение выбранных файлов")
-        copy_layout = QVBoxLayout(copy_group)
+        bottom_results_layout.addWidget(results_group, 1)
 
-        target_folder_layout = QHBoxLayout()
-        target_folder_layout.addWidget(QLabel("Целевая папка:"))
+        # --- Панель копирования/перемещения ---
+        copy_group = QGroupBox("Копирование / перемещение выбранных")
+        copy_layout = QHBoxLayout(copy_group)
+        copy_layout.setSpacing(6)
+        copy_layout.addWidget(QLabel("Целевая папка:"))
         self.target_folder_edit = QLineEdit()
         self.target_folder_edit.setReadOnly(True)
-        target_folder_layout.addWidget(self.target_folder_edit)
-        self.browse_target_btn = QPushButton("Обзор")
-        target_folder_layout.addWidget(self.browse_target_btn)
-        copy_layout.addLayout(target_folder_layout)
-
-        copy_buttons_layout = QHBoxLayout()
+        copy_layout.addWidget(self.target_folder_edit, 1)
+        self.browse_target_btn = QPushButton("Обзор…")
+        copy_layout.addWidget(self.browse_target_btn)
         self.copy_btn = QPushButton("Копировать")
+        copy_layout.addWidget(self.copy_btn)
         self.move_btn = QPushButton("Переместить")
-        copy_buttons_layout.addWidget(self.copy_btn)
-        copy_buttons_layout.addWidget(self.move_btn)
-        copy_buttons_layout.addStretch()
-        copy_layout.addLayout(copy_buttons_layout)
+        copy_layout.addWidget(self.move_btn)
+        bottom_results_layout.addWidget(copy_group)
 
-        results_layout.addWidget(copy_group)
-        right_layout.addWidget(results_group, 1)
+        # --- Кнопка показать/скрыть лог ---
+        self.toggle_log_btn = QPushButton("Показать лог")
+        self.toggle_log_btn.setCheckable(True)
+        self.toggle_log_btn.setToolTip("Показать или скрыть панель лога")
+        bottom_results_layout.addWidget(self.toggle_log_btn)
 
-        # Лог выполнения
+        # --- Лог (скрыт по умолчанию) ---
         self.log_widget = LogWidget(show_clear_btn=True, show_progress=False)
-        right_layout.addWidget(self.log_widget)
+        self.log_widget.setVisible(False)
+        self.log_widget.setMinimumHeight(140)
+        bottom_results_layout.addWidget(self.log_widget)
+
+        right_v_splitter.addWidget(bottom_results_widget)
+        right_v_splitter.setSizes([340, 520])
 
         h_splitter.addWidget(right_widget)
-        h_splitter.setSizes([300, 700])
+        h_splitter.setSizes([260, 890])
 
         self.statusbar = MainWindow.statusBar()
         self.statusbar.showMessage("Готов")
