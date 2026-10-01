@@ -269,6 +269,14 @@ class YOLOSegmentor(BaseSegmentor):
     """
     YOLO сегментатор (любая версия: v8, v11, v26, ...).
     Модель загружается из файла .pt (поддерживаются как официальные, так и пользовательские).
+
+    Тип вывода определяется автоматически по результату инференса:
+        • segmentation — если у результата есть .masks: используем их как есть;
+        • OBB         — если у результата есть .obb: для каждой OBB-детекции берём
+                        её bbox, внутри ROI применяем Otsu (THRESH_BINARY_INV),
+                        результат маскируем полигоном OBB;
+        • detect      — если есть .boxes: для каждого бокса внутри ROI применяем Otsu.
+
     Параметры инференса: conf, iou, imgsz, save.
     """
     def load(self, model_path=None):
@@ -285,15 +293,36 @@ class YOLOSegmentor(BaseSegmentor):
             'model_type': 'YOLO-seg',
             'model_path': model_path,
             'model_name': model_name,
-            'device': self.device
+            'device': self.device,
+            'task': getattr(self.model, 'task', 'unknown'),
         }
-        _log(f"[YOLO] Модель загружена, устройство по умолчанию: {self.device}")
+        _log(f"[YOLO] Модель загружена, task={self.metadata['task']}, "
+             f"устройство по умолчанию: {self.device}")
+
+    # ---------- Вспомогательное: Otsu внутри ROI ----------
+    @staticmethod
+    def _otsu_inside_roi(image, x1, y1, x2, y2):
+        """
+        Возвращает бинарную маску (uint8, 0/255) для ROI [x1:x2, y1:y2]
+        методом Otsu. Инвертированный порог рассчитан на типичный случай
+        «тёмный объект на светлом фоне».
+        """
+        roi = image[y1:y2, x1:x2]
+        if roi.size == 0:
+            return None
+        roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if roi.ndim == 3 else roi
+        _, roi_mask = cv2.threshold(
+            roi_gray, 0, 255,
+            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+        return roi_mask
 
     def predict(self, image, conf=0.25, iou=0.45, imgsz=640, save=False):
         start_time = time.time()
         original_h, original_w = image.shape[:2]
-        _log(f"[YOLO predict] Начало, исходное изображение размером ({original_h}, {original_w}), "
-             f"conf={conf}, iou={iou}, imgsz={imgsz}, save={save}")
+        _log(f"[YOLO predict] Начало, исходное изображение размером "
+             f"({original_h}, {original_w}), conf={conf}, iou={iou}, "
+             f"imgsz={imgsz}, save={save}")
 
         device_arg = None if self.device == 'auto' else self.device
         results = self.model.predict(
@@ -303,22 +332,119 @@ class YOLOSegmentor(BaseSegmentor):
             imgsz=imgsz,
             save=save,
             verbose=False,
-            device=device_arg
+            device=device_arg,
         )
-        if results[0].masks is None:
-            _log("[YOLO predict] Маски не обнаружены, возвращаем нулевую маску")
-            return np.zeros((original_h, original_w), dtype=np.uint8)
+        r = results[0]
+        combined_mask = np.zeros((original_h, original_w), dtype=np.uint8)
 
-        masks = results[0].masks.data.cpu().numpy()  # (N, H', W')
-        _log(f"[YOLO predict] Получено {len(masks)} масок, размер маски внутри модели: {masks.shape[1]}x{masks.shape[2]}")
-        combined = np.max(masks, axis=0)
-        combined = cv2.resize(combined, (original_w, original_h))
-        _log(f"[YOLO predict] После ресайза к исходному размеру: {combined.shape}")
-        mask = (combined * 255).astype(np.uint8)
-        elapsed = time.time() - start_time
-        _log(f"[YOLO predict] Готово за {elapsed:.3f} сек. Выходная маска shape={mask.shape}, min={mask.min()}, max={mask.max()}")
-        return mask
+        # ============== 1. SEGMENTATION ==============
+        masks = getattr(r, 'masks', None)
+        if masks is not None and len(masks) > 0:
+            try:
+                masks_np = masks.data.cpu().numpy()          # (N, H', W')
+            except AttributeError:
+                masks_np = np.asarray(masks.data)
+            _log(f"[YOLO predict] Тип вывода: SEGMENTATION, "
+                 f"{masks_np.shape[0]} масок, размер внутри модели: "
+                 f"{masks_np.shape[1]}x{masks_np.shape[2]}")
 
+            combined = np.max(masks_np, axis=0)
+            combined = cv2.resize(combined, (original_w, original_h),
+                                  interpolation=cv2.INTER_LINEAR)
+            combined_mask = (combined * 255).astype(np.uint8)
+            object_pixels = int(np.sum(combined_mask > 127))
+            _log(f"[YOLO predict] Маска (segmentation): "
+                 f"объектных пикселей {object_pixels} "
+                 f"({100 * object_pixels / combined_mask.size:.2f}%)")
+            elapsed = time.time() - start_time
+            _log(f"[YOLO predict] Готово за {elapsed:.3f} сек. "
+                 f"Выходная маска shape={combined_mask.shape}")
+            return combined_mask
+
+        # ============== 2. OBB ==============
+        obb = getattr(r, 'obb', None)
+        if obb is not None and len(obb) > 0:
+            try:
+                corners_all = obb.xyxyxyxy.cpu().numpy()     # (N, 4, 2)
+            except AttributeError:
+                corners_all = np.asarray(obb.xyxyxyxy)
+
+            n = len(corners_all)
+            _log(f"[YOLO predict] Тип вывода: OBB, {n} детекций. "
+                 f"Для каждой OBB: Otsu внутри bbox, маскирование полигоном OBB.")
+
+            for i, corners in enumerate(corners_all):
+                pts = corners.reshape(-1, 2).astype(np.int32)
+                x1 = max(0, int(pts[:, 0].min()))
+                y1 = max(0, int(pts[:, 1].min()))
+                x2 = min(original_w, int(pts[:, 0].max()) + 1)
+                y2 = min(original_h, int(pts[:, 1].max()) + 1)
+                if x2 - x1 < 2 or y2 - y1 < 2:
+                    continue
+
+                roi_mask = self._otsu_inside_roi(image, x1, y1, x2, y2)
+                if roi_mask is None:
+                    continue
+
+                # Ограничиваем результат полигоном OBB
+                poly_mask = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
+                shifted = pts - np.array([x1, y1])
+                cv2.fillPoly(poly_mask, [shifted], 255)
+                roi_mask = cv2.bitwise_and(roi_mask, poly_mask)
+
+                combined_mask[y1:y2, x1:x2] = np.maximum(
+                    combined_mask[y1:y2, x1:x2], roi_mask
+                )
+
+            object_pixels = int(np.sum(combined_mask > 127))
+            _log(f"[YOLO predict] Маска (OBB): объектных пикселей "
+                 f"{object_pixels} ({100 * object_pixels / combined_mask.size:.2f}%)")
+            elapsed = time.time() - start_time
+            _log(f"[YOLO predict] Готово за {elapsed:.3f} сек. "
+                 f"Выходная маска shape={combined_mask.shape}")
+            return combined_mask
+
+        # ============== 3. DETECT (boxes) ==============
+        boxes = getattr(r, 'boxes', None)
+        if boxes is not None and len(boxes) > 0:
+            try:
+                xyxy_all = boxes.xyxy.cpu().numpy()          # (N, 4)
+            except AttributeError:
+                xyxy_all = np.asarray(boxes.xyxy)
+
+            n = len(xyxy_all)
+            _log(f"[YOLO predict] Тип вывода: DETECT, {n} боксов. "
+                 f"Для каждого бокса: Otsu внутри bbox.")
+
+            for box in xyxy_all:
+                x1 = max(0, int(box[0]))
+                y1 = max(0, int(box[1]))
+                x2 = min(original_w, int(box[2]))
+                y2 = min(original_h, int(box[3]))
+                if x2 - x1 < 2 or y2 - y1 < 2:
+                    continue
+
+                roi_mask = self._otsu_inside_roi(image, x1, y1, x2, y2)
+                if roi_mask is None:
+                    continue
+
+                combined_mask[y1:y2, x1:x2] = np.maximum(
+                    combined_mask[y1:y2, x1:x2], roi_mask
+                )
+
+            object_pixels = int(np.sum(combined_mask > 127))
+            _log(f"[YOLO predict] Маска (detect): объектных пикселей "
+                 f"{object_pixels} ({100 * object_pixels / combined_mask.size:.2f}%)")
+            elapsed = time.time() - start_time
+            _log(f"[YOLO predict] Готово за {elapsed:.3f} сек. "
+                 f"Выходная маска shape={combined_mask.shape}")
+            return combined_mask
+
+        # ============== 4. Пусто ==============
+        task = getattr(self.model, 'task', 'unknown')
+        _log(f"[YOLO predict] Модель не вернула ни масок, ни боксов "
+             f"(task={task}). Возвращаем нулевую маску.")
+        return combined_mask
 
 
 class SAMSegmentor(BaseSegmentor):

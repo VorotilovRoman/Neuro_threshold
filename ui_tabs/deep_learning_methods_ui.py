@@ -84,7 +84,7 @@ def setup_deep_learning_methods_ui(parent):
     model_layout = QHBoxLayout()
     model_layout.addWidget(QLabel("Model:"))
     parent.model_combo = QComboBox()
-    models = ["U-Net", "DeepLabV3+", "SegFormer", "SAM", "YOLO-seg", "Custom ONNX"]
+    models = ["YOLO-seg", "U-Net", "DeepLabV3+", "SegFormer", "SAM", "Custom ONNX"]
     parent.model_combo.addItems(models)
     model_layout.addWidget(parent.model_combo)
     controls_layout.addLayout(model_layout)
