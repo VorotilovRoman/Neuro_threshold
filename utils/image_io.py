@@ -1,15 +1,157 @@
 from import_libs_external import *
 
-# ---------- Базовые функции работы с изображениями (без изменений) ----------
+# ============================================================
+# Жёсткие пределы — защита от падения OpenCV/Qt/libtiff
+# на очень больших изображениях (0xC0000409 и т.п.).
+# Применяются ВСЕГДА, независимо от галочки «resize».
+# ============================================================
+HARD_MAX_SIDE = 16384        # абсолютный предел стороны (px) при чтении
+
+# Практический предел для QPixmap/GDI+ на Windows. При превышении
+# QPixmap.fromImage может уронить процесс нативным исключением
+# (0xC0000409), которое нельзя поймать try/except.
+MAX_QPIXMAP_SIDE = 8192
+
+
+# ---------- Базовые функции работы с изображениями ----------
+def _read_with_pil_draft(image_path, max_side=HARD_MAX_SIDE):
+    """
+    Читает изображение через PIL с уменьшением на этапе декодирования.
+    Для TIFF `draft()` заставляет libtiff декодировать сразу в уменьшенном
+    масштабе — полное изображение в память не попадает.
+    """
+    try:
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
+        pil_img = Image.open(image_path)
+        try:
+            pil_img.draft("RGB", (max_side, max_side))
+        except Exception:
+            pass  # draft поддерживается не всеми форматами
+        img = np.array(pil_img)
+        if img.ndim == 2:
+            return img
+        if img.shape[-1] == 4:
+            return cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+        if img.shape[-1] == 3:
+            return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return img
+    except Exception as e:
+        print(f"[read] PIL draft failed for {image_path}: {e}")
+        return None
+
+
+def _read_with_tifffile(image_path):
+    """Читает TIFF через tifffile — устойчиво к приватным тегам libtiff."""
+    try:
+        import tifffile
+    except ImportError:
+        return None
+    try:
+        arr = tifffile.imread(image_path)
+        if arr is None:
+            return None
+        if arr.ndim == 2:
+            return arr
+        if arr.ndim == 3:
+            if arr.shape[-1] == 4:
+                return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+            if arr.shape[-1] == 3:
+                return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        return arr
+    except Exception as e:
+        print(f"[read] tifffile failed for {image_path}: {e}")
+        return None
+
+
 def read_image_with_fallback(image_path):
-    """Загружает изображение с помощью OpenCV, при ошибке пробует через PIL."""
+    """
+    Загружает изображение с защитой от падения нативных библиотек.
+
+    Порядок для TIFF:
+        1) PIL (с draft для очень больших);
+        2) tifffile — устойчив к приватным тегам libtiff
+           (напр. tag 65100 0xfe4c), которые роняют OpenCV;
+        3) OpenCV — в самом конце.
+
+    Для остальных форматов:
+        1) при очень большом размере — PIL draft;
+        2) cv2.imread;
+        3) PIL без draft.
+    """
+    ext = os.path.splitext(image_path)[1].lower()
+    is_tiff = ext in ('.tif', '.tiff')
+
+    # --- 1. Смотрим размеры БЕЗ полного декодирования (только заголовок) ---
+    need_draft = False
+    try:
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(image_path) as probe:
+            w, h = probe.size
+            if max(w, h) > HARD_MAX_SIDE:
+                need_draft = True
+    except Exception:
+        pass
+
+    # --- 2. TIFF: PIL → tifffile → (только потом) OpenCV ---
+    if is_tiff:
+        if need_draft:
+            print(f"[read] {os.path.basename(image_path)}: очень большой TIFF, "
+                  f"читаю через PIL draft")
+            img = _read_with_pil_draft(image_path, max_side=HARD_MAX_SIDE)
+            if img is not None:
+                return img
+
+        # Обычный TIFF — сначала PIL (без draft)
+        try:
+            from PIL import Image
+            Image.MAX_IMAGE_PIXELS = None
+            pil_img = Image.open(image_path)
+            img = np.array(pil_img)
+            if img.ndim == 2:
+                return img
+            if img.shape[-1] == 4:
+                return cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+            if img.shape[-1] == 3:
+                return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            return img
+        except Exception as e:
+            print(f"[read] PIL failed for TIFF {image_path}: {e}")
+
+        # TIFF через tifffile — обходит кривой libtiff-парсер OpenCV
+        img = _read_with_tifffile(image_path)
+        if img is not None:
+            return img
+
+        # Если ни PIL, ни tifffile не справились — пробуем OpenCV
+        # (последний шанс, может упасть нативным исключением).
+        img = cv2.imread(image_path)
+        if img is not None:
+            return img
+        return None
+
+    # --- 3. Не-TIFF: очень большой файл — грузим через PIL draft сразу ---
+    if need_draft:
+        print(f"[read] {os.path.basename(image_path)}: очень большой, "
+              f"читаю через PIL draft")
+        img = _read_with_pil_draft(image_path, max_side=HARD_MAX_SIDE)
+        if img is not None:
+            return img
+
+    # --- 4. Обычный путь через OpenCV ---
     img = cv2.imread(image_path)
     if img is not None:
         return img
+
+    # --- 5. Fallback на PIL без draft ---
     try:
         from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
         pil_img = Image.open(image_path)
         img = np.array(pil_img)
+        if img.ndim == 2:
+            return img
         if img.shape[-1] == 4:
             img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
         elif img.shape[-1] == 3:
@@ -57,23 +199,51 @@ def convert_to_grayscale(img):
         return cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2GRAY)
 
 
-def numpy_to_qpixmap(img_bgr):
-    """Преобразует numpy-изображение (BGR или grayscale) в QPixmap."""
+def numpy_to_qpixmap(img_bgr, max_side=MAX_QPIXMAP_SIDE):
+    """
+    Преобразует numpy-изображение (BGR или grayscale) в QPixmap.
+
+    Аварийный даунскейл: QPixmap.fromImage на Windows может уронить
+    процесс нативным исключением (0xC0000409) при больших размерах
+    (>~8K по стороне и/или нескольких ГБ суммарной памяти на pixmap).
+    Ограничиваем сторону до max_side ДО создания QImage.
+    """
     if img_bgr is None:
         return QPixmap()
-    if len(img_bgr.shape) == 2:
+
+    # --- Аварийный даунскейл для защиты от крэша QPixmap.fromImage ---
+    h, w = img_bgr.shape[:2]
+    if max(h, w) > max_side:
+        scale = float(max_side) / float(max(h, w))
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        img_bgr = cv2.resize(img_bgr, (new_w, new_h),
+                             interpolation=cv2.INTER_AREA)
+
+    if not img_bgr.flags['C_CONTIGUOUS']:
+        img_bgr = np.ascontiguousarray(img_bgr)
+
+    if img_bgr.ndim == 2:
         h, w = img_bgr.shape
-        bytes_per_line = w
-        qimage = QImage(img_bgr.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
-    else:
+        qimage = QImage(img_bgr.data, w, h, w, QImage.Format_Grayscale8)
+    elif img_bgr.ndim == 3 and img_bgr.shape[2] == 3:
         h, w, ch = img_bgr.shape
+        # BGR888 доступен с Qt 5.14 — экономим целую копию cvtColor.
+        qimage = QImage(img_bgr.data, w, h, ch * w, QImage.Format_BGR888)
+    elif img_bgr.ndim == 3 and img_bgr.shape[2] == 4:
+        h, w, ch = img_bgr.shape
+        qimage = QImage(img_bgr.data, w, h, ch * w, QImage.Format_ARGB32)
+    else:
+        # На всякий случай — fallback на прежний путь.
+        h, w = img_bgr.shape[:2]
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        bytes_per_line = ch * w
-        qimage = QImage(img_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        qimage = QImage(img_rgb.data, w, h, 3 * w, QImage.Format_RGB888)
+    # QPixmap.fromImage копирует в нативный формат, поэтому
+    # numpy-буфер должен быть жив только на время вызова — так и есть.
     return QPixmap.fromImage(qimage)
 
 
-# ---------- Работа с аннотациями (без изменений) ----------
+# ---------- Работа с аннотациями ----------
 def load_annotations(txt_path, img_w, img_h):
     """
     Загружает аннотации из YOLO .txt файла.
@@ -167,7 +337,7 @@ def load_annotations_for_image(img_path, img_w, img_h):
     return load_annotations(txt_path, img_w, img_h)
 
 
-# ---------- Универсальная загрузка изображений (без изменений) ----------
+# ---------- Универсальная загрузка изображений ----------
 def load_images_universal(source, require_annotations=False, resize_enabled=True,
                           max_side=1024, progress_callback=None, parent=None):
     """
@@ -220,6 +390,18 @@ def load_images_universal(source, require_annotations=False, resize_enabled=True
 
         img_original = normalize_to_uint8(img_original)
 
+        # --- HARD LIMIT: до любых cvtColor/resize ---
+        # Если изображение всё ещё превышает жёсткий предел,
+        # уменьшаем его ПЕРЕД BGR/GRAY-конвертацией.
+        # Иначе cvtColor/BGR2GRAY на огромных размерах роняет процесс
+        # с 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN), который нельзя
+        # поймать try/except.
+        h0, w0 = img_original.shape[:2]
+        if max(h0, w0) > HARD_MAX_SIDE:
+            print(f"[load] {os.path.basename(path)}: {w0}x{h0} "
+                  f"> {HARD_MAX_SIDE}, downscaling")
+            img_original = resize_to_max_side(img_original, max_side=HARD_MAX_SIDE)
+
         if resize_enabled:
             img = resize_to_max_side(img_original, max_side=max_side)
         else:
@@ -247,7 +429,7 @@ def load_images_universal(source, require_annotations=False, resize_enabled=True
     return image_paths, images, gray_images, annotations_list
 
 
-# ========== НОВАЯ ФУНКЦИЯ: загрузка датасета из YAML ==========
+# ========== Загрузка датасета из YAML ==========
 def load_dataset_from_yaml(yaml_path, resize_enabled=True, max_side=1024, progress_callback=None, parent=None):
     """
     Загружает датасет из YAML-файла YOLO (train/val/test).
@@ -357,7 +539,7 @@ def load_dataset_from_yaml(yaml_path, resize_enabled=True, max_side=1024, progre
     return paths, imgs, grays, annotations_list
 
 
-# ---------- Остальные утилиты (без изменений) ----------
+# ---------- Остальные утилиты ----------
 def save_coordinates(main_window):
     """Сохраняет координаты выделенных объектов в .txt файл (только detect)."""
     if not main_window.display_images:
@@ -437,6 +619,7 @@ def read_image_with_fallback_find(image_path):
 
     try:
         from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
         pil_img = Image.open(image_path)
         img = np.array(pil_img)
         if len(img.shape) == 2:
@@ -518,6 +701,7 @@ def convert_segment_masks_to_yolo_seg_manual(masks_dir: str, output_dir: str, pi
             txt_path = output_path / f"{mask_file.stem}.txt"
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(yolo_lines))
+
 
 def load_dataset_from_yaml_with_masks(yaml_path, resize_enabled=True, max_side=1024,
                                        progress_callback=None, parent=None):
@@ -617,7 +801,7 @@ def load_dataset_from_yaml_with_masks(yaml_path, resize_enabled=True, max_side=1
     for path in paths:
         label_path = img_to_label.get(os.path.normpath(path))
         if label_path and os.path.exists(label_path):
-            h, w = imgs[annotations_list.__len__()].shape[:2]  # FIX: используем len(annotations_list) как индекс текущего изображения
+            h, w = imgs[annotations_list.__len__()].shape[:2]
             ann = load_annotations(label_path, w, h)
         else:
             ann = []
@@ -635,6 +819,234 @@ def load_dataset_from_yaml_with_masks(yaml_path, resize_enabled=True, max_side=1
         mask_images_list.append(mask_img)
 
     return paths, imgs, grays, annotations_list, mask_paths, mask_images_list
+
+
+
+# ============================================================
+# Ленивая загрузка изображений (LRU-кэш с фоновым префетчем)
+# ============================================================
+def load_one_image_item(image_path, resize_enabled=True, max_side=1024,
+                        safe_max_side=None, load_annotations_flag=True):
+    """
+    Загружает одно изображение и подготавливает его для отображения/инференса.
+
+    Параметры:
+        image_path            — путь к файлу;
+        resize_enabled        — уменьшать ли длинную сторону до max_side;
+        max_side              — значение для обычного ресайза (по галочке);
+        safe_max_side         — жёсткий предел стороны, применяется всегда
+                                (аналог MAX_SAFE_SIDE в окне вкладки);
+        load_annotations_flag — читать ли .txt рядом с изображением.
+
+    Возвращает dict:
+        {'image': BGR uint8, 'gray': gray uint8, 'annotations': [...], 'path': str}
+    или None, если изображение не читается.
+    """
+    img_original = read_image_with_fallback(image_path)
+    if img_original is None:
+        return None
+    img_original = normalize_to_uint8(img_original)
+
+    h0, w0 = img_original.shape[:2]
+    if max(h0, w0) > HARD_MAX_SIDE:
+        img_original = resize_to_max_side(img_original, max_side=HARD_MAX_SIDE)
+
+    if resize_enabled:
+        img = resize_to_max_side(img_original, max_side=max_side)
+    else:
+        img = img_original
+
+    if safe_max_side is not None:
+        img = resize_to_max_side(img, max_side=safe_max_side)
+
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+    elif img.shape[2] != 3:
+        img = img[:, :, :3]
+
+    gray = convert_to_grayscale(img)
+
+    anns = []
+    if load_annotations_flag:
+        txt_path = os.path.splitext(image_path)[0] + ".txt"
+        if os.path.exists(txt_path):
+            anns = load_annotations(txt_path, img.shape[1], img.shape[0])
+
+    return {"image": img, "gray": gray, "annotations": anns, "path": image_path}
+
+
+class LazyImageCache:
+    """
+    LRU-кэш изображений с фоновой предзагрузкой окна вокруг текущего индекса.
+
+    • Хранит не более max_resident готовых элементов.
+    • Для текущего индекса get() синхронно возвращает готовый элемент
+      (или ждёт уже запущенную фоновую задачу для того же индекса).
+    • prefetch() ставит загрузку в ThreadPoolExecutor — UI не блокируется.
+    • trim_around() удаляет из кэша всё, что дальше заданного окна.
+    • Ошибки загрузки не глотаются молча: они сохраняются в _errors[idx]
+      и поднимаются как исключение из get() либо доступны через get_error().
+
+    Потокобезопасен: доступ к внутренним структурам защищён RLock.
+    """
+    def __init__(self, paths, loader, window=8, prefetch_ahead=4,
+                 max_resident=16, max_workers=2):
+        self.paths = list(paths)
+        self.loader = loader
+        self.window = window
+        self.prefetch_ahead = prefetch_ahead
+        self.max_resident = max_resident
+        self._cache = OrderedDict()            # idx -> item
+        self._errors = {}                      # idx -> Exception
+        self._lock = threading.RLock()
+        self._in_flight = set()                # idx, для которых запущена загрузка
+        self._events = {}                      # idx -> threading.Event
+        self._pool = ThreadPoolExecutor(max_workers=max_workers,
+                                        thread_name_prefix="img-load")
+        self._shutdown = False
+
+    # --- базовое ---
+    def __len__(self):
+        return len(self.paths)
+
+    def _trim_locked(self):
+        while len(self._cache) > self.max_resident:
+            self._cache.popitem(last=False)
+
+    def _load_sync(self, idx):
+        """Синхронная загрузка. Ошибка сохраняется и пере-поднимается."""
+        try:
+            item = self.loader(self.paths[idx])
+        except Exception as e:
+            with self._lock:
+                self._errors[idx] = e
+            raise
+        with self._lock:
+            if item is not None:
+                self._cache[idx] = item
+                self._cache.move_to_end(idx)
+                self._trim_locked()
+                self._errors.pop(idx, None)
+            else:
+                # Лоадер вернул None — трактуем как ошибку чтения.
+                self._errors[idx] = IOError(f"Loader вернул None для {self.paths[idx]}")
+        return item
+
+    def is_loaded(self, idx):
+        with self._lock:
+            return idx in self._cache
+
+    def get_error(self, idx):
+        """Последняя ошибка загрузки для индекса (или None)."""
+        with self._lock:
+            return self._errors.get(idx)
+
+    def get(self, idx):
+        """
+        Возвращает элемент по индексу; при отсутствии — загружает синхронно.
+
+        Если загрузка падает, исключение поднимается наружу. Если фоновая
+        задача уже упала — возвращает None, но исходная ошибка доступна
+        через get_error(idx).
+        """
+        if idx < 0 or idx >= len(self.paths):
+            return None
+        with self._lock:
+            if idx in self._cache:
+                self._cache.move_to_end(idx)
+                return self._cache[idx]
+            ev = self._events.get(idx)
+        if ev is not None:
+            ev.wait()
+            with self._lock:
+                if idx in self._cache:
+                    self._cache.move_to_end(idx)
+                    return self._cache[idx]
+                if idx in self._errors:
+                    # Фоновая задача уже провалилась — повторно не пытаемся,
+                    # возвращаем None (ошибка доступна через get_error).
+                    return None
+        return self._load_sync(idx)
+
+    # --- фоновый префетч ---
+    def _load_bg(self, idx):
+        if self._shutdown:
+            return
+        item = None
+        error = None
+        try:
+            item = self.loader(self.paths[idx])
+            if item is None:
+                error = IOError(f"Loader вернул None для {self.paths[idx]}")
+        except Exception as e:
+            error = e
+            print(f"[lazy] background error loading {self.paths[idx]}: {e}")
+        if self._shutdown:
+            return
+        with self._lock:
+            self._in_flight.discard(idx)
+            if item is not None:
+                self._cache[idx] = item
+                self._cache.move_to_end(idx)
+                self._trim_locked()
+                self._errors.pop(idx, None)
+            elif error is not None:
+                self._errors[idx] = error
+            ev = self._events.pop(idx, None)
+        if ev is not None:
+            ev.set()
+
+    def prefetch(self, indices):
+        """Ставит в очередь фоновую загрузку указанных индексов."""
+        if self._shutdown:
+            return
+        for idx in indices:
+            if idx < 0 or idx >= len(self.paths):
+                continue
+            with self._lock:
+                if idx in self._cache or idx in self._in_flight:
+                    continue
+                # Не пытаемся снова, если уже была ошибка — иначе будем
+                # бесконечно перезапускать сбойную загрузку.
+                if idx in self._errors:
+                    continue
+                self._in_flight.add(idx)
+                self._events[idx] = threading.Event()
+            self._pool.submit(self._load_bg, idx)
+
+    def trim_around(self, center, keep_behind=3, keep_ahead=None):
+        """Удаляет из кэша всё, что дальше заданного окна вокруг center."""
+        if keep_ahead is None:
+            keep_ahead = self.prefetch_ahead + 4
+        with self._lock:
+            lo = max(0, center - keep_behind)
+            hi = center + keep_ahead
+            to_remove = [i for i in self._cache.keys() if not (lo <= i <= hi)]
+            for i in to_remove:
+                del self._cache[i]
+            # Заодно чистим устаревшие ошибки вне окна
+            err_remove = [i for i in self._errors.keys() if not (lo <= i <= hi)]
+            for i in err_remove:
+                del self._errors[i]
+
+    # --- остановка ---
+    def shutdown(self):
+        """Останавливает пул потоков и очищает кэш."""
+        self._shutdown = True
+        try:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            # Python < 3.9 — нет cancel_futures
+            self._pool.shutdown(wait=False)
+        with self._lock:
+            self._cache.clear()
+            self._errors.clear()
+            self._in_flight.clear()
+            for ev in self._events.values():
+                ev.set()
+            self._events.clear()
 
 # Алиасы для обратной совместимости
 load_images = load_images_universal

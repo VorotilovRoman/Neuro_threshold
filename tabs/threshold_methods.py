@@ -3,6 +3,7 @@ from import_libs_internal import *
 from import_libs_methods_ui import setup_threshold_ui
 from path_setup import get_project_root
 
+
 class ThresholdWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -12,12 +13,17 @@ class ThresholdWindow(QMainWindow):
         setup_threshold_ui(self)
         print(hasattr(self.nav_widget, 'load_folder'))
         print(self.nav_widget.load_folder)
-        # Данные изображений
+
+        # Данные изображений.
+        # Полный список путей хранится всегда; сами картинки — в _lazy_cache.
         self.image_paths = []
-        self.display_images = []
-        self.gray_images = []
-        self.annotations = []       # список загруженных аннотаций (если есть)
         self.current_index = 0
+        self._lazy_cache = None
+
+        # Текущее изображение и его grayscale-версия для всей логики вкладки.
+        self.original_image = None
+        self.current_gray = None
+
         self.current_threshold = None
         self.current_objects_full = []   # список объектов в унифицированном формате
         self.current_selected_indices = []
@@ -126,6 +132,14 @@ class ThresholdWindow(QMainWindow):
             self.log(f"Ошибка сохранения настроек автоподбора: {e}")
 
     def closeEvent(self, event):
+        # Аккуратно останавливаем фоновый пул, чтобы процесс не висел
+        # на незавершённых задачах загрузки.
+        if self._lazy_cache is not None:
+            try:
+                self._lazy_cache.shutdown()
+            except Exception:
+                pass
+            self._lazy_cache = None
         self.save_auto_settings()
         event.accept()
 
@@ -166,9 +180,8 @@ class ThresholdWindow(QMainWindow):
         self.hist_canvas.draw()
 
     def update_current_histogram(self):
-        if self.display_images:
-            gray = self.gray_images[self.current_index]
-            self.update_histogram(gray, self.current_threshold)
+        if self.current_gray is not None:
+            self.update_histogram(self.current_gray, self.current_threshold)
 
     # ---------- Сбор параметров для бинаризации ----------
     def get_current_threshold_params(self):
@@ -197,7 +210,7 @@ class ThresholdWindow(QMainWindow):
 
     # ---------- Отображение текущего изображения ----------
     def display_current_image(self):
-        if not self.display_images:
+        if self._lazy_cache is None or len(self._lazy_cache) == 0:
             self.update_current_histogram()
             self.original_view.set_pixmap(numpy_to_qpixmap(None))
             self.binary_view.set_pixmap(numpy_to_qpixmap(None))
@@ -205,15 +218,26 @@ class ThresholdWindow(QMainWindow):
             self.annotated_view.set_pixmap(numpy_to_qpixmap(None))
             self.info_label.setText("No images loaded")
             self.object_list.clear()
-            self.annotations = []
             return
 
-        self.info_label.setText(f"Image {self.current_index+1} of {len(self.display_images)}")
-        original = self.display_images[self.current_index]
+        idx = self.current_index
+        total = len(self._lazy_cache)
 
+        self.info_label.setText(f"Image {idx + 1} of {total}")
+
+        # --- Синхронно получаем элемент (LRU-кэш вернёт готовый или загрузит) ---
+        item = self._lazy_cache.get(idx)
+        if item is None:
+            self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
+            return
+
+        original = item["image"]
         if len(original.shape) == 3 and original.shape[2] == 4:
             original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        gray = self.gray_images[self.current_index]
+        gray = item["gray"]
+
+        self.original_image = original
+        self.current_gray = gray
 
         method = self.method_combo.currentText()
         params = self.get_current_threshold_params()
@@ -221,7 +245,7 @@ class ThresholdWindow(QMainWindow):
         self.current_threshold = thresh
         binary = cv2.bitwise_not(binary)
 
-        current_file = os.path.basename(self.image_paths[self.current_index])
+        current_file = os.path.basename(self.image_paths[idx])
         base_name = os.path.splitext(current_file)[0]
         self.log(f"Отображён снимок: {current_file}")
 
@@ -260,13 +284,21 @@ class ThresholdWindow(QMainWindow):
         _, self.current_objects_full = self.draw_objects_on_image(display_img, processed, draw=False)
         self.update_object_list()
 
+        # --- Префетч следующего окна + вытеснение дальних ---
+        ahead = self._lazy_cache.prefetch_ahead
+        self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
+        self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
+
     # ---------- Работа со списком объектов (универсальная) ----------
     def update_object_list(self):
         self.object_list.blockSignals(True)
         self.object_list.clear()
         self.current_selected_indices = []
 
-        img = self.display_images[self.current_index]
+        img = self.original_image
+        if img is None:
+            self.object_list.blockSignals(False)
+            return
         img_h, img_w = img.shape[:2]
 
         for i, obj in enumerate(self.current_objects_full):
@@ -309,7 +341,9 @@ class ThresholdWindow(QMainWindow):
         if not self.current_selected_indices:
             self.coord_text.append("No objects selected.")
             return
-        img = self.display_images[self.current_index]
+        img = self.original_image
+        if img is None:
+            return
         img_h, img_w = img.shape[:2]
         for i, idx in enumerate(self.current_selected_indices, 1):
             obj = self.current_objects_full[idx]
@@ -341,34 +375,34 @@ class ThresholdWindow(QMainWindow):
 
     # ---------- Навигация ----------
     def update_navigation_state(self):
-        has_images = len(self.display_images) > 0
-        if has_images:
+        total = len(self.image_paths) if self.image_paths else 0
+        if total > 0:
             self.nav_widget.set_prev_enabled(self.current_index > 0)
-            self.nav_widget.set_next_enabled(self.current_index < len(self.display_images) - 1)
+            self.nav_widget.set_next_enabled(self.current_index < total - 1)
         else:
             self.nav_widget.set_prev_enabled(False)
             self.nav_widget.set_next_enabled(False)
 
     def prev_image(self):
-        if not self.display_images:
+        if not self.image_paths:
             return
-        self.current_index = (self.current_index - 1) % len(self.display_images)
+        self.current_index = (self.current_index - 1) % len(self.image_paths)
         self.display_current_image()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        self.nav_widget.set_current_index(self.current_index, len(self.image_paths))
         self.update_navigation_state()
 
     def next_image(self):
-        if not self.display_images:
+        if not self.image_paths:
             return
-        self.current_index = (self.current_index + 1) % len(self.display_images)
+        self.current_index = (self.current_index + 1) % len(self.image_paths)
         self.display_current_image()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        self.nav_widget.set_current_index(self.current_index, len(self.image_paths))
         self.update_navigation_state()
 
     def goto_image(self, page_num):
-        if not self.display_images:
+        total = len(self.image_paths) if self.image_paths else 0
+        if total == 0:
             return
-        total = len(self.display_images)
         page_num = max(1, min(page_num, total))
         self.current_index = page_num - 1
         self.display_current_image()
@@ -384,68 +418,108 @@ class ThresholdWindow(QMainWindow):
         if not file_paths:
             return
         self.log(f"Loading {len(file_paths)} images...")
-        paths, imgs, grays, anns = load_images_universal(
-            source=file_paths,
-            require_annotations=False,
-            resize_enabled=self.nav_widget.is_resize_enabled(),
-            parent=self
-        )
-        if not paths:
-            self.log("No images loaded.")
-            return
-        self.image_paths = paths
-        self.display_images = imgs
-        self.gray_images = grays
-        self.annotations = anns  # загруженные аннотации (если есть)
-        self.current_index = 0
-        self.display_current_image()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
-        self.update_navigation_state()
+        self._load_images(file_paths)
 
     def load_folder(self):
-
         print("DEBUG: load_folder вызван")
         folder = QFileDialog.getExistingDirectory(self, "Select Folder")
         print("DEBUG: выбрана папка", folder)
         if not folder:
             return
         self.log(f"Loading folder: {folder}")
+        self._load_images(folder)
 
-        paths, imgs, grays, anns = load_images_universal(
-            source=folder,
-            require_annotations=False,
-            resize_enabled=self.nav_widget.is_resize_enabled(),
-            parent=self
-        )
+    def reload_current_images(self):
+        """Перезагружает текущий набор изображений с учётом текущего режима ресайза."""
+        if not self.image_paths:
+            self.log("Нет загруженных изображений для перезагрузки.")
+            return
+        self.log("Перезагрузка изображений с новыми настройками ресайза...")
+        self._load_images(list(self.image_paths))
 
-        if not paths:
-            self.log("No images found in the selected folder.")
+    # ------- Ленивая загрузка (единая точка входа) -------
+    def _load_images(self, source):
+        # --- Собираем список файлов БЕЗ загрузки картинок ---
+        if isinstance(source, str) and os.path.isdir(source):
+            exts = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
+            all_files = sorted(
+                os.path.join(source, f)
+                for f in os.listdir(source)
+                if os.path.splitext(f)[1].lower() in exts
+            )
+        elif isinstance(source, list):
+            all_files = list(source)
+        else:
+            self.log("No images loaded.")
             return
 
-        self.image_paths = paths
-        self.display_images = imgs
-        self.gray_images = grays
-        self.annotations = anns
+        if not all_files:
+            self.log("No images loaded.")
+            return
+
+        resize_enabled = self.nav_widget.is_resize_enabled()
+        max_side = 1024
+
+        # --- Останавливаем предыдущий кэш ---
+        if self._lazy_cache is not None:
+            self._lazy_cache.shutdown()
+            self._lazy_cache = None
+
+        # --- Создаём кэш ---
+        loader = lambda p: load_one_image_item(
+            p,
+            resize_enabled=resize_enabled,
+            max_side=max_side,
+            safe_max_side=None,
+        )
+        self._lazy_cache = LazyImageCache(
+            paths=all_files,
+            loader=loader,
+            window=8,
+            prefetch_ahead=4,
+            max_resident=16,
+            max_workers=2,
+        )
+
+        # --- Сброс состояния ---
+        self.image_paths = all_files
         self.current_index = 0
+        self.original_image = None
+        self.current_gray = None
+        self.current_objects_full = []
+        self.current_selected_indices = []
+        self.current_base_image = None
+        for view in (self.original_view, self.binary_view,
+                     self.morph_view, self.annotated_view):
+            view.set_pixmap(numpy_to_qpixmap(None))
+        self.object_list.clear()
+
+        # --- Синхронно грузим первый снимок ---
+        first = self._lazy_cache.get(0)
+        if first is None:
+            self.log("Не удалось загрузить первое изображение.")
+            return
+
+        # --- Остальное окно — в фон ---
+        total = len(self._lazy_cache)
+        self._lazy_cache.prefetch(
+            range(1, min(1 + self._lazy_cache.prefetch_ahead + 1, total))
+        )
+
+        self.log(f"Загружено {total} изображений (первое — сразу, остальное в фоне).")
         self.display_current_image()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        self.nav_widget.set_current_index(self.current_index, total)
         self.update_navigation_state()
 
     # ---------- Сохранение аннотаций (универсальное) ----------
     def save_current_annotations(self):
-        if not self.image_paths:
+        if not self.image_paths or self.original_image is None:
             QMessageBox.warning(self, "Нет изображения", "Нет загруженных изображений.")
             return
         img_path = self.image_paths[self.current_index]
         txt_path = os.path.splitext(img_path)[0] + ".txt"
-        # Преобразуем self.current_objects_full в формат, ожидаемый save_annotations
-        # save_annotations из image_io.py ожидает список кортежей ('detect',...), ('obb',...), ('segment',...)
-        success = save_annotations(
-            self.current_objects_full,
-            txt_path,
-            self.display_images[self.current_index].shape[1],
-            self.display_images[self.current_index].shape[0]
-        )
+        h, w = self.original_image.shape[:2]
+        success = save_annotations(self.current_objects_full, txt_path, w, h)
         if success:
             self.log(f"Сохранено {len(self.current_objects_full)} аннотаций в {txt_path}")
             QMessageBox.information(self, "Сохранение", f"Аннотации сохранены в {txt_path}")
@@ -455,12 +529,12 @@ class ThresholdWindow(QMainWindow):
 
     # ---------- События UI ----------
     def reset_all_zooms(self):
-        for view in [self.original_view, self.binary_view, self.morph_view, self.annotated_view]:
+        for view in (self.original_view, self.binary_view,
+                     self.morph_view, self.annotated_view):
             view.reset_view()
 
-    # Изменить метод on_resize_mode_changed
     def on_resize_mode_changed(self, enabled):
-        if self.display_images:
+        if self.image_paths:
             reply = QMessageBox.question(
                 self, "Resize Mode Changed",
                 "Resize mode changed. To apply, you need to reload images.\n"
@@ -473,43 +547,19 @@ class ThresholdWindow(QMainWindow):
                 self.clear_images()
                 self.log("Resize mode changed, images cleared. Please load images again.")
 
-    # Добавить метод в класс ThresholdWindow
-    def reload_current_images(self):
-        """Перезагружает текущий набор изображений с учётом текущего режима ресайза."""
-        if not self.image_paths:
-            self.log("Нет загруженных изображений для перезагрузки.")
-            return
-        self.log("Перезагрузка изображений с новыми настройками ресайза...")
-        resize_enabled = self.nav_widget.is_resize_enabled()
-        paths, imgs, grays, anns = load_images_universal(
-            source=self.image_paths,
-            require_annotations=False,
-            resize_enabled=resize_enabled,
-            parent=self
-        )
-        if not paths:
-            self.log("Ошибка: ни одно изображение не загружено при перезагрузке.")
-            return
-        self.image_paths = paths
-        self.display_images = imgs
-        self.gray_images = grays
-        self.annotations = anns
-        self.current_index = 0
-        self.display_current_image()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
-        self.update_navigation_state()
-        self.log(f"Перезагружено {len(paths)} изображений.")
-
     def clear_images(self):
-        self.display_images = []
-        self.gray_images = []
+        if self._lazy_cache is not None:
+            self._lazy_cache.shutdown()
+            self._lazy_cache = None
         self.image_paths = []
-        self.annotations = []
         self.current_index = 0
+        self.original_image = None
+        self.current_gray = None
         self.current_objects_full = []
         self.current_selected_indices = []
         self.current_base_image = None
-        for view in [self.original_view, self.binary_view, self.morph_view, self.annotated_view]:
+        for view in (self.original_view, self.binary_view,
+                     self.morph_view, self.annotated_view):
             view.set_pixmap(numpy_to_qpixmap(None))
         self.info_label.setText("No images")
         self.object_list.clear()
@@ -569,19 +619,19 @@ class ThresholdWindow(QMainWindow):
             self.row_adaptive_container.setVisible(True)
 
         self.reset_params_for_method(method)
-        if self.display_images:
+        if self.original_image is not None:
             self.schedule_update()
 
     def schedule_update(self):
         self.update_timer.start(50)
 
     def on_param_changed(self):
-        if self.display_images:
+        if self.original_image is not None:
             self.schedule_update()
 
     def on_simple_threshold_changed(self, value):
         self.threshold_value_label.setText(str(value))
-        if self.display_images and self.method_combo.currentText() == "Simple Threshold":
+        if self.original_image is not None and self.method_combo.currentText() == "Simple Threshold":
             self.schedule_update()
 
     def on_niblack_k_changed(self, value):
@@ -613,7 +663,7 @@ class ThresholdWindow(QMainWindow):
         self.schedule_update()
 
     def on_invert_changed(self, state):
-        if self.display_images:
+        if self.original_image is not None:
             self.schedule_update()
 
     def on_draw_mode_changed(self, idx):
@@ -622,11 +672,11 @@ class ThresholdWindow(QMainWindow):
             self.hull_checkbox.setVisible(True)
         else:
             self.hull_checkbox.setVisible(False)
-        if self.display_images:
+        if self.original_image is not None:
             self.schedule_update()
 
     def on_hull_changed(self, state):
-        if self.display_images:
+        if self.original_image is not None:
             self.schedule_update()
 
     def on_object_selection_changed(self, item):
@@ -733,7 +783,7 @@ class ThresholdWindow(QMainWindow):
         self.toggle_hist_btn.setText("Скрыть гистограмму" if checked else "Показать гистограмму")
 
     def on_global_settings_changed(self, new_settings=None):
-        if self.display_images:
+        if self.original_image is not None:
             self.update_annotated_view()
 
 

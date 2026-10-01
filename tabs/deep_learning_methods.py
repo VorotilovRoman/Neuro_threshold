@@ -3,15 +3,21 @@ from import_libs_internal import *
 from import_libs_methods_ui import setup_deep_learning_methods_ui
 
 
+
 class DeepLearningWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Deep Learning Segmentation")
-        self.annotations = []
+
+        # Данные изображений.
+        # Полный список путей хранится всегда; сами картинки — в _lazy_cache.
         self.image_paths = []
-        self.display_images = []
-        self.gray_images = []
         self.current_index = 0
+        self._lazy_cache = None
+
+        # Текущее изображение и его grayscale-версия для всей логики вкладки.
+        self.original_image = None
+        self.current_gray = None
 
         self.segmentor = None
         self.model_metadata = None
@@ -83,7 +89,6 @@ class DeepLearningWindow(QMainWindow):
 
         self.update_navigation_state()
         self.on_model_changed(0)
-
 
     def _update_segment_button_color(self):
         """Обновляет цвет кнопки сегментации в зависимости от наличия модели."""
@@ -174,9 +179,6 @@ class DeepLearningWindow(QMainWindow):
             self._update_segment_button_color()  # красный
             self.display_current_image()
 
-
-
-
     def _update_unet_ui_from_metadata(self, metadata):
         """Заполняет поля U-Net из метаданных (поля уже заблокированы)."""
         if 'encoder' in metadata:
@@ -213,7 +215,7 @@ class DeepLearningWindow(QMainWindow):
             self.yolo_settings._imgsz,
             self.yolo_settings._save,
             self.custom_settings._model_path,
-            self.unet_settings._threshold,  # добавлено
+            self.unet_settings._threshold,
         ]
         for w in widgets:
             if isinstance(w, QComboBox):
@@ -295,7 +297,6 @@ class DeepLearningWindow(QMainWindow):
     # ---------- Выбор модели ----------
     def on_model_changed(self, idx):
         model_name = self.model_combo.currentText()
-        # Скрываем все виджеты настроек
         for cont in [self.unet_settings, self.deeplab_settings, self.segformer_settings,
                      self.sam_settings, self.yolo_settings, self.custom_settings]:
             cont.setVisible(False)
@@ -313,13 +314,11 @@ class DeepLearningWindow(QMainWindow):
         elif model_name == "Custom ONNX":
             self.custom_settings.setVisible(True)
 
-        # Сбрасываем текущую модель
         self.segmentor = None
         self.model_metadata = None
         self.prediction_mask = None
         self._update_segment_button_color()
 
-        # Пытаемся загрузить модель, если путь уже указан
         if model_name == "U-Net":
             path = self.unet_settings._model_path.text().strip()
         elif model_name == "DeepLabV3+":
@@ -336,10 +335,8 @@ class DeepLearningWindow(QMainWindow):
             path = ""
 
         if path and os.path.exists(path):
-            # Файл существует – пробуем загрузить
             self.load_model_from_widget(model_name)
         elif path and not os.path.exists(path):
-            # Файл не существует – очищаем поле пути
             if model_name == "U-Net":
                 self.unet_settings._model_path.setText("")
             elif model_name == "DeepLabV3+":
@@ -369,17 +366,14 @@ class DeepLearningWindow(QMainWindow):
         else:
             new_device = "cpu"
 
-        # Если устройство не изменилось – ничего не делаем
         if hasattr(self, 'device') and self.device == new_device:
             return
 
         self.device = new_device
         self.log(f"Выбрано устройство: {self.device}")
 
-        # Если модель уже загружена, перезагружаем её с новым устройством
         if self.segmentor is not None:
             model_name = self.model_combo.currentText()
-            # Проверяем, есть ли путь к модели (он должен быть, так как модель загружена)
             if model_name == "U-Net":
                 path = self.unet_settings._model_path.text().strip()
             elif model_name == "DeepLabV3+":
@@ -396,10 +390,8 @@ class DeepLearningWindow(QMainWindow):
                 path = ""
 
             if path and os.path.exists(path):
-                # Перезагружаем модель через универсальную функцию
                 self.load_model_from_widget(model_name)
             else:
-                # Путь пропал – сбрасываем модель
                 self.segmentor = None
                 self._update_segment_button_color()
                 self.log(f"Модель {model_name} не найдена, сброшена.")
@@ -414,13 +406,12 @@ class DeepLearningWindow(QMainWindow):
         self.hist_canvas.draw()
 
     def update_current_histogram(self):
-        if self.display_images:
-            gray = self.gray_images[self.current_index]
-            self.update_histogram(gray)
+        if self.current_gray is not None:
+            self.update_histogram(self.current_gray)
 
     # ---------- DL операции ----------
     def run_segmentation(self):
-        if not self.display_images:
+        if self.original_image is None:
             QMessageBox.warning(self, "Нет изображения", "Загрузите изображение.")
             return
         if self.segmentor is None:
@@ -431,7 +422,7 @@ class DeepLearningWindow(QMainWindow):
         if model_name in ["SegFormer", "SAM"]:
             QMessageBox.information(self, "Информация",
                                     f"Модель {model_name} не реализована, сегментация невозможна.")
-            self.prediction_mask = np.zeros(self.gray_images[self.current_index].shape, dtype=np.uint8)
+            self.prediction_mask = np.zeros(self.current_gray.shape, dtype=np.uint8)
             return
 
         self.progress_bar.setValue(0)
@@ -439,7 +430,7 @@ class DeepLearningWindow(QMainWindow):
         QApplication.processEvents()
 
         try:
-            img = self.display_images[self.current_index]
+            img = self.original_image
             kwargs = {}
             self.log(f"=== Запуск сегментации (модель: {model_name}) ===")
             self.log(f"Изображение: {img.shape}, dtype={img.dtype}, диапазон [{img.min()}, {img.max()}]")
@@ -452,7 +443,6 @@ class DeepLearningWindow(QMainWindow):
                 self.log(f"Параметры YOLO: conf={kwargs['conf']}, iou={kwargs['iou']}, "
                          f"imgsz={kwargs['imgsz']}, save={kwargs['save']}")
 
-            # ---------- Добавляем для U‑Net ----------
             if model_name == "U-Net":
                 kwargs['threshold'] = self.unet_settings._threshold.value()
                 self.log(f"Порог U‑Net: {kwargs['threshold']}")
@@ -472,29 +462,29 @@ class DeepLearningWindow(QMainWindow):
             self.prediction_mask = mask
             self.progress_bar.setValue(100)
 
-            # Встроенное сохранение YOLO (если save=True) уже обрабатывается внутри predict
-            # Кнопка "Save Labels" отвечает за сохранение аннотаций в .txt
-
         except Exception as e:
             self.log(f"Ошибка сегментации: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить сегментацию:\n{e}")
-            self.prediction_mask = np.zeros(self.gray_images[self.current_index].shape, dtype=np.uint8)
+            self.prediction_mask = np.zeros(self.current_gray.shape, dtype=np.uint8)
         finally:
             self.segment_button.setEnabled(True)
 
     # ---------- Отображение ----------
     def display_current_image(self):
-        if not self.display_images:
+        if self._lazy_cache is None or len(self._lazy_cache) == 0:
             self.update_current_histogram()
-            for view in [self.original_view, self.dl_view, self.morph_view, self.annotated_view]:
+            for view in (self.original_view, self.dl_view,
+                         self.morph_view, self.annotated_view):
                 view.set_pixmap(numpy_to_qpixmap(None))
             self.info_label.setText("No images loaded")
             self.object_list.clear()
-            self.annotations = []
             return
 
-        self.info_label.setText(f"Image {self.current_index+1} of {len(self.display_images)}")
-        current_file = os.path.basename(self.image_paths[self.current_index])
+        idx = self.current_index
+        total = len(self._lazy_cache)
+
+        self.info_label.setText(f"Image {idx + 1} of {total}")
+        current_file = os.path.basename(self.image_paths[idx])
         base_name = os.path.splitext(current_file)[0]
         self.log(f"Отображён снимок: {current_file}")
 
@@ -503,10 +493,19 @@ class DeepLearningWindow(QMainWindow):
         self.morph_view.set_suggested_save_name(f"dl_morph_{base_name}")
         self.annotated_view.set_suggested_save_name(f"dl_annotated_{base_name}")
 
-        original = self.display_images[self.current_index]
+        # --- Синхронно получаем элемент (LRU-кэш вернёт готовый или загрузит) ---
+        item = self._lazy_cache.get(idx)
+        if item is None:
+            self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
+            return
+
+        original = item["image"]
         if len(original.shape) == 3 and original.shape[2] == 4:
             original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        gray = self.gray_images[self.current_index]
+        gray = item["gray"]
+
+        self.original_image = original
+        self.current_gray = gray
 
         self.update_histogram(gray)
         self.original_view.set_pixmap(numpy_to_qpixmap(original))
@@ -517,6 +516,11 @@ class DeepLearningWindow(QMainWindow):
         mask = self.prediction_mask if self.prediction_mask is not None else np.zeros(gray.shape, dtype=np.uint8)
         self._apply_morphology_and_draw(mask, gray, original)
         self.update_navigation_state()
+
+        # --- Префетч следующего окна + вытеснение дальних ---
+        ahead = self._lazy_cache.prefetch_ahead
+        self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
+        self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
 
     def _apply_morphology_and_draw(self, mask, gray, original):
         close_factor = self.close_kernel_slider.value() / 100.0
@@ -558,7 +562,6 @@ class DeepLearningWindow(QMainWindow):
         draw_mode = self.draw_combo.currentText()
         self.log(f"=== Отрисовка объектов (режим: {draw_mode}) ===")
 
-        # Сохраняем чистое изображение (без аннотаций) и получаем список объектов
         self.current_base_image = display_img.copy()
         _, self.current_objects_full = self.draw_objects_on_image(display_img, processed, draw=False)
 
@@ -592,7 +595,11 @@ class DeepLearningWindow(QMainWindow):
         self.object_list.blockSignals(True)
         self.object_list.clear()
         self.current_selected_indices = []
-        img = self.display_images[self.current_index]
+
+        img = self.original_image
+        if img is None:
+            self.object_list.blockSignals(False)
+            return
         img_h, img_w = img.shape[:2]
         for i, obj in enumerate(self.current_objects_full):
             desc = format_object_for_list(i, obj, img_w, img_h)
@@ -631,7 +638,9 @@ class DeepLearningWindow(QMainWindow):
         if not self.current_selected_indices:
             self.coord_text.append("No objects selected.")
             return
-        img = self.display_images[self.current_index]
+        img = self.original_image
+        if img is None:
+            return
         img_h, img_w = img.shape[:2]
         for i, idx in enumerate(self.current_selected_indices, 1):
             obj = self.current_objects_full[idx]
@@ -661,32 +670,36 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- Навигация ----------
     def update_navigation_state(self):
-        has_images = len(self.display_images) > 0
-        self.nav_widget.set_prev_enabled(has_images and self.current_index > 0)
-        self.nav_widget.set_next_enabled(has_images and self.current_index < len(self.display_images) - 1)
+        total = len(self.image_paths) if self.image_paths else 0
+        if total > 0:
+            self.nav_widget.set_prev_enabled(self.current_index > 0)
+            self.nav_widget.set_next_enabled(self.current_index < total - 1)
+        else:
+            self.nav_widget.set_prev_enabled(False)
+            self.nav_widget.set_next_enabled(False)
 
     def prev_image(self):
-        if not self.display_images:
+        if not self.image_paths:
             return
-        self.current_index = (self.current_index - 1) % len(self.display_images)
+        self.current_index = (self.current_index - 1) % len(self.image_paths)
         self.prediction_mask = None
         self.display_current_image()
         self.update_navigation_state()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        self.nav_widget.set_current_index(self.current_index, len(self.image_paths))
 
     def next_image(self):
-        if not self.display_images:
+        if not self.image_paths:
             return
-        self.current_index = (self.current_index + 1) % len(self.display_images)
+        self.current_index = (self.current_index + 1) % len(self.image_paths)
         self.prediction_mask = None
         self.display_current_image()
         self.update_navigation_state()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        self.nav_widget.set_current_index(self.current_index, len(self.image_paths))
 
     def goto_image(self, page_num):
-        if not self.display_images:
+        total = len(self.image_paths) if self.image_paths else 0
+        if total == 0:
             return
-        total = len(self.display_images)
         page_num = max(1, min(page_num, total))
         self.current_index = page_num - 1
         self.prediction_mask = None
@@ -709,41 +722,100 @@ class DeepLearningWindow(QMainWindow):
             return
         self._load_images(folder)
 
+    def reload_current_images(self):
+        """Перезагружает текущий набор изображений с учётом режима ресайза."""
+        if not self.image_paths:
+            self.log("Нет загруженных изображений для перезагрузки.")
+            return
+        self.log("Перезагрузка изображений с новыми настройками ресайза...")
+        self._load_images(list(self.image_paths))
+
+    # ------- Ленивая загрузка (единая точка входа) -------
     def _load_images(self, source):
         self.log(f"Loading images from {source}...")
-        paths, imgs, grays, anns = load_images_universal(
-            source=source,
-            require_annotations=False,
-            resize_enabled=self.nav_widget.is_resize_enabled(),
-            max_side=640,
-            parent=self
-        )
-        if not paths:
+
+        # --- Собираем список файлов БЕЗ загрузки картинок ---
+        if isinstance(source, str) and os.path.isdir(source):
+            exts = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
+            all_files = sorted(
+                os.path.join(source, f)
+                for f in os.listdir(source)
+                if os.path.splitext(f)[1].lower() in exts
+            )
+        elif isinstance(source, list):
+            all_files = list(source)
+        else:
             self.log("No images loaded.")
             return
-        self.image_paths = paths
-        self.display_images = imgs
-        self.gray_images = grays
-        self.annotations = anns
+
+        if not all_files:
+            self.log("No images loaded.")
+            return
+
+        resize_enabled = self.nav_widget.is_resize_enabled()
+        max_side = 640   # как было в этой вкладке
+
+        # --- Останавливаем предыдущий кэш ---
+        if self._lazy_cache is not None:
+            self._lazy_cache.shutdown()
+            self._lazy_cache = None
+
+        # --- Создаём кэш ---
+        loader = lambda p: load_one_image_item(
+            p,
+            resize_enabled=resize_enabled,
+            max_side=max_side,
+            safe_max_side=None,
+        )
+        self._lazy_cache = LazyImageCache(
+            paths=all_files,
+            loader=loader,
+            window=8,
+            prefetch_ahead=4,
+            max_resident=16,
+            max_workers=2,
+        )
+
+        # --- Сброс состояния ---
+        self.image_paths = all_files
         self.current_index = 0
+        self.original_image = None
+        self.current_gray = None
         self.prediction_mask = None
+        self.current_objects_full = []
+        self.current_selected_indices = []
+        self.current_base_image = None
+        for view in (self.original_view, self.dl_view,
+                     self.morph_view, self.annotated_view):
+            view.set_pixmap(numpy_to_qpixmap(None))
+        self.object_list.clear()
+
+        # --- Синхронно грузим первый снимок ---
+        first = self._lazy_cache.get(0)
+        if first is None:
+            self.log("Не удалось загрузить первое изображение.")
+            return
+
+        # --- Остальное окно — в фон ---
+        total = len(self._lazy_cache)
+        self._lazy_cache.prefetch(
+            range(1, min(1 + self._lazy_cache.prefetch_ahead + 1, total))
+        )
+
+        self.log(f"Загружено {total} изображений (первое — сразу, остальное в фоне).")
         self.display_current_image()
         self.update_navigation_state()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        self.nav_widget.set_current_index(self.current_index, total)
 
     # ---------- Сохранение аннотаций (универсальное) ----------
     def save_current_annotations(self):
-        if not self.image_paths:
+        if not self.image_paths or self.original_image is None:
             QMessageBox.warning(self, "Нет изображения", "Нет загруженных изображений.")
             return
         img_path = self.image_paths[self.current_index]
         txt_path = os.path.splitext(img_path)[0] + ".txt"
-        success = save_annotations(
-            self.current_objects_full,
-            txt_path,
-            self.display_images[self.current_index].shape[1],
-            self.display_images[self.current_index].shape[0]
-        )
+        h, w = self.original_image.shape[:2]
+        success = save_annotations(self.current_objects_full, txt_path, w, h)
         if success:
             self.log(f"Сохранено {len(self.current_objects_full)} аннотаций в {txt_path}")
             QMessageBox.information(self, "Сохранение", f"Аннотации сохранены в {txt_path}")
@@ -753,35 +825,36 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- UI события ----------
     def reset_all_zooms(self):
-        for view in [self.original_view, self.dl_view, self.morph_view, self.annotated_view]:
+        for view in (self.original_view, self.dl_view,
+                     self.morph_view, self.annotated_view):
             view.reset_view()
 
     def on_resize_mode_changed(self, enabled):
-        if self.display_images:
+        if self.image_paths:
             reply = QMessageBox.question(
                 self, "Resize Mode Changed",
                 "Resize mode changed. Reload images?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
             )
             if reply == QMessageBox.Yes:
-                if self.image_paths:
-                    self._load_images(self.image_paths)
-                else:
-                    self.log("Nothing to reload.")
+                self.reload_current_images()
             else:
                 self.clear_images()
 
     def clear_images(self):
-        self.display_images = []
-        self.gray_images = []
+        if self._lazy_cache is not None:
+            self._lazy_cache.shutdown()
+            self._lazy_cache = None
         self.image_paths = []
-        self.annotations = []
         self.current_index = 0
+        self.original_image = None
+        self.current_gray = None
         self.prediction_mask = None
         self.current_objects_full = []
         self.current_selected_indices = []
         self.current_base_image = None
-        for view in [self.original_view, self.dl_view, self.morph_view, self.annotated_view]:
+        for view in (self.original_view, self.dl_view,
+                     self.morph_view, self.annotated_view):
             view.set_pixmap(numpy_to_qpixmap(None))
         self.info_label.setText("No images")
         self.object_list.clear()
@@ -851,6 +924,18 @@ class DeepLearningWindow(QMainWindow):
     def toggle_histogram(self, checked):
         self.hist_container.setVisible(checked)
         self.toggle_hist_btn.setText("Скрыть гистограмму" if checked else "Показать гистограмму")
+
+    # ---------- Завершение работы ----------
+    def closeEvent(self, event):
+        # Аккуратно останавливаем фоновый пул, чтобы процесс не висел
+        # на незавершённых задачах загрузки.
+        if self._lazy_cache is not None:
+            try:
+                self._lazy_cache.shutdown()
+            except Exception:
+                pass
+            self._lazy_cache = None
+        super().closeEvent(event)
 
 
 def center_window(window, width=1200, height=800):

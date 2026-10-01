@@ -14,6 +14,7 @@ ALL_TABS = [
     ("yolo_train", "Обучение модели"),
     ("yolo_demo", "Демонстрация результата"),
     ("yolo_sort", "Сортировка с YOLO"),
+    ("yolo_aeb", "YOLO + AE/VAE"),
     ("settings", "Настройки")
 ]
 

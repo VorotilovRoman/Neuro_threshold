@@ -30,6 +30,7 @@ class ImagePlayer(QMainWindow):
         self.InteractiveMethodsWindow_window = None
         self.TraditionalMLWindow_window = None
         self.DeepLearningWindow_window = None
+        self.yolo_aeb_window = None       # ← новая вкладка YOLO + AE/VAE
 
         # Создаём вкладки
         self._create_selected_tabs()
@@ -115,6 +116,27 @@ class ImagePlayer(QMainWindow):
                 from tabs.yolo_find_img import FindImagesWindow
                 self.yolo_sort_window = FindImagesWindow()
                 self._add_tab(self.yolo_sort_window, tab_title)
+
+            # ================= НОВАЯ ВКЛАДКА =================
+            elif tab_id == "yolo_aeb":
+                try:
+                    from tabs.yolo_test_aeb import YoloInspectWindow
+                    self.yolo_aeb_window = YoloInspectWindow()
+                    self._add_tab(self.yolo_aeb_window, tab_title)
+                except ImportError as e:
+                    QMessageBox.warning(
+                        self, "YOLO + AE/VAE",
+                        f"Не удалось загрузить вкладку:\n{e}\n\n"
+                        f"Убедитесь, что установлены torch, ultralytics, PyQt5 "
+                        f"и что файлы yolo_test_aeb.py / yolo_test_aeb_ui.py "
+                        f"лежат в корне проекта."
+                    )
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, "YOLO + AE/VAE",
+                        f"Ошибка инициализации вкладки:\n{e}"
+                    )
+            # =================================================
 
             elif tab_id == "settings":
                 from ui.settings_ui import SettingsWidget
