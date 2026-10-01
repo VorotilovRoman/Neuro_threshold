@@ -162,6 +162,19 @@ def setup_preparing_dataset_yaml_ui(parent):
     )
     preproc_layout.addRow("", parent.include_empty_annotations)
 
+
+    # --- НОВОЕ: удалить исходники после успешной генерации ---
+    parent.delete_source_after_success = QCheckBox(
+        "Delete source files after successful generation"
+    )
+    parent.delete_source_after_success.setChecked(False)
+    parent.delete_source_after_success.setToolTip(
+        "После успешной генерации датасета будут удалены ТОЛЬКО те исходные "
+        "изображения и аннотации/маски, которые реально попали в датасет. "
+        "Отменённая или упавшая генерация ничего не удаляет."
+    )
+    preproc_layout.addRow("", parent.delete_source_after_success)
+
     preproc_group.setLayout(preproc_layout)
     right_layout.addWidget(preproc_group)
 

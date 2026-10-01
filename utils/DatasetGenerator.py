@@ -21,7 +21,8 @@ class DatasetGeneratorThread(QThread):
                  bg_color, dataset_type, masks_folder, num_classes,
                  mask_class_remap, included_orig_ids=None, included_class_ids=None,
                  total_orig_classes=1, resize_mode="fixed",
-                 include_empty_annotations=False):
+                 include_empty_annotations=False,
+                 delete_source_after_success=False):
         super().__init__()
         self.images_folder = images_folder
         self.labels_folder = labels_folder
@@ -35,18 +36,24 @@ class DatasetGeneratorThread(QThread):
         self.augmentations = augmentations
         self.has_augmentations = has_augmentations
         self.aug_multiplier = aug_multiplier
-        self.class_names = class_names          # словарь new_id -> name
-        self.class_mapping = class_mapping      # original_id -> new_id (только для детекции)
+        self.class_names = class_names
+        self.class_mapping = class_mapping
         self._is_cancelled = False
         self.bg_color = bg_color
-        self.dataset_type = dataset_type          # 0=detect, 1=segment, 2=images only
+        self.dataset_type = dataset_type
         self.masks_folder = masks_folder
         self.num_classes = num_classes
         self.total_orig_classes = total_orig_classes
         self.mask_class_remap = mask_class_remap
-        self.included_orig_ids = included_orig_ids   # для масок
-        self.included_class_ids = included_class_ids # для детекции (устаревший, не используется)
-        self.include_empty_annotations = include_empty_annotations   # ← НОВОЕ
+        self.included_orig_ids = included_orig_ids
+        self.included_class_ids = included_class_ids
+        self.include_empty_annotations = include_empty_annotations
+        self.delete_source_after_success = delete_source_after_success   # ← НОВОЕ
+
+        # Уникальные исходные файлы, которые реально попали в датасет:
+        # (img_path, label_path_or_None, mask_path_or_None)
+        self._processed_source_files = []
+
         self._create_transforms()
 
     def cancel(self):
@@ -56,7 +63,6 @@ class DatasetGeneratorThread(QThread):
         self.log_signal.emit(message)
 
     def _create_transforms(self):
-        # Определяем типы аугментаций для детекции
         self.simple_aug_needed = any([
             self.augmentations.get('horizontal_flip', False),
             self.augmentations.get('vertical_flip', False),
@@ -66,8 +72,6 @@ class DatasetGeneratorThread(QThread):
             self.augmentations.get('random_rotate', False),
             self.augmentations.get('shear', False)
         ])
-
-        # Определяем типы аугментаций для масок
         self.simple_mask_aug_needed = any([
             self.augmentations.get('horizontal_flip', False),
             self.augmentations.get('vertical_flip', False),
@@ -89,21 +93,16 @@ class DatasetGeneratorThread(QThread):
                 self.log(
                     f"Ошибка: не удалось прочитать файл маски (формат не поддерживается или файл повреждён): {path}")
                 return None
-            # Если маска цветная (3 или 4 канала) – берём первый канал
             if len(mask.shape) == 3:
                 mask = mask[:, :, 0]
-            # Убираем лишние измерения
             mask = mask.squeeze()
-            # Приводим к uint8 (если вдруг другой тип)
             if mask.dtype != np.uint8:
                 mask = mask.astype(np.uint8)
 
-            # Проверка на пустую маску (все нули)
             if np.max(mask) == 0:
                 if not self.include_empty_annotations:
                     self.log(f"Предупреждение: маска {path} состоит только из нулей (фон) – пропускаем")
                     return None
-                # Флаг включён — оставляем как негативный пример
                 self.log(f"Маска {path} без объектов — сохранена как негативный пример")
 
             return mask
@@ -114,13 +113,12 @@ class DatasetGeneratorThread(QThread):
             return None
 
     def _resize_mask(self, mask, target_size, resize_mode):
-        """Ресайз маски для сегментации."""
         if target_size is None:
             return mask
         h, w = mask.shape[:2]
         if resize_mode == "stretch":
             return cv2.resize(mask, (target_size, target_size), interpolation=cv2.INTER_NEAREST)
-        else:  # "fixed"
+        else:
             scale = target_size / max(h, w)
             new_w = int(round(w * scale))
             new_h = int(round(h * scale))
@@ -134,7 +132,6 @@ class DatasetGeneratorThread(QThread):
             return padded
 
     def _apply_class_mapping(self, annotations):
-        """Применяет маппинг original_id -> new_id к аннотациям."""
         if not self.class_mapping:
             return annotations
         mapped = []
@@ -142,25 +139,71 @@ class DatasetGeneratorThread(QThread):
             typ, cls = ann[0], ann[1]
             new_cls = self.class_mapping.get(cls)
             if new_cls is None:
-                continue  # класс исключён из датасета (не отмечен галочкой)
+                continue
             if typ == 'detect':
                 mapped.append(('detect', new_cls, *ann[2:]))
             elif typ == 'obb':
                 mapped.append(('obb', new_cls, ann[2]))
-            else:  # segment
+            else:
                 mapped.append(('segment', new_cls, ann[2]))
         return mapped
+
+    # ------------------------------------------------------------------
+    # Удаление исходных файлов, попавших в датасет
+    # ------------------------------------------------------------------
+    def _delete_processed_sources(self):
+        """
+        Удаляет только те исходные файлы, которые реально попали в датасет.
+        Не трогает ничего, если output_folder оказался внутри исходной папки —
+        в этом случае файлы уже перемещены генератором и удалять нечего.
+        """
+        if not self._processed_source_files:
+            self.log("Удаление исходников: нет обработанных пар, нечего удалять.")
+            return
+
+        output_dir = os.path.abspath(self.output_folder)
+        deleted = 0
+        missing = 0
+        failed = 0
+
+        # Уникальные пути — на случай дубликатов (не должно быть, но)
+        seen = set()
+        for img_path, label_path, mask_path in self._processed_source_files:
+            for path in (img_path, label_path, mask_path):
+                if not path:
+                    continue
+                norm = os.path.abspath(path)
+                if norm in seen:
+                    continue
+                seen.add(norm)
+
+                # Защита: не удаляем файлы из выходной папки
+                if norm.startswith(output_dir + os.sep) or norm == output_dir:
+                    self.log(f"Удаление исходников: пропущен файл внутри output_folder: {path}")
+                    continue
+
+                if not os.path.exists(path):
+                    missing += 1
+                    continue
+                try:
+                    os.remove(path)
+                    deleted += 1
+                except Exception as e:
+                    failed += 1
+                    self.log(f"Не удалось удалить {path}: {e}")
+
+        self.log(f"Удаление исходников завершено: удалено={deleted}, "
+                 f"отсутствовало={missing}, ошибок={failed}")
 
     def _generate_all_pairs(self, output_path):
         temp_images = output_path / 'all' / 'images'
         temp_labels = output_path / 'all' / 'labels'
         temp_masks = output_path / 'all' / 'masks'
         temp_images.mkdir(parents=True, exist_ok=True)
-        if self.dataset_type == 0:      # detection
+        if self.dataset_type == 0:
             temp_labels.mkdir(parents=True, exist_ok=True)
-        elif self.dataset_type == 1:    # segmentation
+        elif self.dataset_type == 1:
             temp_masks.mkdir(parents=True, exist_ok=True)
-        # для типа 2 (images only) создаём только temp_images
 
         all_pairs = []
         total_pairs = len(self.pairs)
@@ -184,7 +227,6 @@ class DatasetGeneratorThread(QThread):
                 base_name = os.path.splitext(os.path.basename(img_path))[0]
                 ext = os.path.splitext(img_path)[1]
 
-                # --- Оригинал: только ресайз ---
                 if self.target_size is not None:
                     if self.resize_mode == "fixed":
                         img_orig, _ = resize_image_and_annotations(img, [], self.target_size, self.bg_color)
@@ -204,10 +246,13 @@ class DatasetGeneratorThread(QThread):
                 cv2.imwrite(str(out_img_path), img_orig)
                 cv2.imwrite(str(out_mask_path), mask_orig)
                 all_pairs.append((str(out_img_path), None, str(out_mask_path)))
+
+                # Регистрируем исходную пару как "попавшую в датасет"
+                self._processed_source_files.append((str(img_path), None, str(mask_path)))
+
                 generated += 1
                 self.progress_signal.emit(generated, total_to_generate)
 
-                # --- Аугментированные копии ---
                 if self.has_augmentations:
                     saved_hashes = {self._compute_image_hash(img_orig)}
                     copy_idx = 1
@@ -258,7 +303,7 @@ class DatasetGeneratorThread(QThread):
                             self.log(f"Не удалось создать уникальную копию {base_name}_aug{copy_idx} после {max_attempts} попыток")
                         copy_idx += 1
 
-            elif self.dataset_type == 0:  # Detection – используем аннотации
+            elif self.dataset_type == 0:  # Detection
                 img_path, label_path = pair
                 img = cv2.imread(str(img_path))
                 if img is None:
@@ -267,24 +312,18 @@ class DatasetGeneratorThread(QThread):
                 img_h, img_w = img.shape[:2]
                 annotations = load_annotations(label_path, img_w, img_h)
 
-                # --- НОВОЕ: обработка пустых аннотаций ---
                 originally_empty = (len(annotations) == 0)
 
                 if not originally_empty:
-                    # Применяем маппинг классов (original -> new) и отбрасываем ненужные
                     annotations = self._apply_class_mapping(annotations)
 
                 if not annotations:
                     if originally_empty and self.include_empty_annotations:
-                        # Пустой .txt сохранён как негативный пример
                         self.log(f"Пустая аннотация {label_path} — сохранена как негативный пример")
                     else:
-                        # Либо исходная аннотация пуста и флаг выключен,
-                        # либо исходная была не пуста, но после маппинга стала пустой.
                         self.log(f"Нет аннотаций после маппинга классов в {label_path}")
                         continue
 
-                # --- Оригинал (без аугментаций) ---
                 if self.target_size is not None:
                     if self.resize_mode == "fixed":
                         img_orig, ann_orig = resize_image_and_annotations(img, annotations, self.target_size, self.bg_color)
@@ -305,10 +344,13 @@ class DatasetGeneratorThread(QThread):
                 out_label_path = temp_labels / out_label_name
                 save_annotations(ann_orig, str(out_label_path), img_orig.shape[1], img_orig.shape[0])
                 all_pairs.append((str(out_img_path), str(out_label_path), None))
+
+                # Регистрируем исходную пару
+                self._processed_source_files.append((str(img_path), str(label_path), None))
+
                 generated += 1
                 self.progress_signal.emit(generated, total_to_generate)
 
-                # --- Аугментированные копии ---
                 if self.has_augmentations:
                     saved_hashes = {self._compute_image_hash(img_orig)}
                     copy_idx = 1
@@ -319,20 +361,16 @@ class DatasetGeneratorThread(QThread):
                         success = False
                         for attempt in range(max_attempts):
                             try:
-                                # Начинаем с копии оригиналов
                                 aug_img = img.copy()
                                 aug_anns = annotations.copy()
-                                # Применяем простые аугментации (если включены)
                                 if self.simple_aug_needed:
                                     aug_img, aug_anns = apply_simple_augmentations(aug_img, aug_anns,
                                                                                    self.augmentations)
-                                # Применяем сложные аугментации (если включены)
                                 if self.complex_aug_needed:
                                     aug_img, aug_anns = apply_complex_augmentations(aug_img, aug_anns,
                                                                                     self.augmentations,
                                                                                     border_color=self.bg_color)
 
-                                # НОВОЕ: пропускаем только если аннотации не были изначально пустыми
                                 if not aug_anns and not originally_empty:
                                     continue
 
@@ -364,8 +402,8 @@ class DatasetGeneratorThread(QThread):
                             self.log(f"Не удалось создать уникальную копию {base_name}_aug{copy_idx} после {max_attempts} попыток")
                         copy_idx += 1
 
-            else:  # self.dataset_type == 2: Только изображения
-                img_path = pair[0]  # pair = (img_path, None)
+            else:  # dataset_type == 2: только изображения
+                img_path = pair[0]
                 img = cv2.imread(str(img_path))
                 if img is None:
                     self.log(f"Предупреждение: не удалось прочитать {img_path}")
@@ -374,7 +412,6 @@ class DatasetGeneratorThread(QThread):
                 base_name = os.path.splitext(os.path.basename(img_path))[0]
                 ext = os.path.splitext(img_path)[1]
 
-                # --- Оригинал (только ресайз, без аннотаций) ---
                 if self.target_size is not None:
                     if self.resize_mode == "fixed":
                         img_orig, _ = resize_image_and_annotations(img, [], self.target_size, self.bg_color)
@@ -389,10 +426,12 @@ class DatasetGeneratorThread(QThread):
                 out_img_path = temp_images / out_img_name
                 cv2.imwrite(str(out_img_path), img_orig)
                 all_pairs.append((str(out_img_path), None, None))
+
+                self._processed_source_files.append((str(img_path), None, None))
+
                 generated += 1
                 self.progress_signal.emit(generated, total_to_generate)
 
-                # --- Аугментированные копии ---
                 if self.has_augmentations:
                     saved_hashes = {self._compute_image_hash(img_orig)}
                     copy_idx = 1
@@ -404,11 +443,8 @@ class DatasetGeneratorThread(QThread):
                         for attempt in range(max_attempts):
                             try:
                                 aug_img = img.copy()
-                                # Применяем простые аугментации (если включены) – с пустым списком аннотаций
                                 if self.simple_aug_needed:
-                                    # Используем apply_simple_augmentations с пустыми аннотациями
                                     aug_img, _ = apply_simple_augmentations(aug_img, [], self.augmentations)
-                                # Применяем сложные аугментации – тоже с пустыми аннотациями
                                 if self.complex_aug_needed:
                                     aug_img, _ = apply_complex_augmentations(aug_img, [], self.augmentations,
                                                                               border_color=self.bg_color)
@@ -468,7 +504,6 @@ class DatasetGeneratorThread(QThread):
             except Exception as e:
                 self.log(f"  КРИТИЧЕСКАЯ ОШИБКА при конвертации:\n{traceback.format_exc()}")
                 return []
-            # Связываем метки с парами
             new_pairs = []
             for img_p, _, mask_p in all_pairs:
                 mask_stem = os.path.splitext(os.path.basename(mask_p))[0]
@@ -502,7 +537,7 @@ class DatasetGeneratorThread(QThread):
             img_dst_dir.mkdir(parents=True, exist_ok=True)
             if self.dataset_type != 2:
                 lbl_dst_dir.mkdir(parents=True, exist_ok=True)
-            if self.dataset_type == 1:      # segmentation
+            if self.dataset_type == 1:
                 mask_dst_dir = output_path / 'masks' / split
                 mask_dst_dir.mkdir(parents=True, exist_ok=True)
             for img_path, lbl_path, mask_path in pairs:
@@ -525,7 +560,6 @@ class DatasetGeneratorThread(QThread):
             self.log("=== Начало генерации датасета ===")
             output_path = Path(self.output_folder)
 
-            # Создаём файлы классов, только если есть классы (тип 0 или 1)
             if self.dataset_type != 2 and self.class_names:
                 sorted_cids = sorted(self.class_names.keys())
                 with open(output_path / 'classes.txt', 'w') as f:
@@ -566,6 +600,14 @@ class DatasetGeneratorThread(QThread):
                 return
 
             self._split_and_move(output_path, all_pairs)
+
+            # --- НОВОЕ: удаление исходников после успешной генерации ---
+            if self.delete_source_after_success:
+                self.log("=== Удаление исходных файлов (по флагу пользователя) ===")
+                self._delete_processed_sources()
+            else:
+                self.log("Удаление исходных файлов отключено (флаг не установлен).")
+
             self.log("Генерация датасета завершена успешно!")
             self.finished_signal.emit(True, "Датасет успешно создан")
         except Exception as e:

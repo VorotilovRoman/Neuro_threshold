@@ -711,6 +711,8 @@ class DatasetPreparationWindow(QMainWindow):
 
         # --- НОВОЕ: флаг "включать пустые аннотации" ---
         include_empty_annotations = self.include_empty_annotations.isChecked()
+        # --- НОВОЕ: удалять ли исходники после успеха ---
+        delete_source_after_success = self.delete_source_after_success.isChecked()
 
         self.log("=== Dataset generation started ===")
         self.log(f"Train: {train_pct*100:.0f}%, Val: {val_pct*100:.0f}%, Test: {test_pct*100:.0f}%")
@@ -720,6 +722,7 @@ class DatasetPreparationWindow(QMainWindow):
             self.log(f"Augmentation multiplier: {aug_multiplier}x")
         self.log(f"Classes: {num_classes}")
         self.log(f"Include empty annotations: {include_empty_annotations}")
+        self.log(f"Delete source files after success: {delete_source_after_success}")
 
         self._set_generate_button_active(True)
         self.cancel_btn.setEnabled(True)
@@ -754,6 +757,7 @@ class DatasetPreparationWindow(QMainWindow):
             total_orig_classes=len(self.original_ids),
             resize_mode=resize_mode,
             include_empty_annotations=include_empty_annotations,
+            delete_source_after_success=delete_source_after_success,
         )
 
         self.generator_thread.log_signal.connect(self.log)
@@ -789,9 +793,28 @@ class DatasetPreparationWindow(QMainWindow):
     def on_generation_finished(self, success, message):
         self._set_generate_button_active(False)
         self.cancel_btn.setEnabled(False)
+
         if success:
             self.progress_bar.setValue(100)
             QMessageBox.information(self, "Успех", message)
+
+            # Если включено удаление исходников — после успеха папки-источники
+            # опустели, очищаем локальное состояние.
+            if self.delete_source_after_success.isChecked():
+                self.pairs = []
+                self.file_list.clear()
+                self.class_table.setRowCount(0)
+                self.original_ids = []
+                self.unique_classes = []
+                self.num_classes = 0
+                self.annotation_types_stats = {}
+                self.class_remap = {}
+                self.mask_class_remap = {}
+                self.included_orig_ids = set()
+                self._update_pair_count_label("")
+                self.update_split_counts()
+                self.update_generate_button_state()
+                self.log("Исходные файлы удалены, список пар очищен.")
         else:
             self.progress_bar.setValue(0)
             QMessageBox.critical(self, "Ошибка", f"Ошибка при генерации датасета:\n{message}")
