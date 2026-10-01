@@ -20,7 +20,8 @@ class DatasetGeneratorThread(QThread):
                  has_augmentations, aug_multiplier, class_names, class_mapping,
                  bg_color, dataset_type, masks_folder, num_classes,
                  mask_class_remap, included_orig_ids=None, included_class_ids=None,
-                 total_orig_classes=1, resize_mode="fixed"):
+                 total_orig_classes=1, resize_mode="fixed",
+                 include_empty_annotations=False):
         super().__init__()
         self.images_folder = images_folder
         self.labels_folder = labels_folder
@@ -45,6 +46,7 @@ class DatasetGeneratorThread(QThread):
         self.mask_class_remap = mask_class_remap
         self.included_orig_ids = included_orig_ids   # для масок
         self.included_class_ids = included_class_ids # для детекции (устаревший, не используется)
+        self.include_empty_annotations = include_empty_annotations   # ← НОВОЕ
         self._create_transforms()
 
     def cancel(self):
@@ -95,10 +97,14 @@ class DatasetGeneratorThread(QThread):
             # Приводим к uint8 (если вдруг другой тип)
             if mask.dtype != np.uint8:
                 mask = mask.astype(np.uint8)
+
             # Проверка на пустую маску (все нули)
             if np.max(mask) == 0:
-                self.log(f"Предупреждение: маска {path} состоит только из нулей (фон) – пропускаем")
-                return None
+                if not self.include_empty_annotations:
+                    self.log(f"Предупреждение: маска {path} состоит только из нулей (фон) – пропускаем")
+                    return None
+                # Флаг включён — оставляем как негативный пример
+                self.log(f"Маска {path} без объектов — сохранена как негативный пример")
 
             return mask
         except Exception as e:
@@ -261,11 +267,22 @@ class DatasetGeneratorThread(QThread):
                 img_h, img_w = img.shape[:2]
                 annotations = load_annotations(label_path, img_w, img_h)
 
-                # Применяем маппинг классов (original -> new) и отбрасываем ненужные
-                annotations = self._apply_class_mapping(annotations)
+                # --- НОВОЕ: обработка пустых аннотаций ---
+                originally_empty = (len(annotations) == 0)
+
+                if not originally_empty:
+                    # Применяем маппинг классов (original -> new) и отбрасываем ненужные
+                    annotations = self._apply_class_mapping(annotations)
+
                 if not annotations:
-                    self.log(f"Нет аннотаций после маппинга классов в {label_path}")
-                    continue
+                    if originally_empty and self.include_empty_annotations:
+                        # Пустой .txt сохранён как негативный пример
+                        self.log(f"Пустая аннотация {label_path} — сохранена как негативный пример")
+                    else:
+                        # Либо исходная аннотация пуста и флаг выключен,
+                        # либо исходная была не пуста, но после маппинга стала пустой.
+                        self.log(f"Нет аннотаций после маппинга классов в {label_path}")
+                        continue
 
                 # --- Оригинал (без аугментаций) ---
                 if self.target_size is not None:
@@ -315,7 +332,8 @@ class DatasetGeneratorThread(QThread):
                                                                                     self.augmentations,
                                                                                     border_color=self.bg_color)
 
-                                if not aug_anns:
+                                # НОВОЕ: пропускаем только если аннотации не были изначально пустыми
+                                if not aug_anns and not originally_empty:
                                     continue
 
                                 if self.target_size is not None:

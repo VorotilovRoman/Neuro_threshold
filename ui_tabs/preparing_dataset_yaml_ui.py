@@ -148,6 +148,23 @@ def setup_preparing_dataset_yaml_ui(parent):
     preproc_group.setLayout(preproc_layout)
     right_layout.addWidget(preproc_group)
 
+    parent.bg_color_combo = QComboBox()
+    parent.bg_color_combo.addItems(["Black", "White"])
+    parent.bg_color_combo.setCurrentIndex(0)
+    preproc_layout.addRow("Background fill color:", parent.bg_color_combo)
+
+    # --- Включать пустые аннотации (негативные примеры) ---
+    parent.include_empty_annotations = QCheckBox("Include images with empty annotations")
+    parent.include_empty_annotations.setChecked(False)
+    parent.include_empty_annotations.setToolTip(
+        "Если включено, снимки с пустыми .txt (или маской только из фона) "
+        "попадут в датасет как негативные примеры."
+    )
+    preproc_layout.addRow("", parent.include_empty_annotations)
+
+    preproc_group.setLayout(preproc_layout)
+    right_layout.addWidget(preproc_group)
+
     # Блок 3: Augmentation
     aug_group = QGroupBox("Augmentation")
     aug_layout = QGridLayout()

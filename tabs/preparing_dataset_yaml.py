@@ -1,3 +1,4 @@
+# preparing_dataset_yaml.py
 from import_libs_internal import *
 from import_libs_methods_ui import setup_preparing_dataset_yaml_ui
 
@@ -61,8 +62,28 @@ class DatasetPreparationWindow(QMainWindow):
         self.dataset_type_combo.currentIndexChanged.connect(self._on_dataset_type_changed)
         self.class_table.itemChanged.connect(self.on_class_table_item_changed)
 
+        # При изменении флага "включать пустые аннотации" пересканируем
+        # список пар, чтобы обновить подсветку (empty → будет включён/пропущен).
+        self.include_empty_annotations.stateChanged.connect(self._on_include_empty_toggled)
+
         self.update_multiplier_slider_state()
 
+    # ------------------------------------------------------------------
+    # Обработчики флага "Include empty annotations"
+    # ------------------------------------------------------------------
+    def _on_include_empty_toggled(self, *_):
+        """Перерисовывает список пар и обновляет подсветку пустых аннотаций."""
+        if not self.pairs:
+            return
+        # Пересканируем только для отображения — сами пары уже собраны.
+        self._rebuild_file_list_display()
+
+    def _is_include_empty(self):
+        return bool(self.include_empty_annotations.isChecked())
+
+    # ------------------------------------------------------------------
+    # Смена типа датасета
+    # ------------------------------------------------------------------
     def _on_dataset_type_changed(self, idx):
         self.dataset_type = idx
         if idx == 0:
@@ -236,6 +257,85 @@ class DatasetPreparationWindow(QMainWindow):
     def _check_pair_type_consistency(self):
         return None
 
+    # ------------------------------------------------------------------
+    # Подсветка пар в списке
+    # ------------------------------------------------------------------
+    def _make_list_item(self, text, tag=None):
+        """
+        Создаёт QListWidgetItem с подсветкой по типу аннотации.
+        tag ∈ {'empty', 'error', 'mixed', 'unknown', 'detect', 'obb', 'segment', None}
+        """
+        item = QListWidgetItem(text)
+        include_empty = self._is_include_empty()
+
+        if tag == 'empty':
+            if include_empty:
+                # будет включён — зелёный
+                item.setForeground(QColor(0, 140, 0))
+                item.setToolTip("Пустая аннотация — будет включена как негативный пример.")
+            else:
+                # будет пропущен — оранжевый
+                item.setForeground(QColor(200, 120, 0))
+                item.setToolTip("Пустая аннотация — будет пропущена. "
+                                "Включите «Include images with empty annotations», чтобы сохранить.")
+        elif tag == 'error':
+            item.setForeground(QColor(200, 0, 0))
+            item.setToolTip("Ошибка чтения файла аннотации.")
+        elif tag == 'mixed':
+            item.setForeground(QColor(160, 0, 200))
+            item.setToolTip("Смешанные типы аннотаций в одном файле.")
+        elif tag == 'unknown':
+            item.setForeground(QColor(120, 120, 120))
+            item.setToolTip("Неизвестный формат аннотации.")
+        # detect / obb / segment / None — стандартный цвет
+        return item
+
+    def _rebuild_file_list_display(self):
+        """
+        Перерисовывает список file_list на основе self.pairs и текущего
+        состояния флага include_empty_annotations. Не трогает self.pairs.
+        """
+        if not self.pairs:
+            return
+        self.file_list.clear()
+
+        if self.dataset_type == 0:
+            for img_path, label_path in self.pairs:
+                name = os.path.splitext(os.path.basename(img_path))[0]
+                try:
+                    ann_type = self._detect_annotation_type(label_path)
+                except Exception:
+                    ann_type = 'error'
+                if ann_type == 'empty' and self._is_include_empty():
+                    marker = "empty → include"
+                elif ann_type == 'empty':
+                    marker = "empty → skip"
+                else:
+                    marker = ann_type
+                item = self._make_list_item(
+                    f"{name} (image + label) [{marker}]",
+                    tag=ann_type
+                )
+                self.file_list.addItem(item)
+
+        elif self.dataset_type == 1:
+            for img_path, mask_path in self.pairs:
+                name = os.path.splitext(os.path.basename(img_path))[0]
+                # Тип маски отдельно не вычисляем — дорого.
+                # Просто выводим имя, стандартный цвет.
+                item = self._make_list_item(f"{name} (image + mask)")
+                self.file_list.addItem(item)
+
+        else:  # dataset_type == 2
+            for pair in self.pairs:
+                img_path = pair[0]
+                name = os.path.splitext(os.path.basename(img_path))[0]
+                item = self._make_list_item(f"{name} (image only)")
+                self.file_list.addItem(item)
+
+    # ------------------------------------------------------------------
+    # Сканирование пар
+    # ------------------------------------------------------------------
     def scan_pairs(self):
         self.pairs.clear()
         self.file_list.clear()
@@ -269,7 +369,6 @@ class DatasetPreparationWindow(QMainWindow):
                         ann_type = self._detect_annotation_type(label_path)
                         self.annotation_types_stats[ann_type] = self.annotation_types_stats.get(ann_type, 0) + 1
                         self.pairs.append((img_path, label_path))
-                        self.file_list.addItem(f"{name} (image + label) [{ann_type}]")
                     except Exception as e:
                         self.log(f"Ошибка обработки пары {name}: {e}")
 
@@ -298,7 +397,6 @@ class DatasetPreparationWindow(QMainWindow):
                                 self.log(f"Предупреждение: файл маски совпадает с файлом изображения {img_path}, пара пропущена")
                                 break
                             self.pairs.append((img_path, mask_path))
-                            self.file_list.addItem(f"{name} (image + mask)")
                             found = True
                             break
                     except Exception as e:
@@ -314,7 +412,6 @@ class DatasetPreparationWindow(QMainWindow):
                                     self.log(f"Предупреждение: файл маски совпадает с файлом изображения {img_path}, пара пропущена")
                                     continue
                                 self.pairs.append((img_path, mask_path))
-                                self.file_list.addItem(f"{name} (image + mask)")
                                 found = True
                                 break
                     except Exception as e:
@@ -343,10 +440,12 @@ class DatasetPreparationWindow(QMainWindow):
                     if ext.lower() in img_extensions:
                         img_path = os.path.join(self.images_folder, f)
                         self.pairs.append((img_path, None))
-                        self.file_list.addItem(f"{name} (image only)")
                 self.annotation_types_stats = {}
             except Exception as e:
                 self.log(f"Ошибка при сканировании изображений: {e}")
+
+        # ---- Отображение с подсветкой ----
+        self._rebuild_file_list_display()
 
         error_msg = self._check_pair_type_consistency()
         extra_info = ""
@@ -610,6 +709,9 @@ class DatasetPreparationWindow(QMainWindow):
         if self.dataset_type == 1:
             included_orig_ids = self.included_orig_ids.copy()
 
+        # --- НОВОЕ: флаг "включать пустые аннотации" ---
+        include_empty_annotations = self.include_empty_annotations.isChecked()
+
         self.log("=== Dataset generation started ===")
         self.log(f"Train: {train_pct*100:.0f}%, Val: {val_pct*100:.0f}%, Test: {test_pct*100:.0f}%")
         self.log(f"Image size: {'keep original' if target_size is None else target_size}")
@@ -617,6 +719,7 @@ class DatasetPreparationWindow(QMainWindow):
         if has_augmentations:
             self.log(f"Augmentation multiplier: {aug_multiplier}x")
         self.log(f"Classes: {num_classes}")
+        self.log(f"Include empty annotations: {include_empty_annotations}")
 
         self._set_generate_button_active(True)
         self.cancel_btn.setEnabled(True)
@@ -649,7 +752,8 @@ class DatasetPreparationWindow(QMainWindow):
             included_orig_ids=included_orig_ids,
             included_class_ids=None,
             total_orig_classes=len(self.original_ids),
-            resize_mode=resize_mode
+            resize_mode=resize_mode,
+            include_empty_annotations=include_empty_annotations,
         )
 
         self.generator_thread.log_signal.connect(self.log)
