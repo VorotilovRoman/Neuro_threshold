@@ -513,48 +513,55 @@ class ThresholdWindow(QMainWindow):
 
     # ---------- Сохранение аннотаций (универсальное) ----------
     # ---------- Сохранение аннотаций (только выбранные объекты) ----------
+    # ---------- Сохранение аннотаций (включая пустой файл) ----------
     def save_current_annotations(self):
         if not self.image_paths or self.original_image is None:
             QMessageBox.warning(self, "Нет изображения", "Нет загруженных изображений.")
             return
 
         total_objects = len(self.current_objects_full)
-        if total_objects == 0:
-            QMessageBox.information(self, "Сохранение",
-                                    "На текущем снимке нет объектов для сохранения.")
-            return
 
-        # Отбираем только те объекты, у которых стоит галочка в списке.
+        # Отбираем только те объекты, у которых стоит галочка.
         selected = [
             self.current_objects_full[i]
             for i in self.current_selected_indices
             if 0 <= i < total_objects
         ]
 
-        if not selected:
-            QMessageBox.information(
-                self, "Сохранение",
-                "Не выбрано ни одного объекта.\n"
-                "Отметьте галочками нужные объекты в списке справа."
-            )
-            return
-
         img_path = self.image_paths[self.current_index]
         txt_path = os.path.splitext(img_path)[0] + ".txt"
         h, w = self.original_image.shape[:2]
 
         success = save_annotations(selected, txt_path, w, h)
-        if success:
+        if not success:
+            self.log(f"Ошибка сохранения {txt_path}")
+            QMessageBox.critical(self, "Ошибка", "Не удалось сохранить аннотации.")
+            return
+
+        if len(selected) == 0:
+            # Пустой файл — это валидный негативный пример для YOLO.
+            if total_objects == 0:
+                self.log(f"Сохранён пустой файл аннотаций (на снимке не найдено объектов) в {txt_path}")
+                QMessageBox.information(
+                    self, "Сохранение",
+                    f"На снимке не найдено объектов.\n"
+                    f"Сохранён пустой файл аннотаций:\n{txt_path}"
+                )
+            else:
+                self.log(f"Сохранён пустой файл аннотаций "
+                         f"(сняты галочки со всех {total_objects} объектов) в {txt_path}")
+                QMessageBox.information(
+                    self, "Сохранение",
+                    f"Сняты галочки со всех объектов.\n"
+                    f"Сохранён пустой файл аннотаций:\n{txt_path}"
+                )
+        else:
             self.log(f"Сохранено {len(selected)} из {total_objects} "
                      f"аннотаций в {txt_path}")
             QMessageBox.information(
                 self, "Сохранение",
                 f"Сохранено {len(selected)} из {total_objects} объектов в {txt_path}"
             )
-        else:
-            self.log(f"Ошибка сохранения {txt_path}")
-            QMessageBox.critical(self, "Ошибка", "Не удалось сохранить аннотации.")
-
     # ---------- События UI ----------
     def reset_all_zooms(self):
         for view in (self.original_view, self.binary_view,

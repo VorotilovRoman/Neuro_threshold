@@ -30,6 +30,16 @@ def setup_layout_dataset_ui(parent):
     top_layout.addStretch()
     main_layout.addLayout(top_layout)
 
+    # >>> NEW: строка предупреждения о некорректной разметке
+    parent.validation_status_label = QLabel("")
+    parent.validation_status_label.setWordWrap(True)
+    parent.validation_status_label.setStyleSheet(
+        "color: #b00000; font-weight: bold; padding: 2px;"
+    )
+    parent.validation_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    parent.validation_status_label.setVisible(False)
+    main_layout.addWidget(parent.validation_status_label)
+
     # Основной сплиттер
     main_splitter = QSplitter(Qt.Horizontal)
 

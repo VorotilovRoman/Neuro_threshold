@@ -1,12 +1,13 @@
 from import_libs_internal import *
 
+
 def setup_preparing_dataset_yaml_ui(parent):
     central = QWidget()
     parent.setCentralWidget(central)
     main_layout = QVBoxLayout(central)
     main_layout.setContentsMargins(0, 0, 0, 0)
 
-    # --- Верхняя панель с кнопками и типом датасета ---
+    # --- Верхняя панель ---
     top_layout = QHBoxLayout()
     parent.btn_folder = QPushButton("Load Images")
     parent.btn_labels = QPushButton("Load Labels")
@@ -16,6 +17,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.dataset_type_combo = QComboBox()
     parent.dataset_type_combo.addItems(["Метки (bbox, obb, seg)", "Маски (masks)", "Только изображения"])
     parent.dataset_type_combo.setCurrentIndex(0)
+
     def on_dataset_type_changed(idx):
         if idx == 0:
             parent.btn_labels.setText("Load Labels")
@@ -23,9 +25,10 @@ def setup_preparing_dataset_yaml_ui(parent):
         elif idx == 1:
             parent.btn_labels.setText("Load Masks")
             parent.btn_labels.setEnabled(True)
-        else:  # idx == 2: только изображения
+        else:
             parent.btn_labels.setText("No labels (images only)")
-            parent.btn_labels.setEnabled(False)  # кнопка неактивна
+            parent.btn_labels.setEnabled(False)
+
     parent.dataset_type_combo.currentIndexChanged.connect(on_dataset_type_changed)
     top_layout.addWidget(QLabel("Dataset type:"))
     top_layout.addWidget(parent.dataset_type_combo)
@@ -33,46 +36,72 @@ def setup_preparing_dataset_yaml_ui(parent):
 
     parent.btn_output = QPushButton("Save YAML")
     top_layout.addWidget(parent.btn_output)
+
     parent.output_path_display = QLineEdit()
     parent.output_path_display.setReadOnly(True)
     parent.output_path_display.setPlaceholderText("Not selected")
     parent.output_path_display.setMinimumWidth(400)
     top_layout.addWidget(parent.output_path_display)
+
+    parent.btn_open_output = QPushButton("Open Folder")
+    parent.btn_open_output.setEnabled(False)
+    top_layout.addWidget(parent.btn_open_output)
     main_layout.addLayout(top_layout)
 
-    # Добавить:
-    parent.btn_open_output = QPushButton("Open Folder")
-    parent.btn_open_output.setEnabled(False)  # станет активным после выбора папки
-
-    # Разместить в top_layout, например, после output_path_display:
-    top_layout.addWidget(parent.output_path_display)
-    top_layout.addWidget(parent.btn_open_output)
-
-    # --- Вертикальный сплиттер: основной контент (вверху) и лог (внизу) ---
+    # --- Сплиттеры ---
     main_v_splitter = QSplitter(Qt.Vertical)
     main_layout.addWidget(main_v_splitter, 1)
 
-    # ---- Верхняя часть: горизонтальный сплиттер (список слева, параметры справа) ----
     h_splitter = QSplitter(Qt.Horizontal)
     main_v_splitter.addWidget(h_splitter)
 
-    # ---- Левая панель: список файлов и счётчик ----
+    # ---- Левая панель: список пар ----
     left_widget = QWidget()
     left_layout = QVBoxLayout(left_widget)
     left_layout.setContentsMargins(0, 0, 5, 0)
-    left_layout.addWidget(QLabel("Найденные пары:"))
+    left_layout.addWidget(QLabel("Найденные пары (двойной клик — снимок валидации):"))
     parent.file_list = QListWidget()
+    parent.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+    parent.file_list.setToolTip(
+        "Ctrl+C — скопировать выделенные строки.\n"
+        "Двойной клик — открыть снимок валидации этой пары."
+    )
     left_layout.addWidget(parent.file_list)
+
     parent.pair_count_label = QLabel("Всего пар: 0")
+    parent.pair_count_label.setWordWrap(True)
+    parent.pair_count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     left_layout.addWidget(parent.pair_count_label)
+
+    # >>> NEW: индикация процесса валидации
+    parent.validation_progress_label = QLabel("")
+    parent.validation_progress_label.setWordWrap(True)
+    parent.validation_progress_label.setStyleSheet("color: #0055aa; font-weight: bold;")
+    parent.validation_progress_label.setVisible(False)
+    left_layout.addWidget(parent.validation_progress_label)
+
+    parent.validation_warning_label = QLabel("")
+    parent.validation_warning_label.setWordWrap(True)
+    parent.validation_warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    parent.validation_warning_label.setStyleSheet("color: #b00000;")
+    parent.validation_warning_label.setVisible(False)
+    left_layout.addWidget(parent.validation_warning_label)
+
+    parent.validation_warning_label = QLabel("")
+    parent.validation_warning_label.setWordWrap(True)
+    parent.validation_warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    parent.validation_warning_label.setStyleSheet("color: #b00000;")
+    parent.validation_warning_label.setVisible(False)
+    left_layout.addWidget(parent.validation_warning_label)
+
     h_splitter.addWidget(left_widget)
 
-    # ---- Правая панель: параметры ----
+    # ---- Правая панель ----
     right_widget = QWidget()
     right_layout = QVBoxLayout(right_widget)
     right_layout.setContentsMargins(5, 0, 0, 0)
 
-    # Блок 1: Train/Val/Test Split
+    # Блок 1: Split
     split_group = QGroupBox("Train / Validation / Test Split")
     split_layout = QFormLayout()
     parent.train_slider = QSlider(Qt.Horizontal)
@@ -98,29 +127,17 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.val_slider.valueChanged.connect(lambda v: parent.update_split(v, 'val'))
     parent.test_slider.valueChanged.connect(lambda v: parent.update_split(v, 'test'))
 
-    train_layout = QHBoxLayout()
-    train_layout.addWidget(parent.train_slider)
-    train_layout.addWidget(parent.train_label)
-    train_layout.addWidget(QLabel("("))
-    train_layout.addWidget(parent.train_count_label)
-    train_layout.addWidget(QLabel(" снимков)"))
-    split_layout.addRow("Train:", train_layout)
-
-    val_layout = QHBoxLayout()
-    val_layout.addWidget(parent.val_slider)
-    val_layout.addWidget(parent.val_label)
-    val_layout.addWidget(QLabel("("))
-    val_layout.addWidget(parent.val_count_label)
-    val_layout.addWidget(QLabel(" снимков)"))
-    split_layout.addRow("Validation:", val_layout)
-
-    test_layout = QHBoxLayout()
-    test_layout.addWidget(parent.test_slider)
-    test_layout.addWidget(parent.test_label)
-    test_layout.addWidget(QLabel("("))
-    test_layout.addWidget(parent.test_count_label)
-    test_layout.addWidget(QLabel(" снимков)"))
-    split_layout.addRow("Test:", test_layout)
+    for name, slider, label, count in (
+            ("Train:", parent.train_slider, parent.train_label, parent.train_count_label),
+            ("Validation:", parent.val_slider, parent.val_label, parent.val_count_label),
+            ("Test:", parent.test_slider, parent.test_label, parent.test_count_label)):
+        row = QHBoxLayout()
+        row.addWidget(slider)
+        row.addWidget(label)
+        row.addWidget(QLabel("("))
+        row.addWidget(count)
+        row.addWidget(QLabel(" снимков)"))
+        split_layout.addRow(name, row)
 
     split_group.setLayout(split_layout)
     right_layout.addWidget(split_group)
@@ -128,32 +145,28 @@ def setup_preparing_dataset_yaml_ui(parent):
     # Блок 2: Preprocessing
     preproc_group = QGroupBox("Preprocessing")
     preproc_layout = QFormLayout()
+
     parent.resize_keep = QRadioButton("Keep original size")
     parent.resize_fixed = QRadioButton("Resize to square (keep ratio, pad)")
     parent.resize_stretch = QRadioButton("Resize to square (stretch)")
     parent.resize_fixed.setChecked(True)
+
     parent.resize_size = QSpinBox()
     parent.resize_size.setRange(32, 4096)
     parent.resize_size.setValue(640)
+
     resize_layout = QHBoxLayout()
     resize_layout.addWidget(parent.resize_keep)
     resize_layout.addWidget(parent.resize_fixed)
     resize_layout.addWidget(parent.resize_stretch)
     resize_layout.addWidget(parent.resize_size)
     preproc_layout.addRow("Image size:", resize_layout)
-    parent.bg_color_combo = QComboBox()
-    parent.bg_color_combo.addItems(["Black", "White"])
-    parent.bg_color_combo.setCurrentIndex(0)
-    preproc_layout.addRow("Background fill color:", parent.bg_color_combo)
-    preproc_group.setLayout(preproc_layout)
-    right_layout.addWidget(preproc_group)
 
     parent.bg_color_combo = QComboBox()
     parent.bg_color_combo.addItems(["Black", "White"])
     parent.bg_color_combo.setCurrentIndex(0)
     preproc_layout.addRow("Background fill color:", parent.bg_color_combo)
 
-    # --- Включать пустые аннотации (негативные примеры) ---
     parent.include_empty_annotations = QCheckBox("Include images with empty annotations")
     parent.include_empty_annotations.setChecked(False)
     parent.include_empty_annotations.setToolTip(
@@ -162,8 +175,6 @@ def setup_preparing_dataset_yaml_ui(parent):
     )
     preproc_layout.addRow("", parent.include_empty_annotations)
 
-
-    # --- НОВОЕ: удалить исходники после успешной генерации ---
     parent.delete_source_after_success = QCheckBox(
         "Delete source files after successful generation"
     )
@@ -208,13 +219,13 @@ def setup_preparing_dataset_yaml_ui(parent):
     shear_layout.addWidget(parent.shear_angle)
     aug_layout.addLayout(shear_layout, 3, 0, 1, 2)
     parent.random_crop = QCheckBox("Random Crop")
-    parent.random_crop.setEnabled(False)   # отключаем, т.к. функционал не реализован
+    parent.random_crop.setEnabled(False)
     parent.random_crop.setToolTip("Функционал временно недоступен")
     aug_layout.addWidget(parent.random_crop, 4, 0)
     aug_group.setLayout(aug_layout)
     right_layout.addWidget(aug_group)
 
-    # Блок 4: Augmentation multiplier
+    # Блок 4: Multiplier
     multiplier_group = QGroupBox("Augmentation multiplier")
     multiplier_layout = QFormLayout()
     parent.aug_multiplier_slider = QSlider(Qt.Horizontal)
@@ -243,7 +254,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     labels_group.setLayout(labels_layout)
     right_layout.addWidget(labels_group)
 
-    # --- Кнопки управления ---
+    # Кнопки управления
     parent.control_buttons = ControlButtons(
         show_generate=True,
         show_cancel=True,
@@ -268,9 +279,9 @@ def setup_preparing_dataset_yaml_ui(parent):
     right_layout.addLayout(log_layout)
 
     h_splitter.addWidget(right_widget)
-    h_splitter.setSizes([400, 500])
+    h_splitter.setSizes([500, 500])
 
-    # --- Нижняя панель: лог и прогресс ---
+    # Нижняя панель: лог
     parent.log_widget = LogWidget(show_clear_btn=True, show_progress=True)
     parent.log_text = parent.log_widget.text
     parent.progress_bar = parent.log_widget._progress
@@ -280,7 +291,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     main_v_splitter.addWidget(parent.log_widget)
     main_v_splitter.setSizes([600, 150])
 
-    # ----- Контейнер гистограммы (изначально скрыт) -----
+    # Гистограмма (скрыта)
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     parent.hist_canvas = FigureCanvas(Figure(figsize=(5, 2)))
@@ -292,7 +303,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.hist_container.setVisible(False)
     main_layout.addWidget(parent.hist_container)
 
-    # Подключение кнопок выбора папок
+    # Подключение кнопок
     parent.btn_folder.clicked.connect(parent.select_images_folder)
     parent.btn_labels.clicked.connect(parent.select_labels_folder)
     parent.btn_output.clicked.connect(parent.select_output_folder)

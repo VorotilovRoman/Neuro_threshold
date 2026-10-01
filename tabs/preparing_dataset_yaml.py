@@ -2,10 +2,12 @@
 from import_libs_internal import *
 from import_libs_methods_ui import setup_preparing_dataset_yaml_ui
 
+from PyQt5.QtWidgets import QShortcut
+from PyQt5.QtGui import QKeySequence
+
 ULTRALYTICS_AVAILABLE = False
 try:
     version = ultralytics.__version__
-    # Не выводим в консоль, только сохраняем статус
     ULTRALYTICS_AVAILABLE = True
 except (ImportError, AttributeError):
     pass
@@ -15,8 +17,8 @@ class DatasetPreparationWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Dataset Preparation for YOLO")
-        self.setMinimumWidth(1000)
-        self.setMinimumHeight(700)
+        self.setMinimumWidth(1100)
+        self.setMinimumHeight(750)
 
         setup_preparing_dataset_yaml_ui(self)
 
@@ -40,11 +42,15 @@ class DatasetPreparationWindow(QMainWindow):
         self.num_classes = 0
         self.annotation_types_stats = {}
 
+        # Кэш валидации: (img_path, aux_path) -> (is_valid: bool, err: str)
+        self._validation_cache = {}
+
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Готово: %p%")
 
         self.update_split(self.train_slider.value(), 'train')
 
+        # --- Сигналы ---
         self.flip_horizontal.stateChanged.connect(self.update_multiplier_slider_state)
         self.flip_vertical.stateChanged.connect(self.update_multiplier_slider_state)
         self.rotate_90.stateChanged.connect(self.update_multiplier_slider_state)
@@ -62,30 +68,465 @@ class DatasetPreparationWindow(QMainWindow):
         self.dataset_type_combo.currentIndexChanged.connect(self._on_dataset_type_changed)
         self.class_table.itemChanged.connect(self.on_class_table_item_changed)
 
-        # При изменении флага "включать пустые аннотации" пересканируем
-        # список пар, чтобы обновить подсветку (empty → будет включён/пропущен).
         self.include_empty_annotations.stateChanged.connect(self._on_include_empty_toggled)
+
+        # --- Двойной клик по паре → снимок валидации ---
+        self.file_list.itemDoubleClicked.connect(self._on_file_list_double_clicked)
+
+        # --- Ctrl+C: копировать выделенные строки ---
+        self._copy_shortcut = QShortcut(QKeySequence.Copy, self.file_list)
+        self._copy_shortcut.setContext(Qt.WidgetShortcut)
+        self._copy_shortcut.activated.connect(self._copy_selected_rows_to_clipboard)
 
         self.update_multiplier_slider_state()
 
-    # ------------------------------------------------------------------
-    # Обработчики флага "Include empty annotations"
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # Утилиты списка пар
+    # ==================================================================
+    def _copy_selected_rows_to_clipboard(self):
+        items = self.file_list.selectedItems()
+        if not items:
+            return
+        text = "\n".join(it.text() for it in items)
+        QApplication.clipboard().setText(text)
+        self.log(f"Скопировано строк: {len(items)}")
+
+    def _on_file_list_double_clicked(self, item):
+        if item is None:
+            return
+        pair = item.data(Qt.UserRole + 1)
+        if not pair:
+            return
+        self._open_pair_validation(pair)
+
+    # ==================================================================
+    # Валидация пары
+    # ==================================================================
+    def _validate_pair(self, pair):
+        """
+        Проверяет корректность пары (image, label_or_mask) в соответствии
+        с правилами YOLO-формата (те же, что применяет ultralytics).
+        Возвращает (is_valid: bool, error_message: str).
+        """
+        key = (pair[0], pair[1] if len(pair) > 1 else None)
+        if key in self._validation_cache:
+            return self._validation_cache[key]
+
+        result = self._validate_pair_impl(pair)
+        self._validation_cache[key] = result
+        return result
+
+    def _validate_pair_impl(self, pair):
+        img_path = pair[0]
+        aux_path = pair[1] if len(pair) > 1 else None
+
+        # --- 1. Изображение ---
+        if not os.path.exists(img_path):
+            return False, "Image file not found"
+        try:
+            img = cv2.imread(str(img_path))
+            if img is None:
+                return False, "Cannot decode image"
+            img_h, img_w = img.shape[:2]
+            if img_h == 0 or img_w == 0:
+                return False, "Zero-size image"
+        except Exception as e:
+            return False, f"Image read error: {e}"
+
+        # --- 2. Только изображения (type 2) ---
+        if aux_path is None:
+            return True, ""
+
+        # --- 3. Маски (type 1) ---
+        if self.dataset_type == 1:
+            if not os.path.exists(aux_path):
+                return False, "Mask file not found"
+            try:
+                mask = cv2.imread(str(aux_path), cv2.IMREAD_UNCHANGED)
+                if mask is None:
+                    return False, "Cannot decode mask"
+                if len(mask.shape) == 3:
+                    mask = mask[:, :, 0]
+                mask = mask.squeeze()
+                if mask.dtype != np.uint8:
+                    return False, f"Mask dtype {mask.dtype} (expected uint8)"
+                if mask.shape[:2] != (img_h, img_w):
+                    return False, (f"Mask size {mask.shape[1]}x{mask.shape[0]} != "
+                                   f"image {img_w}x{img_h}")
+            except Exception as e:
+                return False, f"Mask read error: {e}"
+            return True, ""
+
+        # --- 4. Метки (type 0) ---
+        if not os.path.exists(aux_path):
+            return False, "Label file not found"
+        try:
+            with open(aux_path, 'r', encoding='utf-8') as f:
+                raw_lines = f.readlines()
+        except Exception as e:
+            return False, f"Label read error: {e}"
+
+        lines = []
+        for ln, raw in enumerate(raw_lines, 1):
+            s = raw.strip()
+            if not s or s.startswith('#'):
+                continue
+            lines.append((ln, s))
+
+        if not lines:
+            return True, ""  # пустая аннотация — не ошибка формата
+
+        types_in_file = set()
+        for ln, line in lines:
+            parts = line.split()
+            if len(parts) < 5:
+                return False, f"Line {ln}: too few values ({len(parts)})"
+
+            try:
+                cls = int(parts[0])
+                if cls < 0:
+                    return False, f"Line {ln}: negative class id {cls}"
+            except ValueError:
+                return False, f"Line {ln}: invalid class id '{parts[0]}'"
+
+            try:
+                coords = [float(p) for p in parts[1:]]
+            except ValueError as e:
+                return False, f"Line {ln}: invalid coordinate ({e})"
+
+            def in_range(v):
+                return 0.0 <= v <= 1.0
+
+            n = len(parts)
+            if n == 5:  # detect: cx cy w h
+                types_in_file.add('detect')
+                cx, cy, bw, bh = coords
+                if not in_range(cx) or not in_range(cy):
+                    return False, f"Line {ln}: center out of [0,1]"
+                if bw <= 0 or bh <= 0:
+                    return False, f"Line {ln}: non-positive bbox size"
+                if bw > 1 or bh > 1:
+                    return False, f"Line {ln}: bbox size > 1"
+            elif n == 9:  # obb: 4 точки
+                types_in_file.add('obb')
+                for i in range(0, 8, 2):
+                    if not in_range(coords[i]) or not in_range(coords[i + 1]):
+                        return False, f"Line {ln}: OBB point {i // 2 + 1} out of [0,1]"
+            elif n >= 7 and (n - 1) % 2 == 0:  # segment
+                types_in_file.add('segment')
+                num_pts = (n - 1) // 2
+                if num_pts < 3:
+                    return False, f"Line {ln}: polygon needs >=3 points, got {num_pts}"
+                for i in range(0, len(coords), 2):
+                    if not in_range(coords[i]) or not in_range(coords[i + 1]):
+                        return False, f"Line {ln}: polygon point out of [0,1]"
+            else:
+                return False, f"Line {ln}: unknown format ({n} values)"
+
+        if len(types_in_file) > 1:
+            return False, f"Mixed types in file: {', '.join(sorted(types_in_file))}"
+
+        return True, ""
+
+    def _validate_all_pairs(self):
+        """
+        Валидирует все пары, кэшируя результаты.
+        Показывает прогресс в validation_progress_label и не даёт UI подвиснуть.
+        """
+        if not self.pairs:
+            return 0, 0
+
+        self._validation_cache.clear()
+        total = len(self.pairs)
+        valid = 0
+        invalid = 0
+
+        # --- Показать индикатор ---
+        self.validation_progress_label.setVisible(True)
+        self.validation_progress_label.setText(f"⏳ Проверка пар: 0/{total}...")
+        QApplication.processEvents()
+
+        step = max(1, total // 100)  # не чаще 100 обновлений за проход
+
+        for idx, pair in enumerate(self.pairs):
+            ok, _ = self._validate_pair(pair)
+            if ok:
+                valid += 1
+            else:
+                invalid += 1
+
+            if (idx + 1) % step == 0 or idx == total - 1:
+                percent = int((idx + 1) / total * 100)
+                self.validation_progress_label.setText(
+                    f"⏳ Проверка пар: {idx + 1}/{total} ({percent}%)"
+                )
+                QApplication.processEvents()
+
+        # --- Спрятать индикатор ---
+        self.validation_progress_label.setVisible(False)
+        self.validation_progress_label.setText("")
+        QApplication.processEvents()
+
+        return valid, invalid
+    # ==================================================================
+    # Список пар: подсветка и предупреждения
+    # ==================================================================
+    def _make_list_item(self, text, tag=None, error_msg=""):
+        """
+        QListWidgetItem с подсветкой.
+        tag ∈ {'invalid', 'empty', 'error', 'mixed', 'unknown',
+               'detect', 'obb', 'segment', None}
+        """
+        item = QListWidgetItem(text)
+        include_empty = self._is_include_empty()
+
+        if tag == 'invalid':
+            item.setForeground(QColor(220, 0, 0))
+            item.setToolTip(f"❌ Не корректная пара: {error_msg}\n\n"
+                            f"Двойной клик — всё равно открыть снимок.")
+        elif tag == 'empty':
+            if include_empty:
+                item.setForeground(QColor(0, 140, 0))
+                item.setToolTip("Пустая аннотация — будет включена как негативный пример.")
+            else:
+                item.setForeground(QColor(200, 120, 0))
+                item.setToolTip("Пустая аннотация — будет пропущена. "
+                                "Включите «Include images with empty annotations», чтобы сохранить.")
+        elif tag == 'error':
+            item.setForeground(QColor(200, 0, 0))
+            item.setToolTip("Ошибка чтения файла аннотации.")
+        elif tag == 'mixed':
+            item.setForeground(QColor(160, 0, 200))
+            item.setToolTip("Смешанные типы аннотаций в одном файле.")
+        elif tag == 'unknown':
+            item.setForeground(QColor(120, 120, 120))
+            item.setToolTip("Неизвестный формат аннотации.")
+        return item
+
+    def _rebuild_file_list_display(self):
+        """Перерисовывает список пар с подсветкой и предупреждениями."""
+        if not self.pairs:
+            self.validation_warning_label.setVisible(False)
+            self.validation_progress_label.setVisible(False)
+            return
+
+        self.file_list.blockSignals(True)
+        self.file_list.clear()
+
+        valid_count = 0
+        invalid_count = 0
+        invalid_names = []
+
+        total = len(self.pairs)
+        step = max(1, total // 100)
+
+        self.validation_progress_label.setVisible(True)
+        self.validation_progress_label.setText(f"⏳ Построение списка: 0/{total}...")
+        QApplication.processEvents()
+
+        for idx, pair in enumerate(self.pairs):
+            img_path = pair[0]
+            aux_path = pair[1] if len(pair) > 1 else None
+            name = os.path.splitext(os.path.basename(img_path))[0]
+
+            is_valid, err = self._validate_pair(pair)
+
+            if self.dataset_type == 0 and aux_path:
+                try:
+                    ann_type = self._detect_annotation_type(aux_path)
+                except Exception:
+                    ann_type = 'error'
+            elif self.dataset_type == 1:
+                ann_type = 'segment'
+            else:
+                ann_type = None
+
+            if not is_valid:
+                invalid_count += 1
+                invalid_names.append(name)
+                tag = 'invalid'
+                text = f"{name} (image + {'label' if self.dataset_type == 0 else 'mask'}) [INVALID: {err}]"
+            elif ann_type == 'empty':
+                tag = 'empty'
+                marker = "empty → include" if self._is_include_empty() else "empty → skip"
+                text = f"{name} (image + label) [{marker}]"
+                valid_count += 1
+            elif ann_type in ('detect', 'obb', 'segment', 'error', 'mixed', 'unknown'):
+                tag = ann_type
+                text = f"{name} (image + label) [{ann_type}]"
+                valid_count += 1
+            else:
+                tag = None
+                if self.dataset_type == 1:
+                    text = f"{name} (image + mask)"
+                else:
+                    text = f"{name} (image only)"
+                valid_count += 1
+
+            item = self._make_list_item(text, tag=tag, error_msg=err)
+            item.setData(Qt.UserRole, img_path)
+            item.setData(Qt.UserRole + 1, tuple(pair))
+            item.setData(Qt.UserRole + 2, 'valid' if is_valid else 'invalid')
+            self.file_list.addItem(item)
+
+            if (idx + 1) % step == 0 or idx == total - 1:
+                percent = int((idx + 1) / total * 100)
+                self.validation_progress_label.setText(
+                    f"⏳ Построение списка: {idx + 1}/{total} ({percent}%)"
+                )
+                QApplication.processEvents()
+
+        self.file_list.blockSignals(False)
+        self.validation_progress_label.setVisible(False)
+        self.validation_progress_label.setText("")
+
+        if invalid_count > 0:
+            preview = ", ".join(invalid_names[:5])
+            more = "" if invalid_count <= 5 else f" и ещё {invalid_count - 5}"
+            self.validation_warning_label.setText(
+                f"⚠️ Обнаружено {invalid_count} некорректных пар: {preview}{more}. "
+                f"Некорректные пары НЕ будут включены в датасет."
+            )
+            self.validation_warning_label.setVisible(True)
+            self.log(f"Валидация: {valid_count} корректных, {invalid_count} некорректных")
+        else:
+            self.validation_warning_label.setVisible(False)
+            self.log(f"Валидация: все {valid_count} пар корректны")
+    # ==================================================================
+    # Снимок валидации по двойному клику
+    # ==================================================================
+    def _draw_annotations_on_image(self, img, annotations):
+        """Рисует detect/obb/segment на изображении."""
+        out = img.copy()
+        h, w = out.shape[:2]
+        for ann in annotations:
+            typ = ann[0]
+            cls = ann[1]
+            color = (0, 255, 0)
+            if typ == 'detect':
+                _, cls, cx, cy, bw, bh = ann
+                x1 = int((cx - bw / 2) * w)
+                y1 = int((cy - bh / 2) * h)
+                x2 = int((cx + bw / 2) * w)
+                y2 = int((cy + bh / 2) * h)
+                cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(out, f"cls={cls}", (x1, max(15, y1 - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            elif typ == 'obb':
+                _, cls, points = ann
+                pts = []
+                for i in range(0, len(points), 2):
+                    pts.append([int(points[i] * w), int(points[i + 1] * h)])
+                if len(pts) >= 3:
+                    pts_np = np.array(pts, dtype=np.int32)
+                    cv2.polylines(out, [pts_np], isClosed=True, color=color, thickness=2)
+                    cv2.putText(out, f"cls={cls}", (pts[0][0], max(15, pts[0][1] - 5)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            elif typ == 'segment':
+                _, cls, points = ann
+                pts = []
+                for i in range(0, len(points), 2):
+                    pts.append([int(points[i] * w), int(points[i + 1] * h)])
+                if len(pts) >= 3:
+                    pts_np = np.array(pts, dtype=np.int32)
+                    cv2.polylines(out, [pts_np], isClosed=True, color=color, thickness=2)
+                    cv2.putText(out, f"cls={cls}", (pts[0][0], max(15, pts[0][1] - 5)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        return out
+
+    def _apply_mask_overlay(self, img, mask):
+        """Накладывает маску на изображение."""
+        overlay = img.copy()
+        unique_vals = np.unique(mask)
+        for val in unique_vals:
+            if val == 0:
+                continue
+            hue = (int(val) * 37) % 180
+            bgr = cv2.cvtColor(np.uint8([[[hue, 255, 255]]]), cv2.COLOR_HSV2BGR)[0][0]
+            color = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
+            overlay[mask == val] = color
+        return cv2.addWeighted(img, 0.5, overlay, 0.5, 0)
+
+    def _open_pair_validation(self, pair):
+        """Открывает диалог с снимком валидации пары."""
+        img_path = pair[0]
+        aux_path = pair[1] if len(pair) > 1 else None
+
+        img = cv2.imread(str(img_path))
+        if img is None:
+            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить изображение:\n{img_path}")
+            return
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+        annotations = []
+        if self.dataset_type == 0 and aux_path:
+            annotations = load_annotations(aux_path, img.shape[1], img.shape[0])
+
+        if self.dataset_type == 1 and aux_path:
+            mask = cv2.imread(str(aux_path), cv2.IMREAD_UNCHANGED)
+            if mask is not None:
+                if len(mask.shape) == 3:
+                    mask = mask[:, :, 0]
+                if mask.shape[:2] != img.shape[:2]:
+                    mask = cv2.resize(mask, (img.shape[1], img.shape[0]),
+                                      interpolation=cv2.INTER_NEAREST)
+                img = self._apply_mask_overlay(img, mask)
+        elif annotations:
+            img = self._draw_annotations_on_image(img, annotations)
+
+        # --- Диалог ---
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Валидация: {os.path.basename(img_path)}")
+        dlg.resize(1100, 800)
+        layout = QVBoxLayout(dlg)
+
+        is_valid, err = self._validate_pair(pair)
+        status = "✅ Пара корректна" if is_valid else f"❌ Ошибка валидации: {err}"
+        status_label = QLabel(status)
+        status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        status_label.setStyleSheet(
+            "color: #007700; font-weight: bold;" if is_valid
+            else "color: #b00000; font-weight: bold;"
+        )
+        layout.addWidget(status_label)
+
+        view = SmartGraphicsView()
+        view.set_pixmap(numpy_to_qpixmap(img))
+        view.setMinimumHeight(500)
+        layout.addWidget(view, 1)
+
+        path_label = QLabel(f"Image: {img_path}\nAux:   {aux_path or '—'}")
+        path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        path_label.setStyleSheet("font-family: Consolas, monospace; font-size: 11px;")
+        layout.addWidget(path_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("Закрыть")
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        dlg.exec_()
+
+    # ==================================================================
+    # Флаги
+    # ==================================================================
     def _on_include_empty_toggled(self, *_):
-        """Перерисовывает список пар и обновляет подсветку пустых аннотаций."""
         if not self.pairs:
             return
-        # Пересканируем только для отображения — сами пары уже собраны.
         self._rebuild_file_list_display()
 
     def _is_include_empty(self):
         return bool(self.include_empty_annotations.isChecked())
 
-    # ------------------------------------------------------------------
+    # ==================================================================
     # Смена типа датасета
-    # ------------------------------------------------------------------
+    # ==================================================================
     def _on_dataset_type_changed(self, idx):
         self.dataset_type = idx
+        self._validation_cache.clear()
         if idx == 0:
             self.btn_labels.setText("Load Labels")
             self.btn_labels.setEnabled(True)
@@ -99,11 +540,15 @@ class DatasetPreparationWindow(QMainWindow):
             self.file_list.clear()
             self.class_table.setRowCount(0)
             self.original_ids = []
+            self.validation_warning_label.setVisible(False)
             self.update_generate_button_state()
             self.update_split_counts()
         if self.images_folder:
             self.scan_pairs()
 
+    # ==================================================================
+    # Множители и split
+    # ==================================================================
     def update_multiplier_slider_state(self):
         any_aug = (self.flip_horizontal.isChecked() or
                    self.flip_vertical.isChecked() or
@@ -181,16 +626,21 @@ class DatasetPreparationWindow(QMainWindow):
         self.test_label.setText(f"{self.test_slider.value()}%")
         self.update_split_counts()
 
+    # ==================================================================
+    # Выбор папок
+    # ==================================================================
     def select_images_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select folder with images")
         if folder:
             self.images_folder = folder
             self.log(f"Images folder: {folder}")
+            self._validation_cache.clear()
             self.scan_pairs()
 
     def select_labels_folder(self):
         if self.dataset_type == 2:
             return
+        self._validation_cache.clear()
         if self.dataset_type_combo.currentIndex() == 0:
             folder = QFileDialog.getExistingDirectory(self, "Select folder with label files")
             if folder:
@@ -226,6 +676,9 @@ class DatasetPreparationWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Ошибка", "Папка не выбрана или не существует.")
 
+    # ==================================================================
+    # Определение типа аннотации (быстро, только по числу токенов)
+    # ==================================================================
     def _detect_annotation_type(self, label_path):
         types = set()
         try:
@@ -257,89 +710,14 @@ class DatasetPreparationWindow(QMainWindow):
     def _check_pair_type_consistency(self):
         return None
 
-    # ------------------------------------------------------------------
-    # Подсветка пар в списке
-    # ------------------------------------------------------------------
-    def _make_list_item(self, text, tag=None):
-        """
-        Создаёт QListWidgetItem с подсветкой по типу аннотации.
-        tag ∈ {'empty', 'error', 'mixed', 'unknown', 'detect', 'obb', 'segment', None}
-        """
-        item = QListWidgetItem(text)
-        include_empty = self._is_include_empty()
-
-        if tag == 'empty':
-            if include_empty:
-                # будет включён — зелёный
-                item.setForeground(QColor(0, 140, 0))
-                item.setToolTip("Пустая аннотация — будет включена как негативный пример.")
-            else:
-                # будет пропущен — оранжевый
-                item.setForeground(QColor(200, 120, 0))
-                item.setToolTip("Пустая аннотация — будет пропущена. "
-                                "Включите «Include images with empty annotations», чтобы сохранить.")
-        elif tag == 'error':
-            item.setForeground(QColor(200, 0, 0))
-            item.setToolTip("Ошибка чтения файла аннотации.")
-        elif tag == 'mixed':
-            item.setForeground(QColor(160, 0, 200))
-            item.setToolTip("Смешанные типы аннотаций в одном файле.")
-        elif tag == 'unknown':
-            item.setForeground(QColor(120, 120, 120))
-            item.setToolTip("Неизвестный формат аннотации.")
-        # detect / obb / segment / None — стандартный цвет
-        return item
-
-    def _rebuild_file_list_display(self):
-        """
-        Перерисовывает список file_list на основе self.pairs и текущего
-        состояния флага include_empty_annotations. Не трогает self.pairs.
-        """
-        if not self.pairs:
-            return
-        self.file_list.clear()
-
-        if self.dataset_type == 0:
-            for img_path, label_path in self.pairs:
-                name = os.path.splitext(os.path.basename(img_path))[0]
-                try:
-                    ann_type = self._detect_annotation_type(label_path)
-                except Exception:
-                    ann_type = 'error'
-                if ann_type == 'empty' and self._is_include_empty():
-                    marker = "empty → include"
-                elif ann_type == 'empty':
-                    marker = "empty → skip"
-                else:
-                    marker = ann_type
-                item = self._make_list_item(
-                    f"{name} (image + label) [{marker}]",
-                    tag=ann_type
-                )
-                self.file_list.addItem(item)
-
-        elif self.dataset_type == 1:
-            for img_path, mask_path in self.pairs:
-                name = os.path.splitext(os.path.basename(img_path))[0]
-                # Тип маски отдельно не вычисляем — дорого.
-                # Просто выводим имя, стандартный цвет.
-                item = self._make_list_item(f"{name} (image + mask)")
-                self.file_list.addItem(item)
-
-        else:  # dataset_type == 2
-            for pair in self.pairs:
-                img_path = pair[0]
-                name = os.path.splitext(os.path.basename(img_path))[0]
-                item = self._make_list_item(f"{name} (image only)")
-                self.file_list.addItem(item)
-
-    # ------------------------------------------------------------------
+    # ==================================================================
     # Сканирование пар
-    # ------------------------------------------------------------------
+    # ==================================================================
     def scan_pairs(self):
         self.pairs.clear()
         self.file_list.clear()
         self.annotation_types_stats = {}
+        self._validation_cache.clear()
         if not self.images_folder:
             self.log("Папка с изображениями не выбрана")
             return
@@ -444,6 +822,9 @@ class DatasetPreparationWindow(QMainWindow):
             except Exception as e:
                 self.log(f"Ошибка при сканировании изображений: {e}")
 
+        # ---- Валидация ----
+        valid_count, invalid_count = self._validate_all_pairs()
+
         # ---- Отображение с подсветкой ----
         self._rebuild_file_list_display()
 
@@ -452,8 +833,10 @@ class DatasetPreparationWindow(QMainWindow):
         if self.annotation_types_stats:
             type_str = ", ".join([f"{k}:{v}" for k, v in self.annotation_types_stats.items()])
             extra_info = f"  [{type_str}]"
-        self._update_pair_count_label(extra_info, error=bool(error_msg))
-        self.log(f"Найдено пар: {len(self.pairs)}")
+        if invalid_count > 0:
+            extra_info += f"  ⚠️ некорректных: {invalid_count}"
+        self._update_pair_count_label(extra_info, error=bool(error_msg) or invalid_count > 0)
+        self.log(f"Найдено пар: {len(self.pairs)} (корректных: {valid_count}, некорректных: {invalid_count})")
         if error_msg:
             self.log(error_msg)
 
@@ -476,6 +859,9 @@ class DatasetPreparationWindow(QMainWindow):
         else:
             self.pair_count_label.setStyleSheet("")
 
+    # ==================================================================
+    # Классы
+    # ==================================================================
     def rebuild_class_mapping(self):
         if self.dataset_type != 0:
             return
@@ -643,6 +1029,9 @@ class DatasetPreparationWindow(QMainWindow):
         has_output = bool(self.output_folder)
         self.generate_btn.setEnabled(has_pairs and has_output)
 
+    # ==================================================================
+    # Генерация
+    # ==================================================================
     def on_generate(self):
         if not self.images_folder or not self.output_folder:
             QMessageBox.warning(self, "Error", "Please select images and output folders!")
@@ -656,6 +1045,19 @@ class DatasetPreparationWindow(QMainWindow):
         if len(self.pairs) == 0:
             QMessageBox.warning(self, "Error", "No pairs found!")
             return
+
+        # Предупреждение о некорректных парах
+        _, invalid_count = self._validate_all_pairs()
+        if invalid_count > 0:
+            reply = QMessageBox.question(
+                self, "Некорректные пары",
+                f"Обнаружено {invalid_count} некорректных пар.\n"
+                f"Они будут автоматически исключены из датасета.\n\n"
+                f"Продолжить генерацию?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            )
+            if reply != QMessageBox.Yes:
+                return
 
         error_msg = self._check_pair_type_consistency()
         if error_msg:
@@ -689,7 +1091,8 @@ class DatasetPreparationWindow(QMainWindow):
             'shear': self.shear.isChecked(),
             'shear_angle': self.shear_angle.value()
         }
-        has_augmentations = any(v for k, v in augmentations.items() if k not in ['random_rotate_angle', 'shear_angle'])
+        has_augmentations = any(v for k, v in augmentations.items()
+                                if k not in ['random_rotate_angle', 'shear_angle'])
         aug_multiplier = self.aug_multiplier_slider.value() if has_augmentations else 1
 
         if target_size is None and has_augmentations:
@@ -709,10 +1112,23 @@ class DatasetPreparationWindow(QMainWindow):
         if self.dataset_type == 1:
             included_orig_ids = self.included_orig_ids.copy()
 
-        # --- НОВОЕ: флаг "включать пустые аннотации" ---
         include_empty_annotations = self.include_empty_annotations.isChecked()
-        # --- НОВОЕ: удалять ли исходники после успеха ---
         delete_source_after_success = self.delete_source_after_success.isChecked()
+
+        # --- Фильтруем некорректные пары ---
+        pairs_for_generation = []
+        skipped_invalid = 0
+        for pair in self.pairs:
+            ok, _ = self._validate_pair(pair)
+            if ok:
+                pairs_for_generation.append(pair)
+            else:
+                skipped_invalid += 1
+
+        if not pairs_for_generation:
+            QMessageBox.critical(self, "Ошибка",
+                                 "Все пары оказались некорректными. Генерация невозможна.")
+            return
 
         self.log("=== Dataset generation started ===")
         self.log(f"Train: {train_pct*100:.0f}%, Val: {val_pct*100:.0f}%, Test: {test_pct*100:.0f}%")
@@ -723,6 +1139,8 @@ class DatasetPreparationWindow(QMainWindow):
         self.log(f"Classes: {num_classes}")
         self.log(f"Include empty annotations: {include_empty_annotations}")
         self.log(f"Delete source files after success: {delete_source_after_success}")
+        if skipped_invalid:
+            self.log(f"Пропущено некорректных пар: {skipped_invalid}")
 
         self._set_generate_button_active(True)
         self.cancel_btn.setEnabled(True)
@@ -745,7 +1163,8 @@ class DatasetPreparationWindow(QMainWindow):
         self.generator_thread = DatasetGeneratorThread(
             self.images_folder,
             labels_path,
-            self.output_folder, self.pairs, train_pct, val_pct, test_pct, target_size,
+            self.output_folder, pairs_for_generation,
+            train_pct, val_pct, test_pct, target_size,
             augmentations, has_augmentations, aug_multiplier,
             class_names, class_mapping, bg_color,
             self.dataset_type_combo.currentIndex(),
@@ -798,8 +1217,6 @@ class DatasetPreparationWindow(QMainWindow):
             self.progress_bar.setValue(100)
             QMessageBox.information(self, "Успех", message)
 
-            # Если включено удаление исходников — после успеха папки-источники
-            # опустели, очищаем локальное состояние.
             if self.delete_source_after_success.isChecked():
                 self.pairs = []
                 self.file_list.clear()
@@ -811,6 +1228,8 @@ class DatasetPreparationWindow(QMainWindow):
                 self.class_remap = {}
                 self.mask_class_remap = {}
                 self.included_orig_ids = set()
+                self._validation_cache.clear()
+                self.validation_warning_label.setVisible(False)
                 self._update_pair_count_label("")
                 self.update_split_counts()
                 self.update_generate_button_state()

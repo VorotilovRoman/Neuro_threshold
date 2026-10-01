@@ -46,6 +46,16 @@ def setup_viewing_dataset_ui(parent):
 
     main_layout.addLayout(top_layout)
 
+    # >>> NEW: строка предупреждения о некорректной разметке
+    parent.validation_status_label = QLabel("")
+    parent.validation_status_label.setWordWrap(True)
+    parent.validation_status_label.setStyleSheet(
+        "color: #b00000; font-weight: bold; padding: 2px;"
+    )
+    parent.validation_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    parent.validation_status_label.setVisible(False)
+    main_layout.addWidget(parent.validation_status_label)
+
     # ----- Основной сплиттер (изображение слева, список и лог справа) -----
     main_splitter = QSplitter(Qt.Horizontal)
 
