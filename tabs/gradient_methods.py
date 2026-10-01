@@ -738,13 +738,40 @@ class GradientMethodsWindow(QMainWindow):
         if not self.image_paths or self.original_image is None:
             QMessageBox.warning(self, "Нет изображения", "Нет загруженных изображений.")
             return
+
+        total_objects = len(self.current_objects_full)
+        if total_objects == 0:
+            QMessageBox.information(self, "Сохранение",
+                                    "На текущем снимке нет объектов для сохранения.")
+            return
+
+        # Отбираем только те объекты, у которых стоит галочка в списке.
+        selected = [
+            self.current_objects_full[i]
+            for i in self.current_selected_indices
+            if 0 <= i < total_objects
+        ]
+
+        if not selected:
+            QMessageBox.information(
+                self, "Сохранение",
+                "Не выбрано ни одного объекта.\n"
+                "Отметьте галочками нужные объекты в списке справа."
+            )
+            return
+
         img_path = self.image_paths[self.current_index]
         txt_path = os.path.splitext(img_path)[0] + ".txt"
         h, w = self.original_image.shape[:2]
-        success = save_annotations(self.current_objects_full, txt_path, w, h)
+
+        success = save_annotations(selected, txt_path, w, h)
         if success:
-            self.log(f"Сохранено {len(self.current_objects_full)} аннотаций в {txt_path}")
-            QMessageBox.information(self, "Сохранение", f"Аннотации сохранены в {txt_path}")
+            self.log(f"Сохранено {len(selected)} из {total_objects} "
+                     f"аннотаций в {txt_path}")
+            QMessageBox.information(
+                self, "Сохранение",
+                f"Сохранено {len(selected)} из {total_objects} объектов в {txt_path}"
+            )
         else:
             self.log(f"Ошибка сохранения {txt_path}")
             QMessageBox.critical(self, "Ошибка", "Не удалось сохранить аннотации.")
