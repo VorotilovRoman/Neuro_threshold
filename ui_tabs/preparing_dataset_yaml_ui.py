@@ -1,3 +1,4 @@
+# preparing_dataset_yaml_ui.py
 from import_libs_internal import *
 
 
@@ -87,12 +88,30 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.validation_warning_label.setVisible(False)
     left_layout.addWidget(parent.validation_warning_label)
 
-    parent.validation_warning_label = QLabel("")
-    parent.validation_warning_label.setWordWrap(True)
-    parent.validation_warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    parent.validation_warning_label.setStyleSheet("color: #b00000;")
-    parent.validation_warning_label.setVisible(False)
-    left_layout.addWidget(parent.validation_warning_label)
+    # >>> NEW: статистика по цветности изображений
+    parent.color_stats_label = QLabel("")
+    parent.color_stats_label.setWordWrap(True)
+    parent.color_stats_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    parent.color_stats_label.setStyleSheet("font-weight: bold; color: #333;")
+    left_layout.addWidget(parent.color_stats_label)
+
+    # >>> NEW: кнопки массовой конвертации цветности
+    parent.color_convert_buttons_layout = QHBoxLayout()
+    parent.btn_convert_gray = QPushButton("Конвертировать всё в ЧБ")
+    parent.btn_convert_rgb = QPushButton("Конвертировать всё в RGB")
+    parent.btn_convert_gray.setEnabled(False)
+    parent.btn_convert_rgb.setEnabled(False)
+    parent.btn_convert_gray.setToolTip(
+        "Доступно, если в наборе одновременно есть цветные и ч/б изображения.\n"
+        "Все изображения будут перезаписаны как одноканальные (grayscale)."
+    )
+    parent.btn_convert_rgb.setToolTip(
+        "Доступно, если в наборе одновременно есть цветные и ч/б изображения.\n"
+        "Все изображения будут перезаписаны как трёхканальные (BGR)."
+    )
+    parent.color_convert_buttons_layout.addWidget(parent.btn_convert_gray)
+    parent.color_convert_buttons_layout.addWidget(parent.btn_convert_rgb)
+    left_layout.addLayout(parent.color_convert_buttons_layout)
 
     h_splitter.addWidget(left_widget)
 
