@@ -12,8 +12,14 @@ def setup_preparing_dataset_yaml_ui(parent):
     top_layout = QHBoxLayout()
     parent.btn_folder = QPushButton("Load Images")
     parent.btn_labels = QPushButton("Load Labels")
+    parent.btn_load_yaml = QPushButton("Load YAML")
+    parent.btn_load_yaml.setToolTip(
+        "Загрузить пары из data.yaml (train/val/test).\n"
+        "Поддерживаются структуры images/... + labels/... и txt-списки."
+    )
     top_layout.addWidget(parent.btn_folder)
     top_layout.addWidget(parent.btn_labels)
+    top_layout.addWidget(parent.btn_load_yaml)
 
     parent.dataset_type_combo = QComboBox()
     parent.dataset_type_combo.addItems(["Метки (bbox, obb, seg)", "Маски (masks)", "Только изображения"])
@@ -74,7 +80,6 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.pair_count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     left_layout.addWidget(parent.pair_count_label)
 
-    # >>> NEW: индикация процесса валидации
     parent.validation_progress_label = QLabel("")
     parent.validation_progress_label.setWordWrap(True)
     parent.validation_progress_label.setStyleSheet("color: #0055aa; font-weight: bold;")
@@ -88,29 +93,38 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.validation_warning_label.setVisible(False)
     left_layout.addWidget(parent.validation_warning_label)
 
-    # >>> NEW: статистика по цветности изображений
+    # >>> Статистика по цветности и битности
     parent.color_stats_label = QLabel("")
     parent.color_stats_label.setWordWrap(True)
     parent.color_stats_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     parent.color_stats_label.setStyleSheet("font-weight: bold; color: #333;")
     left_layout.addWidget(parent.color_stats_label)
 
-    # >>> NEW: кнопки массовой конвертации цветности
+    # >>> Кнопки массовой конвертации (цветность + битность)
     parent.color_convert_buttons_layout = QHBoxLayout()
     parent.btn_convert_gray = QPushButton("Конвертировать всё в ЧБ")
     parent.btn_convert_rgb = QPushButton("Конвертировать всё в RGB")
+    parent.btn_convert_8bit_png = QPushButton("Перевести в 8 бит PNG")
     parent.btn_convert_gray.setEnabled(False)
     parent.btn_convert_rgb.setEnabled(False)
+    parent.btn_convert_8bit_png.setEnabled(False)
     parent.btn_convert_gray.setToolTip(
-        "Доступно, если в наборе одновременно есть цветные и ч/б изображения.\n"
-        "Все изображения будут перезаписаны как одноканальные (grayscale)."
+        "Перезаписать ЦВЕТНЫЕ и ВИЗУАЛЬНО-СЕРЫЕ изображения в реально-ЧБ (1 канал).\n"
+        "Файлы, уже соответствующие целевому формату, не трогаются."
     )
     parent.btn_convert_rgb.setToolTip(
-        "Доступно, если в наборе одновременно есть цветные и ч/б изображения.\n"
-        "Все изображения будут перезаписаны как трёхканальные (BGR)."
+        "Перезаписать РЕАЛЬНО-ЧБ изображения в 3-канальные (BGR).\n"
+        "Цветные и визуально-серые не трогаются."
+    )
+    parent.btn_convert_8bit_png.setToolTip(
+        "Привести изображения к 8-битному PNG.\n"
+        "Решает ошибку 'Unsupported depth of input image: CV_16U' в аугментациях.\n"
+        "При нажатии можно выбрать: конвертировать все снимки,\n"
+        "или только те, что не являются 8-битным PNG."
     )
     parent.color_convert_buttons_layout.addWidget(parent.btn_convert_gray)
     parent.color_convert_buttons_layout.addWidget(parent.btn_convert_rgb)
+    parent.color_convert_buttons_layout.addWidget(parent.btn_convert_8bit_png)
     left_layout.addLayout(parent.color_convert_buttons_layout)
 
     h_splitter.addWidget(left_widget)
@@ -186,6 +200,19 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.bg_color_combo.setCurrentIndex(0)
     preproc_layout.addRow("Background fill color:", parent.bg_color_combo)
 
+    parent.channels_combo = QComboBox()
+    parent.channels_combo.addItems([
+        "3 (RGB — читать всё как цветное)",
+        "1 (Grayscale — читать всё как Ч/Б)",
+    ])
+    parent.channels_combo.setCurrentIndex(0)
+    parent.channels_combo.setToolTip(
+        "Значение поля channels в итоговом data.yaml.\n"
+        "• 3 — любое изображение (в т.ч. ч/б) читается как 3-канальное.\n"
+        "• 1 — всё читается как одноканальное (grayscale)."
+    )
+    preproc_layout.addRow("Channels:", parent.channels_combo)
+
     parent.include_empty_annotations = QCheckBox("Include images with empty annotations")
     parent.include_empty_annotations.setChecked(False)
     parent.include_empty_annotations.setToolTip(
@@ -200,8 +227,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.delete_source_after_success.setChecked(False)
     parent.delete_source_after_success.setToolTip(
         "После успешной генерации датасета будут удалены ТОЛЬКО те исходные "
-        "изображения и аннотации/маски, которые реально попали в датасет. "
-        "Отменённая или упавшая генерация ничего не удаляет."
+        "изображения и аннотации/маски, которые реально попали в датасет."
     )
     preproc_layout.addRow("", parent.delete_source_after_success)
 
@@ -273,7 +299,6 @@ def setup_preparing_dataset_yaml_ui(parent):
     labels_group.setLayout(labels_layout)
     right_layout.addWidget(labels_group)
 
-    # Кнопки управления
     parent.control_buttons = ControlButtons(
         show_generate=True,
         show_cancel=True,
@@ -300,7 +325,6 @@ def setup_preparing_dataset_yaml_ui(parent):
     h_splitter.addWidget(right_widget)
     h_splitter.setSizes([500, 500])
 
-    # Нижняя панель: лог
     parent.log_widget = LogWidget(show_clear_btn=True, show_progress=True)
     parent.log_text = parent.log_widget.text
     parent.progress_bar = parent.log_widget._progress
@@ -310,7 +334,6 @@ def setup_preparing_dataset_yaml_ui(parent):
     main_v_splitter.addWidget(parent.log_widget)
     main_v_splitter.setSizes([600, 150])
 
-    # Гистограмма (скрыта)
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     parent.hist_canvas = FigureCanvas(Figure(figsize=(5, 2)))
@@ -322,7 +345,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.hist_container.setVisible(False)
     main_layout.addWidget(parent.hist_container)
 
-    # Подключение кнопок
     parent.btn_folder.clicked.connect(parent.select_images_folder)
     parent.btn_labels.clicked.connect(parent.select_labels_folder)
+    parent.btn_load_yaml.clicked.connect(parent.load_from_yaml)
     parent.btn_output.clicked.connect(parent.select_output_folder)
