@@ -28,7 +28,8 @@ class TraditionalMLWindow(QMainWindow):
 
         # Словарь путей к моделям (по типу модели) – хранится временно, не на диске
         self.model_paths = {}
-
+        # Запоминаем выбранный кластер (label), чтобы сохранять его между снимками
+        self._last_selected_cluster_label = None
         setup_traditional_ml_ui(self)
 
         # Пресеты
@@ -379,6 +380,7 @@ class TraditionalMLWindow(QMainWindow):
                 self.cluster_means = None
                 self.cluster_combo.clear()
                 self.cluster_combo.setEnabled(False)
+                self._last_selected_cluster_label = None
                 self.log(f"Модель сброшена, так как выбран {model_name}.")
                 self.schedule_update()
 
@@ -479,11 +481,23 @@ class TraditionalMLWindow(QMainWindow):
         for lbl, mean_val in zip(unique_labels, means):
             self.cluster_combo.addItem(f"Cluster {lbl} (mean intensity = {mean_val:.1f})", userData=int(lbl))
         self.cluster_combo.setEnabled(True)
-        default_idx = np.argmin(means)
-        self.cluster_combo.setCurrentIndex(default_idx)
+
+        # Пытаемся восстановить ранее выбранный label кластера.
+        # Если его нет на текущем снимке (например, кластер исчез после
+        # переобучения или на этом снимке такой метки не встретилось) —
+        # откатываемся к кластеру с минимальной средней интенсивностью.
+        unique_labels_list = [int(x) for x in unique_labels]
+        if (self._last_selected_cluster_label is not None
+                and self._last_selected_cluster_label in unique_labels_list):
+            chosen_idx = unique_labels_list.index(self._last_selected_cluster_label)
+        else:
+            chosen_idx = int(np.argmin(means))
+            self._last_selected_cluster_label = unique_labels_list[chosen_idx]
+
+        self.cluster_combo.setCurrentIndex(chosen_idx)
         self.cluster_combo.blockSignals(False)
 
-        selected_label = unique_labels[default_idx]
+        selected_label = unique_labels[chosen_idx]
         self.prediction_mask = (mask_labels == selected_label).astype(np.uint8) * 255
 
     def _apply_kmeans_cluster(self, idx):
@@ -495,8 +509,11 @@ class TraditionalMLWindow(QMainWindow):
 
     def on_cluster_changed(self, idx):
         if idx >= 0 and self.model is not None:
+            # Запоминаем выбранный label кластера для сохранения между снимками
+            label = self.cluster_combo.itemData(idx)
+            if label is not None:
+                self._last_selected_cluster_label = int(label)
             self._apply_kmeans_cluster(idx)
-
     # ----------------------------------------------------------------------
     #  Обучение модели
     # ----------------------------------------------------------------------
@@ -559,6 +576,7 @@ class TraditionalMLWindow(QMainWindow):
                 n_clusters = self.kmeans_clusters.value()
                 self.model = train_kmeans(X_train, n_clusters)
                 self.log(f"K-Means (K={n_clusters}) обучена на {X_train.shape[0]} пикселях.")
+                self._last_selected_cluster_label = None   # новый набор кластеров
                 self._prepare_cluster_selection_for_current_image()
                 if self.model_metadata is None:
                     self.model_metadata = {}
@@ -575,6 +593,7 @@ class TraditionalMLWindow(QMainWindow):
                         return
                 self.model = train_meanshift(X_train)
                 self.log(f"MeanShift обучен на {X_train.shape[0]} пикселях.")
+                self._last_selected_cluster_label = None   # новый набор кластеров
                 self._prepare_cluster_selection_for_current_image()
                 if self.model_metadata is None:
                     self.model_metadata = {}
@@ -727,6 +746,7 @@ class TraditionalMLWindow(QMainWindow):
 
             if self.display_images:
                 if actual_type in ("K-Means Clustering", "MeanShift"):
+                    self._last_selected_cluster_label = None   # новая модель — метки другие
                     self._prepare_cluster_selection_for_current_image()
                 else:
                     self.apply_model()
