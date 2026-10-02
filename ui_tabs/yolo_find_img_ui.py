@@ -92,46 +92,57 @@ class setup_yolo_find_img_ui(object):
         settings_h_row.addWidget(self.target_group, 2)
         top_settings_layout.addLayout(settings_h_row)
 
-        # --- Дополнительные критерии ---
+        # --- Дополнительные критерии (все в одной строке) ---
         self.criteria_group = QGroupBox("Дополнительные критерии")
-        criteria_layout = QGridLayout(self.criteria_group)
-        criteria_layout.setVerticalSpacing(6)
-        criteria_layout.setHorizontalSpacing(8)
+        criteria_layout = QHBoxLayout(self.criteria_group)
+        criteria_layout.setSpacing(8)
 
-        criteria_layout.addWidget(QLabel("Мин. отступ от краёв кадра (px):"), 0, 0)
+        criteria_layout.addWidget(QLabel("Отступ от краёв (px):"))
         self.edge_margin_spin = QSpinBox()
         self.edge_margin_spin.setRange(0, 2000)
         self.edge_margin_spin.setValue(0)
-        self.edge_margin_spin.setFixedWidth(120)
+        self.edge_margin_spin.setFixedWidth(90)
         self.edge_margin_spin.setToolTip(
             "0 — критерий отключён.\n"
-            "N > 0 — бокс объекта должен быть не ближе N px к каждому краю кадра."
+            "N > 0 — бокс объекта должен быть не ближе N px "
+            "к каждому краю кадра (сверху, снизу, слева, справа)."
         )
-        criteria_layout.addWidget(self.edge_margin_spin, 0, 1)
+        criteria_layout.addWidget(self.edge_margin_spin)
 
-        criteria_layout.addWidget(QLabel("Минимальный размер объекта:"), 1, 0)
+        criteria_layout.addWidget(QLabel("Мин. размер (%):"))
         self.min_object_size_spin = QDoubleSpinBox()
         self.min_object_size_spin.setRange(0.0, 100.0)
         self.min_object_size_spin.setDecimals(2)
         self.min_object_size_spin.setSingleStep(0.1)
         self.min_object_size_spin.setValue(0.0)
-        self.min_object_size_spin.setSuffix(" %")
-        self.min_object_size_spin.setFixedWidth(120)
+        self.min_object_size_spin.setFixedWidth(90)
         self.min_object_size_spin.setToolTip(
             "0 — критерий отключён.\n"
             "N > 0 — площадь бокса объекта должна быть ≥ N% от площади кадра.\n"
             "Например, 0.5 — объект занимает не меньше 0.5% площади снимка."
         )
-        criteria_layout.addWidget(self.min_object_size_spin, 1, 1)
+        criteria_layout.addWidget(self.min_object_size_spin)
 
-        hint = QLabel(
-            "Оба критерия применяются одновременно. Снимок попадает в результаты, "
-            "если хотя бы один объект целевого класса удовлетворяет обоим условиям."
+        criteria_layout.addWidget(QLabel("Макс. размер (%):"))
+        self.max_object_size_spin = QDoubleSpinBox()
+        self.max_object_size_spin.setRange(0.0, 100.0)
+        self.max_object_size_spin.setDecimals(2)
+        self.max_object_size_spin.setSingleStep(0.1)
+        self.max_object_size_spin.setValue(0.0)
+        self.max_object_size_spin.setFixedWidth(90)
+        self.max_object_size_spin.setToolTip(
+            "0 — критерий отключён.\n"
+            "N > 0 — площадь бокса объекта должна быть ≤ N% от площади кадра.\n"
+            "Например, 90 — объект занимает не больше 90% площади снимка.\n"
+            "Полезно, чтобы исключить кадры, где объект «занимает весь снимок»."
         )
-        hint.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
-        hint.setWordWrap(True)
-        criteria_layout.addWidget(hint, 2, 0, 1, 2)
-        criteria_layout.setColumnStretch(2, 1)
+        criteria_layout.addWidget(self.max_object_size_spin)
+
+        criteria_layout.addStretch()
+        self.criteria_group.setToolTip(
+            "Все три критерия применяются одновременно. Снимок попадает в результаты, "
+            "если хотя бы один объект целевого класса удовлетворяет всем активным условиям."
+        )
         top_settings_layout.addWidget(self.criteria_group)
 
         # --- Прогресс + кнопки ---

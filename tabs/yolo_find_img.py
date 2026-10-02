@@ -79,11 +79,13 @@ class ScanThread(QThread):
     finished = pyqtSignal(list)
 
     def __init__(self, root_dir, model_path, target_class, conf, iou, imgsz, device,
-                 edge_margin=0, min_object_size_percent=0.0):
+                 edge_margin=0, min_object_size_percent=0.0, max_object_size_percent=0.0):
         """
         edge_margin              — мин. расстояние (px) от бокса до каждого края кадра;
                                    0 — критерий отключён.
         min_object_size_percent  — мин. площадь бокса в % от площади кадра;
+                                   0 — критерий отключён.
+        max_object_size_percent  — макс. площадь бокса в % от площади кадра;
                                    0 — критерий отключён.
         """
         super().__init__()
@@ -96,6 +98,7 @@ class ScanThread(QThread):
         self.device = device
         self.edge_margin = int(edge_margin)
         self.min_object_size_percent = float(min_object_size_percent)
+        self.max_object_size_percent = float(max_object_size_percent)
         self._is_canceled = False
 
     def cancel(self):
@@ -122,6 +125,20 @@ class ScanThread(QThread):
         box_area = bw * bh
         percent = 100.0 * box_area / img_area
         return percent >= m
+
+    def _box_meets_max_size(self, x1, y1, x2, y2, w, h):
+        """True, если площадь бокса <= max_object_size_percent от площади кадра."""
+        m = self.max_object_size_percent
+        if m <= 0:
+            return True
+        img_area = float(w) * float(h)
+        if img_area <= 0:
+            return True
+        bw = max(0.0, x2 - x1)
+        bh = max(0.0, y2 - y1)
+        box_area = bw * bh
+        percent = 100.0 * box_area / img_area
+        return percent <= m
 
     def run(self):
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
@@ -152,6 +169,14 @@ class ScanThread(QThread):
             )
         else:
             self.log_msg.emit("Доп. критерий минимальной площади объекта отключён (0 %)")
+
+        if self.max_object_size_percent > 0:
+            self.log_msg.emit(
+                f"Доп. критерий: площадь бокса объекта ≤ "
+                f"{self.max_object_size_percent:.2f}% от площади кадра"
+            )
+        else:
+            self.log_msg.emit("Доп. критерий максимальной площади объекта отключён (0 %)")
 
         results = []
         self.log_msg.emit(f"Загрузка модели YOLO: {self.model_path}")
@@ -198,6 +223,8 @@ class ScanThread(QThread):
                         if not self._box_meets_margin(x1, y1, x2, y2, img_w, img_h):
                             continue
                         if not self._box_meets_min_size(x1, y1, x2, y2, img_w, img_h):
+                            continue
+                        if not self._box_meets_max_size(x1, y1, x2, y2, img_w, img_h):
                             continue
 
                         contains_target = True
@@ -325,7 +352,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def _on_thumb_size_changed(self, idx):
         sizes = [120, 180, 260]
         self._thumb_size_px = sizes[max(0, min(idx, len(sizes) - 1))]
-        if self.is_thumbnail_mode and self.thumbnail_widgets:
+        if getattr(self, 'is_thumbnail_mode', False) and getattr(self, 'thumbnail_widgets', None):
             self._rerender_thumbnails()
 
     def _rerender_thumbnails(self):
@@ -430,6 +457,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
 
         edge_margin = self.edge_margin_spin.value()
         min_object_size = float(self.min_object_size_spin.value())
+        max_object_size = float(self.max_object_size_spin.value())
 
         self.log("=" * 50)
         self.log("ЗАПУСК СКАНИРОВАНИЯ")
@@ -446,6 +474,10 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             self.log(f"Минимальная площадь объекта: {min_object_size:.2f}% от площади кадра")
         else:
             self.log("Критерий минимальной площади объекта отключён")
+        if max_object_size > 0:
+            self.log(f"Максимальная площадь объекта: {max_object_size:.2f}% от площади кадра")
+        else:
+            self.log("Критерий максимальной площади объекта отключён")
 
         self.results_list.clear()
         self._clear_thumbnail_grid()
@@ -469,6 +501,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             device=device,
             edge_margin=edge_margin,
             min_object_size_percent=min_object_size,
+            max_object_size_percent=max_object_size,
         )
         self.scan_thread.progress.connect(self.update_progress)
         self.scan_thread.log_msg.connect(self.log)
@@ -729,6 +762,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
                 widget.deleteLater()
         self.thumbnail_widgets.clear()
         self.thumbnail_pixmaps.clear()
+        # Сбрасываем минимальную высоту — иначе пустой контейнер
+        # сохранит большой размер после предыдущего заполнения.
+        self.thumbnail_container.setMinimumHeight(0)
 
     def on_thumbnail_container_resize(self, event):
         if self.thumbnail_widgets:
