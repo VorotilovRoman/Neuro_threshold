@@ -5,6 +5,7 @@ from import_libs_methods_ui import setup_preparing_dataset_yaml_ui
 from PyQt5.QtWidgets import QShortcut
 from PyQt5.QtGui import QKeySequence
 
+
 ULTRALYTICS_AVAILABLE = False
 try:
     version = ultralytics.__version__
@@ -42,25 +43,13 @@ class DatasetPreparationWindow(QMainWindow):
         self.num_classes = 0
         self.annotation_types_stats = {}
 
-        # Статистика по цветности:
-        #   gray_real   — реально 1-канальные
-        #   gray_visual — 3+ канала, но B==G==R
-        #   color       — 3+ канала, разные
-        #   unknown     — не удалось прочитать
-        self.color_type_stats = self._empty_color_stats()
+        # Единый валидатор пар (валидация + кэш + определение характеристик).
+        self.validator = PairValidator(dataset_type=0)
 
-        # Статистика по битности:
-        #   uint8_png   — 8-битный PNG
-        #   uint8_other — 8-битный, но не PNG (JPG, BMP, TIFF и т.д.)
-        #   uint16      — 16-битный целочисленный
-        #   int16       — знаковый 16-бит
-        #   float       — с плавающей точкой
-        #   other       — прочее
-        #   unknown     — не читается
-        self.bit_type_stats = self._empty_bit_stats()
-
-        # Кэш валидации: (img_path, aux_path) -> (is_valid, err, color_type, bit_type)
-        self._validation_cache = {}
+        # Статистика по цветности и битности — словари, которые
+        # пересчитываются через self.validator.recompute_stats(self.pairs).
+        self.color_type_stats = ImageStats.empty_color_stats()
+        self.bit_type_stats = ImageStats.empty_bit_stats()
 
         self._last_patched_yaml = None
 
@@ -109,75 +98,6 @@ class DatasetPreparationWindow(QMainWindow):
         self.update_multiplier_slider_state()
 
     # ==================================================================
-    # Хелперы статистики
-    # ==================================================================
-    @staticmethod
-    def _empty_color_stats():
-        return {'gray_real': 0, 'gray_visual': 0, 'color': 0, 'unknown': 0}
-
-    @staticmethod
-    def _empty_bit_stats():
-        return {
-            'uint8_png': 0,
-            'uint8_other': 0,
-            'uint16': 0,
-            'int16': 0,
-            'float': 0,
-            'other': 0,
-            'unknown': 0,
-        }
-
-    # ==================================================================
-    # Определение типа изображения
-    # ==================================================================
-    def _detect_image_color_type(self, img):
-        if img is None:
-            return 'unknown'
-        try:
-            if len(img.shape) == 2:
-                return 'gray_real'
-            if img.shape[2] == 1:
-                return 'gray_real'
-            bgr = img[:, :, :3] if img.shape[2] >= 3 else img
-            b = bgr[:, :, 0]
-            g = bgr[:, :, 1]
-            r = bgr[:, :, 2]
-            if np.array_equal(b, g) and np.array_equal(g, r):
-                return 'gray_visual'
-            return 'color'
-        except Exception:
-            return 'unknown'
-
-    def _detect_image_bit_type(self, img, img_path):
-        """
-        Возвращает:
-          'uint8_png'   — uint8 + файл .png
-          'uint8_other' — uint8 + другой формат (jpg, jpeg, bmp, tiff, webp)
-          'uint16'      — 16-битный целочисленный
-          'int16'       — знаковый 16-бит
-          'float'       — с плавающей точкой
-          'other'       — прочее
-          'unknown'     — не читается
-        """
-        if img is None:
-            return 'unknown'
-        try:
-            ext = os.path.splitext(str(img_path))[1].lower()
-            is_png = ext == '.png'
-            dt = img.dtype
-            if dt == np.uint8:
-                return 'uint8_png' if is_png else 'uint8_other'
-            if dt == np.uint16:
-                return 'uint16'
-            if dt == np.int16:
-                return 'int16'
-            if dt in (np.float32, np.float64):
-                return 'float'
-            return 'other'
-        except Exception:
-            return 'unknown'
-
-    # ==================================================================
     # Утилиты списка пар
     # ==================================================================
     def _copy_selected_rows_to_clipboard(self):
@@ -197,159 +117,27 @@ class DatasetPreparationWindow(QMainWindow):
         self._open_pair_validation(pair)
 
     # ==================================================================
-    # Валидация пары
+    # Валидация пары / статистика — тонкие обёртки над dataset_validation
     # ==================================================================
-    def _validate_pair_full(self, pair):
-        """(is_valid, err, color_type, bit_type) — с кэшированием."""
-        key = (pair[0], pair[1] if len(pair) > 1 else None)
-        if key in self._validation_cache:
-            return self._validation_cache[key]
-        result = self._validate_pair_impl(pair)
-        self._validation_cache[key] = result
-        return result
-
-    def _validate_pair(self, pair):
-        ok, err, _, _ = self._validate_pair_full(pair)
-        return ok, err
-
-    def _validate_pair_impl(self, pair):
-        img_path = pair[0]
-        aux_path = pair[1] if len(pair) > 1 else None
-
-        if not os.path.exists(img_path):
-            return False, "Image file not found", 'unknown', 'unknown'
-        try:
-            img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
-            if img is None:
-                return False, "Cannot decode image", 'unknown', 'unknown'
-            img_h, img_w = img.shape[:2]
-            if img_h == 0 or img_w == 0:
-                return False, "Zero-size image", 'unknown', 'unknown'
-            color_type = self._detect_image_color_type(img)
-            bit_type = self._detect_image_bit_type(img, img_path)
-        except Exception as e:
-            return False, f"Image read error: {e}", 'unknown', 'unknown'
-
-        if aux_path is None:
-            return True, "", color_type, bit_type
-
-        if self.dataset_type == 1:
-            if not os.path.exists(aux_path):
-                return False, "Mask file not found", color_type, bit_type
-            try:
-                mask = cv2.imread(str(aux_path), cv2.IMREAD_UNCHANGED)
-                if mask is None:
-                    return False, "Cannot decode mask", color_type, bit_type
-                if len(mask.shape) == 3:
-                    mask = mask[:, :, 0]
-                mask = mask.squeeze()
-                if mask.dtype != np.uint8:
-                    return False, f"Mask dtype {mask.dtype} (expected uint8)", color_type, bit_type
-                if mask.shape[:2] != (img_h, img_w):
-                    return False, (f"Mask size {mask.shape[1]}x{mask.shape[0]} != "
-                                   f"image {img_w}x{img_h}"), color_type, bit_type
-            except Exception as e:
-                return False, f"Mask read error: {e}", color_type, bit_type
-            return True, "", color_type, bit_type
-
-        if not os.path.exists(aux_path):
-            return False, "Label file not found", color_type, bit_type
-        try:
-            with open(aux_path, 'r', encoding='utf-8') as f:
-                raw_lines = f.readlines()
-        except Exception as e:
-            return False, f"Label read error: {e}", color_type, bit_type
-
-        lines = []
-        for ln, raw in enumerate(raw_lines, 1):
-            s = raw.strip()
-            if not s or s.startswith('#'):
-                continue
-            lines.append((ln, s))
-
-        if not lines:
-            return True, "", color_type, bit_type
-
-        types_in_file = set()
-        for ln, line in lines:
-            parts = line.split()
-            if len(parts) < 5:
-                return False, f"Line {ln}: too few values ({len(parts)})", color_type, bit_type
-
-            try:
-                cls = int(parts[0])
-                if cls < 0:
-                    return False, f"Line {ln}: negative class id {cls}", color_type, bit_type
-            except ValueError:
-                return False, f"Line {ln}: invalid class id '{parts[0]}'", color_type, bit_type
-
-            try:
-                coords = [float(p) for p in parts[1:]]
-            except ValueError as e:
-                return False, f"Line {ln}: invalid coordinate ({e})", color_type, bit_type
-
-            def in_range(v):
-                return 0.0 <= v <= 1.0
-
-            n = len(parts)
-            if n == 5:
-                types_in_file.add('detect')
-                cx, cy, bw, bh = coords
-                if not in_range(cx) or not in_range(cy):
-                    return False, f"Line {ln}: center out of [0,1]", color_type, bit_type
-                if bw <= 0 or bh <= 0:
-                    return False, f"Line {ln}: non-positive bbox size", color_type, bit_type
-                if bw > 1 or bh > 1:
-                    return False, f"Line {ln}: bbox size > 1", color_type, bit_type
-            elif n == 9:
-                types_in_file.add('obb')
-                for i in range(0, 8, 2):
-                    if not in_range(coords[i]) or not in_range(coords[i + 1]):
-                        return False, f"Line {ln}: OBB point {i // 2 + 1} out of [0,1]", color_type, bit_type
-            elif n >= 7 and (n - 1) % 2 == 0:
-                types_in_file.add('segment')
-                num_pts = (n - 1) // 2
-                if num_pts < 3:
-                    return False, f"Line {ln}: polygon needs >=3 points, got {num_pts}", color_type, bit_type
-                for i in range(0, len(coords), 2):
-                    if not in_range(coords[i]) or not in_range(coords[i + 1]):
-                        return False, f"Line {ln}: polygon point out of [0,1]", color_type, bit_type
-            else:
-                return False, f"Line {ln}: unknown format ({n} values)", color_type, bit_type
-
-        if len(types_in_file) > 1:
-            return False, f"Mixed types in file: {', '.join(sorted(types_in_file))}", color_type, bit_type
-
-        return True, "", color_type, bit_type
-
     def _validate_all_pairs(self):
         if not self.pairs:
             return 0, 0
 
-        self._validation_cache.clear()
         total = len(self.pairs)
-        valid = 0
-        invalid = 0
-
         self.validation_progress_label.setVisible(True)
         self.validation_progress_label.setText(f"⏳ Проверка пар: 0/{total}...")
         QApplication.processEvents()
 
-        step = max(1, total // 100)
+        def on_progress(current, tot):
+            percent = int(current / tot * 100)
+            self.validation_progress_label.setText(
+                f"⏳ Проверка пар: {current}/{tot} ({percent}%)"
+            )
+            QApplication.processEvents()
 
-        for idx, pair in enumerate(self.pairs):
-            ok, _ = self._validate_pair(pair)
-            if ok:
-                valid += 1
-            else:
-                invalid += 1
-
-            if (idx + 1) % step == 0 or idx == total - 1:
-                percent = int((idx + 1) / total * 100)
-                self.validation_progress_label.setText(
-                    f"⏳ Проверка пар: {idx + 1}/{total} ({percent}%)"
-                )
-                QApplication.processEvents()
+        valid, invalid = self.validator.validate_all(
+            self.pairs, progress_cb=on_progress
+        )
 
         self.validation_progress_label.setVisible(False)
         self.validation_progress_label.setText("")
@@ -357,60 +145,25 @@ class DatasetPreparationWindow(QMainWindow):
 
         return valid, invalid
 
-    # ==================================================================
-    # Статистика
-    # ==================================================================
     def _recompute_color_stats(self):
-        self.color_type_stats = self._empty_color_stats()
-        self.bit_type_stats = self._empty_bit_stats()
-        for pair in self.pairs:
-            _, _, ctype, btype = self._validate_pair_full(pair)
-            self.color_type_stats[ctype] = self.color_type_stats.get(ctype, 0) + 1
-            self.bit_type_stats[btype] = self.bit_type_stats.get(btype, 0) + 1
+        self.color_type_stats, self.bit_type_stats = \
+            self.validator.recompute_stats(self.pairs)
 
     def _update_color_stats_label(self):
         if not hasattr(self, 'color_stats_label'):
             return
-        gr = self.color_type_stats.get('gray_real', 0)
-        gv = self.color_type_stats.get('gray_visual', 0)
-        c = self.color_type_stats.get('color', 0)
-        u = self.color_type_stats.get('unknown', 0)
-
-        p8 = self.bit_type_stats.get('uint8_png', 0)
-        o8 = self.bit_type_stats.get('uint8_other', 0)
-        b16 = self.bit_type_stats.get('uint16', 0)
-        i16 = self.bit_type_stats.get('int16', 0)
-        fl = self.bit_type_stats.get('float', 0)
-        oth = self.bit_type_stats.get('other', 0)
-
-        if not self.pairs:
-            self.color_stats_label.setText("")
-            for name in ('btn_convert_gray', 'btn_convert_rgb', 'btn_convert_8bit_png'):
-                if hasattr(self, name):
-                    getattr(self, name).setEnabled(False)
-            return
-
-        line1 = (f"⚫ Реально ЧБ: {gr}   |   "
-                 f"🌫 Визуально ЧБ: {gv}   |   "
-                 f"🎨 Реально цветных: {c}")
-        if u:
-            line1 += f"   |   ❓ Неизвестно: {u}"
-
-        non_8bit = b16 + i16 + fl + oth
-        line2 = f"🔵 8-bit PNG: {p8}   |   🟡 8-bit non-PNG: {o8}"
-        if non_8bit:
-            parts = []
-            if b16: parts.append(f"16-bit: {b16}")
-            if i16: parts.append(f"int16: {i16}")
-            if fl: parts.append(f"float: {fl}")
-            if oth: parts.append(f"other: {oth}")
-            line2 += "   |   ⚠️ " + ", ".join(parts)
-
-        self.color_stats_label.setText(line1 + "\n" + line2)
-
-        for name in ('btn_convert_gray', 'btn_convert_rgb', 'btn_convert_8bit_png'):
+        text, enabled = ImageStats.format_stats_text(
+            self.color_type_stats, self.bit_type_stats, bool(self.pairs)
+        )
+        self.color_stats_label.setText(text)
+        for name in ('btn_convert_gray', 'btn_convert_rgb',
+                     'btn_convert_8bit_png'):
             if hasattr(self, name):
-                getattr(self, name).setEnabled(True)
+                getattr(self, name).setEnabled(enabled)
+
+    def _open_pair_validation(self, pair):
+        PairValidationDialog(self, pair, self.dataset_type,
+                             self.validator).exec_()
 
     # ==================================================================
     # Channels в data.yaml
@@ -600,9 +353,9 @@ class DatasetPreparationWindow(QMainWindow):
         self.labels_folder = root
         self.masks_folder = None
 
-        self._validation_cache.clear()
-        self.color_type_stats = self._empty_color_stats()
-        self.bit_type_stats = self._empty_bit_stats()
+        self.validator.set_dataset_type(0)
+        self.color_type_stats = ImageStats.empty_color_stats()
+        self.bit_type_stats = ImageStats.empty_bit_stats()
         self.annotation_types_stats = {}
 
         self.log(f"=== Загрузка из YAML: {file_path} ===")
@@ -642,16 +395,7 @@ class DatasetPreparationWindow(QMainWindow):
         if not self.pairs:
             return
 
-        to_convert = []
-        for pair in self.pairs:
-            img_path = pair[0]
-            _, _, ctype, _ = self._validate_pair_full(pair)
-            if target == 'gray':
-                if ctype in ('color', 'gray_visual'):
-                    to_convert.append((pair, img_path, ctype))
-            elif target == 'color':
-                if ctype == 'gray_real':
-                    to_convert.append((pair, img_path, ctype))
+        to_convert = select_pairs_for_conversion(self.pairs, self.validator, target)
 
         if not to_convert:
             QMessageBox.information(
@@ -672,62 +416,30 @@ class DatasetPreparationWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
-        converted = 0
-        errors = 0
         total = len(to_convert)
-        step = max(1, total // 100)
-
         self.validation_progress_label.setVisible(True)
         self.validation_progress_label.setText(f"⏳ Конвертация: 0/{total}...")
         QApplication.processEvents()
 
-        for idx, (pair, img_path, _) in enumerate(to_convert):
-            try:
-                img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
-                if img is None:
-                    errors += 1
-                    continue
+        def on_progress(current, tot):
+            percent = int(current / tot * 100)
+            self.validation_progress_label.setText(
+                f"⏳ Конвертация: {current}/{tot} ({percent}%)"
+            )
+            QApplication.processEvents()
 
-                # Приведение к uint8 перед цветовыми преобразованиями
-                if img.dtype != np.uint8:
-                    if img.dtype == np.uint16:
-                        img = (img / 256.0).clip(0, 255).astype(np.uint8)
-                    else:
-                        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-                if len(img.shape) == 2:
-                    img3 = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                elif img.shape[2] == 1:
-                    img3 = cv2.cvtColor(img[:, :, 0], cv2.COLOR_GRAY2BGR)
-                elif img.shape[2] == 4:
-                    img3 = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                else:
-                    img3 = img
-
-                if target == 'gray':
-                    out = cv2.cvtColor(img3, cv2.COLOR_BGR2GRAY)
-                else:
-                    out = img3
-
-                cv2.imwrite(str(img_path), out)
-                converted += 1
-            except Exception as e:
-                errors += 1
-                self.log(f"Ошибка конвертации {img_path}: {e}")
-
-            if (idx + 1) % step == 0 or idx == total - 1:
-                percent = int((idx + 1) / total * 100)
-                self.validation_progress_label.setText(
-                    f"⏳ Конвертация: {idx + 1}/{total} ({percent}%)"
-                )
-                QApplication.processEvents()
+        converted, errors = convert_pairs_color(
+            to_convert, target,
+            progress_cb=on_progress,
+            log_cb=self.log,
+        )
 
         self.validation_progress_label.setVisible(False)
         self.validation_progress_label.setText("")
         self.log(f"Конвертация завершена: перезаписано {converted}, ошибок {errors} "
                  f"(пропущено без изменений: {len(self.pairs) - total})")
 
-        self._validation_cache.clear()
+        self.validator.clear_cache()
         self._recompute_color_stats()
         self._rebuild_file_list_display()
 
@@ -743,13 +455,9 @@ class DatasetPreparationWindow(QMainWindow):
         if not self.pairs:
             return
 
-        need_convert = []
-        all_convert = []
-        for pair in self.pairs:
-            _, _, _, btype = self._validate_pair_full(pair)
-            all_convert.append(pair)
-            if btype != 'uint8_png':
-                need_convert.append(pair)
+        all_convert, need_convert = select_pairs_for_8bit_png(
+            self.pairs, self.validator
+        )
 
         if not need_convert:
             QMessageBox.information(
@@ -781,73 +489,23 @@ class DatasetPreparationWindow(QMainWindow):
         else:
             to_convert = need_convert
 
-        # --- Прогресс ---
-        converted = 0
-        errors = 0
         total = len(to_convert)
-        step = max(1, total // 100)
-        path_map = {}  # old_path → new_path (для пересборки self.pairs)
-
         self.validation_progress_label.setVisible(True)
         self.validation_progress_label.setText(f"⏳ Конвертация в 8 бит PNG: 0/{total}...")
         QApplication.processEvents()
 
-        for idx, pair in enumerate(to_convert):
-            img_path = pair[0]
-            try:
-                img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
-                if img is None:
-                    errors += 1
-                    continue
+        def on_progress(current, tot):
+            percent = int(current / tot * 100)
+            self.validation_progress_label.setText(
+                f"⏳ Конвертация в 8 бит PNG: {current}/{tot} ({percent}%)"
+            )
+            QApplication.processEvents()
 
-                # Приведение dtype к uint8
-                if img.dtype == np.uint8:
-                    img8 = img
-                elif img.dtype == np.uint16:
-                    # 16U: делим на 256 — стандарт для большинства 16-битных форматов
-                    img8 = (img / 256.0).clip(0, 255).astype(np.uint8)
-                elif img.dtype == np.int16:
-                    img8 = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                elif img.dtype in (np.float32, np.float64):
-                    if img.max() <= 1.0 + 1e-6:
-                        img8 = (img * 255.0).clip(0, 255).astype(np.uint8)
-                    else:
-                        img8 = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                else:
-                    img8 = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-                # Целевой путь
-                base, ext = os.path.splitext(str(img_path))
-                if ext.lower() == '.png':
-                    target_path = str(img_path)
-                else:
-                    target_path = base + '.png'
-
-                ok = cv2.imwrite(target_path, img8)
-                if not ok:
-                    errors += 1
-                    self.log(f"Не удалось сохранить {target_path}")
-                    continue
-
-                # Если путь изменился — удалить оригинал и запомнить mapping
-                if target_path != str(img_path):
-                    try:
-                        os.remove(str(img_path))
-                    except Exception as e:
-                        self.log(f"Не удалось удалить {img_path}: {e}")
-                    path_map[str(img_path)] = target_path
-
-                converted += 1
-            except Exception as e:
-                errors += 1
-                self.log(f"Ошибка конвертации {img_path}: {e}")
-
-            if (idx + 1) % step == 0 or idx == total - 1:
-                percent = int((idx + 1) / total * 100)
-                self.validation_progress_label.setText(
-                    f"⏳ Конвертация в 8 бит PNG: {idx + 1}/{total} ({percent}%)"
-                )
-                QApplication.processEvents()
+        converted, errors, path_map = convert_pairs_to_8bit_png(
+            to_convert,
+            progress_cb=on_progress,
+            log_cb=self.log,
+        )
 
         self.validation_progress_label.setVisible(False)
         self.validation_progress_label.setText("")
@@ -866,7 +524,7 @@ class DatasetPreparationWindow(QMainWindow):
             self.pairs = new_pairs
 
         # Сброс кэша и пересчёт
-        self._validation_cache.clear()
+        self.validator.clear_cache()
         self._recompute_color_stats()
         self._rebuild_file_list_display()
 
@@ -915,80 +573,32 @@ class DatasetPreparationWindow(QMainWindow):
 
         total = len(self.pairs)
         step = max(1, total // 100)
+        include_empty = self._is_include_empty()
 
         self.validation_progress_label.setVisible(True)
         self.validation_progress_label.setText(f"⏳ Построение списка: 0/{total}...")
         QApplication.processEvents()
 
         for idx, pair in enumerate(self.pairs):
-            img_path = pair[0]
-            aux_path = pair[1] if len(pair) > 1 else None
-            name = os.path.splitext(os.path.basename(img_path))[0]
+            info = build_pair_display(
+                pair, self.validator, self.dataset_type, include_empty
+            )
 
-            is_valid, err, color_type, bit_type = self._validate_pair_full(pair)
-
-            if self.dataset_type == 0 and aux_path:
-                try:
-                    ann_type = self._detect_annotation_type(aux_path)
-                except Exception:
-                    ann_type = 'error'
-            elif self.dataset_type == 1:
-                ann_type = 'segment'
+            if info['is_valid']:
+                valid_count += 1
             else:
-                ann_type = None
-
-            color_marker = ""
-            if color_type == 'gray_real':
-                color_marker = " [ч/б 1ch]"
-            elif color_type == 'gray_visual':
-                color_marker = " [визуально ч/б]"
-            elif color_type == 'color':
-                color_marker = " [цветное]"
-
-            bit_marker = ""
-            if bit_type == 'uint8_png':
-                bit_marker = ""  # норма — не подсвечиваем
-            elif bit_type == 'uint8_other':
-                bit_marker = " [8b не-PNG]"
-            elif bit_type == 'uint16':
-                bit_marker = " [16bit!]"
-            elif bit_type == 'int16':
-                bit_marker = " [int16!]"
-            elif bit_type == 'float':
-                bit_marker = " [float!]"
-            elif bit_type == 'other':
-                bit_marker = " [??bit]"
-
-            if not is_valid:
                 invalid_count += 1
-                invalid_names.append(name)
-                tag = 'invalid'
-                text = (f"{name}{color_marker}{bit_marker} (image + "
-                        f"{'label' if self.dataset_type == 0 else 'mask'}) "
-                        f"[INVALID: {err}]")
-            elif ann_type == 'empty':
-                tag = 'empty'
-                marker = "empty → include" if self._is_include_empty() else "empty → skip"
-                text = f"{name}{color_marker}{bit_marker} (image + label) [{marker}]"
-                valid_count += 1
-            elif ann_type in ('detect', 'obb', 'segment', 'error', 'mixed', 'unknown'):
-                tag = ann_type
-                text = f"{name}{color_marker}{bit_marker} (image + label) [{ann_type}]"
-                valid_count += 1
-            else:
-                tag = None
-                if self.dataset_type == 1:
-                    text = f"{name}{color_marker}{bit_marker} (image + mask)"
-                else:
-                    text = f"{name}{color_marker}{bit_marker} (image only)"
-                valid_count += 1
+                invalid_names.append(info['name'])
 
-            item = self._make_list_item(text, tag=tag, error_msg=err)
-            item.setData(Qt.UserRole, img_path)
+            item = self._make_list_item(
+                info['text'], tag=info['tag'], error_msg=info['err']
+            )
+            item.setData(Qt.UserRole, pair[0])
             item.setData(Qt.UserRole + 1, tuple(pair))
-            item.setData(Qt.UserRole + 2, 'valid' if is_valid else 'invalid')
-            item.setData(Qt.UserRole + 3, color_type)
-            item.setData(Qt.UserRole + 4, bit_type)
+            item.setData(Qt.UserRole + 2,
+                         'valid' if info['is_valid'] else 'invalid')
+            item.setData(Qt.UserRole + 3, info['color_type'])
+            item.setData(Qt.UserRole + 4, info['bit_type'])
             self.file_list.addItem(item)
 
             if (idx + 1) % step == 0 or idx == total - 1:
@@ -1018,134 +628,6 @@ class DatasetPreparationWindow(QMainWindow):
         self._update_color_stats_label()
 
     # ==================================================================
-    # Снимок валидации
-    # ==================================================================
-    def _draw_annotations_on_image(self, img, annotations):
-        out = img.copy()
-        h, w = out.shape[:2]
-        for ann in annotations:
-            typ = ann[0]
-            cls = ann[1]
-            color = (0, 255, 0)
-            if typ == 'detect':
-                _, cls, cx, cy, bw, bh = ann
-                x1 = int((cx - bw / 2) * w)
-                y1 = int((cy - bh / 2) * h)
-                x2 = int((cx + bw / 2) * w)
-                y2 = int((cy + bh / 2) * h)
-                cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(out, f"cls={cls}", (x1, max(15, y1 - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-            elif typ in ('obb', 'segment'):
-                _, cls, points = ann
-                pts = []
-                for i in range(0, len(points), 2):
-                    pts.append([int(points[i] * w), int(points[i + 1] * h)])
-                if len(pts) >= 3:
-                    pts_np = np.array(pts, dtype=np.int32)
-                    cv2.polylines(out, [pts_np], isClosed=True, color=color, thickness=2)
-                    cv2.putText(out, f"cls={cls}", (pts[0][0], max(15, pts[0][1] - 5)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        return out
-
-    def _apply_mask_overlay(self, img, mask):
-        overlay = img.copy()
-        unique_vals = np.unique(mask)
-        for val in unique_vals:
-            if val == 0:
-                continue
-            hue = (int(val) * 37) % 180
-            bgr = cv2.cvtColor(np.uint8([[[hue, 255, 255]]]), cv2.COLOR_HSV2BGR)[0][0]
-            color = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
-            overlay[mask == val] = color
-        return cv2.addWeighted(img, 0.5, overlay, 0.5, 0)
-
-    def _open_pair_validation(self, pair):
-        img_path = pair[0]
-        aux_path = pair[1] if len(pair) > 1 else None
-
-        img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
-        if img is None:
-            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить изображение:\n{img_path}")
-            return
-        # Для отображения приводим к uint8, если 16-бит/float
-        if img.dtype != np.uint8:
-            if img.dtype == np.uint16:
-                disp = (img / 256.0).clip(0, 255).astype(np.uint8)
-            else:
-                disp = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        else:
-            disp = img
-        if len(disp.shape) == 2:
-            disp = cv2.cvtColor(disp, cv2.COLOR_GRAY2BGR)
-
-        annotations = []
-        if self.dataset_type == 0 and aux_path:
-            annotations = load_annotations(aux_path, disp.shape[1], disp.shape[0])
-
-        if self.dataset_type == 1 and aux_path:
-            mask = cv2.imread(str(aux_path), cv2.IMREAD_UNCHANGED)
-            if mask is not None:
-                if len(mask.shape) == 3:
-                    mask = mask[:, :, 0]
-                if mask.shape[:2] != disp.shape[:2]:
-                    mask = cv2.resize(mask, (disp.shape[1], disp.shape[0]),
-                                      interpolation=cv2.INTER_NEAREST)
-                disp = self._apply_mask_overlay(disp, mask)
-        elif annotations:
-            disp = self._draw_annotations_on_image(disp, annotations)
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Валидация: {os.path.basename(img_path)}")
-        dlg.resize(1100, 800)
-        layout = QVBoxLayout(dlg)
-
-        is_valid, err, color_type, bit_type = self._validate_pair_full(pair)
-        color_str = {
-            'color': 'Реально цветное',
-            'gray_real': 'Реально Ч/Б (1 канал)',
-            'gray_visual': 'Визуально Ч/Б (3 канала)',
-            'unknown': '—',
-        }.get(color_type, '—')
-        bit_str = {
-            'uint8_png': 'uint8 PNG',
-            'uint8_other': 'uint8 (не PNG)',
-            'uint16': 'uint16',
-            'int16': 'int16',
-            'float': 'float',
-            'other': 'other',
-            'unknown': '—',
-        }.get(bit_type, '—')
-        status = (f"{'✅ Пара корректна' if is_valid else f'❌ Ошибка валидации: {err}'}"
-                  f"   |   Цвет: {color_str}   |   Битность: {bit_str}")
-        status_label = QLabel(status)
-        status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        status_label.setStyleSheet(
-            "color: #007700; font-weight: bold;" if is_valid
-            else "color: #b00000; font-weight: bold;"
-        )
-        layout.addWidget(status_label)
-
-        view = SmartGraphicsView()
-        view.set_pixmap(numpy_to_qpixmap(disp))
-        view.setMinimumHeight(500)
-        layout.addWidget(view, 1)
-
-        path_label = QLabel(f"Image: {img_path}\nAux:   {aux_path or '—'}")
-        path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        path_label.setStyleSheet("font-family: Consolas, monospace; font-size: 11px;")
-        layout.addWidget(path_label)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        close_btn = QPushButton("Закрыть")
-        close_btn.clicked.connect(dlg.accept)
-        btn_row.addWidget(close_btn)
-        layout.addLayout(btn_row)
-
-        dlg.exec_()
-
-    # ==================================================================
     # Флаги
     # ==================================================================
     def _on_include_empty_toggled(self, *_):
@@ -1161,9 +643,9 @@ class DatasetPreparationWindow(QMainWindow):
     # ==================================================================
     def _on_dataset_type_changed(self, idx):
         self.dataset_type = idx
-        self._validation_cache.clear()
-        self.color_type_stats = self._empty_color_stats()
-        self.bit_type_stats = self._empty_bit_stats()
+        self.validator.set_dataset_type(idx)
+        self.color_type_stats = ImageStats.empty_color_stats()
+        self.bit_type_stats = ImageStats.empty_bit_stats()
         if idx == 0:
             self.btn_labels.setText("Load Labels")
             self.btn_labels.setEnabled(True)
@@ -1275,14 +757,14 @@ class DatasetPreparationWindow(QMainWindow):
             self._yaml_mode = False
             self.images_folder = folder
             self.log(f"Images folder: {folder}")
-            self._validation_cache.clear()
+            self.validator.clear_cache()
             self.scan_pairs()
 
     def select_labels_folder(self):
         if self.dataset_type == 2:
             return
         self._yaml_mode = False
-        self._validation_cache.clear()
+        self.validator.clear_cache()
         if self.dataset_type_combo.currentIndex() == 0:
             folder = QFileDialog.getExistingDirectory(self, "Select folder with label files")
             if folder:
@@ -1319,55 +801,21 @@ class DatasetPreparationWindow(QMainWindow):
             QMessageBox.warning(self, "Ошибка", "Папка не выбрана или не существует.")
 
     # ==================================================================
-    # Определение типа аннотации
-    # ==================================================================
-    def _detect_annotation_type(self, label_path):
-        types = set()
-        try:
-            with open(label_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    parts = line.split()
-                    if len(parts) < 1:
-                        continue
-                    l = len(parts)
-                    if l == 5:
-                        types.add('detect')
-                    elif l == 9:
-                        types.add('obb')
-                    elif l >= 7 and (l - 1) % 2 == 0:
-                        types.add('segment')
-                    else:
-                        types.add('unknown')
-        except Exception:
-            return 'error'
-        if len(types) == 0:
-            return 'empty'
-        if len(types) == 1:
-            return next(iter(types))
-        return 'mixed'
-
-    def _check_pair_type_consistency(self):
-        return None
-
-    # ==================================================================
     # Сканирование пар
     # ==================================================================
     def scan_pairs(self):
         if self._yaml_mode:
-            self._validation_cache.clear()
+            self.validator.clear_cache()
             self._recompute_color_stats()
             self._rebuild_file_list_display()
             return
 
-        self.pairs.clear()
+        self.pairs = []
         self.file_list.clear()
         self.annotation_types_stats = {}
-        self.color_type_stats = self._empty_color_stats()
-        self.bit_type_stats = self._empty_bit_stats()
-        self._validation_cache.clear()
+        self.color_type_stats = ImageStats.empty_color_stats()
+        self.bit_type_stats = ImageStats.empty_bit_stats()
+        self.validator.clear_cache()
 
         if not self.images_folder:
             self.log("Папка с изображениями не выбрана")
@@ -1383,26 +831,9 @@ class DatasetPreparationWindow(QMainWindow):
                 self._update_pair_count_label("", error=True)
                 self._update_color_stats_label()
                 return
-            img_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
-            img_files = {}
-            try:
-                for f in os.listdir(self.images_folder):
-                    name, ext = os.path.splitext(f)
-                    if ext.lower() in img_extensions:
-                        img_files[name] = os.path.join(self.images_folder, f)
-            except Exception as e:
-                self.log(f"Ошибка при чтении папки изображений: {e}")
-                self._update_color_stats_label()
-                return
-            for name, img_path in img_files.items():
-                label_path = os.path.join(self.labels_folder, name + '.txt')
-                if os.path.exists(label_path):
-                    try:
-                        ann_type = self._detect_annotation_type(label_path)
-                        self.annotation_types_stats[ann_type] = self.annotation_types_stats.get(ann_type, 0) + 1
-                        self.pairs.append((img_path, label_path))
-                    except Exception as e:
-                        self.log(f"Ошибка обработки пары {name}: {e}")
+            self.pairs, self.annotation_types_stats = scan_detection_pairs(
+                self.images_folder, self.labels_folder, log_cb=self.log
+            )
 
         elif dataset_type_idx == 1:
             if not self.masks_folder:
@@ -1410,78 +841,20 @@ class DatasetPreparationWindow(QMainWindow):
                 self._update_pair_count_label("", error=True)
                 self._update_color_stats_label()
                 return
-            img_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
-            img_files = {}
-            try:
-                for f in os.listdir(self.images_folder):
-                    name, ext = os.path.splitext(f)
-                    if ext.lower() in img_extensions:
-                        img_files[name] = os.path.join(self.images_folder, f)
-            except Exception as e:
-                self.log(f"Ошибка при чтении папки изображений: {e}")
-                self._update_color_stats_label()
-                return
-            for name, img_path in img_files.items():
-                found = False
-                for ext in img_extensions:
-                    mask_path = os.path.join(self.masks_folder, name + ext)
-                    try:
-                        if os.path.exists(mask_path):
-                            if os.path.abspath(mask_path) == os.path.abspath(img_path):
-                                self.log(f"Предупреждение: маска совпадает с изображением {img_path}")
-                                break
-                            self.pairs.append((img_path, mask_path))
-                            found = True
-                            break
-                    except Exception as e:
-                        self.log(f"Ошибка при проверке маски {mask_path}: {e}")
-                        continue
-                if not found:
-                    try:
-                        for f in os.listdir(self.masks_folder):
-                            mask_name, mask_ext = os.path.splitext(f)
-                            if mask_name == name and mask_ext.lower() in img_extensions:
-                                mask_path = os.path.join(self.masks_folder, f)
-                                if os.path.abspath(mask_path) == os.path.abspath(img_path):
-                                    continue
-                                self.pairs.append((img_path, mask_path))
-                                found = True
-                                break
-                    except Exception as e:
-                        self.log(f"Ошибка при поиске маски для {name}: {e}")
-
-            self.log(f"Проверка валидности {len(self.pairs)} масок...")
-            valid_pairs = []
-            for img_path, mask_path in self.pairs:
-                try:
-                    test_mask = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
-                    if test_mask is None:
-                        self.log(f"Предупреждение: не удалось прочитать маску {mask_path}")
-                        continue
-                    valid_pairs.append((img_path, mask_path))
-                except Exception as e:
-                    self.log(f"Критическая ошибка при проверке маски {mask_path}: {e}")
-                    continue
-            self.pairs = valid_pairs
-            self.log(f"После проверки осталось {len(self.pairs)} валидных пар")
+            self.pairs = scan_segmentation_pairs(
+                self.images_folder, self.masks_folder, log_cb=self.log
+            )
+            self.log(f"Найдено {len(self.pairs)} валидных пар изображение↔маска")
 
         else:
-            img_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
-            try:
-                for f in os.listdir(self.images_folder):
-                    name, ext = os.path.splitext(f)
-                    if ext.lower() in img_extensions:
-                        img_path = os.path.join(self.images_folder, f)
-                        self.pairs.append((img_path, None))
-                self.annotation_types_stats = {}
-            except Exception as e:
-                self.log(f"Ошибка при сканировании изображений: {e}")
+            self.pairs = scan_image_only_pairs(self.images_folder)
+            self.annotation_types_stats = {}
 
         valid_count, invalid_count = self._validate_all_pairs()
         self._recompute_color_stats()
         self._rebuild_file_list_display()
 
-        error_msg = self._check_pair_type_consistency()
+        error_msg = PairValidator.check_pair_type_consistency()
         extra_info = ""
         if self.annotation_types_stats:
             type_str = ", ".join([f"{k}:{v}" for k, v in self.annotation_types_stats.items()])
@@ -1733,7 +1106,7 @@ class DatasetPreparationWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
-        error_msg = self._check_pair_type_consistency()
+        error_msg = PairValidator.check_pair_type_consistency()
         if error_msg:
             reply = QMessageBox.question(self, "Несоответствие типа",
                                          f"{error_msg}\nВсё равно продолжить?",
@@ -1826,7 +1199,7 @@ class DatasetPreparationWindow(QMainWindow):
         pairs_for_generation = []
         skipped_invalid = 0
         for pair in self.pairs:
-            ok, _ = self._validate_pair(pair)
+            ok, _ = self.validator.validate(pair)
             if ok:
                 pairs_for_generation.append(pair)
             else:
@@ -1942,9 +1315,9 @@ class DatasetPreparationWindow(QMainWindow):
                 self.class_remap = {}
                 self.mask_class_remap = {}
                 self.included_orig_ids = set()
-                self._validation_cache.clear()
-                self.color_type_stats = self._empty_color_stats()
-                self.bit_type_stats = self._empty_bit_stats()
+                self.validator.clear_cache()
+                self.color_type_stats = ImageStats.empty_color_stats()
+                self.bit_type_stats = ImageStats.empty_bit_stats()
                 self._yaml_mode = False
                 self.validation_warning_label.setVisible(False)
                 self._update_pair_count_label("")
