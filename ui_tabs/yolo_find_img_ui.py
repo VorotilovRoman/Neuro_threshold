@@ -217,7 +217,7 @@ class setup_yolo_find_img_ui(object):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.thumbnail_container = QWidget()
-        self.thumbnail_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.thumbnail_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.thumbnail_grid = QGridLayout(self.thumbnail_container)
         self.thumbnail_grid.setSpacing(10)
         self.thumbnail_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -255,6 +255,8 @@ class setup_yolo_find_img_ui(object):
         bottom_results_layout.addWidget(self.log_widget)
 
         right_v_splitter.addWidget(bottom_results_widget)
+        right_v_splitter.setStretchFactor(0, 0)
+        right_v_splitter.setStretchFactor(1, 1)
         right_v_splitter.setSizes([340, 520])
 
         h_splitter.addWidget(right_widget)
