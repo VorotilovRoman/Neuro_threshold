@@ -587,34 +587,65 @@ class Labeler(QMainWindow):
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
         thickness, font_scale, font_thickness, _ = get_display_params(img.shape)
-        color_normal = settings.get_color('annotation')
         color_selected = settings.get_color('selected')
         selected_idx = self.object_list.currentRow()
 
         for i, ann in enumerate(self.current_annotations):
             typ = ann[0]
-            color = color_selected if i == selected_idx else color_normal
+            # cls берём как ann[1]; на всякий случай приводим к int
+            try:
+                cls_id = int(ann[1])
+            except (TypeError, ValueError):
+                cls_id = 0
+
+            class_color = get_class_color(cls_id)
+            # Рамка/контур: у выделенного — цвет выделения, иначе — цвет класса
+            line_color = color_selected if i == selected_idx else class_color
+
+            # Подпись: только номер класса
+            label_text = f"{cls_id}"
+
             if typ == 'detect':
-                _, cls, cx, cy, bw, bh = ann
+                _, _, cx, cy, bw, bh = ann
                 x = int((cx - bw / 2) * self.img_w)
                 y = int((cy - bh / 2) * self.img_h)
                 x2 = x + int(bw * self.img_w)
                 y2 = y + int(bh * self.img_h)
-                cv2.rectangle(img, (x, y), (x2, y2), color, thickness)
+
+                cv2.rectangle(img, (x, y), (x2, y2), line_color, thickness)
+                draw_class_label(
+                    img, label_text, x, y, x2 - x, y2 - y,
+                    font_scale, font_thickness, class_color,
+                )
+
             elif typ in ('obb', 'segment'):
-                _, cls, points = ann
+                _, _, points = ann
                 pts = []
                 for j in range(0, len(points), 2):
                     px = int(points[j] * self.img_w)
                     py = int(points[j + 1] * self.img_h)
                     pts.append([px, py])
                 if len(pts) >= 2:
-                    pts = np.array(pts, dtype=np.int32)
-                    cv2.polylines(img, [pts], isClosed=True, color=color,
-                                  thickness=thickness)
+                    pts_np = np.array(pts, dtype=np.int32)
+                    cv2.polylines(img, [pts_np], isClosed=True,
+                                  color=line_color, thickness=thickness)
+
+                    # Позиция подписи — по AABB полигона
+                    xs = pts_np[:, 0]
+                    ys = pts_np[:, 1]
+                    bx = int(xs.min())
+                    by = int(ys.min())
+                    bw_box = int(xs.max() - bx)
+                    bh_box = int(ys.max() - by)
+
+                    draw_class_label(
+                        img, label_text, bx, by, bw_box, bh_box,
+                        font_scale, font_thickness, class_color,
+                    )
 
         pixmap = numpy_to_qpixmap(img)
         self.image_view.set_pixmap(pixmap)
+
 
     def update_histogram(self, gray_img):
         self.hist_ax.clear()

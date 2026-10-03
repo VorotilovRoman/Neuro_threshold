@@ -61,6 +61,90 @@ def draw_label_rotated(img_color, label, center, font_scale, font_thickness, col
                 font_scale, color, font_thickness, cv2.LINE_AA)
 
 
+
+# ---------- Палитра классов 0..9 и подписи с цветным фоном ----------
+# BGR-цвета подобраны так, чтобы белый текст поверх читался.
+CLASS_COLORS = [
+    (0,   0,   200),   # 0 — красный
+    (0,   130, 220),   # 1 — оранжевый
+    (0,   150, 150),   # 2 — тёмно-бирюзовый
+    (0,   140, 0),     # 3 — зелёный
+    (170, 110, 0),     # 4 — тёмно-синий
+    (200, 0,   0),     # 5 — синий
+    (180, 0,   180),   # 6 — пурпурный
+    (110, 0,   110),   # 7 — фиолетовый
+    (19,  69,  139),   # 8 — коричневый
+    (100, 100, 0),     # 9 — оливковый
+]
+
+
+def get_class_color(cls_id):
+    """Цвет (BGR) для класса. Для id >= 10 цвета циклически повторяются."""
+    try:
+        cid = int(cls_id)
+    except (TypeError, ValueError):
+        cid = 0
+    if cid < 0:
+        return (128, 128, 128)
+    return CLASS_COLORS[cid % len(CLASS_COLORS)]
+
+
+def draw_class_label(img, text, x, y, box_w, box_h,
+                     font_scale, font_thickness, bg_color,
+                     text_color=(255, 255, 255), padding=4, margin=5):
+    """
+    Рисует текстовую подпись поверх изображения на цветной плашке.
+
+    x, y         — координаты верхнего левого угла области (bbox/ААВВ полигона);
+    box_w,box_h  — размеры области (для fallback: подпись сверху, иначе снизу,
+                   иначе внутри);
+    bg_color     — цвет плашки (BGR);
+    text_color   — цвет текста (по умолчанию белый).
+
+    Возвращает изображение (меняется in-place).
+    """
+    h, w = img.shape[:2]
+    (text_w, text_h), _ = cv2.getTextSize(
+        text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+    )
+
+    # Определяем baseline-координату и левый край текста
+    if y - text_h - margin >= 0:
+        baseline_y = y - margin
+        text_x = x
+    elif y + box_h + text_h + margin <= h:
+        baseline_y = y + box_h + text_h + margin
+        text_x = x
+    else:
+        baseline_y = y + text_h + margin
+        text_x = x + margin
+
+    # Не вылезаем за правый край
+    if text_x + text_w + padding > w:
+        text_x = w - text_w - padding
+    if text_x - padding < 0:
+        text_x = padding
+
+    # Границы плашки
+    left   = text_x - padding
+    top    = baseline_y - text_h - padding
+    right  = text_x + text_w + padding
+    bottom = baseline_y + padding
+
+    # Клампим по изображению
+    left_c   = max(0, left)
+    top_c    = max(0, top)
+    right_c  = min(w, right)
+    bottom_c = min(h, bottom)
+
+    if right_c > left_c and bottom_c > top_c:
+        cv2.rectangle(img, (left_c, top_c), (right_c, bottom_c), bg_color, -1)
+
+    cv2.putText(img, text, (text_x, baseline_y),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color,
+                font_thickness, cv2.LINE_AA)
+    return img
+
 # ---------- Методы бинаризации ----------
 def simple_threshold(img, thresh):
     _, binary = cv2.threshold(img, thresh, 255, cv2.THRESH_BINARY)

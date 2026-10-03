@@ -31,7 +31,7 @@ from utils_ops.segmentation_ops import (
     segment_contours, segment_projections, segment_min_area_rect, get_display_params, normalize_method_name,
     apply_threshold_method, apply_morphology, draw_selected_objects,
     format_object_for_list, update_annotation_list, delete_annotation_by_index,
-    draw_yolo_annotations, draw_label, draw_label_rotated
+    draw_yolo_annotations, draw_label, draw_label_rotated, get_class_color, draw_class_label
 )
 from utils.settings import settings, apply_theme
 from utils.presets import (
