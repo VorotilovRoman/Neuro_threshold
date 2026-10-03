@@ -109,7 +109,6 @@ class Labeler(QMainWindow):
         self._lazy_cache = None
 
         # Карта {путь_к_изображению: путь_к_файлу_меток}.
-        # Заполняется при загрузке из YAML (там .txt лежат НЕ рядом с картинкой).
         self._yaml_label_map = {}
         self._label_folder = None
 
@@ -130,45 +129,63 @@ class Labeler(QMainWindow):
         self._validation_per_image = {}     # idx -> [(valid, err), ...]
         self._validation_thread = None
 
+        # Модель авторазметки
+        self.auto_model = None
+
         # UI
         setup_layout_dataset_ui(self)
 
-        # Настройка SmartGraphicsView – используем унифицированные аннотации
+        # Настройка SmartGraphicsView — используем унифицированные аннотации
         self.image_view.set_callbacks(
             on_rect_drawn=self.on_rect_drawn,
+            on_obb_drawn=self.on_obb_drawn,
+            on_segment_drawn=self.on_segment_drawn,
             on_display_update=self.update_image_display,
             on_reset_tool=self.reset_drawing_tool,
             on_annotation_modified=self.on_annotation_modified,
             on_selection_changed=self.on_selection_changed,
-            on_log=self.log
+            on_log=self.log,
         )
 
-        # Сигналы
+        # --- Сигналы навигации и загрузки ---
         self.nav_widget.load_folder.connect(self.load_folder)
         self.nav_widget.load_images.connect(self.load_images)
-        self.save_button.clicked.connect(self.save_labels)
-        self.add_rect_button.clicked.connect(self.toggle_drawing_mode)
-        self.delete_button.clicked.connect(self.delete_selected_object)
-
-        self.btn_load_labels.clicked.connect(self.load_labels_folder)
-        self.btn_load_yaml.clicked.connect(self.load_yaml)
-
-        self.object_list.itemClicked.connect(self.on_object_selected_from_list)
-        self.object_list.itemDoubleClicked.connect(self.on_object_double_clicked)
         self.nav_widget.prev.connect(self.prev_image)
         self.nav_widget.next.connect(self.next_image)
         self.nav_widget.resize_toggled.connect(self.on_resize_mode_changed)
         self.nav_widget.goto_page.connect(self.goto_image)
-        self.toggle_log_btn.clicked.connect(self.toggle_log)
-        self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
 
+        self.btn_load_labels.clicked.connect(self.load_labels_folder)
+        self.btn_load_yaml.clicked.connect(self.load_yaml)
+        self.save_button.clicked.connect(self.save_labels)
+        self.btn_save_all.clicked.connect(self.save_all_annotations)
+
+        # --- Инструменты рисования ---
+        self.tool_group.buttonClicked.connect(self.on_tool_selected)
+
+        # --- Формат сохранения OBB ---
+        self.chk_obb_xywhr.toggled.connect(self.on_obb_format_toggled)
+
+        # --- Auto-label (YOLO) ---
+        self.btn_load_auto_model.clicked.connect(self.load_auto_model)
+        self.btn_auto_current.clicked.connect(
+            lambda: self.run_auto_label(all_images=False))
+        self.btn_auto_all.clicked.connect(
+            lambda: self.run_auto_label(all_images=True))
+
+        # --- Список объектов ---
+        self.delete_button.clicked.connect(self.delete_selected_object)
+        self.delete_all_button.clicked.connect(self.delete_all_annotations)
+        self.object_list.itemClicked.connect(self.on_object_selected_from_list)
+        self.object_list.itemDoubleClicked.connect(self.on_object_double_clicked)
         self.object_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.object_list.customContextMenuRequested.connect(self.show_object_context_menu)
 
+        # --- Лог / гистограмма ---
+        self.toggle_log_btn.clicked.connect(self.toggle_log)
+        self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
+
         # Начальное состояние
-        self.add_rect_button.setChecked(True)
-        if self.image_paths:
-            self.toggle_drawing_mode(True)
         self.update_navigation_state()
         self.log_widget.setVisible(False)
 
@@ -182,14 +199,81 @@ class Labeler(QMainWindow):
         print(message)
 
     # ----------------------------------------------------------------------
-    #  Ленивая загрузка изображений (единая точка входа)
+    #  Инструменты рисования
+    # ----------------------------------------------------------------------
+    def _active_tool_name(self):
+        if self.btn_tool_rect.isChecked():
+            return "rect"
+        if self.btn_tool_segment.isChecked():
+            return "segment"
+        if self.btn_tool_obb.isChecked():
+            return "obb"
+        return None
+
+    def _uncheck_all_tools(self):
+        self.tool_group.setExclusive(False)
+        for b in (self.btn_tool_rect, self.btn_tool_segment, self.btn_tool_obb):
+            b.setChecked(False)
+        self.tool_group.setExclusive(True)
+
+    def on_tool_selected(self, btn):
+        if btn is self.btn_tool_rect:
+            tool = "rect"
+        elif btn is self.btn_tool_segment:
+            tool = "segment"
+        elif btn is self.btn_tool_obb:
+            tool = "obb"
+        else:
+            return
+
+        if not self.image_paths:
+            self.log(f"Инструмент: {tool} (изображения не загружены).")
+            return
+
+        if self.image_view.edit_mode:
+            self.image_view.set_edit_mode(False)
+        self.image_view.set_selected_index(-1)
+        self.image_view.set_drawing_tool(tool)
+        self.log(f"Инструмент: {tool}")
+
+    def toggle_drawing_mode(self, checked):
+        if not self.image_paths:
+            self._uncheck_all_tools()
+            self.log("No image loaded. Cannot enable drawing mode.")
+            return
+        if checked:
+            tool = self._active_tool_name()
+            if tool is None:
+                self.btn_tool_rect.setChecked(True)
+                tool = "rect"
+            if self.image_view.edit_mode:
+                self.image_view.set_edit_mode(False)
+            self.image_view.set_selected_index(-1)
+            self.image_view.set_drawing_tool(tool)
+            self.log(f"Drawing mode ON ({tool}).")
+        else:
+            self._uncheck_all_tools()
+            self.image_view.set_drawing_tool(None)
+            self.log("Drawing mode OFF (panning mode).")
+
+    def reset_drawing_tool(self):
+        self._uncheck_all_tools()
+        self.image_view.set_drawing_tool(None)
+        self.image_view.set_selected_index(-1)
+        self.log("Drawing mode OFF.")
+
+    # ----------------------------------------------------------------------
+    #  Формат сохранения OBB
+    # ----------------------------------------------------------------------
+    def on_obb_format_toggled(self, checked):
+        fmt = "xywhr (cx cy w h angle_rad)" if checked else \
+              "corners (x1 y1 x2 y2 x3 y3 x4 y4)"
+        self.log(f"Формат сохранения OBB: {fmt}")
+
+    # ----------------------------------------------------------------------
+    #  Ленивая загрузка изображений
     # ----------------------------------------------------------------------
     def _load_images(self, source, label_map=None):
-        """
-        source    — папка (str) или список путей.
-        label_map — опциональная карта {img_path: label_path} (YAML-режим).
-        """
-        # --- Собираем список файлов БЕЗ загрузки картинок ---
         if isinstance(source, str) and os.path.isdir(source):
             exts = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
             all_files = sorted(
@@ -212,12 +296,10 @@ class Labeler(QMainWindow):
         resize_enabled = self.nav_widget._resize_cb.isChecked()
         max_side = 1024
 
-        # --- Останавливаем предыдущий кэш ---
         if self._lazy_cache is not None:
             self._lazy_cache.shutdown()
             self._lazy_cache = None
 
-        # --- Создаём новый кэш ---
         loader = lambda p: load_one_image_item(
             p,
             resize_enabled=resize_enabled,
@@ -233,7 +315,6 @@ class Labeler(QMainWindow):
             max_workers=2,
         )
 
-        # --- Сброс состояния ---
         self.image_paths = all_files
         self.current_index = 0
         self.current_annotations = []
@@ -245,13 +326,11 @@ class Labeler(QMainWindow):
         self.image_view.set_selected_index(-1)
         self.object_list.clear()
 
-        # --- Синхронно грузим первый снимок ---
         first = self._lazy_cache.get(0)
         if first is None:
             self.log("Не удалось загрузить первое изображение.")
             return
 
-        # --- Остальное окно — в фон ---
         total = len(self._lazy_cache)
         self._lazy_cache.prefetch(
             range(1, min(1 + self._lazy_cache.prefetch_ahead + 1, total))
@@ -262,13 +341,10 @@ class Labeler(QMainWindow):
         self.nav_widget.set_current_index(self.current_index, total)
         self.update_navigation_state()
 
-        # Кнопка рисования была снята при пустом старте — включаем её снова,
-        # чтобы режим рисования работал как раньше.
-        if not self.add_rect_button.isChecked():
-            self.add_rect_button.setChecked(True)
-            self.toggle_drawing_mode(True)
+        if self._active_tool_name() is None:
+            self.btn_tool_rect.setChecked(True)
+        self.image_view.set_drawing_tool(self._active_tool_name() or "rect")
 
-        # Запускаем фоновую валидацию всех пар
         self._start_annotation_validation()
 
     def load_folder(self):
@@ -360,7 +436,6 @@ class Labeler(QMainWindow):
             return
         self.log(f"Загрузка меток из {folder}")
 
-        # Переключаемся из YAML-режима в «метки из папки»
         self._yaml_label_map = {}
         self._label_folder = folder
 
@@ -379,10 +454,6 @@ class Labeler(QMainWindow):
         self._start_annotation_validation()
 
     def _collect_yaml_items(self, yaml_path):
-        """
-        Собирает изображения из YAML, НЕ загружая их в память.
-        Возвращает (image_paths, {img_path: label_path}).
-        """
         with open(yaml_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
@@ -473,7 +544,6 @@ class Labeler(QMainWindow):
 
         self.update_histogram(gray)
 
-        # --- Ленивая инициализация аннотаций для текущего индекса ---
         if (idx >= len(self.all_annotations)) or (self.all_annotations[idx] is None):
             label_path = self._yaml_label_map.get(self.image_paths[idx]) \
                 if self._yaml_label_map else None
@@ -498,12 +568,9 @@ class Labeler(QMainWindow):
         self.info_label.setText(f"Image {idx + 1} of {total}")
         self.nav_widget.set_current_index(idx, total)
 
-        if self.add_rect_button.isChecked():
-            self.image_view.set_drawing_tool("rect")
-        else:
-            self.image_view.set_drawing_tool(None)
+        tool = self._active_tool_name()
+        self.image_view.set_drawing_tool(tool)
 
-        # --- Префетч следующего окна + вытеснение дальних ---
         ahead = self._lazy_cache.prefetch_ahead
         self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
         self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
@@ -558,9 +625,6 @@ class Labeler(QMainWindow):
         self.hist_ax.set_ylabel("Frequency")
         self.hist_canvas.draw()
 
-    # ----------------------------------------------------------------------
-    #  Синхронизация текущих аннотаций в хранилище (ленивое)
-    # ----------------------------------------------------------------------
     def _sync_current_annotations_to_storage(self):
         idx = self.current_index
         while len(self.all_annotations) <= idx:
@@ -568,7 +632,7 @@ class Labeler(QMainWindow):
         self.all_annotations[idx] = list(self.current_annotations)
 
     # ----------------------------------------------------------------------
-    #  Валидация аннотаций (фоновый поток)
+    #  Валидация
     # ----------------------------------------------------------------------
     def _start_annotation_validation(self):
         if self._validation_thread is not None and self._validation_thread.isRunning():
@@ -595,7 +659,7 @@ class Labeler(QMainWindow):
         if total > 0:
             self.validation_status_label.setText(f"⏳ Проверка разметки: {done}/{total}")
             self.validation_status_label.setStyleSheet(
-                "color: #0055aa; font-weight: bold; padding: 2px;"
+                "color: #0055aa; font-weight: bold; padding: 4px;"
             )
             self.validation_status_label.setVisible(True)
 
@@ -620,10 +684,10 @@ class Labeler(QMainWindow):
         more = "" if len(bad_idx) <= 10 else f" и ещё {len(bad_idx) - 10}"
         self.validation_status_label.setText(
             f"⚠️ Некорректная разметка у {len(bad_idx)} снимков: {preview}{more}. "
-            f"Некорректные объекты выделены красным в списке справа."
+            f"Некорректные объекты выделены красным в списке."
         )
         self.validation_status_label.setStyleSheet(
-            "color: #b00000; font-weight: bold; padding: 2px;"
+            "color: #b00000; font-weight: bold; padding: 4px;"
         )
         self.validation_status_label.setVisible(True)
 
@@ -684,27 +748,27 @@ class Labeler(QMainWindow):
     def update_navigation_state(self):
         has_images = len(self.image_paths) > 0
         self.save_button.setEnabled(has_images)
-        self.add_rect_button.setEnabled(has_images)
+        self.btn_save_all.setEnabled(has_images)
+        self.btn_tool_rect.setEnabled(has_images)
+        self.btn_tool_segment.setEnabled(has_images)
+        self.btn_tool_obb.setEnabled(has_images)
         self.delete_button.setEnabled(has_images and len(self.current_annotations) > 0)
+        self.delete_all_button.setEnabled(has_images and len(self.current_annotations) > 0)
         self.nav_widget.set_navigation_enabled(has_images)
 
     # ----------------------------------------------------------------------
-    #  Рисование новых прямоугольников (detect)
+    #  Рисование новых аннотаций
     # ----------------------------------------------------------------------
-    def toggle_drawing_mode(self, checked):
-        if not self.image_paths:
-            self.add_rect_button.setChecked(False)
-            self.log("No image loaded. Cannot enable drawing mode.")
-            return
-        if checked:
-            if self.image_view.edit_mode:
-                self.image_view.set_edit_mode(False)
-            self.image_view.set_selected_index(-1)
-            self.image_view.set_drawing_tool("rect")
-            self.log("Drawing mode ON. Click and drag to add rectangle.")
-        else:
-            self.image_view.set_drawing_tool(None)
-            self.log("Drawing mode OFF (panning mode).")
+    def _append_annotation(self, new_ann, log_text):
+        self.current_annotations.append(new_ann)
+        self._sync_current_annotations_to_storage()
+        self.image_view.set_annotations(self.current_annotations,
+                                        self.img_w, self.img_h)
+        update_annotation_list(self.object_list, self.current_annotations,
+                               self.img_w, self.img_h)
+        self.update_image_display()
+        self.log(log_text)
+        self._revalidate_current()
 
     def on_rect_drawn(self, rect):
         x1, y1, x2, y2 = rect
@@ -717,29 +781,399 @@ class Labeler(QMainWindow):
         bw = w / self.img_w
         bh = h / self.img_h
         new_ann = ('detect', 0, cx, cy, bw, bh)
-        self.current_annotations.append(new_ann)
+        self._append_annotation(
+            new_ann,
+            f"Added rectangle: class=0, center=({cx:.3f},{cy:.3f}), "
+            f"size=({bw:.3f},{bh:.3f})",
+        )
+
+    def on_obb_drawn(self, norm_pts):
+        if not norm_pts or len(norm_pts) != 8:
+            return
+        norm_pts = [max(0.0, min(1.0, float(p))) for p in norm_pts]
+        norm_pts = canonicalize_obb_corners(norm_pts)
+        new_ann = ('obb', 0, norm_pts)
+        self._append_annotation(
+            new_ann,
+            f"Added OBB: class=0, "
+            f"corners=[{', '.join(f'{p:.3f}' for p in norm_pts)}]",
+        )
+
+    def on_segment_drawn(self, norm_pts):
+        if not norm_pts or len(norm_pts) < 6 or len(norm_pts) % 2 != 0:
+            return
+        norm_pts = [max(0.0, min(1.0, float(p))) for p in norm_pts]
+        new_ann = ('segment', 0, norm_pts)
+        n_pts = len(norm_pts) // 2
+        self._append_annotation(
+            new_ann,
+            f"Added segment: class=0, points={n_pts}",
+        )
+
+    # ======================================================================
+    #  AUTO-LABEL (YOLO)
+    # ======================================================================
+    def _resolve_auto_device(self):
+        d = self.auto_device_combo.currentText()
+        if d == "auto":
+            try:
+                return "0" if torch.cuda.is_available() else "cpu"
+            except Exception:
+                return "cpu"
+        if d == "mps":
+            try:
+                mps = getattr(torch.backends, "mps", None)
+                if mps is not None and mps.is_available():
+                    return "mps"
+            except Exception:
+                pass
+            return "cpu"
+        return d
+
+    def load_auto_model(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите модель YOLO", "",
+            "YOLO weights (*.pt *.onnx *.engine);;Все файлы (*)"
+        )
+        if not path:
+            return
+        try:
+            self.auto_model = YOLO(path)
+            self.auto_model_edit.setText(path)
+
+            task = getattr(self.auto_model, "task", "unknown")
+            self.auto_kind_label.setText(f"Тип вывода: {task}")
+
+            names = getattr(self.auto_model, "names", {})
+            self.log(f"[Auto-label] Модель загружена: {path}")
+            self.log(f"[Auto-label] Задача: {task}")
+            if isinstance(names, dict) and names:
+                self.log(f"[Auto-label] Классы: {dict(names)}")
+
+            if not self.image_paths:
+                self.log("[Auto-label] Изображения ещё не загружены.")
+        except Exception as e:
+            self.auto_model = None
+            self.auto_model_edit.clear()
+            self.auto_kind_label.setText("Тип вывода: —")
+            QMessageBox.critical(self, "Ошибка",
+                                 f"Не удалось загрузить модель:\n{e}")
+            self.log(f"[Auto-label] Ошибка загрузки модели: {e}")
+
+    def _auto_infer_one(self, img_bgr):
+        """Прогон YOLO на одном изображении.
+        Возвращает (unified_annotations, kind)."""
+        if self.auto_model is None:
+            return [], "unknown"
+
+        conf = float(self.auto_conf_spin.value())
+        iou = float(self.auto_iou_spin.value())
+        imgsz = int(self.auto_imgsz_spin.value())
+        device = self._resolve_auto_device()
+
+        results = self.auto_model(
+            img_bgr,
+            conf=conf,
+            iou=iou,
+            imgsz=imgsz,
+            device=device,
+            verbose=False,
+        )
+        if not results:
+            return [], "unknown"
+
+        r = results[0]
+        H, W = img_bgr.shape[:2]
+        if W <= 0 or H <= 0:
+            return [], "unknown"
+
+        # --- 1. OBB ---
+        obb = getattr(r, "obb", None)
+        if (obb is not None
+                and getattr(obb, "xyxyxyxy", None) is not None
+                and len(obb) > 0):
+            corners_all = obb.xyxyxyxy.cpu().numpy()
+            cls_all = obb.cls.cpu().numpy().astype(int)
+            unified = []
+            for i in range(len(cls_all)):
+                corners = corners_all[i].tolist()
+                norm = []
+                for (x, y) in corners:
+                    nx = max(0.0, min(1.0, float(x) / W))
+                    ny = max(0.0, min(1.0, float(y) / H))
+                    norm.append(nx)
+                    norm.append(ny)
+                norm = canonicalize_obb_corners(norm)
+                unified.append(("obb", int(cls_all[i]), norm))
+            return unified, "obb"
+
+        # --- 2. Segmentation ---
+        masks = getattr(r, "masks", None)
+        if (masks is not None
+                and getattr(masks, "xy", None) is not None
+                and len(masks.xy) > 0):
+            boxes = getattr(r, "boxes", None)
+            cls_all = []
+            if boxes is not None and len(boxes) > 0:
+                cls_all = boxes.cls.cpu().numpy().astype(int)
+            unified = []
+            for i, poly in enumerate(masks.xy):
+                if poly is None or len(poly) < 3:
+                    continue
+                cls_id = int(cls_all[i]) if i < len(cls_all) else 0
+                flat = []
+                for p in poly:
+                    nx = max(0.0, min(1.0, float(p[0]) / W))
+                    ny = max(0.0, min(1.0, float(p[1]) / H))
+                    flat.append(nx)
+                    flat.append(ny)
+                if len(flat) >= 6 and len(flat) % 2 == 0:
+                    unified.append(("segment", cls_id, flat))
+            return unified, "segment"
+
+        # --- 3. Detection ---
+        boxes = getattr(r, "boxes", None)
+        if boxes is not None and len(boxes) > 0:
+            xyxy_all = boxes.xyxy.cpu().numpy()
+            cls_all = boxes.cls.cpu().numpy().astype(int)
+            unified = []
+            for i in range(len(cls_all)):
+                x1, y1, x2, y2 = [float(v) for v in xyxy_all[i].tolist()]
+                x1 = max(0.0, min(x1, W))
+                y1 = max(0.0, min(y1, H))
+                x2 = max(0.0, min(x2, W))
+                y2 = max(0.0, min(y2, H))
+                bw = (x2 - x1) / W
+                bh = (y2 - y1) / H
+                if bw <= 0 or bh <= 0:
+                    continue
+                cx = ((x1 + x2) / 2.0) / W
+                cy = ((y1 + y2) / 2.0) / H
+                unified.append(("detect", int(cls_all[i]), cx, cy, bw, bh))
+            return unified, "detect"
+
+        return [], "unknown"
+
+    def _apply_auto_annotations(self, unified, replace):
+        if replace:
+            self.current_annotations = list(unified)
+        else:
+            self.current_annotations = list(self.current_annotations) + list(unified)
         self._sync_current_annotations_to_storage()
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
         update_annotation_list(self.object_list, self.current_annotations,
                                self.img_w, self.img_h)
         self.update_image_display()
-        self.log(f"Added rectangle: class=0, center=({cx:.3f},{cy:.3f}), "
-                 f"size=({bw:.3f},{bh:.3f})")
         self._revalidate_current()
 
-    def reset_drawing_tool(self):
-        if self.add_rect_button.isChecked():
-            self.add_rect_button.setChecked(False)
-            self.toggle_drawing_mode(False)
-        self.image_view.set_selected_index(-1)
-        self.log("Drawing mode OFF (right click).")
+    def _resolve_label_path_for_img(self, img_path):
+        if self._yaml_label_map:
+            lp = self._yaml_label_map.get(img_path)
+            if lp and os.path.exists(lp):
+                return lp
+        if self._label_folder:
+            base = os.path.splitext(os.path.basename(img_path))[0]
+            cand = os.path.join(self._label_folder, base + '.txt')
+            if os.path.exists(cand):
+                return cand
+        cand = os.path.splitext(img_path)[0] + '.txt'
+        if os.path.exists(cand):
+            return cand
+        return None
+
+    def run_auto_label(self, all_images=False):
+        if self.auto_model is None:
+            QMessageBox.warning(
+                self, "Auto-label",
+                "Сначала загрузите модель YOLO (кнопка «Загрузить»)."
+            )
+            return
+        if not self.image_paths:
+            QMessageBox.warning(
+                self, "Auto-label",
+                "Сначала загрузите изображения."
+            )
+            return
+
+        if not all_images:
+            self._run_auto_label_current()
+        else:
+            self._run_auto_label_all()
+
+    def _run_auto_label_current(self):
+        if self._lazy_cache is None:
+            return
+        item = self._lazy_cache.get(self.current_index)
+        if item is None:
+            self.log("[Auto-label] Не удалось загрузить текущий снимок.")
+            return
+
+        img = item["image"]
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            unified, kind = self._auto_infer_one(img)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(
+                self, "Ошибка",
+                f"Не удалось выполнить инференс:\n{e}"
+            )
+            self.log(f"[Auto-label] Ошибка инференса: {e}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self.auto_kind_label.setText(f"Тип вывода: {kind}")
+        replace = self.chk_auto_replace.isChecked()
+        self._apply_auto_annotations(unified, replace)
+
+        action = "заменено" if replace else "добавлено"
+        self.log(f"[Auto-label] Текущий снимок: {action} {len(unified)} "
+                 f"объектов (тип={kind})")
+
+    def _run_auto_label_all(self):
+        total = len(self.image_paths)
+        if total == 0:
+            return
+
+        reply = QMessageBox.question(
+            self, "Auto-label",
+            f"Разметить все изображения ({total})?\n\n"
+            f"Текущее поведение: "
+            f"{'заменить существующие аннотации' if self.chk_auto_replace.isChecked() else 'дополнить существующие'}.\n"
+            f"Операция может занять продолжительное время.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        progress = QProgressDialog(
+            "Авторазметка...", "Отмена", 0, total, self
+        )
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        replace = self.chk_auto_replace.isChecked()
+        kind_seen = None
+        processed = 0
+        errors = 0
+        added_objects = 0
+
+        for idx in range(total):
+            if progress.wasCanceled():
+                break
+            progress.setValue(idx)
+            progress.setLabelText(
+                f"Обработка {idx + 1}/{total}: "
+                f"{os.path.basename(self.image_paths[idx])}"
+            )
+            QApplication.processEvents()
+
+            # --- Загрузка изображения ---
+            try:
+                img = read_image_with_fallback(self.image_paths[idx])
+                if img is None:
+                    errors += 1
+                    self.log(f"[Auto-label] Не удалось прочитать "
+                             f"{os.path.basename(self.image_paths[idx])}")
+                    continue
+                img = normalize_to_uint8(img)
+                if len(img.shape) == 2:
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                elif img.shape[2] == 4:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                elif img.shape[2] != 3:
+                    img = img[:, :, :3]
+            except Exception as e:
+                errors += 1
+                self.log(f"[Auto-label] Ошибка чтения "
+                         f"{os.path.basename(self.image_paths[idx])}: {e}")
+                continue
+
+            # --- Инференс ---
+            try:
+                unified, kind = self._auto_infer_one(img)
+                kind_seen = kind
+            except Exception as e:
+                errors += 1
+                self.log(f"[Auto-label] Ошибка инференса "
+                         f"{os.path.basename(self.image_paths[idx])}: {e}")
+                continue
+
+            # --- Применение ---
+            try:
+                while len(self.all_annotations) <= idx:
+                    self.all_annotations.append(None)
+
+                if replace:
+                    self.all_annotations[idx] = list(unified)
+                else:
+                    existing = self.all_annotations[idx]
+                    if existing is None:
+                        label_path = self._resolve_label_path_for_img(
+                            self.image_paths[idx])
+                        if label_path:
+                            try:
+                                existing = load_annotations(label_path, 1, 1)
+                            except Exception:
+                                existing = []
+                        else:
+                            existing = []
+                    self.all_annotations[idx] = list(existing) + list(unified)
+
+                self._validation_per_image[idx] = [
+                    _validate_unified_annotation(a)
+                    for a in self.all_annotations[idx]
+                ]
+                processed += 1
+                added_objects += len(unified)
+            except Exception as e:
+                errors += 1
+                self.log(f"[Auto-label] Ошибка применения "
+                         f"{os.path.basename(self.image_paths[idx])}: {e}")
+                continue
+
+        progress.setValue(total)
+        progress.close()
+
+        # --- Обновляем текущий снимок, если его разметка изменилась ---
+        if (self.current_index < total
+                and self.all_annotations[self.current_index] is not None):
+            self.current_annotations = list(
+                self.all_annotations[self.current_index])
+            self.image_view.set_annotations(self.current_annotations,
+                                            self.img_w, self.img_h)
+            update_annotation_list(self.object_list, self.current_annotations,
+                                   self.img_w, self.img_h)
+            self.update_image_display()
+            self._revalidate_current()
+
+        self._update_validation_status()
+        self._apply_validation_colors_to_list()
+
+        if kind_seen:
+            self.auto_kind_label.setText(f"Тип вывода: {kind_seen}")
+
+        self.log(f"[Auto-label] Обработано {processed}/{total} "
+                 f"(объектов: {added_objects}, ошибок: {errors}); "
+                 f"тип={kind_seen or '—'}")
+
+        QMessageBox.information(
+            self, "Auto-label",
+            f"Обработано изображений: {processed}/{total}\n"
+            f"Добавлено/заменено объектов: {added_objects}\n"
+            f"Ошибок чтения/инференса: {errors}\n"
+            f"Тип вывода модели: {kind_seen or '—'}\n\n"
+            f"⚠️ Изменения пока только в памяти.\n"
+            f"Не забудьте сохранить разметку (Save Labels / Save All)."
+        )
 
     # ----------------------------------------------------------------------
-    #  Редактирование аннотаций (общее для detect, obb, segment)
+    #  Редактирование аннотаций
     # ----------------------------------------------------------------------
     def on_annotation_modified(self, idx, new_ann):
-        """Новая аннотация уже в унифицированном формате."""
         if idx < 0 or idx >= len(self.current_annotations):
             return
         self.current_annotations[idx] = new_ann
@@ -751,19 +1185,18 @@ class Labeler(QMainWindow):
         self._revalidate_current()
 
     def on_selection_changed(self, idx):
-        """Вызывается при выделении через smart_view."""
         if self._updating_selection:
             return
         self._updating_selection = True
         try:
-            if idx != -1 and self.add_rect_button.isChecked():
-                self.add_rect_button.setChecked(False)
-                self.toggle_drawing_mode(False)
             if idx != -1:
+                self._uncheck_all_tools()
+                self.image_view.set_drawing_tool(None)
                 self.object_list.blockSignals(True)
                 self.object_list.setCurrentRow(idx)
                 self.object_list.blockSignals(False)
             self.update_image_display()
+            self.update_navigation_state()
         finally:
             self._updating_selection = False
 
@@ -777,6 +1210,8 @@ class Labeler(QMainWindow):
         try:
             idx = item.data(Qt.UserRole)
             if idx is not None and 0 <= idx < len(self.current_annotations):
+                self._uncheck_all_tools()
+                self.image_view.set_drawing_tool(None)
                 self.image_view.set_selected_index(idx)
                 self.log(f"Selected object {idx + 1}")
                 self.update_image_display()
@@ -809,12 +1244,97 @@ class Labeler(QMainWindow):
         self.update_image_display()
         self.log(f"Deleted object {idx + 1}")
         self._revalidate_current()
+        self.update_navigation_state()
 
     # ----------------------------------------------------------------------
-    #  Диалог редактирования аннотации: класс + координаты
+    #  Удалить все аннотации текущего снимка
+    # ----------------------------------------------------------------------
+    def delete_all_annotations(self):
+        if not self.image_paths:
+            self.log("Нет загруженных изображений.")
+            return
+        if not self.current_annotations:
+            self.log("На текущем снимке нет аннотаций.")
+            return
+
+        n = len(self.current_annotations)
+        reply = QMessageBox.question(
+            self, "Delete All",
+            f"Удалить все аннотации ({n}) на текущем снимке?\n"
+            f"Другие изображения не затрагиваются.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.current_annotations = []
+        self._sync_current_annotations_to_storage()
+
+        self.image_view.set_selected_index(-1)
+        self.image_view.set_edit_mode(False)
+        self.image_view.set_annotations([], self.img_w, self.img_h)
+        update_annotation_list(self.object_list, [], self.img_w, self.img_h)
+        self.update_image_display()
+        self._revalidate_current()
+        self.update_navigation_state()
+        self.log(f"Удалены все аннотации текущего снимка ({n}).")
+
+    # ----------------------------------------------------------------------
+    #  Смена класса выделенного объекта (Ctrl+0..9)
+    # ----------------------------------------------------------------------
+    def _set_class_of_selected(self, new_class):
+        """Устанавливает класс new_class выбранному объекту.
+        Приоритет — выделение в object_list, затем — во view."""
+        if not self.current_annotations:
+            self.log(f"Нет аннотаций — Ctrl+{new_class} пропущен.")
+            return
+
+        idx = self.object_list.currentRow()
+        if idx < 0 or idx >= len(self.current_annotations):
+            idx = self.image_view.selected_index
+        if idx < 0 or idx >= len(self.current_annotations):
+            self.log(f"Нет выделенного объекта — Ctrl+{new_class} пропущен.")
+            return
+
+        ann = self.current_annotations[idx]
+        old_cls = int(ann[1])
+        new_class = int(new_class)
+        if old_cls == new_class:
+            self.log(f"Класс объекта #{idx + 1} уже {new_class}.")
+            return
+
+        typ = ann[0]
+        if typ == 'detect':
+            _, _, cx, cy, w, h = ann
+            new_ann = ('detect', new_class, cx, cy, w, h)
+        elif typ in ('obb', 'segment'):
+            _, _, points = ann
+            new_ann = (typ, new_class, points)
+        else:
+            self.log(f"Неподдерживаемый тип аннотации '{typ}'.")
+            return
+
+        self.current_annotations[idx] = new_ann
+        self._sync_current_annotations_to_storage()
+
+        update_annotation_list(self.object_list, self.current_annotations,
+                               self.img_w, self.img_h)
+        self.object_list.blockSignals(True)
+        self.object_list.setCurrentRow(idx)
+        self.object_list.blockSignals(False)
+
+        self.image_view.set_annotations(self.current_annotations,
+                                        self.img_w, self.img_h)
+        self.image_view.set_selected_index(idx)
+        self.update_image_display()
+        self._revalidate_current()
+
+        self.log(f"Класс объекта #{idx + 1} ({typ}): {old_cls} → {new_class}.")
+
+    # ----------------------------------------------------------------------
+    #  Диалог редактирования аннотации
     # ----------------------------------------------------------------------
     def _open_annotation_edit_dialog(self, idx):
-        """Универсальный диалог редактирования: Class ID + строка координат."""
         if idx < 0 or idx >= len(self.current_annotations):
             return
         ann = self.current_annotations[idx]
@@ -822,19 +1342,15 @@ class Labeler(QMainWindow):
 
         if typ == 'detect':
             type_desc = "Bounding Box (detect) — 4 числа: cx cy w h"
-            expected = 4
         elif typ == 'obb':
             type_desc = "OBB (4 точки) — 8 чисел: x1 y1 x2 y2 x3 y3 x4 y4"
-            expected = 8
         elif typ == 'segment':
             type_desc = "Segment (полигон) — чётное число ≥ 6: x1 y1 x2 y2 ..."
-            expected = None
         else:
             QMessageBox.warning(self, "Ошибка",
                                 f"Тип '{typ}' не поддерживает редактирование.")
             return
 
-        # Текущие значения
         if typ == 'detect':
             _, cls_orig, cx, cy, w, h = ann
             coords = [cx, cy, w, h]
@@ -842,7 +1358,6 @@ class Labeler(QMainWindow):
             _, cls_orig, points = ann
             coords = list(points)
 
-        # --- Диалог ---
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Редактирование аннотации #{idx + 1}")
         dlg.setMinimumWidth(520)
@@ -882,7 +1397,6 @@ class Labeler(QMainWindow):
 
         new_cls = int(cls_spin.value())
 
-        # Парсинг координат: пробел, запятая, точка с запятой — всё пойдёт
         raw = coords_edit.text().replace(",", " ").replace(";", " ").split()
         try:
             new_coords = [float(t) for t in raw]
@@ -891,7 +1405,6 @@ class Labeler(QMainWindow):
                                 f"Не удалось разобрать координаты: {e}")
             return
 
-        # Проверка количества
         if typ == 'detect' and len(new_coords) != 4:
             QMessageBox.warning(self, "Ошибка", "Для detect нужно ровно 4 числа.")
             return
@@ -903,9 +1416,11 @@ class Labeler(QMainWindow):
                                 "Для segment нужно чётное число ≥ 6.")
             return
 
-        # Сборка новой аннотации
         if typ == 'detect':
             new_ann = ('detect', new_cls, *new_coords)
+        elif typ == 'obb':
+            norm_canon = canonicalize_obb_corners(new_coords)
+            new_ann = ('obb', new_cls, norm_canon)
         else:
             new_ann = (typ, new_cls, new_coords)
 
@@ -921,16 +1436,14 @@ class Labeler(QMainWindow):
         self._revalidate_current()
 
     def on_object_double_clicked(self, item):
-        # При двойном клике выключаем режим рисования, если он активен
-        if self.add_rect_button.isChecked():
-            self.add_rect_button.setChecked(False)
-            self.toggle_drawing_mode(False)
+        if self._active_tool_name() is not None:
+            self._uncheck_all_tools()
+            self.image_view.set_drawing_tool(None)
 
         idx = item.data(Qt.UserRole)
         if idx is None:
             return
         self._open_annotation_edit_dialog(idx)
-
 
     def show_object_context_menu(self, pos):
         item = self.object_list.itemAt(pos)
@@ -948,7 +1461,7 @@ class Labeler(QMainWindow):
             menu.exec_(self.object_list.mapToGlobal(pos))
 
     # ----------------------------------------------------------------------
-    #  Сохранение аннотаций
+    #  Сохранение
     # ----------------------------------------------------------------------
     def save_labels(self):
         if not self.image_paths:
@@ -956,23 +1469,118 @@ class Labeler(QMainWindow):
             return
         img_path = self.image_paths[self.current_index]
         txt_path = os.path.splitext(img_path)[0] + ".txt"
-        success = save_annotations(self.current_annotations, txt_path,
-                                   self.img_w, self.img_h)
+
+        obb_as_xywhr = self.chk_obb_xywhr.isChecked()
+        success = save_annotations(
+            self.current_annotations, txt_path,
+            self.img_w, self.img_h,
+            obb_as_xywhr=obb_as_xywhr,
+        )
         if success:
-            self.log(f"Saved {len(self.current_annotations)} labels to {txt_path}")
-            QMessageBox.information(self, "Save", f"Labels saved to {txt_path}")
+            fmt = "xywhr" if obb_as_xywhr else "corners"
+            self.log(f"Saved {len(self.current_annotations)} labels to {txt_path} "
+                     f"(OBB format: {fmt})")
+            QMessageBox.information(self, "Save",
+                                    f"Labels saved to {txt_path}")
         else:
             self.log(f"Error saving labels to {txt_path}")
-            QMessageBox.critical(self, "Error", f"Failed to save labels to {txt_path}")
+            QMessageBox.critical(self, "Error",
+                                 f"Failed to save labels to {txt_path}")
+
+    # ----------------------------------------------------------------------
+    #  Сохранить все аннотации
+    # ----------------------------------------------------------------------
+    def _resolve_save_path_for_img(self, img_path):
+        """Куда сохранять .txt для данного изображения (без требования
+        существования файла)."""
+        if self._yaml_label_map:
+            lp = self._yaml_label_map.get(img_path)
+            if lp:
+                return lp
+        if self._label_folder:
+            base = os.path.splitext(os.path.basename(img_path))[0]
+            return os.path.join(self._label_folder, base + '.txt')
+        return os.path.splitext(img_path)[0] + '.txt'
+
+    def save_all_annotations(self):
+        """Сохраняет аннотации всех уже загруженных/изменённых изображений."""
+        if not self.image_paths:
+            QMessageBox.warning(self, "No Image", "No images loaded.")
+            return
+
+        loaded = []
+        for i in range(len(self.image_paths)):
+            if i >= len(self.all_annotations):
+                continue
+            anns = self.all_annotations[i]
+            if anns is None:
+                continue
+            loaded.append((i, anns))
+
+        if not loaded:
+            QMessageBox.information(
+                self, "Save All",
+                "Нет загруженных аннотаций для сохранения.\n"
+                "Откройте хотя бы один снимок или запустите авторазметку."
+            )
+            return
+
+        obb_as_xywhr = self.chk_obb_xywhr.isChecked()
+        fmt = "xywhr" if obb_as_xywhr else "corners"
+
+        reply = QMessageBox.question(
+            self, "Save All",
+            f"Сохранить аннотации для {len(loaded)} изображений?\n\n"
+            f"Формат OBB: {fmt}.\n"
+            f"Существующие .txt будут перезаписаны.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        ok = 0
+        err = 0
+        for idx, anns in loaded:
+            img_path = self.image_paths[idx]
+            txt_path = self._resolve_save_path_for_img(img_path)
+            try:
+                success = save_annotations(
+                    anns, txt_path, self.img_w, self.img_h,
+                    obb_as_xywhr=obb_as_xywhr,
+                )
+                if success:
+                    ok += 1
+                else:
+                    err += 1
+                    self.log(f"[Save All] ошибка записи: {txt_path}")
+            except Exception as e:
+                err += 1
+                self.log(f"[Save All] исключение для {txt_path}: {e}")
+
+        self.log(f"[Save All] сохранено: {ok}, ошибок: {err} (формат OBB: {fmt})")
+        QMessageBox.information(
+            self, "Save All",
+            f"Сохранено изображений: {ok}\n"
+            f"Ошибок: {err}"
+        )
 
     # ----------------------------------------------------------------------
     #  Обработка клавиш
     # ----------------------------------------------------------------------
     def keyPressEvent(self, event):
+        # Ctrl+0..9 — установить класс выделенному объекту.
+        if event.modifiers() == Qt.ControlModifier:
+            key = event.key()
+            if Qt.Key_0 <= key <= Qt.Key_9:
+                new_class = int(key - Qt.Key_0)
+                self._set_class_of_selected(new_class)
+                event.accept()
+                return
+
         if event.key() == Qt.Key_Escape:
             if self.image_view.edit_mode:
                 self.image_view.set_edit_mode(False)
-            elif self.add_rect_button.isChecked():
+            elif self._active_tool_name() is not None:
                 self.reset_drawing_tool()
         else:
             super().keyPressEvent(event)
@@ -981,7 +1589,7 @@ class Labeler(QMainWindow):
         super().keyReleaseEvent(event)
 
     # ----------------------------------------------------------------------
-    #  Вспомогательные методы
+    #  Вспомогательные
     # ----------------------------------------------------------------------
     def toggle_log(self, checked):
         self.log_widget.setVisible(checked)

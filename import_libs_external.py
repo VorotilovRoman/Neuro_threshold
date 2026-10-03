@@ -78,7 +78,7 @@ from PyQt5.QtWidgets import (
     QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QProgressDialog,
     QMenu, QAction, QGraphicsView, QSplashScreen, QProgressBar, QDoubleSpinBox,
     QDialogButtonBox, QScrollArea, QFormLayout, QGraphicsScene, QGraphicsPixmapItem,
-    QFrame, QLineEdit
+    QFrame, QLineEdit, QButtonGroup
 )
 
 # ========== Matplotlib ==========

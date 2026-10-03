@@ -1,5 +1,7 @@
 from import_libs_external import *
 
+import math
+
 # ============================================================
 # Жёсткие пределы — защита от падения OpenCV/Qt/libtiff
 # на очень больших изображениях (0xC0000409 и т.п.).
@@ -12,6 +14,163 @@ HARD_MAX_SIDE = 16384        # абсолютный предел стороны 
 # (0xC0000409), которое нельзя поймать try/except.
 MAX_QPIXMAP_SIDE = 8192
 
+
+# ============================================================
+# OBB: конвертация между двумя форматами представления
+# ============================================================
+# Внутри приложения OBB всегда хранится как 4 угла (8 нормализованных
+# чисел) — так проще рисовать (cv2.polylines), делать hit-testing
+# (point-in-polygon) и редактировать (перетаскивание вершин).
+#
+# Файл на диске может быть в одном из двух форматов:
+#   1) class_index x1 y1 x2 y2 x3 y3 x4 y4        (9 токенов)
+#   2) class_index cx cy w h angle_rad            (6 токенов, xywhr)
+#
+# Канонизация xywhr (соглашение Ultralytics YOLO):
+#   • w — длинная сторона (long-edge form), w >= h;
+#   • angle — радианы, отсчитывается от +x до направления стороны w,
+#     значение нормализовано в [-π/4, 3π/4);
+#   • угол и его поворот на 180° эквивалентны (бокс без направления).
+# ============================================================
+
+def _xywhr_to_corners(cx, cy, w, h, angle_rad):
+    """
+    (cx, cy, w, h, angle_rad) → 8 нормализованных чисел (4 угла).
+
+    Порядок углов — обход по периметру (как отдаёт cv2.boxPoints):
+        p1 = ctr + v1 + v2
+        p2 = ctr + v1 - v2
+        p3 = ctr - v1 - v2
+        p4 = ctr - v1 + v2
+    где
+        v1 = (w/2 * cos θ,  w/2 * sin θ)   — вдоль длинной стороны w
+        v2 = (-h/2 * sin θ, h/2 * cos θ)   — вдоль короткой стороны h
+    """
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    dx = w / 2.0
+    dy = h / 2.0
+
+    v1x, v1y = dx * cos_a, dx * sin_a
+    v2x, v2y = -dy * sin_a, dy * cos_a
+
+    return [
+        cx + v1x + v2x, cy + v1y + v2y,
+        cx + v1x - v2x, cy + v1y - v2y,
+        cx - v1x - v2x, cy - v1y - v2y,
+        cx - v1x + v2x, cy - v1y + v2y,
+    ]
+
+
+def _corners_to_xywhr(corners):
+    """
+    8 нормализованных чисел (4 угла) → (cx, cy, w, h, angle_rad).
+
+    Приводит бокс к канонической long-edge форме YOLO:
+        w >= h, angle ∈ [-π/4, 3π/4).
+    """
+    pts = np.asarray(corners, dtype=np.float64).reshape(4, 2)
+    cx = float(pts[:, 0].mean())
+    cy = float(pts[:, 1].mean())
+
+    # Рёбра (p_{i+1} - p_i)
+    edges = []
+    for i in range(4):
+        p1 = pts[i]
+        p2 = pts[(i + 1) % 4]
+        edges.append((p2[0] - p1[0], p2[1] - p1[1]))
+
+    lengths = [math.hypot(dx, dy) for dx, dy in edges]
+    angles = [math.atan2(dy, dx) for dx, dy in edges]
+
+    # Длинное ребро — это w и ориентация бокса
+    longest_idx = max(range(4), key=lambda i: lengths[i])
+    w = lengths[longest_idx]
+    angle_rad = angles[longest_idx]
+
+    # Короткая сторона — усредняем две перпендикулярные стороны
+    perp1 = (longest_idx + 1) % 4
+    perp2 = (longest_idx + 3) % 4
+    h = (lengths[perp1] + lengths[perp2]) / 2.0
+
+    # Канонизация: w >= h
+    if h > w:
+        w, h = h, w
+        angle_rad += math.pi / 2.0
+
+    # Нормализация угла в [-π/4, 3π/4)
+    angle_rad = angle_rad % math.pi
+    if angle_rad >= 3 * math.pi / 4:
+        angle_rad -= math.pi
+
+    return cx, cy, w, h, angle_rad
+
+
+def canonicalize_obb_corners(norm_pts):
+    """
+    Приводит 8 нормализованных чисел (4 угла OBB) к каноническому порядку,
+    совпадающему с smart_view._obb_to_points:
+
+        p0 — «нижний» угол (максимум y; при равенстве — максимум x),
+        p1 — следующий по периметру,
+        p2, p3 — далее по периметру.
+
+    Правила:
+      1) сортировка по полярному углу от центра даёт периметрический обход;
+      2) первое ребро — самое длинное (w >= h);
+      3) середина первого ребра имеет не меньший y, чем середина
+         противоположного (сторона p0—p1 «ниже»);
+      4) обход — с положительным векторным произведением
+         cross(p1-p0, p2-p1) > 0.
+
+    Функция устойчива к любому входному порядку, включая «бабочку».
+
+    Применяется везде, где OBB приходит из внешнего источника:
+      • load_annotations (для обоих форматов: 4 угла и xywhr);
+      • YOLO auto-label в layout_dataset.
+    """
+    if len(norm_pts) != 8:
+        return list(norm_pts)
+
+    try:
+        pts = [(float(norm_pts[i]), float(norm_pts[i + 1]))
+               for i in range(0, 8, 2)]
+    except (TypeError, ValueError):
+        return list(norm_pts)
+    if len(pts) != 4:
+        return list(norm_pts)
+
+    cx = sum(p[0] for p in pts) / 4.0
+    cy = sum(p[1] for p in pts) / 4.0
+
+    # 1) Периметрический обход.
+    pts = sorted(pts, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+
+    def _dist(a, b):
+        return math.hypot(b[0] - a[0], b[1] - a[1])
+
+    # 2) Длинное ребро — первым.
+    if _dist(pts[0], pts[1]) < _dist(pts[1], pts[2]) - 1e-12:
+        pts = pts[1:] + pts[:1]
+
+    # 3) Первое ребро — «нижнее» (больший y у середины).
+    mid_a_y = (pts[0][1] + pts[1][1]) / 2.0
+    mid_b_y = (pts[2][1] + pts[3][1]) / 2.0
+    if mid_a_y < mid_b_y - 1e-12:
+        pts = [pts[2], pts[3], pts[0], pts[1]]
+
+    # 4) Ориентация обхода (на случай, если сортировка дала CCW).
+    p0, p1, p2, p3 = pts
+    v1x, v1y = p1[0] - p0[0], p1[1] - p0[1]
+    v2x, v2y = p2[0] - p1[0], p2[1] - p1[1]
+    if v1x * v2y - v1y * v2x < 0:
+        pts = [p0, p3, p2, p1]
+
+    out = []
+    for (x, y) in pts:
+        out.append(float(x))
+        out.append(float(y))
+    return out
 
 # ---------- Базовые функции работы с изображениями ----------
 def _read_with_pil_draft(image_path, max_side=HARD_MAX_SIDE):
@@ -243,14 +402,33 @@ def numpy_to_qpixmap(img_bgr, max_side=MAX_QPIXMAP_SIDE):
     return QPixmap.fromImage(qimage)
 
 
-# ---------- Работа с аннотациями ----------
+# ============================================================
+# Работа с аннотациями
+# ============================================================
+# Внутренний формат (единый для всего приложения):
+#     ('detect',  cls:int, cx, cy, w, h)                  # 4 норм. числа
+#     ('obb',     cls:int, [x1,y1,x2,y2,x3,y3,x4,y4])     # 8 норм. чисел
+#     ('segment', cls:int, [x1,y1,x2,y2,...])             # чётное ≥6
+#
+# На диске OBB может быть в одном из двух вариантов:
+#     class_index x1 y1 x2 y2 x3 y3 x4 y4        (как есть)
+#     class_index cx cy w h angle_rad            (xywhr, конвертируется
+#                                                 в 4 угла при загрузке)
+# ============================================================
+
 def load_annotations(txt_path, img_w, img_h):
     """
     Загружает аннотации из YOLO .txt файла.
-    Возвращает список кортежей, каждый кортеж имеет вид:
-        ('detect', class_id, cx, cy, w, h)      # 5 чисел
-        ('obb', class_id, [x1,y1,x2,y2,x3,y3,x4,y4])  # 9 чисел (class + 8 координат)
-        ('segment', class_id, [x1,y1,x2,y2,...])      # class + любое чётное количество координат (≥6)
+
+    Возвращает список кортежей:
+        ('detect', class_id, cx, cy, w, h)              # 5 чисел
+        ('obb', class_id, [x1,y1,x2,y2,x3,y3,x4,y4])    # 9 чисел (4 угла)
+        ('obb', class_id, [x1,y1,x2,y2,x3,y3,x4,y4])    # 6 чисел (xywhr) —
+                                                        # конвертируется в 4 угла
+        ('segment', class_id, [x1,y1,x2,y2,...])        # ≥6 чётное число координат
+
+    Параметры img_w, img_h сохранены для обратной совместимости сигнатуры;
+    координаты в файле уже нормализованы и не требуют домножения.
     """
     annotations = []
     if not os.path.exists(txt_path):
@@ -282,25 +460,55 @@ def load_annotations(txt_path, img_w, img_h):
                     print(f"Warning: invalid coordinates in {txt_path} line {line_num}")
                     continue
 
-                # Определяем тип по количеству чисел
-                if len(parts) == 5:  # class + 4 числа -> detect
+                n = len(parts)
+
+                # --- Разбор по числу токенов ---
+                if n == 5:
+                    # class + 4 числа → detect (cx cy w h)
                     cx, cy, w, h = coords
                     annotations.append(('detect', cls, cx, cy, w, h))
-                elif len(parts) == 9:  # class + 8 чисел -> OBB (4 точки)
+
+                elif n == 6:
+                    # class + 5 чисел → OBB в формате xywhr.
+                    # Конвертируем в 4 угла: внутри приложения всегда 4 угла.
+                    cx, cy, w, h, angle = coords
+                    corners = _xywhr_to_corners(cx, cy, w, h, angle)
+                    corners = canonicalize_obb_corners(corners)   # ← добавить
+                    annotations.append(('obb', cls, corners))
+
+                elif n == 9:
+                    # class + 8 чисел → OBB в виде 4 углов (текущий формат)
+                    coords = canonicalize_obb_corners(coords)      # ← добавить
                     annotations.append(('obb', cls, coords))
-                elif len(parts) >= 7 and (len(parts) - 1) % 2 == 0:  # polygon
+
+                elif n >= 7 and (n - 1) % 2 == 0:
+                    # polygon (segment): чётное число координат ≥ 6
                     annotations.append(('segment', cls, coords))
+
                 else:
-                    print(f"Warning: unknown annotation format in {txt_path} line {line_num} (length {len(parts)})")
+                    print(f"Warning: unknown annotation format in "
+                          f"{txt_path} line {line_num} (length {n})")
     except Exception as e:
         print(f"Error loading annotations {txt_path}: {e}")
     return annotations
 
 
-def save_annotations(annotations, txt_path, img_w, img_h):
+def save_annotations(annotations, txt_path, img_w, img_h, obb_as_xywhr=False):
     """
     Сохраняет аннотации в YOLO формате.
+
     Поддерживает типы 'detect', 'obb', 'segment'.
+
+    Параметр obb_as_xywhr управляет форматом записи OBB:
+        False (по умолчанию) — 4 угла:
+            class_index x1 y1 x2 y2 x3 y3 x4 y4
+        True — канонический xywhr:
+            class_index cx cy w h angle_rad
+    Внутреннее представление всегда 4 угла — конвертация выполняется
+    на границе записи.
+
+    Параметры img_w, img_h сохранены для обратной совместимости сигнатуры;
+    координаты уже нормализованы.
     """
     try:
         with open(txt_path, 'w', encoding='utf-8') as f:
@@ -310,8 +518,13 @@ def save_annotations(annotations, txt_path, img_w, img_h):
                     f.write(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
                 elif ann[0] == 'obb':
                     _, cls, points = ann
-                    line = f"{cls} " + " ".join(f"{p:.6f}" for p in points)
-                    f.write(line + "\n")
+                    if obb_as_xywhr:
+                        cx, cy, w, h, angle = _corners_to_xywhr(points)
+                        f.write(f"{cls} {cx:.6f} {cy:.6f} "
+                                f"{w:.6f} {h:.6f} {angle:.6f}\n")
+                    else:
+                        line = f"{cls} " + " ".join(f"{p:.6f}" for p in points)
+                        f.write(line + "\n")
                 elif ann[0] == 'segment':
                     _, cls, points = ann
                     line = f"{cls} " + " ".join(f"{p:.6f}" for p in points)
@@ -325,7 +538,11 @@ def save_annotations(annotations, txt_path, img_w, img_h):
 
 
 def load_annotations_obb(txt_path, img_w, img_h):
-    """Загружает только OBB-аннотации (4 точки) из .txt файла."""
+    """
+    Загружает только OBB-аннотации из .txt файла.
+    Всегда возвращает 4 угла (8 нормализованных чисел) независимо от того,
+    в каком формате файл был на диске (4 угла или xywhr).
+    """
     all_anns = load_annotations(txt_path, img_w, img_h)
     return [(cls, pts) for typ, cls, pts in all_anns if typ == 'obb']
 
@@ -391,11 +608,6 @@ def load_images_universal(source, require_annotations=False, resize_enabled=True
         img_original = normalize_to_uint8(img_original)
 
         # --- HARD LIMIT: до любых cvtColor/resize ---
-        # Если изображение всё ещё превышает жёсткий предел,
-        # уменьшаем его ПЕРЕД BGR/GRAY-конвертацией.
-        # Иначе cvtColor/BGR2GRAY на огромных размерах роняет процесс
-        # с 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN), который нельзя
-        # поймать try/except.
         h0, w0 = img_original.shape[:2]
         if max(h0, w0) > HARD_MAX_SIDE:
             print(f"[load] {os.path.basename(path)}: {w0}x{h0} "
@@ -505,8 +717,6 @@ def load_dataset_from_yaml(yaml_path, resize_enabled=True, max_side=1024, progre
     img_paths, label_paths = zip(*items) if items else ([], [])
 
     # Загружаем изображения с помощью load_images_universal, но аннотации будем загружать отдельно
-    # Поскольку load_images_universal пытается сама найти .txt рядом с изображением, что может не сработать,
-    # мы загрузим изображения без аннотаций, а потом подставим нужные
     paths, imgs, grays, _ = load_images_universal(
         source=list(img_paths),
         require_annotations=False,
@@ -524,7 +734,6 @@ def load_dataset_from_yaml(yaml_path, resize_enabled=True, max_side=1024, progre
     for i, path in enumerate(paths):
         # Находим соответствующий label_path
         label_path = None
-        # map from original img_paths to label_paths
         for orig_path, lbl in zip(img_paths, label_paths):
             if os.path.samefile(path, orig_path):
                 label_path = lbl
@@ -821,7 +1030,6 @@ def load_dataset_from_yaml_with_masks(yaml_path, resize_enabled=True, max_side=1
     return paths, imgs, grays, annotations_list, mask_paths, mask_images_list
 
 
-
 # ============================================================
 # Ленивая загрузка изображений (LRU-кэш с фоновым префетчем)
 # ============================================================
@@ -1047,6 +1255,7 @@ class LazyImageCache:
             for ev in self._events.values():
                 ev.set()
             self._events.clear()
+
 
 # Алиасы для обратной совместимости
 load_images = load_images_universal

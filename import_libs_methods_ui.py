@@ -11,3 +11,4 @@ from ui_tabs.deep_learning_training_ui import setup_deep_learning_training_ui
 from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
 from ui_tabs.yolo_find_img_ui import setup_yolo_find_img_ui
 from ui_tabs.yolo_test_aeb_ui import setup_yolo_ae_vae_ui
+
