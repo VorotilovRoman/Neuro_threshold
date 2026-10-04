@@ -48,6 +48,33 @@ def _validate_unified_annotation(ann):
         return False, f"ошибка проверки: {e}"
 
 
+# ============================================================
+# Конвертация detect → OBB
+# ============================================================
+def _detect_annotation_to_obb(ann):
+    """
+    ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+    Углы нормализованы в [0,1]. Порядок углов соответствует тому,
+    что возвращает SmartGraphicsView._obb_to_points при angle=0:
+    BR → BL → TL → TR (по часовой от правого-нижнего).
+    """
+    if not ann or ann[0] != 'detect':
+        return ann
+    _, cls, cx, cy, w, h = ann
+    x1 = float(cx) - float(w) / 2.0
+    y1 = float(cy) - float(h) / 2.0
+    x2 = float(cx) + float(w) / 2.0
+    y2 = float(cy) + float(h) / 2.0
+    # BR, BL, TL, TR
+    corners = [x2, y2, x1, y2, x1, y1, x2, y1]
+    corners = [max(0.0, min(1.0, float(p))) for p in corners]
+    try:
+        corners = canonicalize_obb_corners(corners)
+    except Exception:
+        pass
+    return ('obb', int(cls), corners)
+
+
 class LabelValidationThread(QThread):
     """Фоновая валидация всех аннотаций загруженного набора."""
     progress = pyqtSignal(int, int)
@@ -159,6 +186,7 @@ class Labeler(QMainWindow):
         self.btn_load_yaml.clicked.connect(self.load_yaml)
         self.save_button.clicked.connect(self.save_labels)
         self.btn_save_all.clicked.connect(self.save_all_annotations)
+        self.btn_convert_all_to_obb.clicked.connect(self.convert_all_detect_to_obb)
 
         # --- Инструменты рисования ---
         self.tool_group.buttonClicked.connect(self.on_tool_selected)
@@ -646,7 +674,6 @@ class Labeler(QMainWindow):
         pixmap = numpy_to_qpixmap(img)
         self.image_view.set_pixmap(pixmap)
 
-
     def update_histogram(self, gray_img):
         self.hist_ax.clear()
         self.hist_ax.hist(gray_img.ravel(), bins=256, range=(0, 256),
@@ -780,6 +807,7 @@ class Labeler(QMainWindow):
         has_images = len(self.image_paths) > 0
         self.save_button.setEnabled(has_images)
         self.btn_save_all.setEnabled(has_images)
+        self.btn_convert_all_to_obb.setEnabled(has_images)
         self.btn_tool_rect.setEnabled(has_images)
         self.btn_tool_segment.setEnabled(has_images)
         self.btn_tool_obb.setEnabled(has_images)
@@ -1363,6 +1391,119 @@ class Labeler(QMainWindow):
         self.log(f"Класс объекта #{idx + 1} ({typ}): {old_cls} → {new_class}.")
 
     # ----------------------------------------------------------------------
+    #  Конвертация detect → OBB (один объект / все снимки)
+    # ----------------------------------------------------------------------
+    def _convert_object_to_obb(self, idx):
+        """Перевести конкретную detect-аннотацию в OBB (по индексу)."""
+        if not (0 <= idx < len(self.current_annotations)):
+            return
+        ann = self.current_annotations[idx]
+        if not ann or ann[0] != 'detect':
+            self.log(f"Объект #{idx + 1} не detect — конвертация не требуется.")
+            return
+
+        new_ann = _detect_annotation_to_obb(ann)
+        self.current_annotations[idx] = new_ann
+        self._sync_current_annotations_to_storage()
+
+        self.image_view.set_annotations(self.current_annotations,
+                                        self.img_w, self.img_h)
+        update_annotation_list(self.object_list, self.current_annotations,
+                               self.img_w, self.img_h)
+
+        # Восстановим выделение
+        self.object_list.blockSignals(True)
+        self.object_list.setCurrentRow(idx)
+        self.object_list.blockSignals(False)
+
+        self.update_image_display()
+        self._revalidate_current()
+        self.log(f"Объект #{idx + 1}: detect → OBB (class={new_ann[1]}).")
+
+    def convert_all_detect_to_obb(self):
+        """Переводит все detect-аннотации во всех уже загруженных
+        снимках (self.all_annotations[i] is not None) в OBB."""
+        if not self.image_paths:
+            QMessageBox.warning(self, "Нет изображений",
+                                "Сначала загрузите изображения.")
+            return
+
+        # Сколько detect реально есть и сколько снимков ещё не открыто
+        total_detect = 0
+        loaded_imgs = 0
+        skipped_imgs = 0
+        for i in range(len(self.image_paths)):
+            if i >= len(self.all_annotations) or self.all_annotations[i] is None:
+                skipped_imgs += 1
+                continue
+            loaded_imgs += 1
+            for a in self.all_annotations[i]:
+                if a and a[0] == 'detect':
+                    total_detect += 1
+
+        if total_detect == 0:
+            QMessageBox.information(
+                self, "Box → OBB",
+                "Обычных bounding box (detect) не найдено "
+                "среди загруженных в память снимков."
+            )
+            return
+
+        extra = ""
+        if skipped_imgs:
+            extra = (f"\n\n⚠️ Пропущено снимков (аннотации не загружены): "
+                     f"{skipped_imgs}.\n"
+                     f"Откройте их, чтобы включить в конвертацию.")
+
+        reply = QMessageBox.question(
+            self, "Box → OBB",
+            f"Перевести {total_detect} detect-аннотаций "
+            f"в {loaded_imgs} снимках в OBB?\n\n"
+            f"Действие необратимо (только в памяти — файлы .txt\n"
+            f"перезапишутся при следующем Save Labels / Save All)."
+            f"{extra}",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        converted = 0
+        for i in range(len(self.image_paths)):
+            if i >= len(self.all_annotations) or self.all_annotations[i] is None:
+                continue
+            old = self.all_annotations[i]
+            new = []
+            changed = False
+            for a in old:
+                if a and a[0] == 'detect':
+                    new.append(_detect_annotation_to_obb(a))
+                    converted += 1
+                    changed = True
+                else:
+                    new.append(a)
+            if changed:
+                self.all_annotations[i] = new
+
+        # Обновляем текущий снимок
+        if (0 <= self.current_index < len(self.all_annotations)
+                and self.all_annotations[self.current_index] is not None):
+            self.current_annotations = list(self.all_annotations[self.current_index])
+            self.image_view.set_annotations(self.current_annotations,
+                                            self.img_w, self.img_h)
+            update_annotation_list(self.object_list, self.current_annotations,
+                                   self.img_w, self.img_h)
+            self.update_image_display()
+            self._revalidate_current()
+
+        self.log(f"[Box → OBB] Переведено detect-аннотаций: {converted} "
+                 f"в {loaded_imgs} снимках.")
+        QMessageBox.information(
+            self, "Box → OBB",
+            f"Переведено detect-аннотаций: {converted}.\n"
+            f"Не забудьте сохранить (Save All)."
+        )
+
+    # ----------------------------------------------------------------------
     #  Диалог редактирования аннотации
     # ----------------------------------------------------------------------
     def _open_annotation_edit_dialog(self, idx):
@@ -1478,18 +1619,36 @@ class Labeler(QMainWindow):
 
     def show_object_context_menu(self, pos):
         item = self.object_list.itemAt(pos)
-        if item is not None:
-            idx = item.data(Qt.UserRole)
-            menu = QMenu()
-            edit_action = QAction("Edit…", self)
-            edit_action.triggered.connect(
-                lambda: self._open_annotation_edit_dialog(idx))
-            delete_action = QAction("Delete", self)
-            delete_action.triggered.connect(lambda: self.delete_object_by_index(idx))
-            menu.addAction(edit_action)
-            menu.addSeparator()
-            menu.addAction(delete_action)
-            menu.exec_(self.object_list.mapToGlobal(pos))
+        if item is None:
+            return
+        idx = item.data(Qt.UserRole)
+        if idx is None or not (0 <= idx < len(self.current_annotations)):
+            return
+
+        ann = self.current_annotations[idx]
+        menu = QMenu(self)
+
+        edit_action = QAction("Edit…", self)
+        edit_action.triggered.connect(
+            lambda: self._open_annotation_edit_dialog(idx))
+        menu.addAction(edit_action)
+
+        # Конвертация detect → OBB (только для обычных боксов)
+        if ann and ann[0] == 'detect':
+            to_obb_action = QAction("Convert to OBB", self)
+            to_obb_action.setToolTip(
+                "Заменить этот прямоугольник (detect) на OBB с теми же углами."
+            )
+            to_obb_action.triggered.connect(
+                lambda: self._convert_object_to_obb(idx))
+            menu.addAction(to_obb_action)
+
+        menu.addSeparator()
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(lambda: self.delete_object_by_index(idx))
+        menu.addAction(delete_action)
+
+        menu.exec_(self.object_list.mapToGlobal(pos))
 
     # ----------------------------------------------------------------------
     #  Сохранение

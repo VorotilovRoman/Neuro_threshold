@@ -21,6 +21,12 @@ def setup_layout_dataset_ui(parent):
         "Сохранить аннотации всех загруженных (и изменённых) изображений.\n"
         "Файлы .txt перезаписываются в текущем формате OBB."
     )
+    parent.btn_convert_all_to_obb = QPushButton("All Box → OBB")
+    parent.btn_convert_all_to_obb.setToolTip(
+        "Перевести все обычные bounding box (detect)\n"
+        "во всех загруженных снимках в OBB-аннотации.\n"
+        "Изменения затрагивают только память — не забудьте Save All."
+    )
 
     # --- Группа эксклюзивных инструментов рисования ---
     parent.tool_group = QButtonGroup(parent)
@@ -65,6 +71,7 @@ def setup_layout_dataset_ui(parent):
     top_layout.addWidget(parent.chk_obb_xywhr)
     top_layout.addWidget(parent.save_button)
     top_layout.addWidget(parent.btn_save_all)
+    top_layout.addWidget(parent.btn_convert_all_to_obb)
     top_layout.addStretch()
     main_layout.addLayout(top_layout)
 

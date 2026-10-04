@@ -20,10 +20,18 @@ def setup_viewing_dataset_ui(parent):
     parent.btn_load_yaml = QPushButton("Load YAML")
     parent.btn_save = QPushButton("Save Labels")
 
+    parent.btn_convert_all_to_obb = QPushButton("All Box → OBB")
+    parent.btn_convert_all_to_obb.setToolTip(
+        "Перевести все обычные bounding box (detect)\n"
+        "во всех уже загруженных в память снимках в OBB-аннотации.\n"
+        "Изменения затрагивают только память — не забудьте Save Labels."
+    )
+
     top_layout.addWidget(parent.btn_load_labels)
     top_layout.addWidget(parent.btn_load_masks)
     top_layout.addWidget(parent.btn_load_yaml)
     top_layout.addWidget(parent.btn_save)
+    top_layout.addWidget(parent.btn_convert_all_to_obb)
 
     top_layout.addStretch()
 

@@ -50,6 +50,33 @@ def _validate_unified_annotation(ann):
         return False, f"ошибка проверки: {e}"
 
 
+# ============================================================
+# Конвертация detect → OBB
+# ============================================================
+def _detect_annotation_to_obb(ann):
+    """
+    ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+    Углы нормализованы в [0,1]. Порядок углов соответствует тому,
+    что возвращает SmartGraphicsView._obb_to_points при angle=0:
+    BR → BL → TL → TR (по часовой от правого-нижнего).
+    """
+    if not ann or ann[0] != 'detect':
+        return ann
+    _, cls, cx, cy, w, h = ann
+    x1 = float(cx) - float(w) / 2.0
+    y1 = float(cy) - float(h) / 2.0
+    x2 = float(cx) + float(w) / 2.0
+    y2 = float(cy) + float(h) / 2.0
+    # BR, BL, TL, TR
+    corners = [x2, y2, x1, y2, x1, y1, x2, y1]
+    corners = [max(0.0, min(1.0, float(p))) for p in corners]
+    try:
+        corners = canonicalize_obb_corners(corners)
+    except Exception:
+        pass
+    return ('obb', int(cls), corners)
+
+
 class LabelValidationThread(QThread):
     """Фоновая валидация всех аннотаций загруженного набора."""
     progress = pyqtSignal(int, int)
@@ -146,6 +173,7 @@ class ViewingDataset(QMainWindow):
         self.btn_delete.clicked.connect(self.delete_selected_object)
         self.btn_load_labels.clicked.connect(self.load_labels_folder)
         self.btn_load_masks.clicked.connect(self.load_masks_folder)
+        self.btn_convert_all_to_obb.clicked.connect(self.convert_all_detect_to_obb)
         self.opacity_slider.valueChanged.connect(self.on_opacity_changed)
         self.coord_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.coord_list.customContextMenuRequested.connect(self.show_object_context_menu)
@@ -156,6 +184,9 @@ class ViewingDataset(QMainWindow):
         self.toggle_log_btn.clicked.connect(self.toggle_log)
 
         self.update_navigation_state()
+        self.log_widget.setVisible(False)
+        self.toggle_log_btn.setChecked(False)
+        self.toggle_log_btn.setText("Показать лог")
 
     # ------------------------------------------------------------------
     # Логирование / сигналы
@@ -173,6 +204,7 @@ class ViewingDataset(QMainWindow):
         self.nav_widget.set_navigation_enabled(has_images)
         self.btn_save.setEnabled(has_images)
         self.btn_delete.setEnabled(has_images and len(self.current_annotations) > 0)
+        self.btn_convert_all_to_obb.setEnabled(has_images)
 
     def closeEvent(self, event):
         if self._lazy_cache is not None:
@@ -467,29 +499,54 @@ class ViewingDataset(QMainWindow):
         thickness, font_scale, font_thickness, _ = get_display_params(img.shape)
         h, w = self.current_img_h, self.current_img_w
 
-        color_normal = settings.get_color('annotation')
         color_selected = settings.get_color('selected')
 
         for i, ann in enumerate(annotations):
-            color = color_selected if i == selected_idx else color_normal
+            # Класс — ann[1]; на случай битых данных приводим к int
+            try:
+                cls_id = int(ann[1])
+            except (TypeError, ValueError):
+                cls_id = 0
+
+            class_color = get_class_color(cls_id)
+            # У выделенного — цвет выделения, у остальных — цвет класса
+            color = color_selected if i == selected_idx else class_color
+            label_text = f"{cls_id}"
+
             if ann[0] == 'detect':
-                _, cls, cx, cy, bw, bh = ann
+                _, _, cx, cy, bw, bh = ann
                 x = int((cx - bw / 2) * w)
                 y = int((cy - bh / 2) * h)
                 x2 = x + int(bw * w)
                 y2 = y + int(bh * h)
                 cv2.rectangle(img_copy, (x, y), (x2, y2), color, thickness)
+                draw_class_label(
+                    img_copy, label_text, x, y, x2 - x, y2 - y,
+                    font_scale, font_thickness, class_color,
+                )
             elif ann[0] in ('obb', 'segment'):
-                _, cls, points = ann
+                _, _, points = ann
                 pts = []
                 for j in range(0, len(points), 2):
                     px = int(points[j] * w)
                     py = int(points[j + 1] * h)
                     pts.append([px, py])
                 if len(pts) >= 2:
-                    pts = np.array(pts, dtype=np.int32)
-                    cv2.polylines(img_copy, [pts], isClosed=True,
+                    pts_np = np.array(pts, dtype=np.int32)
+                    cv2.polylines(img_copy, [pts_np], isClosed=True,
                                   color=color, thickness=thickness)
+
+                    # Подпись — над AABB полигона
+                    xs = pts_np[:, 0]
+                    ys = pts_np[:, 1]
+                    bx = int(xs.min())
+                    by = int(ys.min())
+                    bw_box = int(xs.max() - bx)
+                    bh_box = int(ys.max() - by)
+                    draw_class_label(
+                        img_copy, label_text, bx, by, bw_box, bh_box,
+                        font_scale, font_thickness, class_color,
+                    )
         return img_copy
 
     # ------------------------------------------------------------------
@@ -731,19 +788,142 @@ class ViewingDataset(QMainWindow):
 
     def show_object_context_menu(self, pos):
         item = self.coord_list.itemAt(pos)
-        if item is not None:
-            idx = item.data(Qt.UserRole)
-            menu = QMenu()
-            edit_action = QAction("Edit…", self)
-            edit_action.triggered.connect(
-                lambda: self._open_annotation_edit_dialog(idx))
-            delete_action = QAction("Delete", self)
-            delete_action.triggered.connect(
-                lambda: self.delete_annotation_by_index(idx))
-            menu.addAction(edit_action)
-            menu.addSeparator()
-            menu.addAction(delete_action)
-            menu.exec_(self.coord_list.mapToGlobal(pos))
+        if item is None:
+            return
+        idx = item.data(Qt.UserRole)
+        if idx is None or not (0 <= idx < len(self.current_annotations)):
+            return
+
+        ann = self.current_annotations[idx]
+        menu = QMenu(self)
+
+        edit_action = QAction("Edit…", self)
+        edit_action.triggered.connect(
+            lambda: self._open_annotation_edit_dialog(idx))
+        menu.addAction(edit_action)
+
+        # Конвертация detect → OBB (только для обычных боксов)
+        if ann and ann[0] == 'detect':
+            to_obb_action = QAction("Convert to OBB", self)
+            to_obb_action.setToolTip(
+                "Заменить этот прямоугольник (detect) на OBB с теми же углами."
+            )
+            to_obb_action.triggered.connect(
+                lambda: self._convert_object_to_obb(idx))
+            menu.addAction(to_obb_action)
+
+        menu.addSeparator()
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(
+            lambda: self.delete_annotation_by_index(idx))
+        menu.addAction(delete_action)
+
+        menu.exec_(self.coord_list.mapToGlobal(pos))
+
+    def _convert_object_to_obb(self, idx):
+        """Перевести конкретную detect-аннотацию в OBB (по индексу)."""
+        if not (0 <= idx < len(self.current_annotations)):
+            return
+        ann = self.current_annotations[idx]
+        if not ann or ann[0] != 'detect':
+            self.log(f"Объект #{idx + 1} не detect — конвертация не требуется.")
+            return
+
+        new_ann = _detect_annotation_to_obb(ann)
+        self.current_annotations[idx] = new_ann
+        self._sync_current_annotations()
+
+        # Обновляем только список и вид — выделение сохраняем
+        self.update_annotation_list(self.coord_list, self.current_annotations,
+                                    self.current_img_w, self.current_img_h)
+        self.coord_list.blockSignals(True)
+        self.coord_list.setCurrentRow(idx)
+        self.coord_list.blockSignals(False)
+
+        self.selected_index = idx
+        self.show_current_image()
+        self._revalidate_current()
+        self.log(f"Объект #{idx + 1}: detect → OBB (class={new_ann[1]}).")
+
+    def convert_all_detect_to_obb(self):
+        """Переводит все detect-аннотации во всех уже загруженных
+        снимках (self.annotations[i] is not None) в OBB."""
+        if not self.image_paths:
+            QMessageBox.warning(self, "Нет изображений",
+                                "Сначала загрузите изображения.")
+            return
+
+        total_detect = 0
+        loaded_imgs = 0
+        skipped_imgs = 0
+        for i in range(len(self.image_paths)):
+            if i >= len(self.annotations) or self.annotations[i] is None:
+                skipped_imgs += 1
+                continue
+            loaded_imgs += 1
+            for a in self.annotations[i]:
+                if a and a[0] == 'detect':
+                    total_detect += 1
+
+        if total_detect == 0:
+            QMessageBox.information(
+                self, "Box → OBB",
+                "Обычных bounding box (detect) не найдено "
+                "среди уже загруженных в память снимков."
+            )
+            return
+
+        extra = ""
+        if skipped_imgs:
+            extra = (f"\n\n⚠️ Пропущено снимков (аннотации ещё не загружены "
+                     f"в память): {skipped_imgs}.\n"
+                     f"Просмотрите их, чтобы включить в конвертацию.")
+
+        reply = QMessageBox.question(
+            self, "Box → OBB",
+            f"Перевести {total_detect} detect-аннотаций "
+            f"в {loaded_imgs} снимках в OBB?\n\n"
+            f"Действие необратимо (только в памяти — файлы .txt\n"
+            f"перезапишутся при следующем Save Labels)."
+            f"{extra}",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        converted = 0
+        for i in range(len(self.image_paths)):
+            if i >= len(self.annotations) or self.annotations[i] is None:
+                continue
+            old = self.annotations[i]
+            new = []
+            changed = False
+            for a in old:
+                if a and a[0] == 'detect':
+                    new.append(_detect_annotation_to_obb(a))
+                    converted += 1
+                    changed = True
+                else:
+                    new.append(a)
+            if changed:
+                self.annotations[i] = new
+
+        # Обновляем текущий снимок
+        if (0 <= self.current_idx < len(self.annotations)
+                and self.annotations[self.current_idx] is not None):
+            self.current_annotations = list(self.annotations[self.current_idx])
+            self.update_annotation_list(self.coord_list, self.current_annotations,
+                                        self.current_img_w, self.current_img_h)
+            self.show_current_image()
+            self._revalidate_current()
+
+        self.log(f"[Box → OBB] Переведено detect-аннотаций: {converted} "
+                 f"в {loaded_imgs} снимках.")
+        QMessageBox.information(
+            self, "Box → OBB",
+            f"Переведено detect-аннотаций: {converted}.\n"
+            f"Не забудьте сохранить (Save Labels)."
+        )
 
     def delete_annotation_by_index(self, idx):
         if 0 <= idx < len(self.current_annotations):
@@ -856,6 +1036,9 @@ class ViewingDataset(QMainWindow):
 
         if typ == 'detect':
             new_ann = ('detect', new_cls, *new_coords)
+        elif typ == 'obb':
+            norm_canon = canonicalize_obb_corners(new_coords)
+            new_ann = ('obb', new_cls, norm_canon)
         else:
             new_ann = (typ, new_cls, new_coords)
 
