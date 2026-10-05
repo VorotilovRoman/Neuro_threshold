@@ -66,7 +66,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import (
     QCursor, QPixmap, QPainter, QColor, QImage, QWheelEvent, QMouseEvent, QDesktopServices,
-    QTransform, QPalette, QFont, QPen, QBrush
+    QTransform, QPalette, QFont, QPen, QBrush, QPainterPath
 )
 
 from PyQt5.QtWidgets import (
@@ -78,7 +78,7 @@ from PyQt5.QtWidgets import (
     QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QProgressDialog,
     QMenu, QAction, QGraphicsView, QSplashScreen, QProgressBar, QDoubleSpinBox,
     QDialogButtonBox, QScrollArea, QFormLayout, QGraphicsScene, QGraphicsPixmapItem,
-    QFrame, QLineEdit, QButtonGroup
+    QFrame, QLineEdit, QButtonGroup,
 )
 
 # ========== Matplotlib ==========
