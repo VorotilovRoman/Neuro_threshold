@@ -11,7 +11,9 @@
 выбранного объекта.
 
 Отступ (padding) и смещения X/Y задают окно обрезки вокруг выбранного
-объекта при авто-обрезке и авто-довороте.
+объекта при авто-обрезке и авто-довороте. Дополнительно есть точный
+доворот кадра в градусах (-90..+90) вокруг центра уже обрезанного
+кадра.
 
 Изображения загружаются лениво: в памяти держится окно вокруг текущего
 индекса, остальное подгружается/выгружается через LazyImageCache.
@@ -65,6 +67,7 @@ class YoloAEBPresetManager(PresetManager):
             "crop_padding": int(m.crop_padding_spin.value()),
             "crop_offset_x": int(m.crop_offset_x_spin.value()),
             "crop_offset_y": int(m.crop_offset_y_spin.value()),
+            "crop_rotation": float(m.crop_rotation_spin.value()),
             "chk_auto_crop": bool(m.chk_auto_crop.isChecked()),
             "chk_auto_rotate": bool(m.chk_auto_rotate.isChecked()),
             "fill_mode": m.fill_combo.currentData(),
@@ -108,6 +111,8 @@ class YoloAEBPresetManager(PresetManager):
             m.crop_offset_x_spin.setValue(int(s["crop_offset_x"]))
         if "crop_offset_y" in s:
             m.crop_offset_y_spin.setValue(int(s["crop_offset_y"]))
+        if "crop_rotation" in s:
+            m.crop_rotation_spin.setValue(float(s["crop_rotation"]))
         if "chk_auto_crop" in s:
             m.chk_auto_crop.setChecked(bool(s["chk_auto_crop"]))
         if "chk_auto_rotate" in s:
@@ -227,6 +232,7 @@ class YoloInspectWindow(QMainWindow):
         self.crop_padding_spin.valueChanged.connect(self.schedule_update)
         self.crop_offset_x_spin.valueChanged.connect(self.schedule_update)
         self.crop_offset_y_spin.valueChanged.connect(self.schedule_update)
+        self.crop_rotation_spin.valueChanged.connect(self.schedule_update)
         self.btn_reset_offsets.clicked.connect(self.reset_offsets)
         self.fill_combo.currentIndexChanged.connect(self.schedule_update)
 
@@ -891,6 +897,36 @@ class YoloInspectWindow(QMainWindow):
                 )
                 mode = "cropped"
 
+        # --- Точный доворот кадра вокруг его центра ---
+        fine_angle = float(self.crop_rotation_spin.value())
+        if abs(fine_angle) > 1e-6:
+            h, w = img.shape[:2]
+            center = (w / 2.0, h / 2.0)
+            M = cv2.getRotationMatrix2D(center, fine_angle, 1.0)
+            if fill_mode == "white":
+                img = cv2.warpAffine(
+                    img, M, (w, h),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=(255, 255, 255),
+                )
+            elif fill_mode == "black":
+                img = cv2.warpAffine(
+                    img, M, (w, h),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=(0, 0, 0),
+                )
+            else:
+                # "none" — не заливать фон, растянуть крайние пиксели
+                img = cv2.warpAffine(
+                    img, M, (w, h),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REPLICATE,
+                )
+            if mode == "original":
+                mode = "fine_rotated"
+
         for op in self._manual_ops:
             if op == "rot_cw":
                 img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
@@ -945,19 +981,22 @@ class YoloInspectWindow(QMainWindow):
         self._auto_apply_ae()
 
     def reset_offsets(self):
-        """Сбрасывает отступ и смещения области обрезки в 0."""
+        """Сбрасывает отступ, смещения области обрезки и доворот в 0."""
         self.crop_padding_spin.blockSignals(True)
         self.crop_offset_x_spin.blockSignals(True)
         self.crop_offset_y_spin.blockSignals(True)
+        self.crop_rotation_spin.blockSignals(True)
         try:
             self.crop_padding_spin.setValue(0)
             self.crop_offset_x_spin.setValue(0)
             self.crop_offset_y_spin.setValue(0)
+            self.crop_rotation_spin.setValue(0.0)
         finally:
             self.crop_padding_spin.blockSignals(False)
             self.crop_offset_x_spin.blockSignals(False)
             self.crop_offset_y_spin.blockSignals(False)
-        self.log("[Смещения] сброшены: отступ=0, X=0, Y=0")
+            self.crop_rotation_spin.blockSignals(False)
+        self.log("[Смещения] сброшены: отступ=0, X=0, Y=0, поворот=0°")
         self.schedule_update()
 
     # --------------------------------------------------------

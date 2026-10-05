@@ -254,6 +254,20 @@ def setup_yolo_ae_vae_ui(parent):
     )
     pad_row.addWidget(parent.crop_offset_y_spin)
 
+    # NEW: точный доворот кадра вокруг его центра
+    pad_row.addWidget(QLabel("Поворот (°):"))
+    parent.crop_rotation_spin = QDoubleSpinBox()
+    parent.crop_rotation_spin.setRange(-90.0, 90.0)
+    parent.crop_rotation_spin.setSingleStep(1.0)
+    parent.crop_rotation_spin.setDecimals(1)
+    parent.crop_rotation_spin.setValue(0.0)
+    parent.crop_rotation_spin.setToolTip(
+        "Точный доворот уже обрезанного кадра вокруг его центра.\n"
+        "Диапазон: -90°..+90°. Положительное значение — по часовой\n"
+        "стрелке, отрицательное — против часовой."
+    )
+    pad_row.addWidget(parent.crop_rotation_spin)
+
     # NEW: сброс отступа и смещений
     parent.btn_reset_offsets = QPushButton("Сбросить смещения")
     parent.btn_reset_offsets.setToolTip(
