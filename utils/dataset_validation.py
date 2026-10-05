@@ -38,7 +38,7 @@ dataset_type, возвращает результаты. Это позволяе
 и в других вкладках, где нужна такая же валидация.
 """
 from import_libs_internal import *
-
+from utils.smart_view import SmartGraphicsView
 
 # ============================================================
 # Общие константы

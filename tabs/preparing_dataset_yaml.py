@@ -1,4 +1,7 @@
 # preparing_dataset_yaml.py
+import traceback
+import sys
+
 from import_libs_internal import *
 from import_libs_methods_ui import setup_preparing_dataset_yaml_ui
 
@@ -97,6 +100,43 @@ class DatasetPreparationWindow(QMainWindow):
 
         self.update_multiplier_slider_state()
 
+        # Отладка: лог по умолчанию раскрыт
+        try:
+            self.log_widget.setVisible(True)
+            self.toggle_log_btn.setChecked(True)
+            self.toggle_log_btn.setText("Скрыть лог")
+        except Exception:
+            pass
+
+    # ==================================================================
+    # Отладочное логирование
+    # ==================================================================
+    def _log_debug(self, msg):
+        """Единая точка отладочного лога. Всё уходит и в GUI, и в stdout."""
+        try:
+            print(f"[DEBUG] {msg}")
+        except Exception:
+            pass
+        try:
+            self.log(f"[DEBUG] {msg}")
+        except Exception:
+            pass
+
+    def _log_exception(self, context, exc=None):
+        """Печатает полный traceback текущего или переданного исключения."""
+        tb = traceback.format_exc()
+        head = f"❌ {context}: {exc if exc is not None else ''}"
+        try:
+            print(head)
+            print(tb)
+        except Exception:
+            pass
+        try:
+            self.log(head)
+            self.log(tb)
+        except Exception:
+            pass
+
     # ==================================================================
     # Утилиты списка пар
     # ==================================================================
@@ -109,12 +149,45 @@ class DatasetPreparationWindow(QMainWindow):
         self.log(f"Скопировано строк: {len(items)}")
 
     def _on_file_list_double_clicked(self, item):
-        if item is None:
-            return
-        pair = item.data(Qt.UserRole + 1)
-        if not pair:
-            return
-        self._open_pair_validation(pair)
+        self._log_debug("_on_file_list_double_clicked: начало")
+        try:
+            if item is None:
+                self._log_debug("Двойной клик: item=None, выход")
+                return
+
+            # Что вообще лежит в item
+            try:
+                text = item.text()
+            except Exception:
+                text = "<нет текста>"
+
+            raw_data = item.data(Qt.UserRole + 1)
+            role_img = item.data(Qt.UserRole)
+            role_flag = item.data(Qt.UserRole + 2)
+            role_color = item.data(Qt.UserRole + 3)
+            role_bit = item.data(Qt.UserRole + 4)
+
+            self._log_debug(
+                f"Двойной клик: text={text!r}, "
+                f"role_img={role_img!r}, role_flag={role_flag!r}, "
+                f"role_color={role_color!r}, role_bit={role_bit!r}"
+            )
+            self._log_debug(
+                f"Двойной клик: pair (UserRole+1) = {raw_data!r}, "
+                f"type={type(raw_data).__name__}"
+            )
+
+            if not raw_data:
+                self._log_debug("Двойной клик: пара пустая/None — выход")
+                return
+
+            self._open_pair_validation(raw_data)
+        except Exception as e:
+            self._log_exception("Ошибка в _on_file_list_double_clicked", e)
+            QMessageBox.critical(
+                self, "Ошибка (двойной клик)",
+                f"{type(e).__name__}: {e}\n\nПодробности — в логе."
+            )
 
     # ==================================================================
     # Валидация пары / статистика — тонкие обёртки над dataset_validation
@@ -162,8 +235,91 @@ class DatasetPreparationWindow(QMainWindow):
                 getattr(self, name).setEnabled(enabled)
 
     def _open_pair_validation(self, pair):
-        PairValidationDialog(self, pair, self.dataset_type,
-                             self.validator).exec_()
+        self._log_debug("_open_pair_validation: начало")
+        try:
+            # --- Диагностика входной пары ---
+            self._log_debug(
+                f"_open_pair_validation: pair={pair!r}, "
+                f"type={type(pair).__name__}"
+            )
+
+            if isinstance(pair, (tuple, list)):
+                self._log_debug(
+                    f"_open_pair_validation: len(pair)={len(pair)}"
+                )
+                for i, x in enumerate(pair):
+                    self._log_debug(
+                        f"    pair[{i}] = {x!r} (type={type(x).__name__})"
+                    )
+
+            # --- Нормализация до (img, label_or_None) ---
+            img_path = None
+            label_path = None
+            if isinstance(pair, str):
+                img_path = pair
+            elif isinstance(pair, (tuple, list)) and len(pair) >= 1:
+                img_path = pair[0]
+                if len(pair) >= 2:
+                    label_path = pair[1]
+
+            self._log_debug(
+                f"_open_pair_validation: нормализовано → "
+                f"img={img_path!r}, label={label_path!r}"
+            )
+
+            if not img_path:
+                self._log_debug("_open_pair_validation: img_path пустой — выход")
+                QMessageBox.warning(self, "Ошибка",
+                                    f"Некорректная пара: {pair!r}")
+                return
+
+            img_exists = os.path.exists(str(img_path))
+            lbl_exists = bool(label_path) and os.path.exists(str(label_path))
+            self._log_debug(
+                f"_open_pair_validation: img_exists={img_exists}, "
+                f"label_exists={lbl_exists}, dataset_type={self.dataset_type}"
+            )
+
+            if not img_exists:
+                QMessageBox.warning(
+                    self, "Файл не найден",
+                    f"Изображение не существует:\n{img_path}"
+                )
+                return
+
+            # --- Сам вызов диалога ---
+            self._log_debug(
+                "_open_pair_validation: вызов PairValidationDialog(...)"
+            )
+            dlg = PairValidationDialog(
+                self, (str(img_path), str(label_path) if label_path else None),
+                self.dataset_type, self.validator
+            )
+            self._log_debug(
+                "_open_pair_validation: диалог создан, вызываю exec_()"
+            )
+            dlg.exec_()
+            self._log_debug("_open_pair_validation: exec_() завершён")
+
+        except TypeError as e:
+            self._log_exception(
+                "TypeError при создании/использовании PairValidationDialog", e
+            )
+            QMessageBox.critical(
+                self, "Ошибка валидации",
+                f"TypeError: {e}\n\n"
+                f"Похоже, сигнатура PairValidationDialog не совпадает.\n"
+                f"Ожидается: (parent, pair, dataset_type, validator).\n"
+                f"Подробности — в логе."
+            )
+        except Exception as e:
+            self._log_exception(
+                "Ошибка при открытии пары в PairValidationDialog", e
+            )
+            QMessageBox.critical(
+                self, "Ошибка валидации",
+                f"{type(e).__name__}: {e}\n\nПодробности — в логе."
+            )
 
     # ==================================================================
     # Channels в data.yaml
@@ -383,9 +539,7 @@ class DatasetPreparationWindow(QMainWindow):
             self.update_generate_button_state()
             self.update_split_counts()
         except Exception as e:
-            import traceback
-            self.log(f"Ошибка после загрузки YAML: {e}")
-            self.log(traceback.format_exc())
+            self._log_exception("Ошибка после загрузки YAML", e)
 
     # ==================================================================
     # Массовая конвертация цветности
@@ -564,6 +718,11 @@ class DatasetPreparationWindow(QMainWindow):
             self._update_color_stats_label()
             return
 
+        self._log_debug(
+            f"_rebuild_file_list_display: старт, пар={len(self.pairs)}, "
+            f"dataset_type={self.dataset_type}, include_empty={self._is_include_empty()}"
+        )
+
         self.file_list.blockSignals(True)
         self.file_list.clear()
 
@@ -580,9 +739,24 @@ class DatasetPreparationWindow(QMainWindow):
         QApplication.processEvents()
 
         for idx, pair in enumerate(self.pairs):
-            info = build_pair_display(
-                pair, self.validator, self.dataset_type, include_empty
-            )
+            try:
+                info = build_pair_display(
+                    pair, self.validator, self.dataset_type, include_empty
+                )
+            except Exception as e:
+                self._log_exception(
+                    f"build_pair_display упал на паре #{idx} ({pair!r})", e
+                )
+                # Продолжаем обработку остальных, чтобы не рвать список
+                info = {
+                    'text': f"<ошибка построения: {pair!r}>",
+                    'tag': 'error',
+                    'err': f"{type(e).__name__}: {e}",
+                    'is_valid': False,
+                    'name': f"pair#{idx}",
+                    'color_type': None,
+                    'bit_type': None,
+                }
 
             if info['is_valid']:
                 valid_count += 1
@@ -593,12 +767,28 @@ class DatasetPreparationWindow(QMainWindow):
             item = self._make_list_item(
                 info['text'], tag=info['tag'], error_msg=info['err']
             )
-            item.setData(Qt.UserRole, pair[0])
-            item.setData(Qt.UserRole + 1, tuple(pair))
+
+            # --- Кладём пару в item.data в двух видах ---
+            img_path = pair[0] if isinstance(pair, (tuple, list)) and pair else None
+            label_path = (pair[1] if isinstance(pair, (tuple, list)) and len(pair) > 1
+                          else None)
+
+            pair_norm = (img_path, label_path)
+            item.setData(Qt.UserRole, img_path)
+            item.setData(Qt.UserRole + 1, pair_norm)
             item.setData(Qt.UserRole + 2,
                          'valid' if info['is_valid'] else 'invalid')
             item.setData(Qt.UserRole + 3, info['color_type'])
             item.setData(Qt.UserRole + 4, info['bit_type'])
+
+            # Отладочный лог только для первых 5 пар — чтобы не спамить
+            if idx < 5:
+                self._log_debug(
+                    f"  item#{idx}: pair_norm={pair_norm!r} "
+                    f"(типы: {type(img_path).__name__}, "
+                    f"{type(label_path).__name__}), tag={info['tag']}"
+                )
+
             self.file_list.addItem(item)
 
             if (idx + 1) % step == 0 or idx == total - 1:
@@ -626,6 +816,7 @@ class DatasetPreparationWindow(QMainWindow):
             self.log(f"Валидация: все {valid_count} пар корректны")
 
         self._update_color_stats_label()
+        self._log_debug("_rebuild_file_list_display: завершено")
 
     # ==================================================================
     # Флаги
@@ -804,76 +995,83 @@ class DatasetPreparationWindow(QMainWindow):
     # Сканирование пар
     # ==================================================================
     def scan_pairs(self):
-        if self._yaml_mode:
+        self._log_debug("scan_pairs: начало")
+        try:
+            if self._yaml_mode:
+                self.validator.clear_cache()
+                self._recompute_color_stats()
+                self._rebuild_file_list_display()
+                return
+
+            self.pairs = []
+            self.file_list.clear()
+            self.annotation_types_stats = {}
+            self.color_type_stats = ImageStats.empty_color_stats()
+            self.bit_type_stats = ImageStats.empty_bit_stats()
             self.validator.clear_cache()
+
+            if not self.images_folder:
+                self.log("Папка с изображениями не выбрана")
+                self._update_color_stats_label()
+                return
+
+            dataset_type_idx = self.dataset_type_combo.currentIndex()
+            self.log(f"Начинаем сканирование пар для типа {dataset_type_idx}")
+
+            if dataset_type_idx == 0:
+                if not self.labels_folder:
+                    self.log("Папка с метками не выбрана")
+                    self._update_pair_count_label("", error=True)
+                    self._update_color_stats_label()
+                    return
+                self.pairs, self.annotation_types_stats = scan_detection_pairs(
+                    self.images_folder, self.labels_folder, log_cb=self.log
+                )
+
+            elif dataset_type_idx == 1:
+                if not self.masks_folder:
+                    self.log("Папка с масками не выбрана")
+                    self._update_pair_count_label("", error=True)
+                    self._update_color_stats_label()
+                    return
+                self.pairs = scan_segmentation_pairs(
+                    self.images_folder, self.masks_folder, log_cb=self.log
+                )
+                self.log(f"Найдено {len(self.pairs)} валидных пар изображение↔маска")
+
+            else:
+                self.pairs = scan_image_only_pairs(self.images_folder)
+                self.annotation_types_stats = {}
+
+            self._log_debug(
+                f"scan_pairs: получено {len(self.pairs)} пар, пример: "
+                f"{(self.pairs[0] if self.pairs else None)!r}"
+            )
+
+            valid_count, invalid_count = self._validate_all_pairs()
             self._recompute_color_stats()
             self._rebuild_file_list_display()
-            return
 
-        self.pairs = []
-        self.file_list.clear()
-        self.annotation_types_stats = {}
-        self.color_type_stats = ImageStats.empty_color_stats()
-        self.bit_type_stats = ImageStats.empty_bit_stats()
-        self.validator.clear_cache()
+            error_msg = PairValidator.check_pair_type_consistency()
+            extra_info = ""
+            if self.annotation_types_stats:
+                type_str = ", ".join([f"{k}:{v}" for k, v in self.annotation_types_stats.items()])
+                extra_info = f"  [{type_str}]"
+            if invalid_count > 0:
+                extra_info += f"  ⚠️ некорректных: {invalid_count}"
+            self._update_pair_count_label(extra_info, error=bool(error_msg) or invalid_count > 0)
+            self.log(f"Найдено пар: {len(self.pairs)} (корректных: {valid_count}, некорректных: {invalid_count})")
+            if error_msg:
+                self.log(error_msg)
 
-        if not self.images_folder:
-            self.log("Папка с изображениями не выбрана")
-            self._update_color_stats_label()
-            return
-
-        dataset_type_idx = self.dataset_type_combo.currentIndex()
-        self.log(f"Начинаем сканирование пар для типа {dataset_type_idx}")
-
-        if dataset_type_idx == 0:
-            if not self.labels_folder:
-                self.log("Папка с метками не выбрана")
-                self._update_pair_count_label("", error=True)
-                self._update_color_stats_label()
-                return
-            self.pairs, self.annotation_types_stats = scan_detection_pairs(
-                self.images_folder, self.labels_folder, log_cb=self.log
-            )
-
-        elif dataset_type_idx == 1:
-            if not self.masks_folder:
-                self.log("Папка с масками не выбрана")
-                self._update_pair_count_label("", error=True)
-                self._update_color_stats_label()
-                return
-            self.pairs = scan_segmentation_pairs(
-                self.images_folder, self.masks_folder, log_cb=self.log
-            )
-            self.log(f"Найдено {len(self.pairs)} валидных пар изображение↔маска")
-
-        else:
-            self.pairs = scan_image_only_pairs(self.images_folder)
-            self.annotation_types_stats = {}
-
-        valid_count, invalid_count = self._validate_all_pairs()
-        self._recompute_color_stats()
-        self._rebuild_file_list_display()
-
-        error_msg = PairValidator.check_pair_type_consistency()
-        extra_info = ""
-        if self.annotation_types_stats:
-            type_str = ", ".join([f"{k}:{v}" for k, v in self.annotation_types_stats.items()])
-            extra_info = f"  [{type_str}]"
-        if invalid_count > 0:
-            extra_info += f"  ⚠️ некорректных: {invalid_count}"
-        self._update_pair_count_label(extra_info, error=bool(error_msg) or invalid_count > 0)
-        self.log(f"Найдено пар: {len(self.pairs)} (корректных: {valid_count}, некорректных: {invalid_count})")
-        if error_msg:
-            self.log(error_msg)
-
-        try:
-            self.collect_classes()
-            self.update_generate_button_state()
-            self.update_split_counts()
+            try:
+                self.collect_classes()
+                self.update_generate_button_state()
+                self.update_split_counts()
+            except Exception as e:
+                self._log_exception("Ошибка при обновлении интерфейса после сканирования", e)
         except Exception as e:
-            self.log(f"Ошибка при обновлении интерфейса после сканирования: {e}")
-            import traceback
-            self.log(traceback.format_exc())
+            self._log_exception("Ошибка в scan_pairs", e)
 
     def _update_pair_count_label(self, extra_text, error=False):
         text = f"Всего пар: {len(self.pairs)}"
@@ -1013,8 +1211,7 @@ class DatasetPreparationWindow(QMainWindow):
                     valid_pairs_for_classes.append((img_path, mask_path))
                 except Exception as e:
                     self.log(f"Ошибка при обработке маски {mask_path}: {e}")
-                    import traceback
-                    self.log(traceback.format_exc())
+                    self._log_exception("Обработка маски", e)
             if not valid_pairs_for_classes:
                 self.log("Нет валидных масок для определения классов")
                 self.class_table.setRowCount(0)
