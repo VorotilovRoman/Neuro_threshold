@@ -18,63 +18,57 @@ DATA_DIR     = r"C:\Users\prodis\Pictures\filters\crop_filters\BD"
 OUT_DIR      = r"C:\Users\prodis\Pictures\filters\crop_filters\BD\runs_ae_def_new"
 
 # --- Геометрия ---
-# ГЛАВНОЕ ИЗМЕНЕНИЕ: вход вчетверо больше.
-# Было 128×192 → бутылочное горлышко 8×12 (одна ячейка ~16×16 px исходника).
-# Стало 256×384 → бутылочное горлышко 16×24 (та же ячейка 16×16 px,
-# но мелкий дефект при ресайзе занимает больше пикселей — он «выживает»).
 IMG_H        = 256
 IMG_W        = 256
 KEEP_ASPECT  = True
 PAD_VALUE    = 0
 
 # --- Цвет ---
-COLOR_MODE   = "grayscale"              # "color" | "grayscale"
+COLOR_MODE   = "grayscale"
 IN_CHANNELS  = 3 if COLOR_MODE == "color" else 1
 
 # --- Тип автоэнкодера ---
-MODEL_TYPE   = "vae"                # "ae" | "vae"
-# β=1.0 сильно давит на латент → декодер склонен к «гладкой» реконструкции.
-# 0.3 — компромисс: детали сохраняются лучше, но регуляризация ещё работает.
-BETA_VAE     = 0.3
+MODEL_TYPE   = "vae"
+
+# FIX: β задаётся как ЦЕЛЕВОЕ значение, а KL-annealing сам разгоняет его от 0.
+BETA_VAE_TARGET       = 0.3
+BETA_VAE_WARMUP_EPOCHS = 100     # 0 → β_target за 100 эпох
 
 # --- Функция потерь ---
 USE_SSIM     = True
-# SSIM штрафует структурные искажения (края/контуры) — самые «мелкие» признаки.
-# Поднимаем с 0.5 до 0.8, чтобы декодер внимательнее относился к границам.
 SSIM_WEIGHT  = 0.8
 
 # --- Шумовая аугментация ---
 USE_NOISE_AUG = True
-# Было 0.05 — это заметно «зашумляло» мелкие детали при обучении.
-# 0.02 — сеть всё ещё устойчива к шуму, но не учится его игнорировать.
 NOISE_STD     = 0.02
 
 # --- Аугментация ---
 USE_AUGMENTATION = True
-# Сдвиги/повороты/яркость мягче: агрессивная аугментация «смазывает»
-# мелкие аномалии, и модель перестаёт их считать значимыми.
-AUG_TRANSLATE    = 0.01     # было 0.03
-AUG_DEGREES      = 1.0      # было 2.0
-AUG_BRIGHTNESS   = 0.10     # было 0.15
-AUG_CONTRAST     = 0.10     # было 0.15
+AUG_TRANSLATE    = 0.01
+AUG_DEGREES      = 1.0
+AUG_BRIGHTNESS   = 0.10
+AUG_CONTRAST     = 0.10
 
 # --- Обучение ---
-# flat_dim теперь 16*24*128 = 49152 (было 12288). Чтобы сохранить
-# примерно ту же «плотность» информации на единицу латента, увеличиваем
-# его пропорционально (x2 от исходного).
-LATENT_DIM   = 256
-# Батч уменьшен: вход вчетверо тяжелее, при BATCH=16 рискуем OOM.
+# FIX: bottleneck ослаблен (enc_c=64 вместо 128), latent увеличен 256→512.
+# Сжатие: 64*16*16 = 16384 → 512 ≈ 32:1  (было 32768 → 256 = 128:1).
+LATENT_DIM   = 512
 BATCH_SIZE   = 8
-EPOCHS       = 1000                  # чуть больше эпох — задача сложнее
-LR           = 1e-3
+EPOCHS       = 1000
+# FIX: LR снижен с 1e-3 до 3e-4 — VAE с таким бутылочным горлышком при 1e-3
+# уходит в расходимость на первой же смене LR.
+LR           = 3e-4
 WEIGHT_DECAY = 1e-5
 VAL_SPLIT    = 0.1
-NUM_WORKERS  = 0                    # 0 безопаснее на Windows
+NUM_WORKERS  = 0
 DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
 SEED         = 42
-PATIENCE     = 40                   # было 30 — даём больше времени на плато
+PATIENCE     = 40
 
 THRESHOLD_PERCENTILE = 99.0
+
+# FIX: клиппинг logvar — обязательная защита от exp-переполнения.
+LOGVAR_MIN, LOGVAR_MAX = -10.0, 10.0
 # ============================================
 
 assert IMG_H % 16 == 0 and IMG_W % 16 == 0
@@ -193,18 +187,28 @@ def collect_images(root, exclude_names=("loss.png", "recon_examples.png", "best.
 
 
 # ------------------ Модели ------------------
+def _gn(channels, max_groups=8):
+    """GroupNorm с автоматическим подбором числа групп (устойчив к малому batch)."""
+    g = max_groups
+    while g > 1 and channels % g != 0:
+        g //= 2
+    return nn.GroupNorm(g, channels)
+
+
 class ConvEncoder(nn.Module):
+    # FIX: BatchNorm → GroupNorm (при batch=8 BN шумит);
+    # FIX: последний conv сжимает 128→64 (bottleneck мягче в 2 раза).
     def __init__(self, in_channels):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1),
-            nn.BatchNorm2d(32), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            _gn(32), nn.ReLU(inplace=True), nn.MaxPool2d(2),       # 128
             nn.Conv2d(32, 64, 3, padding=1),
-            nn.BatchNorm2d(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            _gn(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),       # 64
             nn.Conv2d(64, 128, 3, padding=1),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True), nn.MaxPool2d(2),
-            nn.Conv2d(128, 128, 3, padding=1),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            _gn(128), nn.ReLU(inplace=True), nn.MaxPool2d(2),      # 32
+            nn.Conv2d(128, 64, 3, padding=1),
+            _gn(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),       # 16
         )
 
     def forward(self, x):
@@ -215,14 +219,14 @@ class ConvDecoder(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
         self.net = nn.Sequential(
-            nn.ConvTranspose2d(128, 128, 2, stride=2),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(64, 128, 2, stride=2),
+            _gn(128), nn.ReLU(inplace=True),                       # 32
             nn.ConvTranspose2d(128, 64, 2, stride=2),
-            nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            _gn(64), nn.ReLU(inplace=True),                        # 64
             nn.ConvTranspose2d(64, 32, 2, stride=2),
-            nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            _gn(32), nn.ReLU(inplace=True),                        # 128
             nn.ConvTranspose2d(32, in_channels, 2, stride=2),
-            nn.Sigmoid(),
+            nn.Sigmoid(),                                          # 256
         )
 
     def forward(self, z):
@@ -232,7 +236,7 @@ class ConvDecoder(nn.Module):
 class ConvAutoencoder(nn.Module):
     def __init__(self, in_channels, latent_dim, img_h, img_w):
         super().__init__()
-        self.enc_c = 128
+        self.enc_c = 64                                         # FIX: было 128
         self.enc_h, self.enc_w = img_h // 16, img_w // 16
         self.flat_dim = self.enc_c * self.enc_h * self.enc_w
         self.encoder = ConvEncoder(in_channels)
@@ -251,7 +255,7 @@ class ConvAutoencoder(nn.Module):
 class ConvVAE(nn.Module):
     def __init__(self, in_channels, latent_dim, img_h, img_w):
         super().__init__()
-        self.enc_c = 128
+        self.enc_c = 64                                         # FIX: было 128
         self.enc_h, self.enc_w = img_h // 16, img_w // 16
         self.flat_dim = self.enc_c * self.enc_h * self.enc_w
         self.latent_dim = latent_dim
@@ -262,18 +266,21 @@ class ConvVAE(nn.Module):
         self.decoder = ConvDecoder(in_channels)
 
     def reparameterize(self, mu, logvar):
+        # FIX: жёсткий клиппинг logvar — предотвращает exp() → inf.
+        logvar = torch.clamp(logvar, LOGVAR_MIN, LOGVAR_MAX)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        return mu + eps * std
+        return mu + eps * std, logvar
 
     def forward(self, x):
         h = self.encoder(x).flatten(1)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
-        z = self.reparameterize(mu, logvar)
+        z, logvar_clamped = self.reparameterize(mu, logvar)
         h_dec = self.fc_decode(z)
         h_dec = h_dec.view(h_dec.size(0), self.enc_c, self.enc_h, self.enc_w)
-        return self.decoder(h_dec), (mu, logvar)
+        # возвращаем уже зажатый logvar, чтобы KL считался по нему
+        return self.decoder(h_dec), (mu, logvar_clamped)
 
 
 def build_model(model_type, in_channels, latent_dim, img_h, img_w):
@@ -283,15 +290,25 @@ def build_model(model_type, in_channels, latent_dim, img_h, img_w):
 
 
 def vae_kl_loss(mu, logvar):
+    # logvar уже зажат в reparameterize; страховочный clamp — на всякий случай.
+    logvar = torch.clamp(logvar, LOGVAR_MIN, LOGVAR_MAX)
     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / mu.size(0)
+
+
+def get_beta(epoch, warmup_epochs, target_beta):
+    """FIX: линейный KL-annealing 0 → β_target за warmup_epochs эпох."""
+    if warmup_epochs <= 0:
+        return target_beta
+    return target_beta * min(1.0, float(epoch) / float(warmup_epochs))
 
 
 # ------------------ Обучение ------------------
 def train_one_epoch(model, loader, optimizer, criterion_mse, criterion_ssim,
-                    model_type, device):
+                    model_type, device, beta):
     model.train()
     total_loss = total_recon = total_kl = 0.0
     n = 0
+    n_skipped = 0
 
     for x in loader:
         x = x.to(device, non_blocking=True)
@@ -310,9 +327,15 @@ def train_one_epoch(model, loader, optimizer, criterion_mse, criterion_ssim,
         if model_type == "vae" and extra is not None:
             mu, logvar = extra
             kl = vae_kl_loss(mu, logvar)
-            loss = recon_loss + BETA_VAE * kl
+            loss = recon_loss + beta * kl
         else:
             loss = recon_loss
+
+        # FIX: защита от NaN/inf — пропускаем батч без backward.
+        if not torch.isfinite(loss):
+            optimizer.zero_grad(set_to_none=True)
+            n_skipped += 1
+            continue
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -324,13 +347,16 @@ def train_one_epoch(model, loader, optimizer, criterion_mse, criterion_ssim,
         total_kl += kl.item() * bs
         n += bs
 
+    if n_skipped:
+        print(f"  [WARN] пропущено батчей из-за NaN/inf: {n_skipped}")
+
     if n == 0:
         return float("nan"), float("nan"), float("nan")
     return total_loss / n, total_recon / n, total_kl / n
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device):
+def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device, beta):
     model.eval()
     total_loss = 0.0
     n = 0
@@ -351,9 +377,12 @@ def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device):
         if model_type == "vae" and extra is not None:
             mu, logvar = extra
             kl = vae_kl_loss(mu, logvar)
-            loss = recon_loss + BETA_VAE * kl
+            loss = recon_loss + beta * kl
         else:
             loss = recon_loss
+
+        if not torch.isfinite(loss):
+            continue
 
         per_sample = F.mse_loss(recon, x, reduction="none").flatten(1).mean(dim=1)
         all_errors.append(per_sample.cpu())
@@ -371,12 +400,16 @@ def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device):
 def main():
     print(f"{'='*60}")
     print(f"Конфиг:")
-    print(f"  MODEL_TYPE     = {MODEL_TYPE}" + (f"  (β={BETA_VAE})" if MODEL_TYPE == "vae" else ""))
+    print(f"  MODEL_TYPE     = {MODEL_TYPE}" +
+          (f"  (β_target={BETA_VAE_TARGET}, warmup={BETA_VAE_WARMUP_EPOCHS})"
+           if MODEL_TYPE == "vae" else ""))
     print(f"  COLOR_MODE     = {COLOR_MODE} (in_channels={IN_CHANNELS})")
     print(f"  IMG            = ({IMG_H}, {IMG_W})  KEEP_ASPECT={KEEP_ASPECT}")
     print(f"  USE_SSIM       = {USE_SSIM}" + (f"  (λ={SSIM_WEIGHT})" if USE_SSIM else ""))
     print(f"  USE_NOISE_AUG  = {USE_NOISE_AUG}" + (f"  (σ={NOISE_STD})" if USE_NOISE_AUG else ""))
     print(f"  AUGMENTATION   = {USE_AUGMENTATION}")
+    print(f"  LR             = {LR}")
+    print(f"  LATENT_DIM     = {LATENT_DIM}")
     print(f"  DEVICE         = {DEVICE}")
     print(f"{'='*60}")
 
@@ -388,18 +421,15 @@ def main():
     if len(all_paths) < 20:
         print(f"[WARN] Всего {len(all_paths)} изображений — модель почти наверняка переобучится.")
         print(f"[WARN] Рекомендуется ≥100 снимков, либо включите USE_AUGMENTATION=True.")
-        print(f"[WARN] Сейчас USE_AUGMENTATION = {USE_AUGMENTATION}")
 
     random.shuffle(all_paths)
 
-    # --- Сплит train/val с защитой от пустой валидации ---
     if len(all_paths) < 5:
-        # слишком мало — используем всё и для train, и для val
         train_paths, val_paths = all_paths, all_paths
         print(f"[WARN] Слишком мало изображений — train и val совпадают.")
     else:
         n_val = max(1, int(len(all_paths) * VAL_SPLIT))
-        n_val = min(n_val, len(all_paths) - 1)   # хотя бы 1 в train
+        n_val = min(n_val, len(all_paths) - 1)
         val_paths = all_paths[:n_val]
         train_paths = all_paths[n_val:]
 
@@ -417,7 +447,6 @@ def main():
     if n_train == 0:
         raise SystemExit("Обучающая выборка пуста.")
 
-    # --- АВТОПОДБОР batch size ---
     eff_batch = min(BATCH_SIZE, max(1, n_train // 4))
     drop_last = (n_train // eff_batch) >= 2
     print(f"[data] batch_size={eff_batch} (задан {BATCH_SIZE}), drop_last={drop_last}")
@@ -433,27 +462,36 @@ def main():
     print(model)
     if hasattr(model, "flat_dim"):
         print(f"bottleneck: {model.enc_c}x{model.enc_h}x{model.enc_w} "
-              f"= {model.flat_dim} → latent {LATENT_DIM}")
+              f"= {model.flat_dim} → latent {LATENT_DIM} "
+              f"(compression ~{model.flat_dim / LATENT_DIM:.1f}:1)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=20, T_mult=2, eta_min=1e-5
+
+    # FIX: CosineAnnealingWarmRestarts заменён на обычный CosineAnnealingLR.
+    # Причина: warm restart на 20-й эпохе скачком поднимал LR ×100 (1e-5 → 1e-3)
+    # и выбивал logvar в inf → NaN со следующей эпохи.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=EPOCHS, eta_min=1e-5
     )
+
     criterion_mse = nn.MSELoss()
     criterion_ssim = SSIMLoss(channel=IN_CHANNELS).to(DEVICE)
 
     best_val = float("inf")
-    hist = {"train": [], "val": [], "train_recon": [], "train_kl": []}
+    hist = {"train": [], "val": [], "train_recon": [], "train_kl": [], "beta": []}
     epochs_no_improve = 0
 
     for epoch in range(1, EPOCHS + 1):
+        # FIX: β линейно растёт от 0 до BETA_VAE_TARGET.
+        beta = get_beta(epoch, BETA_VAE_WARMUP_EPOCHS, BETA_VAE_TARGET)
+
         tr_loss, tr_recon, tr_kl = train_one_epoch(
             model, train_loader, optimizer, criterion_mse,
-            criterion_ssim, MODEL_TYPE, DEVICE,
+            criterion_ssim, MODEL_TYPE, DEVICE, beta,
         )
         va_loss, va_errors = evaluate(
             model, val_loader, criterion_mse, criterion_ssim,
-            MODEL_TYPE, DEVICE,
+            MODEL_TYPE, DEVICE, beta,
         )
         scheduler.step()
 
@@ -461,13 +499,24 @@ def main():
         hist["val"].append(va_loss)
         hist["train_recon"].append(tr_recon)
         hist["train_kl"].append(tr_kl)
+        hist["beta"].append(beta)
 
         lr_now = optimizer.param_groups[0]["lr"]
         print(f"[{epoch:03d}/{EPOCHS}] "
-              f"train={tr_loss:.6f} (recon={tr_recon:.6f}, kl={tr_kl:.6f})  "
+              f"train={tr_loss:.6f} (recon={tr_recon:.6f}, kl={tr_kl:.6f}, β={beta:.4f})  "
               f"val={va_loss:.6f}  lr={lr_now:.2e}")
 
-        if np.isfinite(va_loss) and va_loss < best_val:
+        # FIX: явная обработка NaN в val — раньше nan < best_val == False
+        # уводило поток в ветку else, но обучение продолжалось вслепую.
+        if not np.isfinite(va_loss):
+            print(f"  [WARN] val loss = {va_loss} — пропускаем сохранение.")
+            epochs_no_improve += 1
+            if epochs_no_improve >= PATIENCE:
+                print(f"  Ранняя остановка (NaN).")
+                break
+            continue
+
+        if va_loss < best_val:
             best_val = va_loss
             epochs_no_improve = 0
             threshold = float(np.percentile(va_errors, THRESHOLD_PERCENTILE)) \
@@ -475,8 +524,10 @@ def main():
             torch.save({
                 "model": model.state_dict(),
                 "config": {
+                    "arch": "conv_gn",
                     "model_type": MODEL_TYPE,
-                    "beta_vae": BETA_VAE,
+                    "beta_vae_target": BETA_VAE_TARGET,
+                    "beta_vae_warmup_epochs": BETA_VAE_WARMUP_EPOCHS,
                     "in_channels": IN_CHANNELS,
                     "color_mode": COLOR_MODE,
                     "latent_dim": LATENT_DIM,
@@ -485,6 +536,8 @@ def main():
                     "pad_value": PAD_VALUE,
                     "use_ssim": USE_SSIM,
                     "ssim_weight": SSIM_WEIGHT,
+                    "logvar_min": LOGVAR_MIN,
+                    "logvar_max": LOGVAR_MAX,
                 },
                 "epoch": epoch,
                 "val_loss": best_val,
@@ -500,7 +553,7 @@ def main():
                 break
 
     # --- Графики ---
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
     axes[0].plot(hist["train"], label="train")
     axes[0].plot(hist["val"], label="val")
     axes[0].set_xlabel("epoch"); axes[0].set_ylabel("loss")
@@ -512,6 +565,14 @@ def main():
         axes[1].set_yscale("log")
     axes[1].set_xlabel("epoch"); axes[1].legend()
     axes[1].grid(True); axes[1].set_title("Components")
+
+    if MODEL_TYPE == "vae":
+        axes[2].plot(hist["beta"], label="β")
+        axes[2].set_xlabel("epoch"); axes[2].legend(); axes[2].grid(True)
+        axes[2].set_title("KL weight (annealing)")
+    else:
+        axes[2].axis("off")
+
     plt.tight_layout()
     plt.savefig(os.path.join(OUT_DIR, "loss.png"), dpi=120)
 

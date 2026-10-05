@@ -3,8 +3,13 @@
 Утилиты для вкладки YOLO + AE/VAE.
 
 Содержит:
-  • модели AE / VAE (старая conv-архитектура и U-Net с skip-связями);
-  • фабрику моделей по config из чекпойнта;
+  • модели AE / VAE в трёх архитектурах:
+        - conv        : старая conv-сеть, BatchNorm, enc_c=128, шаг 16;
+        - conv_gn     : новая conv-сеть, GroupNorm, enc_c=64, шаг 16;
+        - unet        : U-Net со skip-связями, BatchNorm, шаг 8;
+  • фабрику моделей по config чекпойнта (detect_arch / build_ae_model_from_cfg),
+    понимающую явное поле "arch" и умеющую угадывать архитектуру по
+    структуре state_dict (если поля нет — старые чекпойнты);
   • препроцессинг изображения под вход AE/VAE;
   • вспомогательные функции для работы с детекциями:
       - маска объекта,
@@ -20,7 +25,7 @@ from import_libs_internal import *
 
 
 # ============================================================
-# AE / VAE — старая архитектура (Conv, шаг 16)
+# AE / VAE — старая архитектура (Conv + BatchNorm, шаг 16)
 # ============================================================
 class ConvEncoder(nn.Module):
     def __init__(self, in_channels):
@@ -91,22 +96,120 @@ class ConvVAE(nn.Module):
         self.decoder = ConvDecoder(in_channels)
 
     def reparameterize(self, mu, logvar):
+        # FIX: клиппинг logvar — страховка от exp() → inf на инференсе.
+        logvar = torch.clamp(logvar, -10.0, 10.0)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        return mu + eps * std
+        return mu + eps * std, logvar
 
     def forward(self, x):
         h = self.encoder(x).flatten(1)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
-        z = self.reparameterize(mu, logvar)
+        z, logvar_c = self.reparameterize(mu, logvar)
         h_dec = self.fc_decode(z)
         h_dec = h_dec.view(h_dec.size(0), self.enc_c, self.enc_h, self.enc_w)
-        return self.decoder(h_dec), (mu, logvar)
+        return self.decoder(h_dec), (mu, logvar_c)
 
 
 # ============================================================
-# AE / VAE — новая архитектура (U-Net, шаг 8, skip)
+# AE / VAE — новая conv-архитектура (GroupNorm, bottleneck enc_c=64)
+# ============================================================
+def _gn(channels, max_groups=8):
+    """GroupNorm с автоматическим подбором числа групп — как в обучении."""
+    g = max_groups
+    while g > 1 and channels % g != 0:
+        g //= 2
+    return nn.GroupNorm(g, channels)
+
+
+class ConvEncoderGN(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_channels, 32, 3, padding=1),
+            _gn(32), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1),
+            _gn(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, 3, padding=1),
+            _gn(128), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.Conv2d(128, 64, 3, padding=1),
+            _gn(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class ConvDecoderGN(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.ConvTranspose2d(64, 128, 2, stride=2),
+            _gn(128), nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(128, 64, 2, stride=2),
+            _gn(64), nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(64, 32, 2, stride=2),
+            _gn(32), nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(32, in_channels, 2, stride=2),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, z):
+        return self.net(z)
+
+
+class ConvAutoencoderGN(nn.Module):
+    def __init__(self, in_channels, latent_dim, img_h, img_w):
+        super().__init__()
+        self.enc_c = 64
+        self.enc_h, self.enc_w = img_h // 16, img_w // 16
+        self.flat_dim = self.enc_c * self.enc_h * self.enc_w
+        self.encoder = ConvEncoderGN(in_channels)
+        self.fc_encode = nn.Linear(self.flat_dim, latent_dim)
+        self.fc_decode = nn.Linear(latent_dim, self.flat_dim)
+        self.decoder = ConvDecoderGN(in_channels)
+
+    def forward(self, x):
+        z = self.encoder(x).flatten(1)
+        z = self.fc_encode(z)
+        z = self.fc_decode(z)
+        z = z.view(z.size(0), self.enc_c, self.enc_h, self.enc_w)
+        return self.decoder(z), None
+
+
+class ConvVAEGN(nn.Module):
+    def __init__(self, in_channels, latent_dim, img_h, img_w):
+        super().__init__()
+        self.enc_c = 64
+        self.enc_h, self.enc_w = img_h // 16, img_w // 16
+        self.flat_dim = self.enc_c * self.enc_h * self.enc_w
+        self.latent_dim = latent_dim
+        self.encoder = ConvEncoderGN(in_channels)
+        self.fc_mu = nn.Linear(self.flat_dim, latent_dim)
+        self.fc_logvar = nn.Linear(self.flat_dim, latent_dim)
+        self.fc_decode = nn.Linear(latent_dim, self.flat_dim)
+        self.decoder = ConvDecoderGN(in_channels)
+
+    def reparameterize(self, mu, logvar):
+        # Та же защита, что и в обучении — клиппинг logvar.
+        logvar = torch.clamp(logvar, -10.0, 10.0)
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std, logvar
+
+    def forward(self, x):
+        h = self.encoder(x).flatten(1)
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        z, logvar_c = self.reparameterize(mu, logvar)
+        h_dec = self.fc_decode(z)
+        h_dec = h_dec.view(h_dec.size(0), self.enc_c, self.enc_h, self.enc_w)
+        return self.decoder(h_dec), (mu, logvar_c)
+
+
+# ============================================================
+# AE / VAE — U-Net (шаг 8, skip-связи, BatchNorm)
 # ============================================================
 class UNetEncoder(nn.Module):
     def __init__(self, in_channels, base=32):
@@ -224,33 +327,66 @@ class UNetVAE(nn.Module):
         self.decoder = UNetDecoder(in_channels, base)
 
     def reparameterize(self, mu, logvar):
+        # FIX: тот же клиппинг, что и в conv-моделях.
+        logvar = torch.clamp(logvar, -10.0, 10.0)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        return mu + eps * std
+        return mu + eps * std, logvar
 
     def forward(self, x):
         f0, f1, f2, f3 = self.encoder(x)
         mu = self.fc_mu(f3)
         logvar = self.fc_logvar(f3)
-        z = self.reparameterize(mu, logvar)
+        z, logvar_c = self.reparameterize(mu, logvar)
         h = self.expand(z)
         recon = self.decoder(h, f0, f1, f2)
-        return recon, (mu, logvar)
+        return recon, (mu, logvar_c)
 
 
-def detect_arch(cfg):
-    """Определяет архитектуру AE/VAE по config чекпойнта."""
+# ============================================================
+# Фабрика моделей по config чекпойнта
+# ============================================================
+def detect_arch_from_state_dict(state_dict):
+    """
+    Определяет архитектуру по ключам state_dict.
+    Приоритет: U-Net → старая conv+BN → новая conv+GN.
+    """
+    keys = list(state_dict.keys())
+    if any(k.startswith("encoder.enc0.") for k in keys):
+        return "unet"
+    # BatchNorm оставляет running_mean/running_var; GroupNorm — нет.
+    if any(k.endswith("running_mean") for k in keys):
+        return "conv"          # старая архитектура (BatchNorm, enc_c=128)
+    return "conv_gn"           # новая (GroupNorm, enc_c=64)
+
+
+def detect_arch(cfg, state_dict=None):
+    """
+    Определяет архитектуру AE/VAE.
+    1) Явный 'arch' в config — приоритет.
+    2) Наличие 'latent_channels' → unet.
+    3) Фолбэк по state_dict.
+    4) Фолбэк по умолчанию — старая conv.
+    """
     arch = cfg.get("arch")
-    if arch in ("unet", "conv"):
+    if arch in ("unet", "conv", "conv_gn"):
         return arch
     if "latent_channels" in cfg:
         return "unet"
+    if state_dict is not None:
+        return detect_arch_from_state_dict(state_dict)
     return "conv"
 
 
-def build_ae_model_from_cfg(cfg):
-    """Собирает модель AE/VAE по config из чекпойнта."""
-    arch = detect_arch(cfg)
+def build_ae_model_from_cfg(cfg, arch=None):
+    """
+    Собирает модель AE/VAE по config чекпойнта.
+    arch можно передать явно (обычно — результат detect_arch), иначе
+    определяется автоматически по config.
+    """
+    if arch is None:
+        arch = detect_arch(cfg)
+
     model_type = cfg["model_type"]
     in_channels = int(cfg["in_channels"])
     img_h = int(cfg["img_h"])
@@ -263,6 +399,13 @@ def build_ae_model_from_cfg(cfg):
         return UNetAE(in_channels, latent_channels, img_h, img_w)
 
     latent_dim = int(cfg["latent_dim"])
+
+    if arch == "conv_gn":
+        if model_type == "vae":
+            return ConvVAEGN(in_channels, latent_dim, img_h, img_w)
+        return ConvAutoencoderGN(in_channels, latent_dim, img_h, img_w)
+
+    # arch == "conv" — старая архитектура (BatchNorm, enc_c=128)
     if model_type == "vae":
         return ConvVAE(in_channels, latent_dim, img_h, img_w)
     return ConvAutoencoder(in_channels, latent_dim, img_h, img_w)

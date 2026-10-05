@@ -1,4 +1,4 @@
-# auto-aeb.py
+# auto-aeb.py — U-Net AE/VAE
 import os
 import glob
 import random
@@ -14,62 +14,56 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 # ================== КОНФИГ ==================
-DATA_DIR     = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\Good_ball"
-OUT_DIR      = r"C:\Users\prodis\Pictures\ДАТАСЕТЫ ДЛЯ ВКРМ\bga_ball\Good_ball\runs_ae_def"
+DATA_DIR     = r"C:\Users\prodis\Pictures\filters\crop_filters\BD"
+OUT_DIR      = r"C:\Users\prodis\Pictures\filters\crop_filters\BD\runs_ae_def_new"
 
-# --- Геометрия ---
-# ВАЖНО: вход должен быть кратен 8 (U-Net делает 3 пула, а не 4).
 IMG_H        = 128
 IMG_W        = 192
 KEEP_ASPECT  = True
 PAD_VALUE    = 0
 
-# --- Цвет ---
-COLOR_MODE   = "grayscale"              # "color" | "grayscale"
+COLOR_MODE   = "grayscale"
 IN_CHANNELS  = 3 if COLOR_MODE == "color" else 1
 
-# --- Тип автоэнкодера ---
-MODEL_TYPE   = "vae"                # "ae" | "vae"
-BETA_VAE     = 1.0
+MODEL_TYPE   = "vae"
 
-# --- Функция потерь ---
+# FIX: β через target+warmup.
+BETA_VAE_TARGET        = 1.0
+BETA_VAE_WARMUP_EPOCHS = 100
+
 USE_SSIM       = True
-SSIM_WEIGHT    = 0.25                # уменьшил: L1+grad уже дают резкость
-GRAD_LOSS_W    = 0.5                 # вес градиентной компоненты
+SSIM_WEIGHT    = 0.25
+GRAD_LOSS_W    = 0.5
 L1_WEIGHT      = 1.0
 
-# --- Шумовая аугментация ---
 USE_NOISE_AUG = True
 NOISE_STD     = 0.05
 
-# --- Аугментация ---
 USE_AUGMENTATION = True
 AUG_TRANSLATE    = 0.03
 AUG_DEGREES      = 2.0
 AUG_BRIGHTNESS   = 0.15
 AUG_CONTRAST     = 0.15
-AUG_HFLIP        = True              # зеркала по осям (безопасно для большинства задач)
+AUG_HFLIP        = True
 AUG_VFLIP        = False
 
-# --- Обучение ---
-# Пространственный латент: это ЧИСЛО КАНАЛОВ в бутылочном горлышке,
-# а не размер flat-вектора. Для 128×192 и шага 8 латент = C×16×24.
 LATENT_CHANNELS = 8
-BATCH_SIZE   = 16                   # будет автоматически уменьшен, если выборка мала
+BATCH_SIZE   = 16
 EPOCHS       = 150
-LR           = 1e-3
+# FIX: LR снижен с 1e-3 до 3e-4 (та же причина, что и в conv-скриптах).
+LR           = 3e-4
 WEIGHT_DECAY = 1e-5
 VAL_SPLIT    = 0.1
-NUM_WORKERS  = 0                    # 0 безопаснее на Windows
+NUM_WORKERS  = 0
 DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
 SEED         = 42
-PATIENCE     = 30
+PATIENCE     = 40                 # FIX: было 30; β-warmup=100
 
 THRESHOLD_PERCENTILE = 99.0
+LOGVAR_MIN, LOGVAR_MAX = -10.0, 10.0
 # ============================================
 
-assert IMG_H % 8 == 0 and IMG_W % 8 == 0, \
-    "U-Net делает 3 пула → H и W должны быть кратны 8."
+assert IMG_H % 8 == 0 and IMG_W % 8 == 0
 assert COLOR_MODE in ("color", "grayscale")
 assert MODEL_TYPE in ("ae", "vae")
 
@@ -119,11 +113,6 @@ class SSIMLoss(nn.Module):
 
 # ------------------ Gradient Loss ------------------
 class GradientLoss(nn.Module):
-    """
-    L1 между пространственными градиентами pred и target.
-    Заставляет декодер воспроизводить контуры/края, что напрямую
-    повышает чувствительность карты ошибок к мелким локальным дефектам.
-    """
     def __init__(self):
         super().__init__()
         kx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
@@ -219,32 +208,28 @@ def collect_images(root, exclude_names=("loss.png", "recon_examples.png", "best.
 # U-Net AE / VAE
 # ============================================================
 class UNetEncoder(nn.Module):
-    """
-    3 пула → шаг 8. Бутылочное горлышко для 128×192: 16×24.
-    Skip-выходы f0, f1, f2 идут в декодер напрямую.
-    """
     def __init__(self, in_channels, base=32):
         super().__init__()
         b = base
-        self.enc0 = nn.Sequential(                     # 1/1
+        self.enc0 = nn.Sequential(
             nn.Conv2d(in_channels, b, 3, padding=1),
             nn.BatchNorm2d(b), nn.ReLU(inplace=True),
             nn.Conv2d(b, b, 3, padding=1),
             nn.BatchNorm2d(b), nn.ReLU(inplace=True),
         )
-        self.enc1 = nn.Sequential(                     # 1/2
+        self.enc1 = nn.Sequential(
             nn.Conv2d(b, b * 2, 3, padding=1),
             nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
             nn.Conv2d(b * 2, b * 2, 3, padding=1),
             nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
         )
-        self.enc2 = nn.Sequential(                     # 1/4
+        self.enc2 = nn.Sequential(
             nn.Conv2d(b * 2, b * 4, 3, padding=1),
             nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
             nn.Conv2d(b * 4, b * 4, 3, padding=1),
             nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
         )
-        self.enc3 = nn.Sequential(                     # 1/8 (bottleneck)
+        self.enc3 = nn.Sequential(
             nn.Conv2d(b * 4, b * 8, 3, padding=1),
             nn.BatchNorm2d(b * 8), nn.ReLU(inplace=True),
             nn.Conv2d(b * 8, b * 8, 3, padding=1),
@@ -264,7 +249,7 @@ class UNetDecoder(nn.Module):
     def __init__(self, out_channels, base=32):
         super().__init__()
         b = base
-        self.up2 = nn.Sequential(                      # 1/8 → 1/4
+        self.up2 = nn.Sequential(
             nn.ConvTranspose2d(b * 8, b * 4, 2, stride=2),
             nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
         )
@@ -274,7 +259,7 @@ class UNetDecoder(nn.Module):
             nn.Conv2d(b * 4, b * 4, 3, padding=1),
             nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
         )
-        self.up1 = nn.Sequential(                      # 1/4 → 1/2
+        self.up1 = nn.Sequential(
             nn.ConvTranspose2d(b * 4, b * 2, 2, stride=2),
             nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
         )
@@ -284,7 +269,7 @@ class UNetDecoder(nn.Module):
             nn.Conv2d(b * 2, b * 2, 3, padding=1),
             nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
         )
-        self.up0 = nn.Sequential(                      # 1/2 → 1/1
+        self.up0 = nn.Sequential(
             nn.ConvTranspose2d(b * 2, b, 2, stride=2),
             nn.BatchNorm2d(b), nn.ReLU(inplace=True),
         )
@@ -303,10 +288,6 @@ class UNetDecoder(nn.Module):
 
 
 class UNetAE(nn.Module):
-    """
-    Полностью свёрточный AE. Латент — пространственная карта
-    (B, latent_channels, H/8, W/8), а не плоский вектор.
-    """
     def __init__(self, in_channels, latent_channels, img_h, img_w, base=32):
         super().__init__()
         assert img_h % 8 == 0 and img_w % 8 == 0
@@ -328,7 +309,6 @@ class UNetAE(nn.Module):
 
 
 class UNetVAE(nn.Module):
-    """Тот же U-Net, но с VAE-головой на пространственной карте."""
     def __init__(self, in_channels, latent_channels, img_h, img_w, base=32):
         super().__init__()
         assert img_h % 8 == 0 and img_w % 8 == 0
@@ -343,18 +323,20 @@ class UNetVAE(nn.Module):
         self.decoder = UNetDecoder(in_channels, base)
 
     def reparameterize(self, mu, logvar):
+        # FIX: клиппинг logvar.
+        logvar = torch.clamp(logvar, LOGVAR_MIN, LOGVAR_MAX)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        return mu + eps * std
+        return mu + eps * std, logvar
 
     def forward(self, x):
         f0, f1, f2, f3 = self.encoder(x)
         mu = self.fc_mu(f3)
         logvar = self.fc_logvar(f3)
-        z = self.reparameterize(mu, logvar)
+        z, logvar_c = self.reparameterize(mu, logvar)
         h = self.expand(z)
         recon = self.decoder(h, f0, f1, f2)
-        return recon, (mu, logvar)
+        return recon, (mu, logvar_c)
 
 
 def build_model(model_type, in_channels, latent_channels, img_h, img_w):
@@ -364,13 +346,16 @@ def build_model(model_type, in_channels, latent_channels, img_h, img_w):
 
 
 def vae_kl_loss(mu, logvar):
-    """
-    Нормированный KL для пространственного латента.
-    Делим на (C*H*W), чтобы значение было сопоставимо с пиксельным лоссом
-    (иначе β_Vae физически "не работает" — KL доминирует над реконструкцией).
-    """
+    # FIX: клиппинг logvar + нормировка на C*H*W.
+    logvar = torch.clamp(logvar, LOGVAR_MIN, LOGVAR_MAX)
     n = mu.size(1) * mu.size(2) * mu.size(3)
     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / (mu.size(0) * n)
+
+
+def get_beta(epoch, warmup_epochs, target_beta):
+    if warmup_epochs <= 0:
+        return target_beta
+    return target_beta * min(1.0, float(epoch) / float(warmup_epochs))
 
 
 # ------------------ Обучение ------------------
@@ -383,10 +368,11 @@ def _compute_recon_loss(recon, x, criterion_l1, criterion_grad, criterion_ssim):
 
 
 def train_one_epoch(model, loader, optimizer, criterion_l1, criterion_grad,
-                    criterion_ssim, model_type, device):
+                    criterion_ssim, model_type, device, beta):
     model.train()
     total_loss = total_recon = total_kl = 0.0
     n = 0
+    n_skipped = 0
 
     for x in loader:
         x = x.to(device, non_blocking=True)
@@ -399,9 +385,15 @@ def train_one_epoch(model, loader, optimizer, criterion_l1, criterion_grad,
         if model_type == "vae" and extra is not None:
             mu, logvar = extra
             kl = vae_kl_loss(mu, logvar)
-            loss = recon_loss + BETA_VAE * kl
+            loss = recon_loss + beta * kl
         else:
             loss = recon_loss
+
+        # FIX: NaN-guard.
+        if not torch.isfinite(loss):
+            optimizer.zero_grad(set_to_none=True)
+            n_skipped += 1
+            continue
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -413,6 +405,9 @@ def train_one_epoch(model, loader, optimizer, criterion_l1, criterion_grad,
         total_kl += kl.item() * bs
         n += bs
 
+    if n_skipped:
+        print(f"  [WARN] пропущено батчей: {n_skipped}")
+
     if n == 0:
         return float("nan"), float("nan"), float("nan")
     return total_loss / n, total_recon / n, total_kl / n
@@ -420,7 +415,7 @@ def train_one_epoch(model, loader, optimizer, criterion_l1, criterion_grad,
 
 @torch.no_grad()
 def evaluate(model, loader, criterion_l1, criterion_grad, criterion_ssim,
-             model_type, device):
+             model_type, device, beta):
     model.eval()
     total_loss = 0.0
     n = 0
@@ -429,16 +424,18 @@ def evaluate(model, loader, criterion_l1, criterion_grad, criterion_ssim,
     for x in loader:
         x = x.to(device, non_blocking=True)
         recon, extra = model(x)
-
         recon_loss = _compute_recon_loss(recon, x, criterion_l1, criterion_grad, criterion_ssim)
 
         kl = torch.tensor(0.0, device=device)
         if model_type == "vae" and extra is not None:
             mu, logvar = extra
             kl = vae_kl_loss(mu, logvar)
-            loss = recon_loss + BETA_VAE * kl
+            loss = recon_loss + beta * kl
         else:
             loss = recon_loss
+
+        if not torch.isfinite(loss):
+            continue
 
         per_sample = F.l1_loss(recon, x, reduction="none").flatten(1).mean(dim=1)
         all_errors.append(per_sample.cpu())
@@ -456,17 +453,14 @@ def evaluate(model, loader, criterion_l1, criterion_grad, criterion_ssim,
 def main():
     print(f"{'='*60}")
     print(f"Конфиг:")
-    print(f"  MODEL_TYPE     = {MODEL_TYPE}" + (f"  (β={BETA_VAE})" if MODEL_TYPE == "vae" else ""))
-    print(f"  ARCH           = U-Net (3 пула, skip-connections)")
+    print(f"  MODEL_TYPE     = {MODEL_TYPE}"
+          + (f"  (β_target={BETA_VAE_TARGET}, warmup={BETA_VAE_WARMUP_EPOCHS})"
+             if MODEL_TYPE == "vae" else ""))
+    print(f"  ARCH           = U-Net (3 пула, skip)")
     print(f"  COLOR_MODE     = {COLOR_MODE} (in_channels={IN_CHANNELS})")
-    print(f"  IMG            = ({IMG_H}, {IMG_W})  KEEP_ASPECT={KEEP_ASPECT}")
-    print(f"  LATENT_CHANNELS= {LATENT_CHANNELS}  →  {LATENT_CHANNELS}×{IMG_H//8}×{IMG_W//8}"
-          f" = {LATENT_CHANNELS * (IMG_H//8) * (IMG_W//8)}")
-    print(f"  LOSS           = L1 + {GRAD_LOSS_W}·grad" +
-          (f" + {SSIM_WEIGHT}·ssim" if USE_SSIM else ""))
-    print(f"  USE_NOISE_AUG  = {USE_NOISE_AUG}" + (f"  (σ={NOISE_STD})" if USE_NOISE_AUG else ""))
-    print(f"  AUGMENTATION   = {USE_AUGMENTATION}"
-          + (f"  (hflip={AUG_HFLIP}, vflip={AUG_VFLIP})" if USE_AUGMENTATION else ""))
+    print(f"  IMG            = ({IMG_H}, {IMG_W})")
+    print(f"  LATENT_CHANNELS= {LATENT_CHANNELS}  →  {LATENT_CHANNELS}×{IMG_H//8}×{IMG_W//8}")
+    print(f"  LR             = {LR}")
     print(f"  DEVICE         = {DEVICE}")
     print(f"{'='*60}")
 
@@ -476,16 +470,13 @@ def main():
     print(f"Найдено изображений: {len(all_paths)}")
 
     if len(all_paths) < 20:
-        print(f"[WARN] Всего {len(all_paths)} изображений — модель почти наверняка переобучится.")
-        print(f"[WARN] Рекомендуется ≥100 снимков, либо включите USE_AUGMENTATION=True.")
-        print(f"[WARN] Сейчас USE_AUGMENTATION = {USE_AUGMENTATION}")
+        print(f"[WARN] Всего {len(all_paths)} изображений — модель переобучится.")
 
     random.shuffle(all_paths)
 
-    # --- Сплит train/val с защитой от пустой валидации ---
     if len(all_paths) < 5:
         train_paths, val_paths = all_paths, all_paths
-        print(f"[WARN] Слишком мало изображений — train и val совпадают.")
+        print(f"[WARN] train и val совпадают.")
     else:
         n_val = max(1, int(len(all_paths) * VAL_SPLIT))
         n_val = min(n_val, len(all_paths) - 1)
@@ -508,7 +499,7 @@ def main():
 
     eff_batch = min(BATCH_SIZE, max(1, n_train // 4))
     drop_last = (n_train // eff_batch) >= 2
-    print(f"[data] batch_size={eff_batch} (задан {BATCH_SIZE}), drop_last={drop_last}")
+    print(f"[data] batch_size={eff_batch}, drop_last={drop_last}")
 
     train_loader = DataLoader(train_ds, batch_size=eff_batch, shuffle=True,
                               num_workers=NUM_WORKERS, pin_memory=True,
@@ -519,12 +510,12 @@ def main():
 
     model = build_model(MODEL_TYPE, IN_CHANNELS, LATENT_CHANNELS, IMG_H, IMG_W).to(DEVICE)
     print(model)
-    print(f"bottleneck: {LATENT_CHANNELS}×{IMG_H//8}×{IMG_W//8} "
-          f"= {LATENT_CHANNELS * (IMG_H//8) * (IMG_W//8)} значений латента")
+    print(f"bottleneck: {LATENT_CHANNELS}×{IMG_H//8}×{IMG_W//8}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=20, T_mult=2, eta_min=1e-5
+    # FIX: CosineAnnealingLR вместо WarmRestarts.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=EPOCHS, eta_min=1e-5
     )
 
     criterion_l1 = nn.L1Loss()
@@ -532,17 +523,19 @@ def main():
     criterion_ssim = SSIMLoss(channel=IN_CHANNELS).to(DEVICE)
 
     best_val = float("inf")
-    hist = {"train": [], "val": [], "train_recon": [], "train_kl": []}
+    hist = {"train": [], "val": [], "train_recon": [], "train_kl": [], "beta": []}
     epochs_no_improve = 0
 
     for epoch in range(1, EPOCHS + 1):
+        beta = get_beta(epoch, BETA_VAE_WARMUP_EPOCHS, BETA_VAE_TARGET)
+
         tr_loss, tr_recon, tr_kl = train_one_epoch(
             model, train_loader, optimizer, criterion_l1, criterion_grad,
-            criterion_ssim, MODEL_TYPE, DEVICE,
+            criterion_ssim, MODEL_TYPE, DEVICE, beta,
         )
         va_loss, va_errors = evaluate(
             model, val_loader, criterion_l1, criterion_grad,
-            criterion_ssim, MODEL_TYPE, DEVICE,
+            criterion_ssim, MODEL_TYPE, DEVICE, beta,
         )
         scheduler.step()
 
@@ -550,13 +543,22 @@ def main():
         hist["val"].append(va_loss)
         hist["train_recon"].append(tr_recon)
         hist["train_kl"].append(tr_kl)
+        hist["beta"].append(beta)
 
         lr_now = optimizer.param_groups[0]["lr"]
         print(f"[{epoch:03d}/{EPOCHS}] "
-              f"train={tr_loss:.6f} (recon={tr_recon:.6f}, kl={tr_kl:.6f})  "
+              f"train={tr_loss:.6f} (recon={tr_recon:.6f}, kl={tr_kl:.6f}, β={beta:.4f})  "
               f"val={va_loss:.6f}  lr={lr_now:.2e}")
 
-        if np.isfinite(va_loss) and va_loss < best_val:
+        if not np.isfinite(va_loss):
+            print(f"  [WARN] val loss = {va_loss} — пропускаем сохранение.")
+            epochs_no_improve += 1
+            if epochs_no_improve >= PATIENCE:
+                print(f"  Ранняя остановка (NaN).")
+                break
+            continue
+
+        if va_loss < best_val:
             best_val = va_loss
             epochs_no_improve = 0
             threshold = float(np.percentile(va_errors, THRESHOLD_PERCENTILE)) \
@@ -566,12 +568,12 @@ def main():
                 "config": {
                     "arch": "unet",
                     "model_type": MODEL_TYPE,
-                    "beta_vae": BETA_VAE,
+                    "beta_vae_target": BETA_VAE_TARGET,
+                    "beta_vae_warmup_epochs": BETA_VAE_WARMUP_EPOCHS,
                     "in_channels": IN_CHANNELS,
                     "color_mode": COLOR_MODE,
                     "latent_channels": LATENT_CHANNELS,
-                    # legacy-ключ: некоторые внешние скрипты могут ожидать "latent_dim"
-                    "latent_dim": LATENT_CHANNELS,
+                    "latent_dim": LATENT_CHANNELS,   # legacy-ключ
                     "img_h": IMG_H, "img_w": IMG_W,
                     "keep_aspect": KEEP_ASPECT,
                     "pad_value": PAD_VALUE,
@@ -579,6 +581,8 @@ def main():
                     "ssim_weight": SSIM_WEIGHT,
                     "grad_loss_w": GRAD_LOSS_W,
                     "l1_weight": L1_WEIGHT,
+                    "logvar_min": LOGVAR_MIN,
+                    "logvar_max": LOGVAR_MAX,
                 },
                 "epoch": epoch,
                 "val_loss": best_val,
@@ -594,7 +598,7 @@ def main():
                 break
 
     # --- Графики ---
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
     axes[0].plot(hist["train"], label="train")
     axes[0].plot(hist["val"], label="val")
     axes[0].set_xlabel("epoch"); axes[0].set_ylabel("loss")
@@ -606,6 +610,14 @@ def main():
         axes[1].set_yscale("log")
     axes[1].set_xlabel("epoch"); axes[1].legend()
     axes[1].grid(True); axes[1].set_title("Components")
+
+    if MODEL_TYPE == "vae":
+        axes[2].plot(hist["beta"], label="β")
+        axes[2].set_xlabel("epoch"); axes[2].legend(); axes[2].grid(True)
+        axes[2].set_title("KL weight (annealing)")
+    else:
+        axes[2].axis("off")
+
     plt.tight_layout()
     plt.savefig(os.path.join(OUT_DIR, "loss.png"), dpi=120)
 
@@ -631,7 +643,7 @@ def main():
         else:
             axes[0, i].imshow(xi.permute(1, 2, 0))
             axes[1, i].imshow(ri.permute(1, 2, 0).clamp(0, 1))
-        im = axes[2, i].imshow(err, cmap="hot")
+        axes[2, i].imshow(err, cmap="hot")
         axes[0, i].set_title("orig", fontsize=8)
         axes[1, i].set_title("recon", fontsize=8)
         axes[2, i].set_title("|err|", fontsize=8)

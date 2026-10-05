@@ -26,9 +26,13 @@ from import_libs_methods_ui import setup_yolo_ae_vae_ui
 
 
 from utils_aeb.yolo_aeb_utils import (
-    # модели AE/VAE
+    # модели AE/VAE — старые conv+BN
     ConvEncoder, ConvDecoder, ConvAutoencoder, ConvVAE,
+    # модели AE/VAE — новые conv+GN
+    ConvEncoderGN, ConvDecoderGN, ConvAutoencoderGN, ConvVAEGN,
+    # модели AE/VAE — U-Net
     UNetEncoder, UNetDecoder, UNetAE, UNetVAE,
+    # фабрика и препроцессинг
     detect_arch, build_ae_model_from_cfg, preprocess_image_for_ae,
     # геометрия
     longest_edge_angle_deg,
@@ -150,7 +154,6 @@ class YoloInspectWindow(QMainWindow):
         self.setWindowTitle("YOLO + AE/VAE")
 
         # --- Данные изображений ---
-        # Полный список путей хранится всегда; сами картинки — в _lazy_cache.
         self.image_paths = []
         self.current_index = 0
         self._lazy_cache = None
@@ -380,7 +383,6 @@ class YoloInspectWindow(QMainWindow):
     def _load_images(self, source):
         self.log(f"Loading images from {source}...")
 
-        # --- Собираем список файлов БЕЗ загрузки картинок ---
         if isinstance(source, str) and os.path.isdir(source):
             exts = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
             all_files = sorted(
@@ -401,12 +403,10 @@ class YoloInspectWindow(QMainWindow):
         resize_enabled = self.nav_widget.is_resize_enabled()
         max_side = 1024
 
-        # --- Останавливаем предыдущий кэш ---
         if self._lazy_cache is not None:
             self._lazy_cache.shutdown()
             self._lazy_cache = None
 
-        # --- Создаём кэш ---
         loader = lambda p: load_one_image_item(
             p,
             resize_enabled=resize_enabled,
@@ -422,7 +422,6 @@ class YoloInspectWindow(QMainWindow):
             max_workers=2,
         )
 
-        # --- Сброс состояния ---
         self.image_paths = all_files
         self.current_index = 0
         self.original_image = None
@@ -434,13 +433,11 @@ class YoloInspectWindow(QMainWindow):
             view.set_pixmap(numpy_to_qpixmap(None))
         self.objects_list.clear()
 
-        # --- Синхронно грузим первый снимок ---
         first = self._lazy_cache.get(0)
         if first is None:
             self.log("Не удалось загрузить первое изображение.")
             return
 
-        # --- Остальное окно — в фон ---
         total = len(self._lazy_cache)
         self._lazy_cache.prefetch(
             range(1, min(1 + self._lazy_cache.prefetch_ahead + 1, total))
@@ -483,8 +480,6 @@ class YoloInspectWindow(QMainWindow):
             view.reset_view()
 
     def closeEvent(self, event):
-        # Аккуратно останавливаем фоновый пул, чтобы процесс не висел
-        # на незавершённых задачах загрузки.
         if self._lazy_cache is not None:
             try:
                 self._lazy_cache.shutdown()
@@ -508,7 +503,6 @@ class YoloInspectWindow(QMainWindow):
         current_file = os.path.basename(self.image_paths[idx])
         self.log(f"Отображён снимок: {current_file}")
 
-        # --- Синхронно получаем элемент (LRU-кэш вернёт готовый или загрузит) ---
         item = self._lazy_cache.get(idx)
         if item is None:
             self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
@@ -536,7 +530,6 @@ class YoloInspectWindow(QMainWindow):
         self._auto_apply_ae()
         self.update_navigation_state()
 
-        # --- Префетч следующего окна + вытеснение дальних ---
         ahead = self._lazy_cache.prefetch_ahead
         self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
         self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
@@ -752,10 +745,9 @@ class YoloInspectWindow(QMainWindow):
         self.schedule_update()
 
     # --------------------------------------------------------
-    # Имена файлов для сохранения (с учётом класса и номера объекта)
+    # Имена файлов для сохранения
     # --------------------------------------------------------
     def _update_suggested_names(self):
-        """Обновляет suggested save-name во всех view с учётом класса и номера объекта."""
         if not (self.image_paths and 0 <= self.current_index < len(self.image_paths)):
             return
         current_file = os.path.basename(self.image_paths[self.current_index])
@@ -897,7 +889,6 @@ class YoloInspectWindow(QMainWindow):
                 )
                 mode = "cropped"
 
-        # --- Точный доворот кадра вокруг его центра ---
         fine_angle = float(self.crop_rotation_spin.value())
         if abs(fine_angle) > 1e-6:
             h, w = img.shape[:2]
@@ -918,7 +909,6 @@ class YoloInspectWindow(QMainWindow):
                     borderValue=(0, 0, 0),
                 )
             else:
-                # "none" — не заливать фон, растянуть крайние пиксели
                 img = cv2.warpAffine(
                     img, M, (w, h),
                     flags=cv2.INTER_LINEAR,
@@ -981,7 +971,6 @@ class YoloInspectWindow(QMainWindow):
         self._auto_apply_ae()
 
     def reset_offsets(self):
-        """Сбрасывает отступ, смещения области обрезки и доворот в 0."""
         self.crop_padding_spin.blockSignals(True)
         self.crop_offset_x_spin.blockSignals(True)
         self.crop_offset_y_spin.blockSignals(True)
@@ -1096,7 +1085,12 @@ class YoloInspectWindow(QMainWindow):
                 raise RuntimeError("В чекпойнте нет полей 'model' и 'config'.")
 
             cfg = dict(ckpt["config"])
-            arch = detect_arch(cfg)
+            state_dict = ckpt["model"]
+
+            # Определяем архитектуру: сначала по cfg["arch"], затем по структуре
+            # state_dict. Это даёт совместимость со всеми тремя семействами:
+            # conv (BatchNorm, enc_c=128), conv_gn (GroupNorm, enc_c=64), unet.
+            arch = detect_arch(cfg, state_dict=state_dict)
 
             required = ["model_type", "in_channels", "img_h", "img_w"]
             required.append("latent_channels" if arch == "unet" else "latent_dim")
@@ -1105,8 +1099,19 @@ class YoloInspectWindow(QMainWindow):
                     raise RuntimeError(f"В config нет ключа '{k}' (arch={arch}).")
 
             device = self._resolve_torch_device()
-            model = build_ae_model_from_cfg(cfg)
-            model.load_state_dict(ckpt["model"])
+            model = build_ae_model_from_cfg(cfg, arch=arch)
+
+            # Строгая загрузка + понятная ошибка, если что-то не совпало.
+            try:
+                model.load_state_dict(state_dict)
+            except RuntimeError as e:
+                raise RuntimeError(
+                    f"state_dict не совпал с моделью arch={arch}.\n"
+                    f"Проверьте, что чекпойнт от того же скрипта обучения "
+                    f"(conv / conv_gn / unet) и той же геометрии входа.\n"
+                    f"Детали: {e}"
+                )
+
             model.eval()
             try:
                 model.to(device)
@@ -1123,14 +1128,24 @@ class YoloInspectWindow(QMainWindow):
             self._ae_ckpt_threshold = ckpt.get("threshold_value", None)
             self._ae_ckpt_percentile = ckpt.get("threshold_percentile", None)
 
+            # Собираем сводку по модели для лога.
+            n_params = sum(p.numel() for p in model.parameters())
             if arch == "unet":
                 latent_info = f"latent_channels={cfg['latent_channels']}"
+                if "latent_h" in cfg or "img_h" in cfg:
+                    lh = int(cfg["img_h"]) // 8
+                    lw = int(cfg["img_w"]) // 8
+                    latent_info += f" ({cfg['latent_channels']}×{lh}×{lw})"
             else:
                 latent_info = f"latent_dim={cfg['latent_dim']}"
 
             self.log(f"[AE/VAE] {path}")
             self.log(f"[AE/VAE] arch={arch}, type={cfg['model_type']}, {latent_info}, "
-                     f"size=({cfg['img_h']},{cfg['img_w']}), device={device}")
+                     f"size=({cfg['img_h']},{cfg['img_w']}), "
+                     f"params={n_params/1e6:.3f}M, device={device}")
+            if self._ae_ckpt_threshold is not None:
+                self.log(f"[AE/VAE] ckpt threshold={self._ae_ckpt_threshold:.6f} "
+                         f"@ p{self._ae_ckpt_percentile}")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить AE/VAE:\n{e}")
             return False

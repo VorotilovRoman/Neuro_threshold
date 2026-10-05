@@ -1,4 +1,4 @@
-# auto-aeb.py
+# auto-aeb.py — legacy conv+BN
 import os
 import glob
 import random
@@ -12,69 +12,49 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import matplotlib.pyplot as plt
-
 # ================== КОНФИГ ==================
 DATA_DIR     = r"C:\Users\prodis\Pictures\filters\crop_filters\BD"
 OUT_DIR      = r"C:\Users\prodis\Pictures\filters\crop_filters\BD\runs_ae_def_new"
 
-# --- Геометрия ---
-# ГЛАВНОЕ ИЗМЕНЕНИЕ: вход вчетверо больше.
-# Было 128×192 → бутылочное горлышко 8×12 (одна ячейка ~16×16 px исходника).
-# Стало 256×384 → бутылочное горлышко 16×24 (та же ячейка 16×16 px,
-# но мелкий дефект при ресайзе занимает больше пикселей — он «выживает»).
 IMG_H        = 256
 IMG_W        = 256
 KEEP_ASPECT  = True
 PAD_VALUE    = 0
 
-# --- Цвет ---
-COLOR_MODE   = "grayscale"              # "color" | "grayscale"
+COLOR_MODE   = "grayscale"
 IN_CHANNELS  = 3 if COLOR_MODE == "color" else 1
 
-# --- Тип автоэнкодера ---
-MODEL_TYPE   = "vae"                # "ae" | "vae"
-# β=1.0 сильно давит на латент → декодер склонен к «гладкой» реконструкции.
-# 0.3 — компромисс: детали сохраняются лучше, но регуляризация ещё работает.
-BETA_VAE     = 0.3
+MODEL_TYPE   = "vae"
 
-# --- Функция потерь ---
+BETA_VAE_TARGET        = 0.3
+BETA_VAE_WARMUP_EPOCHS = 100     # β плавно 0 → 0.3
+
 USE_SSIM     = True
-# SSIM штрафует структурные искажения (края/контуры) — самые «мелкие» признаки.
-# Поднимаем с 0.5 до 0.8, чтобы декодер внимательнее относился к границам.
 SSIM_WEIGHT  = 0.8
 
-# --- Шумовая аугментация ---
 USE_NOISE_AUG = True
-# Было 0.05 — это заметно «зашумляло» мелкие детали при обучении.
-# 0.02 — сеть всё ещё устойчива к шуму, но не учится его игнорировать.
 NOISE_STD     = 0.02
 
-# --- Аугментация ---
 USE_AUGMENTATION = True
-# Сдвиги/повороты/яркость мягче: агрессивная аугментация «смазывает»
-# мелкие аномалии, и модель перестаёт их считать значимыми.
-AUG_TRANSLATE    = 0.01     # было 0.03
-AUG_DEGREES      = 1.0      # было 2.0
-AUG_BRIGHTNESS   = 0.10     # было 0.15
-AUG_CONTRAST     = 0.10     # было 0.15
+AUG_TRANSLATE    = 0.01
+AUG_DEGREES      = 1.0
+AUG_BRIGHTNESS   = 0.10
+AUG_CONTRAST     = 0.10
 
-# --- Обучение ---
-# flat_dim теперь 16*24*128 = 49152 (было 12288). Чтобы сохранить
-# примерно ту же «плотность» информации на единицу латента, увеличиваем
-# его пропорционально (x2 от исходного).
 LATENT_DIM   = 256
-# Батч уменьшен: вход вчетверо тяжелее, при BATCH=16 рискуем OOM.
 BATCH_SIZE   = 8
-EPOCHS       = 1000                  # чуть больше эпох — задача сложнее
-LR           = 1e-3
+EPOCHS       = 1000
+LR           = 3e-4               # FIX: снижен с 1e-3
 WEIGHT_DECAY = 1e-5
 VAL_SPLIT    = 0.1
-NUM_WORKERS  = 0                    # 0 безопаснее на Windows
+NUM_WORKERS  = 0
 DEVICE       = "cuda" if torch.cuda.is_available() else "cpu"
 SEED         = 42
-PATIENCE     = 40                   # было 30 — даём больше времени на плато
+PATIENCE     = 200                # FIX: было 40 — меньше β-warmup
 
 THRESHOLD_PERCENTILE = 99.0
+LOGVAR_MIN, LOGVAR_MAX = -10.0, 10.0
+# ============================================
 # ============================================
 
 assert IMG_H % 16 == 0 and IMG_W % 16 == 0
@@ -192,7 +172,7 @@ def collect_images(root, exclude_names=("loss.png", "recon_examples.png", "best.
     return sorted(set(files))
 
 
-# ------------------ Модели ------------------
+# ------------------ Модели (conv + BatchNorm, enc_c=128) ------------------
 class ConvEncoder(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -262,18 +242,20 @@ class ConvVAE(nn.Module):
         self.decoder = ConvDecoder(in_channels)
 
     def reparameterize(self, mu, logvar):
+        # FIX: клиппинг logvar.
+        logvar = torch.clamp(logvar, LOGVAR_MIN, LOGVAR_MAX)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        return mu + eps * std
+        return mu + eps * std, logvar
 
     def forward(self, x):
         h = self.encoder(x).flatten(1)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
-        z = self.reparameterize(mu, logvar)
+        z, logvar_c = self.reparameterize(mu, logvar)
         h_dec = self.fc_decode(z)
         h_dec = h_dec.view(h_dec.size(0), self.enc_c, self.enc_h, self.enc_w)
-        return self.decoder(h_dec), (mu, logvar)
+        return self.decoder(h_dec), (mu, logvar_c)
 
 
 def build_model(model_type, in_channels, latent_dim, img_h, img_w):
@@ -283,15 +265,24 @@ def build_model(model_type, in_channels, latent_dim, img_h, img_w):
 
 
 def vae_kl_loss(mu, logvar):
+    # FIX: клиппинг logvar.
+    logvar = torch.clamp(logvar, LOGVAR_MIN, LOGVAR_MAX)
     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / mu.size(0)
+
+
+def get_beta(epoch, warmup_epochs, target_beta):
+    if warmup_epochs <= 0:
+        return target_beta
+    return target_beta * min(1.0, float(epoch) / float(warmup_epochs))
 
 
 # ------------------ Обучение ------------------
 def train_one_epoch(model, loader, optimizer, criterion_mse, criterion_ssim,
-                    model_type, device):
+                    model_type, device, beta):
     model.train()
     total_loss = total_recon = total_kl = 0.0
     n = 0
+    n_skipped = 0
 
     for x in loader:
         x = x.to(device, non_blocking=True)
@@ -301,8 +292,7 @@ def train_one_epoch(model, loader, optimizer, criterion_mse, criterion_ssim,
 
         loss_mse = criterion_mse(recon, x)
         if USE_SSIM:
-            loss_ssim = criterion_ssim(recon, x)
-            recon_loss = loss_mse + SSIM_WEIGHT * loss_ssim
+            recon_loss = loss_mse + SSIM_WEIGHT * criterion_ssim(recon, x)
         else:
             recon_loss = loss_mse
 
@@ -310,9 +300,15 @@ def train_one_epoch(model, loader, optimizer, criterion_mse, criterion_ssim,
         if model_type == "vae" and extra is not None:
             mu, logvar = extra
             kl = vae_kl_loss(mu, logvar)
-            loss = recon_loss + BETA_VAE * kl
+            loss = recon_loss + beta * kl
         else:
             loss = recon_loss
+
+        # FIX: NaN-guard.
+        if not torch.isfinite(loss):
+            optimizer.zero_grad(set_to_none=True)
+            n_skipped += 1
+            continue
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -324,13 +320,16 @@ def train_one_epoch(model, loader, optimizer, criterion_mse, criterion_ssim,
         total_kl += kl.item() * bs
         n += bs
 
+    if n_skipped:
+        print(f"  [WARN] пропущено батчей: {n_skipped}")
+
     if n == 0:
         return float("nan"), float("nan"), float("nan")
     return total_loss / n, total_recon / n, total_kl / n
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device):
+def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device, beta):
     model.eval()
     total_loss = 0.0
     n = 0
@@ -342,8 +341,7 @@ def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device):
 
         loss_mse = criterion_mse(recon, x)
         if USE_SSIM:
-            loss_ssim = criterion_ssim(recon, x)
-            recon_loss = loss_mse + SSIM_WEIGHT * loss_ssim
+            recon_loss = loss_mse + SSIM_WEIGHT * criterion_ssim(recon, x)
         else:
             recon_loss = loss_mse
 
@@ -351,9 +349,12 @@ def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device):
         if model_type == "vae" and extra is not None:
             mu, logvar = extra
             kl = vae_kl_loss(mu, logvar)
-            loss = recon_loss + BETA_VAE * kl
+            loss = recon_loss + beta * kl
         else:
             loss = recon_loss
+
+        if not torch.isfinite(loss):
+            continue
 
         per_sample = F.mse_loss(recon, x, reduction="none").flatten(1).mean(dim=1)
         all_errors.append(per_sample.cpu())
@@ -371,12 +372,13 @@ def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device):
 def main():
     print(f"{'='*60}")
     print(f"Конфиг:")
-    print(f"  MODEL_TYPE     = {MODEL_TYPE}" + (f"  (β={BETA_VAE})" if MODEL_TYPE == "vae" else ""))
+    print(f"  MODEL_TYPE     = {MODEL_TYPE}"
+          + (f"  (β_target={BETA_VAE_TARGET}, warmup={BETA_VAE_WARMUP_EPOCHS})"
+             if MODEL_TYPE == "vae" else ""))
+    print(f"  ARCH           = conv (BatchNorm, enc_c=128)")
     print(f"  COLOR_MODE     = {COLOR_MODE} (in_channels={IN_CHANNELS})")
     print(f"  IMG            = ({IMG_H}, {IMG_W})  KEEP_ASPECT={KEEP_ASPECT}")
-    print(f"  USE_SSIM       = {USE_SSIM}" + (f"  (λ={SSIM_WEIGHT})" if USE_SSIM else ""))
-    print(f"  USE_NOISE_AUG  = {USE_NOISE_AUG}" + (f"  (σ={NOISE_STD})" if USE_NOISE_AUG else ""))
-    print(f"  AUGMENTATION   = {USE_AUGMENTATION}")
+    print(f"  LR             = {LR}")
     print(f"  DEVICE         = {DEVICE}")
     print(f"{'='*60}")
 
@@ -386,20 +388,16 @@ def main():
     print(f"Найдено изображений: {len(all_paths)}")
 
     if len(all_paths) < 20:
-        print(f"[WARN] Всего {len(all_paths)} изображений — модель почти наверняка переобучится.")
-        print(f"[WARN] Рекомендуется ≥100 снимков, либо включите USE_AUGMENTATION=True.")
-        print(f"[WARN] Сейчас USE_AUGMENTATION = {USE_AUGMENTATION}")
+        print(f"[WARN] Всего {len(all_paths)} изображений — модель переобучится.")
 
     random.shuffle(all_paths)
 
-    # --- Сплит train/val с защитой от пустой валидации ---
     if len(all_paths) < 5:
-        # слишком мало — используем всё и для train, и для val
         train_paths, val_paths = all_paths, all_paths
-        print(f"[WARN] Слишком мало изображений — train и val совпадают.")
+        print(f"[WARN] train и val совпадают.")
     else:
         n_val = max(1, int(len(all_paths) * VAL_SPLIT))
-        n_val = min(n_val, len(all_paths) - 1)   # хотя бы 1 в train
+        n_val = min(n_val, len(all_paths) - 1)
         val_paths = all_paths[:n_val]
         train_paths = all_paths[n_val:]
 
@@ -417,10 +415,9 @@ def main():
     if n_train == 0:
         raise SystemExit("Обучающая выборка пуста.")
 
-    # --- АВТОПОДБОР batch size ---
     eff_batch = min(BATCH_SIZE, max(1, n_train // 4))
     drop_last = (n_train // eff_batch) >= 2
-    print(f"[data] batch_size={eff_batch} (задан {BATCH_SIZE}), drop_last={drop_last}")
+    print(f"[data] batch_size={eff_batch}, drop_last={drop_last}")
 
     train_loader = DataLoader(train_ds, batch_size=eff_batch, shuffle=True,
                               num_workers=NUM_WORKERS, pin_memory=True,
@@ -436,24 +433,27 @@ def main():
               f"= {model.flat_dim} → latent {LATENT_DIM}")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=20, T_mult=2, eta_min=1e-5
+    # FIX: CosineAnnealingLR вместо CosineAnnealingWarmRestarts.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=EPOCHS, eta_min=1e-5
     )
     criterion_mse = nn.MSELoss()
     criterion_ssim = SSIMLoss(channel=IN_CHANNELS).to(DEVICE)
 
     best_val = float("inf")
-    hist = {"train": [], "val": [], "train_recon": [], "train_kl": []}
+    hist = {"train": [], "val": [], "train_recon": [], "train_kl": [], "beta": []}
     epochs_no_improve = 0
 
     for epoch in range(1, EPOCHS + 1):
+        beta = get_beta(epoch, BETA_VAE_WARMUP_EPOCHS, BETA_VAE_TARGET)
+
         tr_loss, tr_recon, tr_kl = train_one_epoch(
             model, train_loader, optimizer, criterion_mse,
-            criterion_ssim, MODEL_TYPE, DEVICE,
+            criterion_ssim, MODEL_TYPE, DEVICE, beta,
         )
         va_loss, va_errors = evaluate(
             model, val_loader, criterion_mse, criterion_ssim,
-            MODEL_TYPE, DEVICE,
+            MODEL_TYPE, DEVICE, beta,
         )
         scheduler.step()
 
@@ -461,13 +461,23 @@ def main():
         hist["val"].append(va_loss)
         hist["train_recon"].append(tr_recon)
         hist["train_kl"].append(tr_kl)
+        hist["beta"].append(beta)
 
         lr_now = optimizer.param_groups[0]["lr"]
         print(f"[{epoch:03d}/{EPOCHS}] "
-              f"train={tr_loss:.6f} (recon={tr_recon:.6f}, kl={tr_kl:.6f})  "
+              f"train={tr_loss:.6f} (recon={tr_recon:.6f}, kl={tr_kl:.6f}, β={beta:.4f})  "
               f"val={va_loss:.6f}  lr={lr_now:.2e}")
 
-        if np.isfinite(va_loss) and va_loss < best_val:
+        # FIX: явная обработка NaN в val.
+        if not np.isfinite(va_loss):
+            print(f"  [WARN] val loss = {va_loss} — пропускаем сохранение.")
+            epochs_no_improve += 1
+            if epochs_no_improve >= PATIENCE:
+                print(f"  Ранняя остановка (NaN).")
+                break
+            continue
+
+        if va_loss < best_val:
             best_val = va_loss
             epochs_no_improve = 0
             threshold = float(np.percentile(va_errors, THRESHOLD_PERCENTILE)) \
@@ -475,8 +485,11 @@ def main():
             torch.save({
                 "model": model.state_dict(),
                 "config": {
+                    # FIX: явная метка архитектуры для инференса.
+                    "arch": "conv",
                     "model_type": MODEL_TYPE,
-                    "beta_vae": BETA_VAE,
+                    "beta_vae_target": BETA_VAE_TARGET,
+                    "beta_vae_warmup_epochs": BETA_VAE_WARMUP_EPOCHS,
                     "in_channels": IN_CHANNELS,
                     "color_mode": COLOR_MODE,
                     "latent_dim": LATENT_DIM,
@@ -485,6 +498,8 @@ def main():
                     "pad_value": PAD_VALUE,
                     "use_ssim": USE_SSIM,
                     "ssim_weight": SSIM_WEIGHT,
+                    "logvar_min": LOGVAR_MIN,
+                    "logvar_max": LOGVAR_MAX,
                 },
                 "epoch": epoch,
                 "val_loss": best_val,
@@ -537,7 +552,7 @@ def main():
         else:
             axes[0, i].imshow(xi.permute(1, 2, 0))
             axes[1, i].imshow(ri.permute(1, 2, 0).clamp(0, 1))
-        im = axes[2, i].imshow(err, cmap="hot")
+        axes[2, i].imshow(err, cmap="hot")
         axes[0, i].set_title("orig", fontsize=8)
         axes[1, i].set_title("recon", fontsize=8)
         axes[2, i].set_title("|err|", fontsize=8)
