@@ -2,6 +2,7 @@
 from import_libs_internal import *
 import math
 
+from utils.settings import settings   # ← добавить
 
 
 ULTRALYTICS_AVAILABLE = False
