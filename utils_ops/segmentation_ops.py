@@ -8,8 +8,8 @@ def get_display_params(img_shape):
     h, w = img_shape[:2]
     base = min(h, w)
     base_thickness = max(1, int(0.005 * base))
-    base_font_scale = max(0.3, 0.001 * base)
-    font_thickness = max(1, int(0.001 * base))
+    base_font_scale = max(0.2, 0.00067 * base)
+    font_thickness = max(1, int(0.0007 * base))
     min_area = max(1, int(0.0005 * h * w))
 
     thickness = int(base_thickness * settings.get_line_thickness_factor())
@@ -91,7 +91,7 @@ def get_class_color(cls_id):
 
 def draw_class_label(img, text, x, y, box_w, box_h,
                      font_scale, font_thickness, bg_color,
-                     text_color=(255, 255, 255), padding=4, margin=5):
+                     text_color=(255, 255, 255), padding=2, margin=5):
     """
     Рисует текстовую подпись поверх изображения на цветной плашке.
 

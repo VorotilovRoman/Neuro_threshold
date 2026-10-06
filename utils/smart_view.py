@@ -36,6 +36,29 @@ class SmartGraphicsView(QGraphicsView):
         • перетаскивание за тело   — перемещение
     """
 
+    # ------------------------------------------------------------------
+    # Размеры элементов управления.
+    # *_PX — это ЭКРАННЫЕ пиксели. Они не зависят от зума: при отрисовке
+    # делятся на текущий масштаб scene, чтобы визуально сохранять размер.
+    # ------------------------------------------------------------------
+    # Отрисовка (радиусы кружков/полустороны квадратов и толщина линий)
+    DRAW_DETECT_POINT_PX   = 5      # угол bbox detect
+    DRAW_SEGMENT_POINT_PX  = 5      # вершина polygon
+    DRAW_OBB_CORNER_PX     = 5      # угол OBB (квадрат со стороной 2*PX)
+    DRAW_OBB_EDGE_PX       = 4      # середина стороны OBB (жёлтый кружок)
+    DRAW_OBB_ROTATE_PX     = 8      # радиус синей ручки вращения
+    DRAW_LINE_WIDTH_PX     = 1.6    # толщина контуров фигур и линий хендлов
+
+    # Хит-тестирование (радиус попадания)
+    HIT_POINT_PX           = 8      # detect углы, segment вершины
+    HIT_OBB_CORNER_PX      = 9      # углы OBB
+    HIT_OBB_EDGE_PX        = 8      # середины сторон OBB
+    HIT_OBB_ROTATE_PX      = 11     # ручка вращения
+
+    # Доля меньшей стороны объекта, выше которой маркер не увеличивается.
+    # Защита от ситуации «объект крошечный, а маркер в нём занимает пол-объекта».
+    MARKER_MAX_FRACTION    = 0.22
+
     # ==================================================================
     # Конструктор
     # ==================================================================
@@ -288,6 +311,18 @@ class SmartGraphicsView(QGraphicsView):
     # ==================================================================
     # Вспомогательные геометрические методы
     # ==================================================================
+    def _scene_per_px(self):
+        """Сколько scene-единиц соответствует одному экранному пикселю
+        при текущем масштабе view. 1.0 — масштаб 1:1.
+        Уменьшается при приближении (zoom in), растёт при отдалении."""
+        try:
+            s = self.transform().m11()
+        except Exception:
+            return 1.0
+        if s is None or not math.isfinite(s) or s <= 1e-9:
+            return 1.0
+        return 1.0 / s
+
     def _get_points_pixel(self, ann):
         if self.img_width == 0 or self.img_height == 0:
             return []
@@ -331,7 +366,10 @@ class SmartGraphicsView(QGraphicsView):
             p1x, p1y = p2x, p2y
         return inside
 
-    def _hit_test_point(self, point, pos_pixel, radius=8):
+    def _hit_test_point(self, point, pos_pixel, radius=None):
+        if radius is None:
+            # 8 экранных пикселей, переведённых в scene-единицы.
+            radius = self.HIT_POINT_PX * self._scene_per_px()
         x, y = point
         px, py = pos_pixel
         return abs(x - px) <= radius and abs(y - py) <= radius
@@ -526,12 +564,16 @@ class SmartGraphicsView(QGraphicsView):
         else:
             ux = to_cx / dist
             uy = to_cy / dist
-            # Отступ: не больше 30% от меньшей стороны и не больше 30 px,
-            # но минимум 12 px, чтобы не сливаться с edge0.
+
+            spx = self._scene_per_px()
             min_side = min(w, h)
-            offset = max(min(min_side * 0.30, 30.0), 12.0)
-            # Не выходим за половину меньшей стороны (иначе уедем за центр).
-            offset = min(offset, min_side * 0.45)
+
+            # Постоянные 22 экранных пикселя от середины верхней стороны,
+            # с ограничением сверху — иначе ручка уедет за центр мелкого OBB.
+            offset = 22.0 * spx
+            offset = max(offset, 4.0 * spx)          # нижняя планка
+            offset = min(offset, min_side * 0.35)    # не дальше 35% от стороны
+
             rot_handle = (mid01[0] + ux * offset, mid01[1] + uy * offset)
 
         return {
@@ -551,22 +593,27 @@ class SmartGraphicsView(QGraphicsView):
         if not handles:
             return None
 
-        # 1) Ручка вращения — приоритет (проверяем первой).
+        spx = self._scene_per_px()
+        rot_r    = self.HIT_OBB_ROTATE_PX * spx
+        corner_r = self.HIT_OBB_CORNER_PX * spx
+        edge_r   = self.HIT_OBB_EDGE_PX   * spx
+
+        # 1) Ручка вращения — приоритет.
         rot = handles.get('rotate')
-        if rot and abs(rot[0] - pos_pixel[0]) <= 11 \
-                and abs(rot[1] - pos_pixel[1]) <= 11:
+        if rot and abs(rot[0] - pos_pixel[0]) <= rot_r \
+                and abs(rot[1] - pos_pixel[1]) <= rot_r:
             return 'rotate'
 
         # 2) Углы.
         for name in ('corner0', 'corner1', 'corner2', 'corner3'):
             pt = handles.get(name)
-            if pt and self._hit_test_point(pt, pos_pixel, radius=9):
+            if pt and self._hit_test_point(pt, pos_pixel, radius=corner_r):
                 return name
 
         # 3) Середины сторон.
         for name in ('edge0', 'edge1', 'edge2', 'edge3'):
             pt = handles.get(name)
-            if pt and self._hit_test_point(pt, pos_pixel, radius=8):
+            if pt and self._hit_test_point(pt, pos_pixel, radius=edge_r):
                 return name
 
         # 4) Тело OBB.
@@ -1407,55 +1454,116 @@ class SmartGraphicsView(QGraphicsView):
             typ = ann[0]
             edit_color_bgr = settings.get_color('edit_points')
             edit_color_rgb = (edit_color_bgr[2], edit_color_bgr[1], edit_color_bgr[0])
-            painter.setPen(QPen(QColor(*edit_color_rgb), 2))
+
+            spx = self._scene_per_px()               # scene-единиц в 1 экранном px
+
+            # Толщина пера: экранные 1.6 px, переведённые в scene-единицы.
+            pen_w = max(1.0, self.DRAW_LINE_WIDTH_PX * spx)
 
             if typ == 'detect':
                 points = self._get_points_pixel(ann)
+                if len(points) == 4:
+                    xs = [p[0] for p in points]
+                    ys = [p[1] for p in points]
+                    w_scene = max(1.0, max(xs) - min(xs))
+                    h_scene = max(1.0, max(ys) - min(ys))
+                    min_side = min(w_scene, h_scene)
+                else:
+                    min_side = 1.0
+
+                # Желаемый радиус в scene-единицах.
+                r = self.DRAW_DETECT_POINT_PX * spx
+                # Ограничение сверху — чтобы не «залезть» на весь объект.
+                r = min(r, min_side * self.MARKER_MAX_FRACTION)
+                # И нижняя планка, чтобы маркер не исчезал на отдалении.
+                r = max(r, 2.0 * spx)
+
+                painter.setPen(QPen(QColor(*edit_color_rgb), pen_w))
+                painter.setBrush(QBrush(QColor(*edit_color_rgb)))
                 for (px, py) in points:
-                    painter.setBrush(QBrush(QColor(*edit_color_rgb)))
-                    painter.drawEllipse(QPointF(px, py), 6, 6)
+                    painter.drawEllipse(QPointF(px, py), r, r)
 
             elif typ == 'obb':
                 points = self._get_points_pixel(ann)
                 handles = self._get_obb_handles(points)
                 if handles:
-                    # Углы — квадраты
+                    cx, cy, w, h, _ = self._obb_to_params(points)
+                    min_side = max(1.0, min(w, h))
+
+                    # Углы — квадраты.
+                    corner_half = self.DRAW_OBB_CORNER_PX * spx
+                    corner_half = min(corner_half,
+                                      min_side * self.MARKER_MAX_FRACTION)
+                    corner_half = max(corner_half, 2.0 * spx)
+
+                    # Середины сторон — маленькие кружки.
+                    edge_r = self.DRAW_OBB_EDGE_PX * spx
+                    edge_r = min(edge_r, min_side * self.MARKER_MAX_FRACTION)
+                    edge_r = max(edge_r, 1.5 * spx)
+
+                    # Ручка вращения — покрупнее.
+                    rot_r = self.DRAW_OBB_ROTATE_PX * spx
+                    rot_r = min(rot_r, min_side * 0.4)
+                    rot_r = max(rot_r, 4.0 * spx)
+
+                    painter.setPen(QPen(QColor(*edit_color_rgb), pen_w))
                     for name in ('corner0', 'corner1', 'corner2', 'corner3'):
                         pt = handles.get(name)
                         if pt is None:
                             continue
                         painter.setBrush(QBrush(QColor(*edit_color_rgb)))
-                        painter.setPen(QPen(QColor(*edit_color_rgb), 2))
-                        painter.drawRect(QRectF(pt[0] - 5, pt[1] - 5, 10, 10))
-                    # Середины сторон — жёлтые кружки
+                        painter.drawRect(QRectF(pt[0] - corner_half,
+                                                pt[1] - corner_half,
+                                                corner_half * 2,
+                                                corner_half * 2))
+
                     for name in ('edge0', 'edge1', 'edge2', 'edge3'):
                         pt = handles.get(name)
                         if pt is None:
                             continue
                         painter.setBrush(QBrush(QColor(255, 255, 0)))
-                        painter.setPen(QPen(QColor(180, 180, 0), 1))
-                        painter.drawEllipse(QPointF(pt[0], pt[1]), 4, 4)
-                    # Ручка вращения — крупный синий кружок внутри OBB
+                        painter.setPen(QPen(QColor(180, 180, 0), max(0.8, pen_w * 0.6)))
+                        painter.drawEllipse(QPointF(pt[0], pt[1]), edge_r, edge_r)
+
                     rot = handles.get('rotate')
                     if rot:
                         # Тонкая линия от центра к ручке — визуальная связь.
-                        cx, cy, _, _, _ = self._obb_to_params(points)
-                        painter.setPen(QPen(QColor(0, 0, 255, 90), 1, Qt.DashLine))
+                        painter.setPen(QPen(QColor(0, 0, 255, 90),
+                                            max(0.8, pen_w * 0.7), Qt.DashLine))
                         painter.drawLine(QPointF(cx, cy), QPointF(rot[0], rot[1]))
-                        # Синий круг с заливкой
-                        painter.setPen(QPen(QColor(0, 0, 255), 2))
+
+                        # Синий круг.
+                        painter.setPen(QPen(QColor(0, 0, 255), pen_w))
                         painter.setBrush(QBrush(QColor(0, 0, 255, 140)))
-                        painter.drawEllipse(QPointF(rot[0], rot[1]), 9, 9)
-                        # Белая иконка «дуга вращения»
-                        painter.setPen(QPen(QColor(255, 255, 255), 2))
-                        painter.drawArc(QRectF(rot[0] - 5, rot[1] - 5, 10, 10),
-                                        30 * 16, 120 * 16)
+                        painter.drawEllipse(QPointF(rot[0], rot[1]), rot_r, rot_r)
+
+                        # Белая «дуга вращения» внутри круга.
+                        icon_r = rot_r * 0.55
+                        painter.setPen(QPen(QColor(255, 255, 255), max(0.8, pen_w * 0.8)))
+                        painter.drawArc(
+                            QRectF(rot[0] - icon_r, rot[1] - icon_r,
+                                   icon_r * 2, icon_r * 2),
+                            30 * 16, 120 * 16)
 
             elif typ == 'segment':
                 points = self._get_points_pixel(ann)
+                if points:
+                    xs = [p[0] for p in points]
+                    ys = [p[1] for p in points]
+                    w_scene = max(1.0, max(xs) - min(xs))
+                    h_scene = max(1.0, max(ys) - min(ys))
+                    min_side = min(w_scene, h_scene)
+                else:
+                    min_side = 1.0
+
+                r = self.DRAW_SEGMENT_POINT_PX * spx
+                r = min(r, min_side * self.MARKER_MAX_FRACTION)
+                r = max(r, 2.0 * spx)
+
+                painter.setPen(QPen(QColor(*edit_color_rgb), pen_w))
+                painter.setBrush(QBrush(QColor(*edit_color_rgb)))
                 for (px, py) in points:
-                    painter.setBrush(QBrush(QColor(*edit_color_rgb)))
-                    painter.drawEllipse(QPointF(px, py), 6, 6)
+                    painter.drawEllipse(QPointF(px, py), r, r)
 
         # --- Crosshair при рисовании ---
         if self.drawing_mode and not self.edit_mode \

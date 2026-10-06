@@ -150,8 +150,6 @@ class Labeler(QMainWindow):
         self.class_colors = {}
         self.mask_opacity = 0.5
 
-        self._updating_selection = False
-
         # Валидация аннотаций
         self._validation_per_image = {}     # idx -> [(valid, err), ...]
         self._validation_thread = None
@@ -204,7 +202,7 @@ class Labeler(QMainWindow):
         # --- Список объектов ---
         self.delete_button.clicked.connect(self.delete_selected_object)
         self.delete_all_button.clicked.connect(self.delete_all_annotations)
-        self.object_list.itemClicked.connect(self.on_object_selected_from_list)
+        self.object_list.currentItemChanged.connect(self.on_object_selection_changed)
         self.object_list.itemDoubleClicked.connect(self.on_object_double_clicked)
         self.object_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.object_list.customContextMenuRequested.connect(self.show_object_context_menu)
@@ -225,6 +223,27 @@ class Labeler(QMainWindow):
     def log(self, message):
         self.log_widget.log(message)
         print(message)
+
+    # ----------------------------------------------------------------------
+    #  Пересборка QListWidget: единая точка, защищена от реентерабельности
+    # ----------------------------------------------------------------------
+    def _rebuild_object_list(self, keep_row=None):
+        """Пересобирает QListWidget с аннотациями текущего снимка.
+        Сигналы блокируются, чтобы clear() не запускал каскад
+        currentItemChanged → on_object_selection_changed → сброс
+        выделения во view. Если keep_row задан — восстанавливает
+        current row на этой строке.
+        keep_row == -1 (или None) — current row снимается."""
+        self.object_list.blockSignals(True)
+        try:
+            update_annotation_list(self.object_list, self.current_annotations,
+                                   self.img_w, self.img_h)
+            if keep_row is not None and 0 <= keep_row < self.object_list.count():
+                self.object_list.setCurrentRow(keep_row)
+            else:
+                self.object_list.setCurrentRow(-1)
+        finally:
+            self.object_list.blockSignals(False)
 
     # ----------------------------------------------------------------------
     #  Инструменты рисования
@@ -588,8 +607,8 @@ class Labeler(QMainWindow):
         self.image_view.set_annotations(self.current_annotations, self.img_w, self.img_h)
         self.image_view.set_selected_index(-1)
 
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
+        # Новый снимок — выделения в списке быть не должно.
+        self._rebuild_object_list(keep_row=None)
         self._apply_validation_colors_to_list()
 
         self.update_image_display()
@@ -620,17 +639,13 @@ class Labeler(QMainWindow):
 
         for i, ann in enumerate(self.current_annotations):
             typ = ann[0]
-            # cls берём как ann[1]; на всякий случай приводим к int
             try:
                 cls_id = int(ann[1])
             except (TypeError, ValueError):
                 cls_id = 0
 
             class_color = get_class_color(cls_id)
-            # Рамка/контур: у выделенного — цвет выделения, иначе — цвет класса
             line_color = color_selected if i == selected_idx else class_color
-
-            # Подпись: только номер класса
             label_text = f"{cls_id}"
 
             if typ == 'detect':
@@ -658,7 +673,6 @@ class Labeler(QMainWindow):
                     cv2.polylines(img, [pts_np], isClosed=True,
                                   color=line_color, thickness=thickness)
 
-                    # Позиция подписи — по AABB полигона
                     xs = pts_np[:, 0]
                     ys = pts_np[:, 1]
                     bx = int(xs.min())
@@ -823,11 +837,14 @@ class Labeler(QMainWindow):
         self._sync_current_annotations_to_storage()
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
+        # Новый объект — выделения в списке пока нет; после добавления
+        # удобно выделить именно его.
+        new_row = len(self.current_annotations) - 1
+        self._rebuild_object_list(keep_row=new_row)
         self.update_image_display()
         self.log(log_text)
         self._revalidate_current()
+        self.update_navigation_state()
 
     def on_rect_drawn(self, rect):
         x1, y1, x2, y2 = rect
@@ -1021,10 +1038,10 @@ class Labeler(QMainWindow):
         self._sync_current_annotations_to_storage()
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
+        self._rebuild_object_list(keep_row=None)
         self.update_image_display()
         self._revalidate_current()
+        self.update_navigation_state()
 
     def _resolve_label_path_for_img(self, img_path):
         if self._yaml_label_map:
@@ -1204,10 +1221,10 @@ class Labeler(QMainWindow):
                 self.all_annotations[self.current_index])
             self.image_view.set_annotations(self.current_annotations,
                                             self.img_w, self.img_h)
-            update_annotation_list(self.object_list, self.current_annotations,
-                                   self.img_w, self.img_h)
+            self._rebuild_object_list(keep_row=None)
             self.update_image_display()
             self._revalidate_current()
+            self.update_navigation_state()
 
         self._update_validation_status()
         self._apply_validation_colors_to_list()
@@ -1237,48 +1254,70 @@ class Labeler(QMainWindow):
             return
         self.current_annotations[idx] = new_ann
         self._sync_current_annotations_to_storage()
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
+        # Пересобираем список с сохранением выделения на idx.
+        self._rebuild_object_list(keep_row=idx)
         self.update_image_display()
         self.log(f"Modified object {idx + 1}")
         self._revalidate_current()
 
-    def on_selection_changed(self, idx):
-        if self._updating_selection:
-            return
-        self._updating_selection = True
-        try:
-            if idx != -1:
-                self._uncheck_all_tools()
-                self.image_view.set_drawing_tool(None)
-                self.object_list.blockSignals(True)
-                self.object_list.setCurrentRow(idx)
-                self.object_list.blockSignals(False)
+    # ----------------------------------------------------------------------
+    #  Единая точка синхронизации выделения: список ↔ image_view
+    # ----------------------------------------------------------------------
+    def on_object_selection_changed(self, current, previous):
+        """Срабатывает при смене текущего элемента списка: клик пользователя,
+        стрелки клавиатуры, программный setCurrentRow (если сигналы не
+        заблокированы). previous игнорируется — мы всегда смотрим на current."""
+        idx = current.data(Qt.UserRole) if current is not None else -1
+
+        # Если выделение уже совпадает с состоянием view — просто обновим
+        # картинку (мог поменяться, например, цвет выделения).
+        if idx == self.image_view.selected_index:
             self.update_image_display()
-            self.update_navigation_state()
+            return
+
+        # Перешли из режима рисования к выделению объекта —
+        # гасим активный инструмент.
+        if idx != -1 and self._active_tool_name() is not None:
+            self._uncheck_all_tools()
+            self.image_view.set_drawing_tool(None)
+
+        # Обновляем view. set_selected_index сам дёрнет on_selection_changed,
+        # но тот сразу выйдет (idx уже == currentRow в списке).
+        self.image_view.set_selected_index(idx)
+
+        if idx != -1 and not self.image_view.edit_mode:
+            self.image_view.set_edit_mode(True)
+
+        self.update_image_display()
+        self.update_navigation_state()
+
+    def on_selection_changed(self, idx):
+        """Вызывается из SmartGraphicsView при выделении/снятии выделения
+        объекта мышью. Синхронизирует список, не создавая рекурсии."""
+        if idx == self.object_list.currentRow():
+            # Уже синхронно — просто перерисуем.
+            self.update_image_display()
+            return
+
+        # Синхронизируем список. Блокируем сигналы только здесь и на одну
+        # операцию — это безопаснее, чем глобальный флаг-«заглушка».
+        self.object_list.blockSignals(True)
+        try:
+            self.object_list.setCurrentRow(idx)
         finally:
-            self._updating_selection = False
+            self.object_list.blockSignals(False)
+
+        # Раз выделили объект — выключаем инструмент рисования.
+        if idx != -1 and self._active_tool_name() is not None:
+            self._uncheck_all_tools()
+            self.image_view.set_drawing_tool(None)
+
+        self.update_image_display()
+        self.update_navigation_state()
 
     # ----------------------------------------------------------------------
     #  Управление объектами из списка
     # ----------------------------------------------------------------------
-    def on_object_selected_from_list(self, item):
-        if self._updating_selection:
-            return
-        self._updating_selection = True
-        try:
-            idx = item.data(Qt.UserRole)
-            if idx is not None and 0 <= idx < len(self.current_annotations):
-                self._uncheck_all_tools()
-                self.image_view.set_drawing_tool(None)
-                self.image_view.set_selected_index(idx)
-                self.log(f"Selected object {idx + 1}")
-                self.update_image_display()
-                if not self.image_view.edit_mode:
-                    self.image_view.set_edit_mode(True)
-        finally:
-            self._updating_selection = False
-
     def delete_selected_object(self):
         selected_row = self.object_list.currentRow()
         if 0 <= selected_row < len(self.current_annotations):
@@ -1293,13 +1332,19 @@ class Labeler(QMainWindow):
         self._sync_current_annotations_to_storage()
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
-        if self.image_view.selected_index == idx:
-            self.image_view.set_selected_index(-1)
+
+        # Соседний объект вместо пустоты.
+        new_idx = -1
+        if self.current_annotations:
+            new_idx = min(idx, len(self.current_annotations) - 1)
+
+        self._rebuild_object_list(keep_row=new_idx if new_idx >= 0 else None)
+        self.image_view.set_selected_index(new_idx)
+        if new_idx != -1 and not self.image_view.edit_mode:
+            self.image_view.set_edit_mode(True)
+        elif new_idx == -1:
             self.image_view.set_edit_mode(False)
-        elif self.image_view.selected_index > idx:
-            self.image_view.set_selected_index(self.image_view.selected_index - 1)
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
+
         self.update_image_display()
         self.log(f"Deleted object {idx + 1}")
         self._revalidate_current()
@@ -1332,7 +1377,7 @@ class Labeler(QMainWindow):
         self.image_view.set_selected_index(-1)
         self.image_view.set_edit_mode(False)
         self.image_view.set_annotations([], self.img_w, self.img_h)
-        update_annotation_list(self.object_list, [], self.img_w, self.img_h)
+        self._rebuild_object_list(keep_row=None)
         self.update_image_display()
         self._revalidate_current()
         self.update_navigation_state()
@@ -1376,14 +1421,9 @@ class Labeler(QMainWindow):
         self.current_annotations[idx] = new_ann
         self._sync_current_annotations_to_storage()
 
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
-        self.object_list.blockSignals(True)
-        self.object_list.setCurrentRow(idx)
-        self.object_list.blockSignals(False)
-
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
+        self._rebuild_object_list(keep_row=idx)
         self.image_view.set_selected_index(idx)
         self.update_image_display()
         self._revalidate_current()
@@ -1408,14 +1448,8 @@ class Labeler(QMainWindow):
 
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
-
-        # Восстановим выделение
-        self.object_list.blockSignals(True)
-        self.object_list.setCurrentRow(idx)
-        self.object_list.blockSignals(False)
-
+        self._rebuild_object_list(keep_row=idx)
+        self.image_view.set_selected_index(idx)
         self.update_image_display()
         self._revalidate_current()
         self.log(f"Объект #{idx + 1}: detect → OBB (class={new_ann[1]}).")
@@ -1428,7 +1462,6 @@ class Labeler(QMainWindow):
                                 "Сначала загрузите изображения.")
             return
 
-        # Сколько detect реально есть и сколько снимков ещё не открыто
         total_detect = 0
         loaded_imgs = 0
         skipped_imgs = 0
@@ -1490,10 +1523,10 @@ class Labeler(QMainWindow):
             self.current_annotations = list(self.all_annotations[self.current_index])
             self.image_view.set_annotations(self.current_annotations,
                                             self.img_w, self.img_h)
-            update_annotation_list(self.object_list, self.current_annotations,
-                                   self.img_w, self.img_h)
+            self._rebuild_object_list(keep_row=None)
             self.update_image_display()
             self._revalidate_current()
+            self.update_navigation_state()
 
         self.log(f"[Box → OBB] Переведено detect-аннотаций: {converted} "
                  f"в {loaded_imgs} снимках.")
@@ -1600,8 +1633,8 @@ class Labeler(QMainWindow):
         self._sync_current_annotations_to_storage()
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
-        update_annotation_list(self.object_list, self.current_annotations,
-                               self.img_w, self.img_h)
+        self._rebuild_object_list(keep_row=idx)
+        self.image_view.set_selected_index(idx)
         self.update_image_display()
         self.log(f"Изменена аннотация #{idx + 1}: type={typ}, class={new_cls}, "
                  f"координат={len(new_coords)}")
@@ -1792,8 +1825,10 @@ class Labeler(QMainWindow):
     def on_global_settings_changed(self, new_settings=None):
         if self.image_paths:
             self.update_image_display()
-            update_annotation_list(self.object_list, self.current_annotations,
-                                   self.img_w, self.img_h)
+            # Сохраняем текущее выделение при пересборке списка.
+            current_row = self.object_list.currentRow()
+            self._rebuild_object_list(keep_row=current_row
+                                      if current_row >= 0 else None)
             self._apply_validation_colors_to_list()
 
     def showEvent(self, event):

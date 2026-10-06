@@ -177,7 +177,7 @@ class ViewingDataset(QMainWindow):
         self.opacity_slider.valueChanged.connect(self.on_opacity_changed)
         self.coord_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.coord_list.customContextMenuRequested.connect(self.show_object_context_menu)
-        self.coord_list.itemClicked.connect(self.on_object_selected)
+        self.coord_list.currentItemChanged.connect(self.on_object_selection_changed)
         self.coord_list.itemDoubleClicked.connect(self.on_object_double_clicked)
         self.btn_load_yaml.clicked.connect(self.load_yaml)
         settings.settings_changed.connect(self.on_settings_changed)
@@ -470,27 +470,31 @@ class ViewingDataset(QMainWindow):
     # Список аннотаций / отрисовка
     # ------------------------------------------------------------------
     def update_annotation_list(self, list_widget, annotations, img_w, img_h):
-        list_widget.clear()
-        for idx, ann in enumerate(annotations):
-            if ann[0] == 'detect':
-                _, cls, cx, cy, w, h = ann
-                x = int((cx - w / 2) * img_w)
-                y = int((cy - h / 2) * img_h)
-                x2 = int((cx + w / 2) * img_w)
-                y2 = int((cy + h / 2) * img_h)
-                text = f"{idx}: cls={cls}, rect=({x},{y},{x2},{y2})"
-            elif ann[0] == 'obb':
-                _, cls, points = ann
-                text = f"{idx}: cls={cls}, OBB (4 points)"
-            elif ann[0] == 'segment':
-                _, cls, points = ann
-                num_pts = len(points) // 2
-                text = f"{idx}: cls={cls}, polygon ({num_pts} points)"
-            else:
-                text = f"{idx}: unknown type"
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, idx)
-            list_widget.addItem(item)
+        list_widget.blockSignals(True)
+        try:
+            list_widget.clear()
+            for idx, ann in enumerate(annotations):
+                if ann[0] == 'detect':
+                    _, cls, cx, cy, w, h = ann
+                    x = int((cx - w / 2) * img_w)
+                    y = int((cy - h / 2) * img_h)
+                    x2 = int((cx + w / 2) * img_w)
+                    y2 = int((cy + h / 2) * img_h)
+                    text = f"{idx}: cls={cls}, rect=({x},{y},{x2},{y2})"
+                elif ann[0] == 'obb':
+                    _, cls, points = ann
+                    text = f"{idx}: cls={cls}, OBB (4 points)"
+                elif ann[0] == 'segment':
+                    _, cls, points = ann
+                    num_pts = len(points) // 2
+                    text = f"{idx}: cls={cls}, polygon ({num_pts} points)"
+                else:
+                    text = f"{idx}: unknown type"
+                item = QListWidgetItem(text)
+                item.setData(Qt.UserRole, idx)
+                list_widget.addItem(item)
+        finally:
+            list_widget.blockSignals(False)
 
     def draw_annotations_with_selection(self, img, annotations, selected_idx):
         if not annotations:
@@ -591,6 +595,11 @@ class ViewingDataset(QMainWindow):
 
         self.update_annotation_list(self.coord_list, self.current_annotations,
                                     self.current_img_w, self.current_img_h)
+        # Восстанавливаем выделение в списке после пересборки.
+        if 0 <= self.selected_index < self.coord_list.count():
+            self.coord_list.blockSignals(True)
+            self.coord_list.setCurrentRow(self.selected_index)
+            self.coord_list.blockSignals(False)
         self._apply_validation_colors_to_list()
         self.update_info_label()
         self.update_navigation_state()
@@ -778,13 +787,17 @@ class ViewingDataset(QMainWindow):
     # ------------------------------------------------------------------
     # Работа со списком объектов
     # ------------------------------------------------------------------
-    def on_object_selected(self, item):
-        idx = item.data(Qt.UserRole)
-        if idx is not None and idx != self.selected_index:
-            self.selected_index = idx
-            self.show_current_image()
-            if 0 <= idx < len(self.current_annotations):
-                self.log(f"Selected object {idx + 1}: {self.current_annotations[idx]}")
+    def on_object_selection_changed(self, current, previous):
+        """Смена выделенного объекта в списке: клик, стрелки клавиатуры.
+        previous не используется — всегда работаем с current."""
+        idx = current.data(Qt.UserRole) if current is not None else -1
+        if idx == self.selected_index:
+            # Ничего не поменялось — не перерисовываем зря.
+            return
+        self.selected_index = idx
+        self.show_current_image()
+        if idx >= 0 and idx < len(self.current_annotations):
+            self.log(f"Selected object {idx + 1}")
 
     def show_object_context_menu(self, pos):
         item = self.coord_list.itemAt(pos)
@@ -950,6 +963,60 @@ class ViewingDataset(QMainWindow):
             self.log("No object selected for deletion.")
 
     # ------------------------------------------------------------------
+    #  Смена класса выделенного объекта (Ctrl+0..9)
+    # ------------------------------------------------------------------
+    def _set_class_of_selected(self, new_class):
+        """Устанавливает класс new_class выбранному объекту.
+        Приоритет — выделение в coord_list, затем — self.selected_index."""
+        if not self.current_annotations:
+            self.log(f"Нет аннотаций — Ctrl+{new_class} пропущен.")
+            return
+
+        idx = self.coord_list.currentRow()
+        if idx < 0 or idx >= len(self.current_annotations):
+            idx = self.selected_index
+        if idx < 0 or idx >= len(self.current_annotations):
+            self.log(f"Нет выделенного объекта — Ctrl+{new_class} пропущен.")
+            return
+
+        ann = self.current_annotations[idx]
+        try:
+            old_cls = int(ann[1])
+        except (TypeError, ValueError):
+            old_cls = 0
+
+        new_class = int(new_class)
+        if old_cls == new_class:
+            self.log(f"Класс объекта #{idx + 1} уже {new_class}.")
+            return
+
+        typ = ann[0]
+        if typ == 'detect':
+            _, _, cx, cy, w, h = ann
+            new_ann = ('detect', new_class, cx, cy, w, h)
+        elif typ in ('obb', 'segment'):
+            _, _, points = ann
+            new_ann = (typ, new_class, points)
+        else:
+            self.log(f"Неподдерживаемый тип аннотации '{typ}'.")
+            return
+
+        self.current_annotations[idx] = new_ann
+        self._sync_current_annotations()
+
+        # Обновляем список и восстанавливаем выделение
+        self.update_annotation_list(self.coord_list, self.current_annotations,
+                                    self.current_img_w, self.current_img_h)
+        self.coord_list.blockSignals(True)
+        self.coord_list.setCurrentRow(idx)
+        self.coord_list.blockSignals(False)
+
+        self.selected_index = idx
+        self.show_current_image()
+        self._revalidate_current()
+
+        self.log(f"Класс объекта #{idx + 1} ({typ}): {old_cls} → {new_class}.")
+    # ------------------------------------------------------------------
     # Диалог редактирования аннотации: класс + координаты
     # ------------------------------------------------------------------
     def _open_annotation_edit_dialog(self, idx):
@@ -1046,6 +1113,10 @@ class ViewingDataset(QMainWindow):
         self._sync_current_annotations()
         self.update_annotation_list(self.coord_list, self.current_annotations,
                                     self.current_img_w, self.current_img_h)
+        if 0 <= idx < self.coord_list.count():
+            self.coord_list.blockSignals(True)
+            self.coord_list.setCurrentRow(idx)
+            self.coord_list.blockSignals(False)
         self.show_current_image()
         self.log(f"Изменена аннотация #{idx + 1}: type={typ}, class={new_cls}, "
                  f"координат={len(new_coords)}")

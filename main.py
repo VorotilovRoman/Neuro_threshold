@@ -1,3 +1,4 @@
+# main.py
 from import_libs_internal import *
 from main_ui import StartupDialog
 
@@ -30,7 +31,11 @@ class ImagePlayer(QMainWindow):
         self.InteractiveMethodsWindow_window = None
         self.TraditionalMLWindow_window = None
         self.DeepLearningWindow_window = None
-        self.yolo_aeb_window = None       # ← новая вкладка YOLO + AE/VAE
+        self.yolo_aeb_window = None       # ← вкладка YOLO + AE/VAE
+
+        # Держим ссылки на QShortcut, чтобы они не удалялись GC.
+        # Ключ — виджет (content вкладки), значение — список шорткатов.
+        self._class_shortcuts = []
 
         # Создаём вкладки
         self._create_selected_tabs()
@@ -44,6 +49,9 @@ class ImagePlayer(QMainWindow):
             self.demo_window.update_presets()
             self.demo_window.log("Пресеты обновлены при переключении вкладки")
 
+    # ------------------------------------------------------------------
+    #  Инфраструктура добавления вкладок
+    # ------------------------------------------------------------------
     def _add_tab(self, widget, title):
         """Добавляет вкладку, извлекает centralWidget если widget — QMainWindow.
            Возвращает индекс добавленной вкладки."""
@@ -53,18 +61,49 @@ class ImagePlayer(QMainWindow):
                 content = widget
         else:
             content = widget
+
         index = self.tab_widget.addTab(content, title)
         if widget is self.demo_window:
             self.demo_tab_index = index
 
-        # --- Устанавливаем горячие клавиши навигации (Num+4 / Num+6) ---
+        # --- Горячие клавиши навигации (Num+4 / Num+6) ---
         prev_cb = getattr(widget, 'prev_image', None) or getattr(widget, 'prev', None)
         next_cb = getattr(widget, 'next_image', None) or getattr(widget, 'next', None)
         if callable(prev_cb) and callable(next_cb):
             NavigationShortcutInstaller(content, prev_cb, next_cb, parent=self)
 
+        # --- Ctrl+0..9 — смена класса выделенного объекта ---
+        # Встраиваемый QMainWindow (Labeler, ViewingDataset и др.) теряет
+        # свой keyPressEvent при reparent в QTabWidget, поэтому вешаем
+        # QShortcut на content вкладки. Тогда хоткей работает независимо
+        # от того, какой дочерний виджет сейчас в фокусе.
+        class_cb = getattr(widget, '_set_class_of_selected', None)
+        if callable(class_cb):
+            self._install_class_shortcuts(content, class_cb)
+
         return index
 
+    def _install_class_shortcuts(self, parent_widget, class_cb):
+        """Регистрирует Ctrl+0..9 на parent_widget (обычно centralWidget
+        вкладки). Контекст WidgetWithChildrenShortcut делает хоткей
+        активным только когда активна эта вкладка (или её потомок),
+        независимо от конкретного фокуса внутри."""
+        try:
+            from PyQt5.QtWidgets import QShortcut
+            from PyQt5.QtGui import QKeySequence
+        except ImportError:
+            from PyQt6.QtGui import QShortcut, QKeySequence
+
+        for n in range(10):
+            sc = QShortcut(QKeySequence(f"Ctrl+{n}"), parent_widget)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            # n захватываем через default-arg: иначе все слоты получат 9.
+            sc.activated.connect(lambda nn=n, cb=class_cb: cb(nn))
+            self._class_shortcuts.append(sc)
+
+    # ------------------------------------------------------------------
+    #  Создание вкладок
+    # ------------------------------------------------------------------
     def _create_selected_tabs(self):
         for tab_id, tab_title in self.selected_tabs:
             if tab_id == "threshold":
@@ -123,7 +162,7 @@ class ImagePlayer(QMainWindow):
                 self.yolo_sort_window = FindImagesWindow()
                 self._add_tab(self.yolo_sort_window, tab_title)
 
-            # ================= НОВАЯ ВКЛАДКА =================
+            # ================= ВКЛАДКА YOLO + AE/VAE =================
             elif tab_id == "yolo_aeb":
                 try:
                     from tabs.yolo_test_aeb import YoloInspectWindow
@@ -151,6 +190,9 @@ class ImagePlayer(QMainWindow):
             else:
                 print(f"Неизвестная вкладка: {tab_id}")
 
+    # ------------------------------------------------------------------
+    #  Завершение работы / сбор информации
+    # ------------------------------------------------------------------
     def closeEvent(self, event):
         # Проверяем глобальный флаг через переменную окружения
         collect_info = os.environ.get('COLLECT_LIBS_INFO', '0').lower() in ('1', 'true', 'yes')
@@ -168,7 +210,7 @@ class ImagePlayer(QMainWindow):
         def get_version(module, attr='__version__'):
             try:
                 return getattr(module, attr, 'unknown')
-            except:
+            except Exception:
                 return 'not available'
 
         try:
@@ -233,7 +275,7 @@ class ImagePlayer(QMainWindow):
 
         try:
             import onnxruntime as ort
-            libs['onnxruntime'] = ort.__version__ if hasattr(ort, '__version__') else 'unknown'
+            libs['onnxruntime'] = getattr(ort, '__version__', 'unknown')
         except ImportError:
             libs['onnxruntime'] = 'not installed'
 
@@ -295,12 +337,14 @@ def main():
     splash_pixmap.fill(Qt.white)
     painter = QPainter(splash_pixmap)
     painter.setPen(QColor(50, 50, 50))
-    painter.drawText(splash_pixmap.rect(), Qt.AlignCenter, "Threshold‑Researcher\nЗагрузка модулей...")
+    painter.drawText(splash_pixmap.rect(), Qt.AlignCenter,
+                     "Threshold‑Researcher\nЗагрузка модулей...")
     painter.end()
 
     splash = QSplashScreen(splash_pixmap)
     splash.show()
-    splash.showMessage("Инициализация приложения...", Qt.AlignBottom | Qt.AlignCenter, Qt.black)
+    splash.showMessage("Инициализация приложения...",
+                       Qt.AlignBottom | Qt.AlignCenter, Qt.black)
     app.processEvents()
 
     dialog = StartupDialog()
@@ -309,7 +353,8 @@ def main():
 
     selected = dialog.get_selected_tabs()
     if not selected:
-        QMessageBox.warning(None, "Предупреждение", "Не выбрано ни одной вкладки. Приложение будет закрыто.")
+        QMessageBox.warning(None, "Предупреждение",
+                            "Не выбрано ни одной вкладки. Приложение будет закрыто.")
         sys.exit(0)
 
     splash.showMessage("Загрузка выбранных вкладок...\nЭто может занять некоторое время",
