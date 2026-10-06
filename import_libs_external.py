@@ -59,14 +59,13 @@ from sklearn.preprocessing import StandardScaler
 
 from ast import literal_eval
 
-
 # ========== PyQt5 ==========
 from PyQt5.QtCore import (
     Qt, QProcess, QTimer, QSettings, QThread, pyqtSignal, QRectF, QPointF, QObject, QDir, QUrl
 )
 from PyQt5.QtGui import (
     QCursor, QPixmap, QPainter, QColor, QImage, QWheelEvent, QMouseEvent, QDesktopServices,
-    QTransform, QPalette, QFont, QPen, QBrush, QPainterPath
+    QTransform, QPalette, QFont, QPen, QBrush, QPainterPath, QKeySequence
 )
 
 from PyQt5.QtWidgets import (
@@ -78,7 +77,7 @@ from PyQt5.QtWidgets import (
     QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QProgressDialog,
     QMenu, QAction, QGraphicsView, QSplashScreen, QProgressBar, QDoubleSpinBox,
     QDialogButtonBox, QScrollArea, QFormLayout, QGraphicsScene, QGraphicsPixmapItem,
-    QFrame, QLineEdit, QButtonGroup,
+    QFrame, QLineEdit, QButtonGroup, QShortcut
 )
 
 # ========== Matplotlib ==========

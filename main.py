@@ -88,11 +88,6 @@ class ImagePlayer(QMainWindow):
         вкладки). Контекст WidgetWithChildrenShortcut делает хоткей
         активным только когда активна эта вкладка (или её потомок),
         независимо от конкретного фокуса внутри."""
-        try:
-            from PyQt5.QtWidgets import QShortcut
-            from PyQt5.QtGui import QKeySequence
-        except ImportError:
-            from PyQt6.QtGui import QShortcut, QKeySequence
 
         for n in range(10):
             sc = QShortcut(QKeySequence(f"Ctrl+{n}"), parent_widget)
