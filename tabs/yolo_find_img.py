@@ -260,6 +260,10 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.thumbnail_widgets = {}
         self.thumbnail_pixmaps = {}
 
+        # Очередь миниатюр: обрабатывается по одному элементу за итерацию
+        # цикла событий, чтобы UI оставался отзывчивым во время сканирования.
+        self._thumb_queue = []
+
         self.select_all_checkbox.setTristate(False)
 
         # Подключение сигналов
@@ -307,7 +311,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             else:
                 device_widget = QWidget()
                 device_layout = QHBoxLayout(device_widget)
-                device_layout.addWidget(QLabel("Устройство:"))
+                device_layout.addLayout(QLabel("Устройство:"))
                 device_layout.addWidget(self.device_combo)
                 self.yolo_settings.layout().addWidget(device_widget)
 
@@ -341,7 +345,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             for f in os.listdir(TEMP_THUMB_DIR):
                 try:
                     os.remove(os.path.join(TEMP_THUMB_DIR, f))
-                except:
+                except Exception:
                     pass
             self.log(f"Очищена временная папка (удалено {count} файлов)")
 
@@ -460,7 +464,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         max_object_size = float(self.max_object_size_spin.value())
 
         self.log("=" * 50)
-        self.log("ЗАПУСК СКАНИРОВАНИЯ")
+        self.log("ЗАПУСК СКАНИРОВАНИЯ (режим онлайн-миниатюр)")
         self.log(f"Модель: {model_path}")
         self.log(f"Целевая метка: {target_class}")
         self.log(f"Параметры: conf={conf}, iou={iou}, imgsz={imgsz}")
@@ -482,14 +486,28 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.results_list.clear()
         self._clear_thumbnail_grid()
         self.result_file_paths = []
+        self._thumb_queue = []
         self.select_all_checkbox.setChecked(False)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Сканирование: 0%")
+
+        # Управление кнопками: список/сортировка недоступны во время сканирования,
+        # переключение вида — доступно, чтобы можно было смотреть список
+        # или миниатюры в реальном времени.
         self.scan_btn.setEnabled(False)
         self.select_folder_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
-        self.toggle_view_btn.setEnabled(False)
+        self.toggle_view_btn.setEnabled(True)
         self.sort_btn.setEnabled(False)
+
+        # Автопереключение в режим миниатюр: пользователь сразу видит,
+        # как появляются найденные снимки.
+        if not self.is_thumbnail_mode:
+            self.toggle_view_btn.setChecked(True)
+            self.is_thumbnail_mode = True
+            self.stacked_view.setCurrentIndex(1)
+            self.toggle_view_btn.setText("Режим: список")
+            self.log("Автопереключение в режим миниатюр (генерация по мере поиска)")
 
         self.scan_thread = ScanThread(
             root_dir=self.current_root_dir,
@@ -528,14 +546,66 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.progress_bar.setFormat(f"Сканирование: {percent}% ({current}/{total})")
         QApplication.processEvents()
 
+    # --------------------------------------------------------
+    # Поступление файла во время сканирования
+    # --------------------------------------------------------
     def on_file_done(self, file_path, max_conf, contains_target):
-        if contains_target:
-            self.result_file_paths.append((file_path, max_conf))
-            item = QListWidgetItem(f"{os.path.basename(file_path)} (conf: {max_conf:.3f})")
-            item.setData(Qt.UserRole, file_path)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked)
-            self.results_list.addItem(item)
+        if not contains_target:
+            return
+
+        # 1) Сразу добавляем в список
+        self.result_file_paths.append((file_path, max_conf))
+        item = QListWidgetItem(f"{os.path.basename(file_path)} (conf: {max_conf:.3f})")
+        item.setData(Qt.UserRole, file_path)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Unchecked)
+        self.results_list.addItem(item)
+        self.results_list.scrollToBottom()
+
+        # 2) Ставим миниатюру в очередь. Если очередь была пуста — стартуем
+        #    обработку через цикл событий, чтобы UI не подвисал.
+        was_empty = len(self._thumb_queue) == 0
+        self._thumb_queue.append((file_path, max_conf))
+        if was_empty:
+            QTimer.singleShot(0, self._process_thumb_queue)
+
+        self.update_select_all_state()
+
+    def _process_thumb_queue(self):
+        """Обрабатывает одну миниатюру за вызов, затем планирует следующий вызов."""
+        if not self._thumb_queue:
+            return
+        file_path, conf = self._thumb_queue.pop(0)
+        self._generate_single_thumbnail(file_path, conf)
+        if self._thumb_queue:
+            QTimer.singleShot(0, self._process_thumb_queue)
+
+    def _generate_single_thumbnail(self, file_path, confidence):
+        """Генерирует миниатюру для одного файла и добавляет её в сетку."""
+        hash_name = hashlib.md5(file_path.encode('utf-8')).hexdigest() + ".png"
+        thumb_path = os.path.join(TEMP_THUMB_DIR, hash_name)
+
+        if not os.path.exists(thumb_path):
+            try:
+                img = read_image_with_fallback_find(file_path)
+                if img is None:
+                    self.log(f"Не удалось загрузить: {os.path.basename(file_path)}")
+                    return
+                h, w = img.shape[:2]
+                max_side = max(self._thumb_size_px, 260)
+                scale = max_side / max(h, w)
+                if scale < 1.0:
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    img_resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                else:
+                    img_resized = img
+                cv2.imwrite(thumb_path, img_resized)
+            except Exception as e:
+                self.log(f"Ошибка миниатюры для {os.path.basename(file_path)}: {e}")
+                return
+
+        self.add_thumbnail_widget(file_path, thumb_path, confidence)
 
     def on_scan_finished(self, result_files):
         self.scan_btn.setEnabled(True)
@@ -549,17 +619,13 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         QMessageBox.information(
             self, "Результат",
             f"Найдено {len(result_files)} файлов.\n"
-            f"Список отображён на правой панели."
+            f"Список и миниатюры отображены на правой панели."
         )
 
-        if len(result_files) > 0 and not self.is_thumbnail_mode:
-            self.log("Автоматическое переключение в режим миниатюр...")
-            self.toggle_view_btn.setChecked(True)
-            self.toggle_view_mode()
-        elif len(result_files) > 0 and self.is_thumbnail_mode:
-            self.generate_thumbnails_sync()
-        else:
-            self.log("Нет файлов для отображения миниатюр.")
+        # Миниатюры строились инкрементально по ходу поиска — здесь только
+        # финально выравниваем раскладку сетки.
+        if self.is_thumbnail_mode and self.thumbnail_widgets:
+            self.relayout_thumbnails()
 
     # --------------------------------------------------------
     # Сортировка
@@ -567,7 +633,10 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def sort_by_confidence(self):
         if not self.result_file_paths:
             return
+
         self.result_file_paths.sort(key=lambda x: x[1], reverse=True)
+
+        # Перестроить список в новом порядке
         self.results_list.blockSignals(True)
         self.results_list.clear()
         for file_path, conf in self.result_file_paths:
@@ -577,81 +646,68 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             item.setCheckState(Qt.Unchecked)
             self.results_list.addItem(item)
         self.results_list.blockSignals(False)
-        if self.is_thumbnail_mode and self.thumbnail_widgets:
-            self._clear_thumbnail_grid()
-            self.thumbnail_widgets.clear()
-            self.generate_thumbnails_sync()
+
+        # Синхронизируем чекбоксы списка с чекбоксами миниатюр
+        self.sync_selection_to_list()
+
+        # Пересобрать сетку миниатюр в новом порядке, используя уже
+        # сгенерированные виджеты (файлы миниатюр уже на диске).
+        if self.thumbnail_widgets:
+            ordered = []
+            for fp, conf in self.result_file_paths:
+                entry = self.thumbnail_widgets.get(fp)
+                if entry is not None:
+                    ordered.append((fp, entry))
+
+            # Снять виджеты с сетки, не удаляя их
+            for i in reversed(range(self.thumbnail_grid.count())):
+                w = self.thumbnail_grid.itemAt(i).widget()
+                if w is not None:
+                    w.setParent(None)
+
+            size = self._thumb_size_px
+            item_w = size + 30
+            item_h = size + 90
+            width = max(1, self.thumbnail_container.width())
+            cols = max(1, width // item_w)
+
+            for idx, (fp, (cb, label, container)) in enumerate(ordered):
+                row = idx // cols
+                col = idx % cols
+                self.thumbnail_grid.addWidget(container, row, col)
+
+            rows = (len(ordered) + cols - 1) // cols if ordered else 0
+            self.thumbnail_container.setMinimumHeight(rows * item_h + 20)
+            self.thumbnail_grid.update()
+
         self.log("Список отсортирован по убыванию уверенности.")
 
     # --------------------------------------------------------
-    # Миниатюры
+    # Миниатюры (полная генерация — оставлена для совместимости)
     # --------------------------------------------------------
     def generate_thumbnails_sync(self):
+        """Синхронная генерация миниатюр для всех уже найденных файлов.
+
+        Используется, если по какой-то причине инкрементальная генерация
+        не сработала (например, вызов из внешнего кода)."""
         if not self.result_file_paths:
             self.log("Нет файлов для генерации миниатюр.")
             return
 
-        self.log(f"Начало синхронной генерации миниатюр для {len(self.result_file_paths)} файлов")
-        self._clear_thumbnail_grid()
-        self.thumbnail_widgets.clear()
-        self.thumbnail_pixmaps.clear()
-
-        total = len(self.result_file_paths)
-        success_count = 0
-        cache_hit_count = 0
-        error_count = 0
-
-        for idx, (file_path, conf) in enumerate(self.result_file_paths):
-            percent = int((idx + 1) / total * 100)
-            self.progress_bar.setValue(percent)
-            self.progress_bar.setFormat(f"Генерация миниатюр: {percent}% ({idx+1}/{total})")
+        self.log(f"Полная генерация миниатюр для {len(self.result_file_paths)} файлов")
+        existing = set(self.thumbnail_widgets.keys())
+        for file_path, conf in self.result_file_paths:
+            if file_path in existing:
+                continue
+            self._generate_single_thumbnail(file_path, conf)
             QApplication.processEvents()
 
-            hash_name = hashlib.md5(file_path.encode('utf-8')).hexdigest() + ".png"
-            thumb_path = os.path.join(TEMP_THUMB_DIR, hash_name)
-
-            if os.path.exists(thumb_path):
-                self.add_thumbnail_widget(file_path, thumb_path, conf)
-                cache_hit_count += 1
-                success_count += 1
-                continue
-
-            try:
-                img = read_image_with_fallback_find(file_path)
-                if img is None:
-                    self.log(f"Не удалось загрузить: {os.path.basename(file_path)}")
-                    error_count += 1
-                    continue
-
-                # Больший исходник — для возможности переключения размера без перечитывания
-                h, w = img.shape[:2]
-                max_side = max(self._thumb_size_px, 260)
-                scale = max_side / max(h, w)
-                if scale < 1.0:
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
-                    img_resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                else:
-                    img_resized = img
-                cv2.imwrite(thumb_path, img_resized)
-                self.add_thumbnail_widget(file_path, thumb_path, conf)
-                success_count += 1
-
-                if (idx + 1) % 50 == 0:
-                    self.log(f"Сгенерировано миниатюр: {success_count}/{total} "
-                             f"(кеш: {cache_hit_count})")
-            except Exception as e:
-                self.log(f"Ошибка для {os.path.basename(file_path)}: {e}")
-                error_count += 1
-
-        self.progress_bar.setFormat("Готово")
-        self.log(f"Генерация миниатюр завершена. Успешно: {success_count}, "
-                 f"кеш: {cache_hit_count}, ошибок: {error_count}")
         self.relayout_thumbnails()
-        self.thumbnail_container.adjustSize()
-        self.scroll_area.update()
 
     def add_thumbnail_widget(self, file_path, thumb_path, confidence):
+        if file_path in self.thumbnail_widgets:
+            return
+
         pixmap = QPixmap(thumb_path)
         if pixmap.isNull():
             self.log(f"Ошибка загрузки миниатюры для {os.path.basename(file_path)}")
@@ -712,7 +768,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
 
         self.thumbnail_widgets[file_path] = (cb, label, container)
 
-        # Обновляем состояние чекбокса по данным results_list
+        # Подтянуть чекбокс из списка (пользователь мог успеть отметить строку)
         for i in range(self.results_list.count()):
             it = self.results_list.item(i)
             if it.data(Qt.UserRole) == file_path and it.checkState() == Qt.Checked:
@@ -721,8 +777,14 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
                 cb.blockSignals(False)
                 break
 
-        row = len(self.thumbnail_widgets) // 4
-        col = len(self.thumbnail_widgets) % 4
+        # Позиция в сетке — по текущей ширине контейнера
+        size = self._thumb_size_px
+        item_w = size + 30
+        width = max(1, self.thumbnail_container.width())
+        cols = max(1, width // item_w)
+        idx = len(self.thumbnail_widgets) - 1
+        row = idx // cols
+        col = idx % cols
         self.thumbnail_grid.addWidget(container, row, col)
 
     def _toggle_thumbnail_by_path(self, file_path):
@@ -800,20 +862,15 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Переключение режима
     # --------------------------------------------------------
     def toggle_view_mode(self):
-        if self.scan_thread and self.scan_thread.isRunning():
-            self.log("Нельзя переключить режим во время сканирования. Подождите окончания.")
-            self.toggle_view_btn.setChecked(not self.toggle_view_btn.isChecked())
-            return
-
+        # Переключение доступно и во время сканирования — пользователь
+        # может в любой момент посмотреть список или сетку миниатюр.
         self.is_thumbnail_mode = self.toggle_view_btn.isChecked()
         if self.is_thumbnail_mode:
             self.stacked_view.setCurrentIndex(1)
             self.toggle_view_btn.setText("Режим: список")
             self.log("Переключение в режим миниатюр")
             self.sync_selection_to_thumbnails()
-            if self.result_file_paths and not self.thumbnail_widgets:
-                self.generate_thumbnails_sync()
-            else:
+            if self.thumbnail_widgets:
                 self.relayout_thumbnails()
         else:
             self.stacked_view.setCurrentIndex(0)
