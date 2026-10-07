@@ -21,7 +21,7 @@ class ImageNavigationWidget(QWidget):
         self._next_btn = QPushButton("Next ▶")
         self._page_spin = QSpinBox()
         self._page_spin.setRange(1, 1)          # будет обновляться при загрузке изображений
-        self._page_spin.setFixedWidth(80)
+        self._page_spin.setFixedWidth(160)
         self._page_spin.setAlignment(Qt.AlignCenter)
         self._page_spin.setSuffix(" / ?")       # временный суффикс, обновится при set_total
         self._resize_cb = QCheckBox("Resize to max 1024px")
