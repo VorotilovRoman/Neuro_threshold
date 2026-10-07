@@ -169,6 +169,7 @@ class Labeler(QMainWindow):
             on_reset_tool=self.reset_drawing_tool,
             on_annotation_modified=self.on_annotation_modified,
             on_selection_changed=self.on_selection_changed,
+            on_annotation_right_clicked=self.on_annotation_right_clicked,  # NEW
             on_log=self.log,
         )
 
@@ -1319,7 +1320,11 @@ class Labeler(QMainWindow):
     #  Управление объектами из списка
     # ----------------------------------------------------------------------
     def delete_selected_object(self):
+        """Удаляет выделенный объект. Приоритет — выделение в object_list,
+        но если там ничего не выбрано, используем выделение во view."""
         selected_row = self.object_list.currentRow()
+        if selected_row < 0:
+            selected_row = self.image_view.selected_index
         if 0 <= selected_row < len(self.current_annotations):
             self.delete_object_by_index(selected_row)
         else:
@@ -1650,12 +1655,44 @@ class Labeler(QMainWindow):
             return
         self._open_annotation_edit_dialog(idx)
 
+    # ----------------------------------------------------------------------
+    #  Контекстное меню объекта (общая точка для списка и для изображения)
+    # ----------------------------------------------------------------------
     def show_object_context_menu(self, pos):
+        """ПКМ по элементу в QListWidget."""
         item = self.object_list.itemAt(pos)
         if item is None:
             return
         idx = item.data(Qt.UserRole)
+        if idx is None:
+            return
+        self._show_context_menu_for_index(idx, self.object_list.mapToGlobal(pos))
+
+    def on_annotation_right_clicked(self, idx, global_pos):
+        """ПКМ по аннотации прямо на изображении.
+        Синхронизирует выделение (список ↔ view), затем показывает то же
+        контекстное меню, что и для списка объектов."""
         if idx is None or not (0 <= idx < len(self.current_annotations)):
+            return
+
+        # Синхронизируем выделение с состоянием view.
+        if self.object_list.currentRow() != idx:
+            self.object_list.blockSignals(True)
+            try:
+                self.object_list.setCurrentRow(idx)
+            finally:
+                self.object_list.blockSignals(False)
+            self.image_view.set_selected_index(idx)
+            if not self.image_view.edit_mode:
+                self.image_view.set_edit_mode(True)
+            self.update_image_display()
+            self.update_navigation_state()
+
+        self._show_context_menu_for_index(idx, global_pos)
+
+    def _show_context_menu_for_index(self, idx, global_pos):
+        """Единая точка построения контекстного меню объекта по его индексу."""
+        if not (0 <= idx < len(self.current_annotations)):
             return
 
         ann = self.current_annotations[idx]
@@ -1681,7 +1718,7 @@ class Labeler(QMainWindow):
         delete_action.triggered.connect(lambda: self.delete_object_by_index(idx))
         menu.addAction(delete_action)
 
-        menu.exec_(self.object_list.mapToGlobal(pos))
+        menu.exec_(global_pos)
 
     # ----------------------------------------------------------------------
     #  Сохранение
@@ -1791,6 +1828,16 @@ class Labeler(QMainWindow):
     #  Обработка клавиш
     # ----------------------------------------------------------------------
     def keyPressEvent(self, event):
+        # Delete — удалить выделенный объект (в списке или во view).
+        if event.key() == Qt.Key_Delete and event.modifiers() == Qt.NoModifier:
+            idx = self.object_list.currentRow()
+            if idx < 0:
+                idx = self.image_view.selected_index
+            if 0 <= idx < len(self.current_annotations):
+                self.delete_selected_object()
+                event.accept()
+                return
+
         # Ctrl+0..9 — установить класс выделенному объекту.
         if event.modifiers() == Qt.ControlModifier:
             key = event.key()

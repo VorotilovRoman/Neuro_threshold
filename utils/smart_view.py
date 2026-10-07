@@ -135,6 +135,7 @@ class SmartGraphicsView(QGraphicsView):
         self.on_reset_tool_callback = None
         self.on_annotation_modified_callback = None
         self.on_selection_changed_callback = None
+        self.on_annotation_right_clicked_callback = None
         self.on_log_callback = None
 
         self._suppress_context_menu = False
@@ -260,6 +261,7 @@ class SmartGraphicsView(QGraphicsView):
                       on_segment_drawn=None, on_scribble_added=None,
                       on_display_update=None, on_reset_tool=None,
                       on_annotation_modified=None, on_selection_changed=None,
+                      on_annotation_right_clicked=None,
                       on_log=None):
         self.on_rect_drawn_callback = on_rect_drawn
         self.on_obb_drawn_callback = on_obb_drawn
@@ -269,6 +271,7 @@ class SmartGraphicsView(QGraphicsView):
         self.on_reset_tool_callback = on_reset_tool
         self.on_annotation_modified_callback = on_annotation_modified
         self.on_selection_changed_callback = on_selection_changed
+        self.on_annotation_right_clicked_callback = on_annotation_right_clicked
         self.on_log_callback = on_log
 
     def set_image_data(self, width, height, fg_scribbles=None, bg_scribbles=None):
@@ -714,12 +717,33 @@ class SmartGraphicsView(QGraphicsView):
             event.accept()
             return
 
-        # --- Правый клик: выход из режимов / контекстное меню ---
+        # --- Правый клик: аннотация / выход из режимов / контекстное меню ---
         if event.button() == Qt.RightButton:
             if event.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier):
                 self._suppress_context_menu = False
                 event.ignore()
                 return
+
+            # NEW: если курсор попал в выделенную аннотацию — показать меню
+            # действий с объектом (Edit / Convert to OBB / Delete).
+            # Приоритет отдаём уже выделенному объекту, но если он не под
+            # курсором, разрешаем найти другой — родитель синхронизирует
+            # выделение сам.
+            if (self._current_pixmap is not None
+                    and not self._current_pixmap.isNull()
+                    and self.img_width > 0 and self.img_height > 0):
+                scene_pos = self.mapToScene(event.pos())
+                if (0 <= scene_pos.x() < self.img_width
+                        and 0 <= scene_pos.y() < self.img_height):
+                    pos_pixel = (scene_pos.x(), scene_pos.y())
+                    idx_hit, _hit = self._find_hit(pos_pixel, self.selected_index)
+                    if idx_hit != -1 and self.on_annotation_right_clicked_callback:
+                        self._suppress_context_menu = True
+                        self.on_annotation_right_clicked_callback(
+                            idx_hit, event.globalPos())
+                        event.accept()
+                        return
+
             if self.drawing_mode or self.edit_mode:
                 if self.on_reset_tool_callback:
                     self.on_reset_tool_callback()
