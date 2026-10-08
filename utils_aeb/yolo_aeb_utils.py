@@ -603,30 +603,47 @@ def detect_arch_from_state_dict(state_dict):
 def detect_arch(cfg, state_dict=None):
     """
     Определяет архитектуру AE/VAE.
-    1) явный 'arch' в cfg — приоритет;
-    2) признаки unet_v2 (use_edge_channel / bottleneck_dilations /
-       model_in_channels / norm_type);
-    3) наличие 'latent_channels' → старый unet;
-    4) фолбэк по state_dict;
-    5) фолбэк по умолчанию — 'conv'.
-    """
-    arch = cfg.get("arch")
-    if arch in ("unet_v2", "unet", "conv", "conv_gn"):
-        return arch
 
+    Приоритет:
+      1) state_dict — если передан, он авторитетен (ключи реальной модели
+         однозначно указывают на архитектуру);
+      2) маркеры unet_v2 в cfg
+         (use_edge_channel / bottleneck_dilations /
+          model_in_channels / norm_type);
+      3) явный 'arch' в cfg;
+      4) 'latent_channels' без маркеров → старый unet;
+      5) 'conv' по умолчанию.
+
+    Такая очерёдность нужна, потому что обучающий скрипт
+    auto-aeb_unet_with_grad.py сохраняет в cfg['arch'] исторический
+    хардкод "unet", хотя реально строит unet_v2. state_dict всегда
+    корректно различает эти две архитектуры.
+    """
+    # 1) state_dict — истина в последней инстанции
+    if state_dict is not None:
+        detected = detect_arch_from_state_dict(state_dict)
+        if detected in ("unet_v2", "unet", "conv", "conv_gn"):
+            return detected
+
+    # 2) специфичные маркеры unet_v2 в cfg
     if ("use_edge_channel" in cfg
             or "bottleneck_dilations" in cfg
             or "model_in_channels" in cfg
             or "norm_type" in cfg):
         return "unet_v2"
 
+    # 3) явный arch
+    arch = cfg.get("arch")
+    if arch in ("unet_v2", "unet", "conv", "conv_gn"):
+        return arch
+
+    # 4) latent_channels без маркеров → старый unet
     if "latent_channels" in cfg:
         return "unet"
 
-    if state_dict is not None:
-        return detect_arch_from_state_dict(state_dict)
-
+    # 5) дефолт
     return "conv"
+
 
 
 def build_ae_model_from_cfg(cfg, arch=None):

@@ -1093,7 +1093,9 @@ class YoloInspectWindow(QMainWindow):
             arch = detect_arch(cfg, state_dict=state_dict)
 
             required = ["model_type", "in_channels", "img_h", "img_w"]
-            required.append("latent_channels" if arch == "unet" else "latent_dim")
+            required.append(
+                "latent_channels" if arch in ("unet", "unet_v2") else "latent_dim"
+            )
             for k in required:
                 if k not in cfg:
                     raise RuntimeError(f"В config нет ключа '{k}' (arch={arch}).")
@@ -1130,14 +1132,23 @@ class YoloInspectWindow(QMainWindow):
 
             # Собираем сводку по модели для лога.
             n_params = sum(p.numel() for p in model.parameters())
-            if arch == "unet":
+            if arch in ("unet", "unet_v2"):
                 latent_info = f"latent_channels={cfg['latent_channels']}"
-                if "latent_h" in cfg or "img_h" in cfg:
+                if "img_h" in cfg and "img_w" in cfg:
                     lh = int(cfg["img_h"]) // 8
                     lw = int(cfg["img_w"]) // 8
                     latent_info += f" ({cfg['latent_channels']}×{lh}×{lw})"
+                if arch == "unet_v2":
+                    latent_info += (
+                        f", in={cfg.get('model_in_channels', cfg['in_channels'])}"
+                        f", out={cfg.get('out_channels', cfg['in_channels'])}"
+                    )
             else:
                 latent_info = f"latent_dim={cfg['latent_dim']}"
+            if arch == "unet_v2" and cfg.get("use_edge_channel"):
+                self.log(f"[AE/VAE] edge-канал: kernel={cfg.get('edge_kernel')}, "
+                         f"median={cfg.get('median_kernel')}, "
+                         f"lo={cfg.get('edge_lo')}, hi={cfg.get('edge_hi')}")
 
             self.log(f"[AE/VAE] {path}")
             self.log(f"[AE/VAE] arch={arch}, type={cfg['model_type']}, {latent_info}, "
@@ -1248,6 +1259,24 @@ class YoloInspectWindow(QMainWindow):
                 self.log(f"[AE/VAE auto] ошибка инференса: {e}")
             return
 
+        # --- FIX: сравнение только по image-каналам ---
+        # x содержит [image_channels (+edge_channel)], recon — только image_channels.
+        # Edge-канал (для unet_v2) отбрасываем, иначе тензоры несовместимы.
+        in_ch = int(self.ae_cfg.get("in_channels", 3))
+        out_ch = int(self.ae_cfg.get("out_channels", in_ch))
+
+        if x_cpu.shape[1] != recon.shape[1]:
+            if x_cpu.shape[1] < recon.shape[1]:
+                raise RuntimeError(
+                    f"Каналов на входе ({x_cpu.shape[1]}) меньше, чем на выходе "
+                    f"({recon.shape[1]}). Проверьте in_channels/out_channels в cfg."
+                )
+            x_cpu = x_cpu[:, :recon.shape[1]]  # оставляем первые out_ch (=image) каналов
+
+        if out_ch != recon.shape[1]:
+            self.log(f"[AE/VAE] WARN: out_channels={out_ch} в cfg, "
+                     f"а модель вернула {recon.shape[1]} — использую фактическое.")
+
         err = (x_cpu - recon).abs().mean(dim=1)[0].numpy()
 
         self._ae_err_hw = err
@@ -1264,7 +1293,8 @@ class YoloInspectWindow(QMainWindow):
             max_err = float(roi.max())
             thr = self._ae_threshold
             frac_above = float((roi > thr).mean()) * 100 if np.isfinite(thr) else 0.0
-            self.log(f"[AE/VAE] arch={self.ae_arch}  тензор входа: {tuple(x.shape)}  "
+            self.log(f"[AE/VAE] arch={self.ae_arch}  "
+                     f"input={tuple(x.shape)} → recon={tuple(recon.shape)}  "
                      f"valid ROI: x[{x1}:{x2}] y[{y1}:{y2}]  device: {device}")
             self.log(f"[AE/VAE] mean err={mean_err:.6f}, max={max_err:.6f}")
             if np.isfinite(thr):

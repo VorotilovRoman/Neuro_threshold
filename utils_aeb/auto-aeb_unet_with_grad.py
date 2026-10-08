@@ -919,7 +919,7 @@ def main():
             torch.save({
                 "model": model.state_dict(),
                 "config": {
-                    "arch": "unet",
+                    "arch": "unet_v2",
                     "model_type": MODEL_TYPE,
                     "beta_vae_target": BETA_VAE_TARGET,
                     "beta_vae_warmup_epochs": BETA_VAE_WARMUP_EPOCHS,
