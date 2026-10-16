@@ -383,13 +383,13 @@ class YOLOTrainWidget(BaseTrainWidget):
 # =============================================================================
 # U-Net Training Widget
 # =============================================================================
+# =============================================================================
+# U-Net Training Widget
+# =============================================================================
 class UNetTrainWidget(BaseTrainWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # Подсказка про структуру датасета — исправленная.
-        # Раньше было «PNG, бинарные (0 и 255)» — это вводило в заблуждение:
-        # наш генератор пишет значения {0, 1, 2, ...} = индексы классов.
         hint = (
             "<b>📁 Структура датасета U‑Net:</b><br>"
             "dataset/<br>"
@@ -408,6 +408,7 @@ class UNetTrainWidget(BaseTrainWidget):
         )
         self.add_dataset_structure_hint(hint)
 
+        # --- Папка датасета ---
         self.dataset_path = QLineEdit()
         self.dataset_path.setPlaceholderText("Корневая папка датасета (содержит images/ и masks/)")
         self.browse_dataset_btn = QPushButton("Обзор")
@@ -416,6 +417,29 @@ class UNetTrainWidget(BaseTrainWidget):
         row.addWidget(self.dataset_path)
         row.addWidget(self.browse_dataset_btn)
         self.form_layout.addRow("📁 Папка датасета:", row)
+
+        # --- NEW: U-Net YAML (masks_data.yaml) ---
+        # Если указан — воркер читает path/num_classes/class_names из него.
+        # Поля «Папка датасета» и «Количество классов» заполняются автоматически.
+        self.unet_yaml = QLineEdit()
+        self.unet_yaml.setPlaceholderText(
+            "Или masks_data.yaml — переопределит path и num_classes"
+        )
+        self.browse_yaml_btn = QPushButton("Обзор YAML")
+        self.browse_yaml_btn.clicked.connect(self._browse_unet_yaml)
+        yaml_row = QHBoxLayout()
+        yaml_row.addWidget(self.unet_yaml)
+        yaml_row.addWidget(self.browse_yaml_btn)
+        self.form_layout.addRow("📄 U-Net YAML:", yaml_row)
+
+        yaml_hint = QLabel(
+            "Если указан YAML — его поля <code>path</code> и <code>num_classes</code> "
+            "переопределяют значения из этой формы. Удобно, когда датасет "
+            "сгенерирован утилитой и уже имеет готовый <code>masks_data.yaml</code>."
+        )
+        yaml_hint.setWordWrap(True)
+        yaml_hint.setStyleSheet("color: #666; font-size: 11px;")
+        self.form_layout.addRow(yaml_hint)
 
         self.add_project_field()
         self.add_experiment_name_field()
@@ -426,10 +450,55 @@ class UNetTrainWidget(BaseTrainWidget):
         self.add_buttons()
         self.add_progress_bar()
 
+        # Реагируем на ручное изменение поля YAML
+        self.unet_yaml.textChanged.connect(self._on_unet_yaml_changed)
+
     def _browse_dataset(self):
         path = QFileDialog.getExistingDirectory(self, "Выберите корневую папку датасета")
         if path:
             self.dataset_path.setText(path)
+            self.unet_yaml.clear()
+
+    def _browse_unet_yaml(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите masks_data.yaml", "",
+            "YAML files (*.yaml *.yml);;All files (*)"
+        )
+        if path:
+            self.unet_yaml.setText(path)
+            # Авто-заполнение полей ниже — через сигнал textChanged
+
+    def _on_unet_yaml_changed(self, text):
+        """Автозаполнение dataset_path и num_classes из YAML."""
+        path = (text or "").strip()
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            import yaml
+            with open(path, 'r', encoding='utf-8') as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception as e:
+            # Тихо игнорируем — детальная валидация будет в _validate_unet_params
+            print(f"[U-Net YAML] не удалось прочитать {path}: {e}")
+            return
+
+        # 1. path → dataset_path
+        root = cfg.get('path', '')
+        if root:
+            if not os.path.isabs(root):
+                root = os.path.normpath(os.path.join(os.path.dirname(path), root))
+            # Не перезаписываем, если поле уже совпадает (чтобы не мигало)
+            if self.dataset_path.text().strip() != root:
+                self.dataset_path.setText(root)
+
+        # 2. num_classes → спинбокс (только если валидно и >= 2)
+        nc = cfg.get('num_classes')
+        try:
+            nc_int = int(nc) if nc is not None else None
+        except (ValueError, TypeError):
+            nc_int = None
+        if nc_int is not None and nc_int >= 2 and self.num_classes.value() != nc_int:
+            self.num_classes.setValue(nc_int)
 
     def _add_model_selection(self):
         group = QGroupBox("Источник модели")
@@ -486,8 +555,6 @@ class UNetTrainWidget(BaseTrainWidget):
 
     def _add_unet_specific(self):
         # --- Количество классов (включая фон) ---
-        # Минимум 2: класс 0 — фон, минимум класс 1 — объект.
-        # Значение 1 приводило к поломке: маски {0,1} после /255 → все нули.
         self.num_classes = QSpinBox()
         self.num_classes.setRange(2, 100)
         self.num_classes.setValue(2)
@@ -498,14 +565,12 @@ class UNetTrainWidget(BaseTrainWidget):
             "Примеры:\n"
             "  фон + 1 объект   → 2\n"
             "  фон + 3 объекта → 4\n\n"
-            "Значение должно быть строго больше максимального пикселя в масках."
+            "Если указан U-Net YAML — это поле будет перезаписано "
+            "значением num_classes из YAML."
         )
         self.form_layout.addRow("Количество классов (вкл. фон):", self.num_classes)
 
         # --- Функция потерь (BCE+Dice по умолчанию) ---
-        # Для сегментации это самый надёжный старт: CE/BCE даёт стабильные
-        # градиенты, Dice напрямую оптимизирует перекрытие и борется с
-        # дисбалансом классов.
         self.loss = QComboBox()
         self.loss.addItems(["BCE+Dice", "BCE", "Dice", "Focal", "Tversky"])
         self.loss.setToolTip(
@@ -541,7 +606,6 @@ class UNetTrainWidget(BaseTrainWidget):
         self.optimizer.addItems(["Adam", "SGD", "RMSprop", "AdamW"])
         self.form_layout.addRow("optimizer:", self.optimizer)
 
-        # --- Порог бинаризации (для метрик) ---
         self.threshold = QDoubleSpinBox()
         self.threshold.setRange(0.01, 0.99)
         self.threshold.setSingleStep(0.01)
@@ -550,10 +614,7 @@ class UNetTrainWidget(BaseTrainWidget):
         self.threshold.setToolTip("Порог для бинаризации предсказаний при вычислении метрик (0.5 – стандарт)")
         self.form_layout.addRow("Порог (threshold):", self.threshold)
 
-        # --- Аугментации (по умолчанию ВЫКЛЮЧЕНЫ) ---
-        # Пользователь включает только если действительно нужно.
-        # Раньше по умолчанию стояли все пять — это маскировало реальные
-        # проблемы с данными и затрудняло отладку.
+        # --- Аугментации (по умолчанию выключены) ---
         aug_group = QGroupBox("Аугментации")
         aug_layout = QVBoxLayout(aug_group)
         self.aug_hflip = QCheckBox("Горизонтальное отражение")
@@ -590,13 +651,35 @@ class UNetTrainWidget(BaseTrainWidget):
             if not model_path:
                 QMessageBox.warning(self, "Ошибка", "Не указан файл модели U-Net")
                 return None
+
         dataset_path = self.dataset_path.text().strip()
-        if not dataset_path:
-            QMessageBox.warning(self, "Ошибка", "Не указана папка датасета")
+        unet_yaml = self.unet_yaml.text().strip()
+
+        # Должен быть указан хотя бы один источник: папка или YAML.
+        if not dataset_path and not unet_yaml:
+            QMessageBox.warning(
+                self, "Ошибка",
+                "Укажите либо папку датасета, либо U-Net YAML (masks_data.yaml)."
+            )
+            return None
+
+        if unet_yaml and not os.path.isfile(unet_yaml):
+            QMessageBox.warning(
+                self, "Ошибка",
+                f"U-Net YAML не найден:\n{unet_yaml}"
+            )
+            return None
+
+        if dataset_path and not os.path.isdir(dataset_path):
+            QMessageBox.warning(
+                self, "Ошибка",
+                f"Папка датасета не существует:\n{dataset_path}"
+            )
             return None
 
         return {
-            "dataset_path": dataset_path,
+            "dataset_path": dataset_path or None,
+            "unet_yaml": unet_yaml or None,          # NEW
             "model_path": model_path,
             "project_path": self.project_path.text().strip() or None,
             "name": self.experiment_name.text().strip() or None,

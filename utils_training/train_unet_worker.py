@@ -752,6 +752,63 @@ def main():
     threshold = params.get('threshold', THRESHOLD_FACTOR)
     num_workers = params.get('num_workers', NUM_WORKERS_DEFAULT)
 
+    # --- Если пользователь указал U-Net YAML — читаем оттуда path и num_classes ---
+    # YAML имеет приоритет над dataset_path и num_classes из params.
+    unet_yaml = params.get('unet_yaml')
+    if unet_yaml and os.path.isfile(unet_yaml):
+        try:
+            with open(unet_yaml, 'r', encoding='utf-8') as f:
+                cfg = yaml.safe_load(f) or {}
+            # 1. path → dataset_path
+            yaml_root = cfg.get('path', '')
+            if yaml_root:
+                if not os.path.isabs(yaml_root):
+                    yaml_root = os.path.normpath(
+                        os.path.join(os.path.dirname(unet_yaml), yaml_root)
+                    )
+                if dataset_path != yaml_root:
+                    log(f"📄 dataset_path переопределён из YAML: "
+                        f"{dataset_path!r} → {yaml_root!r}")
+                dataset_path = yaml_root
+            else:
+                # Нет поля path — берём папку самого YAML
+                yaml_root = os.path.dirname(os.path.abspath(unet_yaml))
+                log(f"📄 В YAML нет поля 'path', использую папку YAML: {yaml_root}")
+                dataset_path = yaml_root
+
+            # 2. num_classes → num_classes
+            nc_yaml = cfg.get('num_classes')
+            if nc_yaml is not None:
+                try:
+                    nc_yaml_int = int(nc_yaml)
+                except (ValueError, TypeError):
+                    nc_yaml_int = None
+                if nc_yaml_int is not None and nc_yaml_int >= 2:
+                    if nc_yaml_int != num_classes:
+                        log(f"📄 num_classes переопределён из YAML: "
+                            f"{num_classes} → {nc_yaml_int}")
+                    num_classes = nc_yaml_int
+                elif nc_yaml_int is not None:
+                    log(f"⚠️ num_classes в YAML = {nc_yaml_int}, ожидалось ≥ 2. "
+                        f"Оставляю значение из UI: {num_classes}")
+
+            # 3. class_names (только для информации)
+            cn_list = cfg.get('class_names', [])
+            if cn_list:
+                log(f"📄 Классы из YAML ({len(cn_list)}): {cn_list}")
+
+            # 4. mask_class_offset (для справки — сам воркер его не применяет,
+            #    маски уже сохранены с этим offset)
+            mco = cfg.get('mask_class_offset')
+            if mco is not None:
+                log(f"📄 mask_class_offset из YAML: {mco}")
+        except Exception as e:
+            log(f"⚠️ Не удалось прочитать {unet_yaml}: {e}. "
+                f"Использую параметры из UI.")
+    elif unet_yaml:
+        log(f"⚠️ U-Net YAML указан, но файл не найден: {unet_yaml}. "
+            f"Использую параметры из UI.")
+
     # Формирование пути сохранения
     if name and project_path:
         save_root = os.path.join(project_path, name)

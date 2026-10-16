@@ -235,6 +235,7 @@ class YoloTrainWindow(QMainWindow):
 
     # ===================== U‑NET =====================
     # ---------- Валидация параметров U-Net перед запуском ----------
+    # ---------- Валидация параметров U-Net перед запуском ----------
     def _validate_unet_params(self, params):
         """
         Быстрая проверка параметров U-Net перед запуском воркера.
@@ -244,20 +245,40 @@ class YoloTrainWindow(QMainWindow):
             return False, "Параметры не переданы."
 
         dataset_path = params.get("dataset_path")
-        if not dataset_path:
-            return False, "Не указана папка датасета."
-        if not os.path.isdir(dataset_path):
-            return False, f"Папка датасета не существует:\n{dataset_path}"
+        unet_yaml = params.get("unet_yaml")
 
-        # Базовая структура
-        train_img = os.path.join(dataset_path, 'images', 'train')
-        train_msk = os.path.join(dataset_path, 'masks', 'train')
-        if not os.path.isdir(train_img):
-            return False, f"Не найдена папка с изображениями:\n{train_img}"
-        if not os.path.isdir(train_msk):
-            return False, f"Не найдена папка с масками:\n{train_msk}"
+        # Указан U-Net YAML — файл должен существовать.
+        # Если он есть, воркер прочитает path/num_classes из него, а параметры UI
+        # будут проигнорированы.
+        has_yaml = False
+        if unet_yaml:
+            if not os.path.isfile(unet_yaml):
+                return False, f"U-Net YAML не найден:\n{unet_yaml}"
+            has_yaml = True
 
-        # num_classes — минимум 2 (фон + хотя бы один объект)
+        # Без YAML обязателен dataset_path и его структура.
+        if not has_yaml:
+            if not dataset_path:
+                return False, ("Не указан ни датасет (папка), "
+                               "ни U-Net YAML (masks_data.yaml).")
+            if not os.path.isdir(dataset_path):
+                return False, f"Папка датасета не существует:\n{dataset_path}"
+
+            train_img = os.path.join(dataset_path, 'images', 'train')
+            train_msk = os.path.join(dataset_path, 'masks', 'train')
+            if not os.path.isdir(train_img):
+                return False, f"Не найдена папка с изображениями:\n{train_img}"
+            if not os.path.isdir(train_msk):
+                return False, f"Не найдена папка с масками:\n{train_msk}"
+        else:
+            # Даже с YAML полезно проверить, что папка, если она указана,
+            # существует — иначе воркер всё равно прочитает path из YAML.
+            if dataset_path and not os.path.isdir(dataset_path):
+                self.log(f"ℹ️ Папка из UI не существует ({dataset_path}), "
+                         f"но указан YAML — path будет прочитан из него.")
+
+        # num_classes — минимум 2. Если указан YAML, значение может быть
+        # переопределено воркером, но UI всё равно должен содержать валидное число.
         try:
             nc = int(params.get("num_classes", 2))
         except (ValueError, TypeError):
@@ -268,7 +289,7 @@ class YoloTrainWindow(QMainWindow):
                 f"«Класс 0» — это фон. Для 1 объекта укажите 2, для N — N+1."
             )
 
-        # input_size — должен быть положительным
+        # input_size
         try:
             isz = int(params.get("input_size", 512))
         except (ValueError, TypeError):
@@ -276,7 +297,7 @@ class YoloTrainWindow(QMainWindow):
         if isz < 32:
             return False, f"input_size = {isz} слишком мал (минимум 32)."
 
-        # lr — положительный
+        # lr
         try:
             lr = float(params.get("lr", 1e-4))
         except (ValueError, TypeError):
@@ -286,9 +307,8 @@ class YoloTrainWindow(QMainWindow):
 
         # Пользовательская модель — проверить существование файла
         model_path = params.get("model_path")
-        if model_path:
-            if not os.path.isfile(model_path):
-                return False, f"Файл модели не найден:\n{model_path}"
+        if model_path and not os.path.isfile(model_path):
+            return False, f"Файл модели не найден:\n{model_path}"
 
         return True, ""
 
@@ -307,6 +327,11 @@ class YoloTrainWindow(QMainWindow):
         self.log("=== Параметры обучения U‑Net ===")
         for key, val in params.items():
             self.log(f"{key}: {val}")
+        unet_yaml = params.get("unet_yaml")
+        if unet_yaml:
+            self.log(f"📄 U-Net YAML задан: {unet_yaml}")
+            self.log("📄 path и num_classes будут прочитаны из YAML "
+                     "(приоритет над полями UI).")
         # Явно подсвечиваем критичные для обучения поля
         nc = params.get("num_classes")
         loss = params.get("loss")
