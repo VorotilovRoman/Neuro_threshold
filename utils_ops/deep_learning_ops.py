@@ -261,50 +261,10 @@ class UNetSegmentor(TorchSegmentor):
                 f"Текущее содержимое: {meta}"
             )
 
-        # --- Препроцессинг (с backward compat) ---
-        normalize = bool(meta.get('normalize', False))
-
-        resize_mode = meta.get('resize_mode')
-        if resize_mode not in VALID_TRAIN_RESIZE_MODES:
-            # Backward compat: старое поле keep_aspect_ratio (bool)
-            if 'keep_aspect_ratio' in meta:
-                resize_mode = 'keep_aspect_pad' if meta['keep_aspect_ratio'] else 'hard'
-            else:
-                resize_mode = 'hard'
-
-        inference_resize_mode = meta.get('inference_resize_mode')
-        if inference_resize_mode not in VALID_INFERENCE_RESIZE_MODES:
-            # Если не задано — для random_crop безопасный дефолт
-            if resize_mode == 'random_crop':
-                inference_resize_mode = 'keep_aspect_pad'
-            else:
-                inference_resize_mode = None
-
-        # Сохраняем метаданные для predict
-        self.metadata = {
-            'model_type': 'U-Net',
-            'encoder': encoder_name,
-            'input_size': input_size_val,
-            'num_classes': num_classes,
-            'decoder_channels': decoder_channels,
-            'weights_path': weights_path,
-            'normalize': normalize,
-            'resize_mode': resize_mode,
-            # Держим старое поле для отладки / обратной совместимости
-            'keep_aspect_ratio': (resize_mode == 'keep_aspect_pad'),
-        }
-        if inference_resize_mode is not None:
-            self.metadata['inference_resize_mode'] = inference_resize_mode
-
-        _log(f"[UNet] Метаданные: encoder={encoder_name}, "
-             f"input_size={input_size_val}, num_classes={num_classes}, "
-             f"normalize={normalize}, resize_mode={resize_mode}, "
-             f"inference_resize_mode={inference_resize_mode}")
-
         # --- Модель ---
         self.model = smp.Unet(
             encoder_name=encoder_name,
-            encoder_weights=None,      # веса загружаем из файла, imagenet не используем
+            encoder_weights=None,
             in_channels=3,
             classes=num_classes,
             decoder_channels=decoder_channels,
@@ -323,6 +283,59 @@ class UNetSegmentor(TorchSegmentor):
         self.model.to(self._get_device())
         self.model.eval()
         _log(f"[UNet] Модель загружена, устройство: {self._get_device()}")
+
+
+
+        # --- Формируем metadata ТОЛЬКО из того, что реально есть в файле ---
+        # Ключевое отличие: если параметра нет в meta — мы НЕ записываем
+        # его со значением по умолчанию. Это позволяет UI различить
+        # «параметр известен из обучения» vs «параметр неизвестен,
+        # пользователь должен выбрать сам».
+        self.metadata = {
+            'model_type': 'U-Net',
+            'encoder': encoder_name,
+            'input_size': input_size_val,
+            'num_classes': num_classes,
+            'decoder_channels': decoder_channels,
+            'weights_path': weights_path,
+        }
+
+        # --- normalize: добавляем только если был в файле ---
+        if 'normalize' in meta:
+            self.metadata['normalize'] = bool(meta['normalize'])
+
+        # --- resize_mode: добавляем только если был в файле ---
+        # Обратная совместимость: старый bool-ключ keep_aspect_ratio
+        if 'resize_mode' in meta and meta['resize_mode'] in VALID_TRAIN_RESIZE_MODES:
+            self.metadata['resize_mode'] = meta['resize_mode']
+            self.metadata['keep_aspect_ratio'] = (meta['resize_mode'] == 'keep_aspect_pad')
+        elif 'keep_aspect_ratio' in meta:
+            # Старое поле: конвертируем в новый формат
+            self.metadata['resize_mode'] = ('keep_aspect_pad'
+                                            if meta['keep_aspect_ratio'] else 'hard')
+            self.metadata['keep_aspect_ratio'] = bool(meta['keep_aspect_ratio'])
+
+        # --- inference_resize_mode: добавляем только если был в файле
+        # (или если train resize_mode == random_crop и мы хотим явный
+        # safe-default, чтобы пользователю не пришлось выбирать заново
+        # при перезагрузке). ---
+        if 'inference_resize_mode' in meta and \
+                meta['inference_resize_mode'] in VALID_INFERENCE_RESIZE_MODES:
+            self.metadata['inference_resize_mode'] = meta['inference_resize_mode']
+        elif self.metadata.get('resize_mode') == 'random_crop':
+            # Для random_crop даём безопасный дефолт — keep_aspect_pad
+            self.metadata['inference_resize_mode'] = 'keep_aspect_pad'
+
+        _log(f"[UNet] Метаданные загружены: encoder={encoder_name}, "
+             f"input_size={input_size_val}, num_classes={num_classes}")
+        _log(f"[UNet]   присутствуют в meta: "
+             f"normalize={'yes' if 'normalize' in self.metadata else 'NO'}, "
+             f"resize_mode={'yes' if 'resize_mode' in self.metadata else 'NO'}, "
+             f"inference_resize_mode="
+             f"{'yes' if 'inference_resize_mode' in self.metadata else 'NO'}")
+
+
+
 
     def predict(self, image, threshold=0.5):
         """
