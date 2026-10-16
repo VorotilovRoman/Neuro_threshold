@@ -1,5 +1,5 @@
 {
-    "theme": "dark",
+    "theme": "light",
     "primary_color": [
         86,
         139,
@@ -33,7 +33,7 @@
         ]
     },
     "font_size_mode": "auto",
-    "line_thickness_mode": "small",
+    "line_thickness_mode": "auto",
     "navigation_shortcuts": {
         "prev": "Left",
         "next": "Right"

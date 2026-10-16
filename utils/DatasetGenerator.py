@@ -300,15 +300,33 @@ class DatasetGeneratorThread(QThread):
         return mapped
 
     def _remap_mask_pixels(self, mask):
-        """Перекладывает значения пикселей маски по плотному ремапу."""
+        """
+        Перекладывает значения пикселей маски по плотному ремапу
+        И применяет out_masks_offset.
+
+        В выходной маске U-Net:
+            0                       — фон
+            dense_id + offset       — класс (dense_id 0..N-1)
+
+        Без этой поправки класс с dense_id=0 записывался бы пикселем 0
+        и сливался с фоном — объекты исчезали бы из выходной маски.
+        """
         dense_map = self._dense_mask_class_mapping()
-        if not dense_map:
-            return mask
+        # Принудительно offset ≥ 1. offset=0 бессмысленен для U-Net:
+        # он ставит первый класс на пиксель 0, что конфликтует с фоном.
+        out_offset = int(self.out_masks_offset)
+        if out_offset < 1:
+            out_offset = 1
+
         max_new = max(dense_map.values()) if dense_map else 0
-        dtype = np.uint16 if max_new > 255 else np.uint8
+        max_pixel = max_new + out_offset
+        dtype = np.uint16 if max_pixel > 255 else np.uint8
         out = np.zeros(mask.shape, dtype=dtype)
+
+        if not dense_map:
+            return out
         for old_val, new_val in dense_map.items():
-            out[mask == old_val] = new_val
+            out[mask == old_val] = new_val + out_offset
         return out
 
     # ------------------------------------------------------------------
@@ -718,16 +736,19 @@ class DatasetGeneratorThread(QThread):
             self.log("⚠️ Нет маппинга масок → YOLO, конвертация пропущена.")
             return
 
-        # pixel_to_class: {orig_pixel_in_mask: dense_yolo_cls}
-        # orig_pixel_in_mask = orig_class + mask_pixel_offset_in
-        offset_in = int(self.mask_pixel_offset_in)
+        # Маски в temp_masks уже прошли _remap_mask_pixels,
+        # поэтому значения пикселей в них — dense_id + out_masks_offset.
+        out_offset = int(self.out_masks_offset)
+        if out_offset < 1:
+            out_offset = 1
+
         pixel_to_class = {}
-        for orig_cls, dense_cls in dense_map.items():
-            pixel_val = orig_cls + offset_in
-            pixel_to_class[pixel_val] = dense_cls
+        for dense_id in sorted(set(dense_map.values())):
+            pixel_val = dense_id + out_offset
+            pixel_to_class[pixel_val] = dense_id
 
         self.log(f"[masks → txt] pixel_to_class={pixel_to_class} "
-                 f"(offset_in={offset_in})")
+                 f"(out_offset={out_offset})")
 
         try:
             convert_segment_masks_to_yolo_seg_manual(

@@ -298,128 +298,51 @@ class DatasetPreparationWindow(QMainWindow):
 
     def _load_yolo_yaml_from_path(self, file_path):
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                cfg = yaml.safe_load(f) or {}
+            pairs, names, root, splits_info = load_yolo_yaml(
+                file_path, log_cb=self.log)
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать YAML:\n{e}")
             return
-        if not isinstance(cfg, dict):
-            QMessageBox.critical(self, "Ошибка", "YAML не содержит словаря.")
-            return
 
-        root = cfg.get('path', '')
-        if root:
-            if not os.path.isabs(root):
-                root = os.path.normpath(os.path.join(os.path.dirname(file_path), root))
-        else:
-            root = os.path.dirname(file_path)
-        root = os.path.abspath(root)
-
-        splits_dirs = []
-        for key in ('train', 'val', 'test', 'valid', 'validation'):
-            val = cfg.get(key)
-            if not val:
-                continue
-            items = val if isinstance(val, (list, tuple)) else [val]
-            for it in items:
-                if not isinstance(it, str):
-                    continue
-                p = it if os.path.isabs(it) else os.path.join(root, it)
-                p = os.path.normpath(p)
-                if os.path.isdir(p):
-                    splits_dirs.append(p)
-                elif os.path.isfile(p):
-                    try:
-                        with open(p, 'r', encoding='utf-8') as f:
-                            for line in f:
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                q = line if os.path.isabs(line) else os.path.join(root, line)
-                                q = os.path.normpath(q)
-                                if os.path.isdir(q):
-                                    splits_dirs.append(q)
-                    except Exception:
-                        pass
-
-        if not splits_dirs:
-            QMessageBox.warning(self, "Ошибка",
-                                "В YAML не найдено ни одной существующей папки "
-                                "с изображениями.\nПроверено path: " + root)
-            return
-
-        img_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
-        all_images = []
-        for sp in splits_dirs:
-            try:
-                for f in os.listdir(sp):
-                    name, ext = os.path.splitext(f)
-                    if ext.lower() in img_extensions:
-                        all_images.append(os.path.join(sp, f))
-            except Exception as e:
-                self.log(f"Ошибка чтения {sp}: {e}")
-
-        if not all_images:
-            QMessageBox.warning(self, "Ошибка", "В папках не найдено изображений.")
-            return
-
-        def find_label(img_path):
-            img_path_abs = os.path.abspath(img_path)
-            d = os.path.dirname(img_path_abs)
-            base = os.path.splitext(os.path.basename(img_path_abs))[0]
-            same = os.path.join(d, base + '.txt')
-            if os.path.exists(same):
-                return same
-            norm = img_path_abs.replace('\\', '/')
-            parts = norm.split('/')
-            for i, p in enumerate(parts):
-                if p == 'images':
-                    new_parts = parts[:i] + ['labels'] + parts[i + 1:]
-                    new_parts[-1] = base + '.txt'
-                    cand = os.sep.join(new_parts)
-                    if os.path.exists(cand):
-                        return cand
-            return None
-
-        new_pairs = []
-        missing = 0
-        for img in all_images:
-            lbl = find_label(img)
-            if lbl:
-                new_pairs.append((img, lbl))
-            else:
-                missing += 1
-
-        if not new_pairs:
+        if not pairs:
             QMessageBox.warning(
                 self, "Ошибка",
-                f"Найдено {len(all_images)} изображений, но ни одного .txt.\n"
+                "В YAML не найдено ни одной существующей папки с изображениями.")
+            return
+
+        missing = sum(1 for _, lbl in pairs if lbl is None)
+        with_labels = [(img, lbl) for img, lbl in pairs if lbl is not None]
+        if not with_labels:
+            QMessageBox.warning(
+                self, "Ошибка",
+                f"Найдено {len(pairs)} изображений, но ни одного .txt.\n"
                 f"Ожидается структура images/... и labels/...")
             return
 
         self._yaml_mode = True
         self._yaml_root = root
         self._yaml_path = file_path
-        self._yaml_names = cfg.get('names')
+        self._yaml_names = names
 
         self.images_folder = root
         self.labels_folder = root
         self.masks_folder = None
 
         self._apply_loaded_pairs(
-            pairs=new_pairs,
+            pairs=with_labels,
             input_type=0,
             input_format='auto',
-            class_names_from_yaml=self._yaml_names,
+            class_names_from_yaml=names,
             source_label=f"YAML: {file_path}",
         )
 
         self.log(f"=== Загрузка из YAML: {file_path} ===")
         self.log(f"Root: {root}")
-        self.log(f"Сплитов найдено: {len(splits_dirs)}")
-        self.log(f"Изображений: {len(all_images)}, пар с метками: {len(new_pairs)}")
-        if missing:
-            self.log(f"⚠️ Изображений без .txt: {missing}")
+        for split, n in splits_info.items():
+            if n:
+                self.log(f"  • {split}: {n} изображений")
+        self.log(f"Пар с метками: {len(with_labels)}, без .txt: {missing}")
+
 
     # ==================================================================
     # Load COCO
@@ -1738,6 +1661,7 @@ class DatasetPreparationWindow(QMainWindow):
 
         include_empty_annotations = self.include_empty_annotations.isChecked()
         delete_source_after_success = self.delete_source_after_success.isChecked()
+        min_ann_area_px = int(self.min_ann_area_spin.value())
 
         pairs_for_generation = []
         skipped_invalid = 0
@@ -1778,7 +1702,8 @@ class DatasetPreparationWindow(QMainWindow):
         self.log(f"Classes: {num_classes}")
         if skipped_invalid:
             self.log(f"Пропущено некорректных пар: {skipped_invalid}")
-
+        self.log(f"Min annotation area: {min_ann_area_px} px² "
+                 f"({'off' if min_ann_area_px <= 0 else 'on'})")
         self._set_generate_button_active(True)
         self.cancel_btn.setEnabled(True)
 
@@ -1826,6 +1751,7 @@ class DatasetPreparationWindow(QMainWindow):
             out_unet_yaml=out_unet_yaml,
             out_coco=out_coco,
             mask_pixel_offset_in=self.mask_pixel_offset_in,
+            min_ann_area_px=min_ann_area_px,
         )
 
         self.generator_thread.log_signal.connect(self.log)

@@ -2,6 +2,15 @@
 # train_unet_worker.py
 # Поддерживается бинарная (num_classes=1) и многоклассовая (num_classes>1) сегментация
 # Сохранение результатов организовано по аналогии с YOLO
+#
+# Сохраняются три модели:
+#   weights/best_loss.pth — лучшая по val_loss
+#   weights/best_iou.pth  — лучшая по IoU (Dice)
+#   weights/last.pth      — последняя эпоха
+#
+# Пути сплитов (train_images / val_images / test_images и т.д.) читаются
+# из masks_data.yaml, если он указан; иначе — дефолтная структура
+# dataset/images/{train,val,test} + dataset/masks/{train,val,test}.
 
 import sys
 import io
@@ -71,14 +80,9 @@ NUM_TRAIN_BATCHES_TO_SAVE = 3               # сколько тренирово�
 NUM_VAL_SAMPLES_TO_SAVE = 8                 # сколько валидационных изображений для предсказаний
 
 # Early stopping — ослабленные значения
-# EARLY_STOPPING_PATIENCE: сколько эпох подряд val_loss может не улучшаться.
-# OVERFITTING_GAP_THRESHOLD: относительный разрыв val_loss / train_loss, после
-#   которого включается «стоп» (только если patience_counter уже >= 3).
-# Раньше было: patience=3, tolerance=0.05, gap=0.2 — тренировка срывалась
-# почти на каждой задаче.
 EARLY_STOPPING_PATIENCE = 5
 OVERFITTING_GAP_THRESHOLD = 0.5
-OVERFITTING_MIN_PATIENCE = 3                 # gap-проверка активна только после этой «задержки»
+OVERFITTING_MIN_PATIENCE = 3
 
 THRESHOLD_FACTOR = 0.7                       # порог бинаризации для метрик по умолчанию
 
@@ -90,11 +94,14 @@ MASK_EXTS  = ('.png', '.tif', '.tiff', '.bmp')   # без .jpg — плохо д
 model = None
 optimizer = None
 scheduler = None
-best_model_path = None
+best_model_path = None            # алиас на best_loss (для обратной совместимости)
+best_loss_model_path = None
+best_iou_model_path = None
 final_model_path = None
 current_epoch = 0
 best_val_loss = float('inf')
-stop_requested = False                       # флаг ручной остановки
+best_iou = -float('inf')
+stop_requested = False
 
 history = {  # для сбора метрик по эпохам
     'epoch': [],
@@ -122,10 +129,13 @@ def signal_handler(signum, frame):
         checkpoint_path = final_model_path.replace(".pth", f"_checkpoint_epoch_{current_epoch}.pth")
         torch.save(model.state_dict(), checkpoint_path)
         log(f"Модель сохранена как {checkpoint_path}")
-        if best_model_path and os.path.exists(best_model_path):
-            backup_best = best_model_path.replace(".pth", f"_interrupted.pth")
-            torch.save(torch.load(best_model_path), backup_best)
-            log(f"Лучшая модель скопирована в {backup_best}")
+        # Бэкапим лучшие модели, если они уже есть
+        for src_path, suffix in ((best_loss_model_path, "_interrupted"),
+                                  (best_iou_model_path, "_interrupted")):
+            if src_path and os.path.exists(src_path):
+                backup = src_path.replace(".pth", f"{suffix}.pth")
+                torch.save(torch.load(src_path), backup)
+                log(f"Лучшая модель скопирована в {backup}")
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -672,19 +682,15 @@ def check_dataset_masks_consistency(dataset, num_classes, max_check=20):
                 m = np.array(im)
 
             if m.size == 0:
-                # Пустая маска — не должна попадать сюда, но защищаемся.
                 continue
 
             if m.ndim == 3:
                 m = m[:, :, 0]
             m = m.squeeze()
 
-            # Приводим к целочисленному типу, чтобы .max() и unique()
-            # работали одинаково для uint8 / uint16 / float-масок.
             try:
                 m_int = m.astype(np.int64)
             except Exception:
-                # Совсем экзотический dtype — пропускаем файл.
                 continue
 
             mx = int(m_int.max())
@@ -692,7 +698,6 @@ def check_dataset_masks_consistency(dataset, num_classes, max_check=20):
                 global_max = mx
 
             uniq = np.unique(m_int)
-            # uniq — numpy-массив; делаем безопасный tolist через list(...)
             uniq_preview = list(uniq[:10])
             preview_str = ", ".join(str(int(v)) for v in uniq_preview)
             if len(uniq) > 10:
@@ -704,7 +709,6 @@ def check_dataset_masks_consistency(dataset, num_classes, max_check=20):
                     f"уникальные=[{preview_str}]"
                 )
         except Exception as e:
-            # Никогда не падаем из-за одной битой маски.
             warnings_out.append(
                 f"  • {os.path.basename(mask_path or '?')}: "
                 f"ошибка чтения ({type(e).__name__}: {e})"
@@ -752,13 +756,24 @@ def main():
     threshold = params.get('threshold', THRESHOLD_FACTOR)
     num_workers = params.get('num_workers', NUM_WORKERS_DEFAULT)
 
-    # --- Если пользователь указал U-Net YAML — читаем оттуда path и num_classes ---
-    # YAML имеет приоритет над dataset_path и num_classes из params.
+    # --- Если пользователь указал U-Net YAML — читаем оттуда path, num_classes и пути сплитов ---
     unet_yaml = params.get('unet_yaml')
+
+    # Словарь с относительными путями сплитов (будут заполнены из YAML, если он задан)
+    split_paths = {
+        'train_images': 'images/train',
+        'train_masks':  'masks/train',
+        'val_images':   'images/val',
+        'val_masks':    'masks/val',
+        'test_images':  'images/test',
+        'test_masks':   'masks/test',
+    }
+
     if unet_yaml and os.path.isfile(unet_yaml):
         try:
             with open(unet_yaml, 'r', encoding='utf-8') as f:
                 cfg = yaml.safe_load(f) or {}
+
             # 1. path → dataset_path
             yaml_root = cfg.get('path', '')
             if yaml_root:
@@ -771,12 +786,20 @@ def main():
                         f"{dataset_path!r} → {yaml_root!r}")
                 dataset_path = yaml_root
             else:
-                # Нет поля path — берём папку самого YAML
                 yaml_root = os.path.dirname(os.path.abspath(unet_yaml))
                 log(f"📄 В YAML нет поля 'path', использую папку YAML: {yaml_root}")
                 dataset_path = yaml_root
 
-            # 2. num_classes → num_classes
+            # 2. Чтение путей сплитов из YAML (если заданы)
+            for key in split_paths.keys():
+                val = cfg.get(key)
+                if isinstance(val, str) and val.strip():
+                    if not os.path.isabs(val):
+                        val = os.path.normpath(os.path.join(dataset_path, val))
+                    split_paths[key] = val
+                    log(f"📄 {key} из YAML: {val}")
+
+            # 3. num_classes → num_classes
             nc_yaml = cfg.get('num_classes')
             if nc_yaml is not None:
                 try:
@@ -792,13 +815,12 @@ def main():
                     log(f"⚠️ num_classes в YAML = {nc_yaml_int}, ожидалось ≥ 2. "
                         f"Оставляю значение из UI: {num_classes}")
 
-            # 3. class_names (только для информации)
+            # 4. class_names (только для информации)
             cn_list = cfg.get('class_names', [])
             if cn_list:
                 log(f"📄 Классы из YAML ({len(cn_list)}): {cn_list}")
 
-            # 4. mask_class_offset (для справки — сам воркер его не применяет,
-            #    маски уже сохранены с этим offset)
+            # 5. mask_class_offset (для справки)
             mco = cfg.get('mask_class_offset')
             if mco is not None:
                 log(f"📄 mask_class_offset из YAML: {mco}")
@@ -841,10 +863,20 @@ def main():
     if not dataset_path or not os.path.exists(dataset_path):
         log(f"Ошибка: папка датасета не существует: {dataset_path}")
         sys.exit(1)
-    train_img_dir = os.path.join(dataset_path, 'images', 'train')
-    train_mask_dir = os.path.join(dataset_path, 'masks', 'train')
-    val_img_dir = os.path.join(dataset_path, 'images', 'val')
-    val_mask_dir = os.path.join(dataset_path, 'masks', 'val')
+
+    # Если YAML не задан (или в нём не было соответствующих ключей),
+    # делаем дефолтные пути абсолютными относительно dataset_path
+    for key, val in split_paths.items():
+        if not os.path.isabs(val):
+            split_paths[key] = os.path.normpath(os.path.join(dataset_path, val))
+
+    # Пути уже абсолютные (после нормализации выше)
+    train_img_dir  = split_paths['train_images']
+    train_mask_dir = split_paths['train_masks']
+    val_img_dir    = split_paths['val_images']
+    val_mask_dir   = split_paths['val_masks']
+    test_img_dir   = split_paths['test_images']
+    test_mask_dir  = split_paths['test_masks']
 
     if not os.path.exists(train_img_dir) or not os.path.exists(train_mask_dir):
         log(f"Ошибка: не найдены папки:\n{train_img_dir}\n{train_mask_dir}")
@@ -896,18 +928,48 @@ def main():
         log(f"Ошибка: файл модели {model_source} не найден")
         sys.exit(1)
 
-    # Датасеты
+    # ---------- Датасеты ----------
     train_dataset = SegmentationDataset(train_img_dir, train_mask_dir,
                                          input_size, num_classes, augmentations)
+
+    # --- Валидация — с защитой от пустых папок ---
+    val_dataset = None
+    val_loader = None
     if val_exists:
-        val_dataset = SegmentationDataset(val_img_dir, val_mask_dir,
-                                           input_size, num_classes, {})
-        val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                                 shuffle=False, num_workers=num_workers)
-        log(f"Загружено {len(train_dataset)} обучающих, {len(val_dataset)} валидационных образцов")
+        try:
+            val_dataset = SegmentationDataset(val_img_dir, val_mask_dir,
+                                               input_size, num_classes, {})
+            val_loader = DataLoader(val_dataset, batch_size=batch_size,
+                                     shuffle=False, num_workers=num_workers)
+            log(f"Загружено {len(train_dataset)} обучающих, "
+                f"{len(val_dataset)} валидационных образцов")
+        except RuntimeError as e:
+            log(f"⚠️ Не удалось загрузить валидационный датасет: {e}")
+            log("⚠️ Обучение продолжится БЕЗ валидации.")
+            val_dataset = None
+            val_loader = None
     else:
-        log("⚠️ Валидационные папки не найдены, валидация будет пропущена")
-        val_loader = None
+        log(f"⚠️ Валидационные папки не найдены ({val_img_dir}, {val_mask_dir}), "
+            f"валидация будет пропущена")
+
+    # --- Тест — только для финальной оценки ---
+    test_dataset = None
+    test_loader = None
+    if os.path.exists(test_img_dir) and os.path.exists(test_mask_dir):
+        try:
+            test_dataset = SegmentationDataset(test_img_dir, test_mask_dir,
+                                                input_size, num_classes, {})
+            test_loader = DataLoader(test_dataset, batch_size=batch_size,
+                                      shuffle=False, num_workers=num_workers)
+            log(f"Загружено {len(test_dataset)} тестовых образцов "
+                f"({test_img_dir})")
+        except RuntimeError as e:
+            log(f"⚠️ Не удалось загрузить тестовый датасет: {e}")
+            test_dataset = None
+            test_loader = None
+    else:
+        log(f"ℹ️ Тестовые папки не найдены ({test_img_dir}, {test_mask_dir}), "
+            f"тестовая оценка будет пропущена")
 
     # --- Проверка масок на согласованность с num_classes ---
     log("--- Проверка масок на согласованность с num_classes ---")
@@ -921,7 +983,6 @@ def main():
         else:
             log("⚠️ ВНИМАНИЕ: бинарный режим (num_classes=1), но все маски пусты!")
     else:
-        # Для многокласса нужно, чтобы num_classes >= max_pixel + 1
         if max_pixel >= num_classes:
             log("=" * 60)
             log(f"❌ ОШИБКА КОНФИГУРАЦИИ: num_classes={num_classes}, "
@@ -934,7 +995,6 @@ def main():
                 log(w)
             log(f"Решение: в UI укажите «Количество классов» = {max_pixel + 1}.")
             log("=" * 60)
-            # Не падаем — продолжаем с обрезкой в фон, но пользователь предупреждён.
         else:
             expected_nc = max_pixel + 1
             if expected_nc < num_classes:
@@ -949,6 +1009,7 @@ def main():
 
     # Модель
     global model, best_model_path, final_model_path
+    global best_loss_model_path, best_iou_model_path, best_iou
     load_pretrained = (model_source is None) or (not os.path.exists(model_source))
     model = smp.Unet(
         encoder_name=encoder,
@@ -992,8 +1053,12 @@ def main():
     optimizer = get_optimizer(model, optimizer_name, lr)
     scheduler = get_scheduler(optimizer, scheduler_name, epochs)
 
-    best_model_path = os.path.join(weights_dir, 'best.pth')
-    final_model_path = os.path.join(weights_dir, 'last.pth')
+    # --- Пути сохранения моделей ---
+    best_loss_model_path = os.path.join(weights_dir, 'best_loss.pth')
+    best_iou_model_path  = os.path.join(weights_dir, 'best_iou.pth')
+    final_model_path     = os.path.join(weights_dir, 'last.pth')
+    # best.pth = алиас на best_loss для обратной совместимости
+    best_model_path = best_loss_model_path
 
     args_dict = {
         'encoder': encoder,
@@ -1036,14 +1101,16 @@ def main():
         'num_workers': num_workers,
         'threshold': threshold,
         'best_val_loss': None,
+        'best_iou': None,
         'date': datetime.now().isoformat()
     }
-    save_model_meta(meta_info_initial, best_model_path)
+    save_model_meta(meta_info_initial, best_loss_model_path)
     save_model_meta(meta_info_initial, final_model_path)
     log("Метаданные модели сохранены (начальная версия).")
 
     patience_counter = 0
     best_val_loss = float('inf')
+    best_iou = -float('inf')
 
     global current_epoch, stop_requested
     log("=== Начало обучения ===")
@@ -1095,18 +1162,17 @@ def main():
             val_loss = None
             metrics = None
 
-        # Сохранение лучшей модели и early stopping
+        # Сохранение лучших моделей и early stopping
         if val_loss is not None:
+            # --- best_loss.pth ---
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                torch.save(model.state_dict(), best_model_path)
+                torch.save(model.state_dict(), best_loss_model_path)
                 patience_counter = 0
-                log(f"✅ Новая лучшая модель сохранена (val_loss={best_val_loss:.4f})")
+                log(f"✅ Новая лучшая модель по val_loss сохранена "
+                    f"(val_loss={best_val_loss:.4f}) → {os.path.basename(best_loss_model_path)}")
             else:
                 patience_counter += 1
-                # Проверка на большой разрыв train-val loss (переобучение).
-                # Активируется только при достаточно длинной серии неудач,
-                # чтобы не «убивать» обучение на ранних колебаниях.
                 if patience_counter >= OVERFITTING_MIN_PATIENCE:
                     loss_gap = (val_loss - train_loss) / (train_loss + 1e-8)
                     if loss_gap > OVERFITTING_GAP_THRESHOLD:
@@ -1119,11 +1185,21 @@ def main():
                     log(f"⚠️ Early stopping: val_loss не улучшается "
                         f"{EARLY_STOPPING_PATIENCE} эпох. Остановка обучения.")
                     break
+
+            # --- best_iou.pth (независимо от loss) ---
+            if metrics is not None:
+                current_iou = metrics['IoU']
+                if current_iou > best_iou:
+                    best_iou = current_iou
+                    torch.save(model.state_dict(), best_iou_model_path)
+                    log(f"✅ Новая лучшая модель по IoU сохранена "
+                        f"(IoU={best_iou:.4f}) → {os.path.basename(best_iou_model_path)}")
         else:
+            # Нет валидации — сохраняем best_loss по train_loss (на первой эпохе)
             if best_val_loss == float('inf'):
                 best_val_loss = train_loss
-                torch.save(model.state_dict(), best_model_path)
-                log(f"✅ Модель сохранена (нет валидации)")
+                torch.save(model.state_dict(), best_loss_model_path)
+                log("✅ Модель сохранена (нет валидации, best_loss≈train_loss)")
 
         # История
         history['epoch'].append(epoch)
@@ -1186,16 +1262,26 @@ def main():
         'threshold': threshold,
         'num_workers': num_workers,
         'best_val_loss': best_val_loss if best_val_loss != float('inf') else None,
+        'best_iou': best_iou if best_iou > -float('inf') else None,
         'date': datetime.now().isoformat()
     }
-    save_model_meta(meta_info_final, best_model_path)
+    save_model_meta(meta_info_final, best_loss_model_path)
+    if os.path.exists(best_iou_model_path):
+        save_model_meta(meta_info_final, best_iou_model_path)
     save_model_meta(meta_info_final, final_model_path)
     log("Метаданные модели обновлены (финальная версия).")
 
-    # Пост-обработка
+    # ---------- Пост-обработка: используем best_iou для отчётов (fallback на best_loss) ----------
     if val_loader is not None:
         log("=== Генерация итоговых отчётов и графиков ===")
-        best_state = torch.load(best_model_path, map_location='cpu')
+        if os.path.exists(best_iou_model_path):
+            eval_model_path = best_iou_model_path
+            log(f"Для отчётов использую модель по IoU: {os.path.basename(eval_model_path)}")
+        else:
+            eval_model_path = best_loss_model_path
+            log(f"Модель по IoU не найдена, использую: {os.path.basename(eval_model_path)}")
+
+        best_state = torch.load(eval_model_path, map_location='cpu')
         model.load_state_dict(best_state)
         model = model.to(device)
         model.eval()
@@ -1234,9 +1320,52 @@ def main():
         log("⚠️ Валидация отсутствует – дополнительные графики и кривые не сгенерированы")
         save_csv_results(history, os.path.join(save_root, 'results.csv'))
 
+    # ---------- Финальная оценка на тестовом наборе ----------
+    if test_loader is not None:
+        log("=== Оценка на тестовом наборе ===")
+        if os.path.exists(best_iou_model_path):
+            eval_model_path = best_iou_model_path
+        else:
+            eval_model_path = best_loss_model_path
+        model.load_state_dict(torch.load(eval_model_path, map_location='cpu'))
+        model = model.to(device)
+        model.eval()
+
+        test_preds, test_masks = [], []
+        with torch.no_grad():
+            for images, masks in test_loader:
+                images = images.to(device)
+                masks = masks.to(device)
+                outputs = model(images)
+                if num_classes == 1:
+                    test_preds.append(torch.sigmoid(outputs).cpu())
+                else:
+                    test_preds.append(outputs.cpu())
+                test_masks.append(masks.cpu())
+        test_preds = torch.cat(test_preds, dim=0)
+        test_masks = torch.cat(test_masks, dim=0)
+        test_metrics = compute_metrics(test_preds, test_masks,
+                                       num_classes, threshold=threshold)
+        log(f"TEST_METRICS: {json.dumps(test_metrics)}")
+        with open(os.path.join(save_root, 'test_metrics.json'), 'w',
+                  encoding='utf-8') as f:
+            json.dump(test_metrics, f, indent=2, ensure_ascii=False)
+
+        # Дополняем метаданные тестовыми метриками
+        meta_info_final['test_metrics'] = test_metrics
+        save_model_meta(meta_info_final, best_loss_model_path)
+        if os.path.exists(best_iou_model_path):
+            save_model_meta(meta_info_final, best_iou_model_path)
+        save_model_meta(meta_info_final, final_model_path)
+    else:
+        log("ℹ️ Тестовая оценка пропущена (нет test_loader)")
+
     log("=== Обучение завершено ===")
-    if best_model_path and os.path.exists(best_model_path):
-        log(f"Лучшая модель сохранена: {best_model_path} (val_loss={best_val_loss:.4f})")
+    if os.path.exists(best_loss_model_path):
+        log(f"Best loss model: {best_loss_model_path} (val_loss={best_val_loss:.4f})")
+    if os.path.exists(best_iou_model_path):
+        log(f"Best IoU model:  {best_iou_model_path} (IoU={best_iou:.4f})")
+    log(f"Last model:      {final_model_path}")
     log("SUCCESS")
 
 if __name__ == "__main__":

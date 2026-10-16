@@ -1311,12 +1311,13 @@ class DatasetPreparationWindow(QMainWindow):
                     self.class_table.setItem(row, 3, item)
                     continue
 
-                if input_type == 1:
-                    # input=masks: выходной пиксель = dense New ID.
-                    pixel = new_id
-                else:
-                    # input=labels + out_masks: pixel = New ID + offset.
-                    pixel = new_id + offset
+                # Выходной пиксель в маске всегда = New ID + offset
+                # (offset ≥ 1, чтобы первый класс не слился с фоном).
+                # Это справедливо и для input=masks, и для input=labels:
+                # _remap_mask_pixels применяет ту же формулу, что и
+                # export_masks_from_annotations.
+                eff_offset = max(offset, 1)
+                pixel = new_id + eff_offset
 
                 item = QTableWidgetItem(str(pixel))
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
