@@ -15,6 +15,23 @@ def setup_layout_dataset_ui(parent):
 
     parent.btn_load_labels = QPushButton("Load Labels")
     parent.btn_load_yaml = QPushButton("Load YAML")
+    parent.btn_load_yaml.setToolTip(
+        "Загрузить YOLO-датасет из data.yaml.\n"
+        "Поддерживаются images/... + labels/... и txt-списки,\n"
+        "valid/validation, несколько папок на split."
+    )
+    parent.btn_load_coco = QPushButton("Load COCO")
+    parent.btn_load_coco.setToolTip(
+        "Загрузить COCO JSON. Можно несколько файлов сразу (train/val/test).\n"
+        "bbox → detect; segmentation → segment или obb (эвристика).\n"
+        "Категории объединяются по имени."
+    )
+    parent.btn_load_unet = QPushButton("Load U-Net YAML")
+    parent.btn_load_unet.setToolTip(
+        "Загрузить U-Net-датасет (masks_data.yaml).\n"
+        "Маски будут конвертированы в полигоны (findContours).\n"
+        "Это lossy — дырки и тонкие структуры теряются."
+    )
     parent.save_button = QPushButton("Save Labels")
     parent.btn_save_all = QPushButton("Save All")
     parent.btn_save_all.setToolTip(
@@ -76,6 +93,8 @@ def setup_layout_dataset_ui(parent):
     top_layout.addWidget(parent.nav_widget)
     top_layout.addWidget(parent.btn_load_labels)
     top_layout.addWidget(parent.btn_load_yaml)
+    top_layout.addWidget(parent.btn_load_coco)
+    top_layout.addWidget(parent.btn_load_unet)
     top_layout.addStretch()
     top_layout.addWidget(parent.btn_tool_rect)
     top_layout.addWidget(parent.btn_tool_segment)

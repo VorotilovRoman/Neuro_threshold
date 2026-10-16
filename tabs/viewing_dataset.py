@@ -180,6 +180,8 @@ class ViewingDataset(QMainWindow):
         self.coord_list.currentItemChanged.connect(self.on_object_selection_changed)
         self.coord_list.itemDoubleClicked.connect(self.on_object_double_clicked)
         self.btn_load_yaml.clicked.connect(self.load_yaml)
+        self.btn_load_coco.clicked.connect(self.load_coco_json)
+        self.btn_load_unet.clicked.connect(self.load_unet_yaml)
         settings.settings_changed.connect(self.on_settings_changed)
         self.toggle_log_btn.clicked.connect(self.toggle_log)
 
@@ -194,6 +196,20 @@ class ViewingDataset(QMainWindow):
     def log(self, message):
         self.log_widget.log(message)
         print(message)
+
+    def _log_exception(self, context, exc=None):
+        tb = traceback.format_exc()
+        head = f"❌ {context}: {exc if exc is not None else ''}"
+        try:
+            print(head)
+            print(tb)
+        except Exception:
+            pass
+        try:
+            self.log(head)
+            self.log(tb)
+        except Exception:
+            pass
 
     def on_settings_changed(self, new_settings):
         if self.image_paths:
@@ -1136,79 +1152,29 @@ class ViewingDataset(QMainWindow):
     # ------------------------------------------------------------------
     # YAML датасет
     # ------------------------------------------------------------------
-    def _collect_yaml_items_with_masks(self, yaml_path):
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-
-        base_path = config.get('path', '')
-        if not base_path:
-            base_path = os.path.dirname(yaml_path)
-        base_path = os.path.abspath(base_path)
-
-        items = []
-        for split in ['train', 'val', 'test']:
-            split_val = config.get(split)
-            if not split_val:
-                continue
-            if isinstance(split_val, str):
-                split_dirs = [split_val]
-            elif isinstance(split_val, list):
-                split_dirs = split_val
-            else:
-                continue
-
-            for rel_dir in split_dirs:
-                img_dir = os.path.join(base_path, rel_dir)
-                if not os.path.isdir(img_dir):
-                    continue
-
-                for fname in os.listdir(img_dir):
-                    if not fname.lower().endswith(
-                            ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')):
-                        continue
-                    img_path = os.path.join(img_dir, fname)
-                    stem = os.path.splitext(fname)[0]
-
-                    label_path = None
-                    for lbl_sub in [split, '']:
-                        lbl_dir = (os.path.join(base_path, 'labels', lbl_sub)
-                                   if lbl_sub else os.path.join(base_path, 'labels'))
-                        cand = os.path.join(lbl_dir, stem + '.txt')
-                        if os.path.exists(cand):
-                            label_path = cand
-                            break
-
-                    mask_path = None
-                    for mask_sub in [split, '']:
-                        mask_dir = (os.path.join(base_path, 'masks', mask_sub)
-                                    if mask_sub else os.path.join(base_path, 'masks'))
-                        for ext in ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'):
-                            cand = os.path.join(mask_dir, stem + ext)
-                            if os.path.exists(cand):
-                                mask_path = cand
-                                break
-                        if mask_path:
-                            break
-
-                    items.append((img_path, label_path, mask_path))
-
-        image_paths = [p for p, _, _ in items]
-        label_map = {p: lp for p, lp, _ in items if lp}
-        mask_map = {p: mp for p, _, mp in items if mp}
-        return image_paths, label_map, mask_map
-
     def load_yaml(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите YAML файл датасета", "", "YAML files (*.yaml *.yml)"
+            self, "Select YAML file", "", "YAML files (*.yaml *.yml)"
         )
         if not file_path:
             return
-
         try:
-            image_paths, label_map, mask_map = self._collect_yaml_items_with_masks(file_path)
-            if not image_paths:
-                QMessageBox.warning(self, "Ошибка", "Не найдено изображений в YAML.")
+            pairs, names, root, splits_info = load_yolo_yaml(
+                file_path, log_cb=self.log)
+            if not pairs:
+                QMessageBox.warning(self, "Ошибка",
+                                     "Не найдено изображений в YAML.")
                 return
+
+            image_paths = [p for p, _ in pairs]
+            label_map = {p: lp for p, lp in pairs if lp is not None}
+
+            # Ищем маски (необязательно)
+            mask_map = {}
+            for img in image_paths:
+                m = find_mask_for_image(img, base_path=root)
+                if m:
+                    mask_map[img] = m
 
             self._load_images(
                 image_paths,
@@ -1217,16 +1183,211 @@ class ViewingDataset(QMainWindow):
                 label_folder=None,
                 mask_folder=None,
             )
-            self.log(f"Загружено {len(image_paths)} изображений из YAML "
-                     f"(метки: {len(label_map)}, маски: {len(mask_map)}).")
-            QMessageBox.information(self, "Успех",
-                                    f"Загружено {len(image_paths)} изображений.")
-        except Exception as e:
-            self.log(f"Ошибка загрузки YAML: {e}")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить YAML:\n{e}")
 
+            self.log(f"=== Загрузка YAML: {file_path} ===")
+            self.log(f"Root: {root}")
+            for split, n in splits_info.items():
+                if n:
+                    self.log(f"  • {split}: {n} изображений")
+            self.log(f"Загружено {len(image_paths)} изображений "
+                     f"(метки: {len(label_map)}, маски: {len(mask_map)}).")
+            QMessageBox.information(
+                self, "Успех",
+                f"Загружено {len(image_paths)} изображений.\n"
+                f"Метки: {len(label_map)}\n"
+                f"Маски: {len(mask_map)}"
+            )
+        except Exception as e:
+            self._log_exception("Ошибка загрузки YAML", e)
+            QMessageBox.critical(self, "Ошибка",
+                                  f"Не удалось загрузить YAML:\n{e}")
+
+
+    # ------------------------------------------------------------------
+    # COCO
+    # ------------------------------------------------------------------
+    def load_coco_json(self):
+        json_paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select COCO JSON(s) — можно несколько",
+            "", "JSON files (*.json);;All files (*)")
+        if not json_paths:
+            return
+        try:
+            self._load_coco_into_viewer(json_paths)
+        except Exception as e:
+            self._log_exception("Ошибка загрузки COCO", e)
+            QMessageBox.critical(self, "Ошибка COCO", str(e))
+
+    def _load_coco_into_viewer(self, json_paths):
+        from utils.coco_io import load_coco, write_yolo_txt_for_coco_items
+
+        if not json_paths:
+            return
+
+        # --- 1. Читаем все JSON ---
+        per_json_data = []
+        for jp in json_paths:
+            items, categories, _root = load_coco(jp, log_cb=self.log)
+            if not items:
+                self.log(f"⚠️ {os.path.basename(jp)}: нет изображений.")
+                continue
+            per_json_data.append((jp, items, categories))
+
+        if not per_json_data:
+            QMessageBox.warning(self, "COCO",
+                                 "Не найдено ни одного изображения.")
+            return
+
+        # --- 2. Объединяем категории по имени ---
+        name_to_global = {}
+        for jp, items, categories in per_json_data:
+            local_map = {}
+            for coco_cat_id, name in categories.items():
+                name_str = str(name) if name is not None else str(coco_cat_id)
+                if name_str not in name_to_global:
+                    name_to_global[name_str] = len(name_to_global)
+                local_map[int(coco_cat_id)] = name_to_global[name_str]
+            for it in items:
+                new_anns = []
+                for a in it['annotations']:
+                    coco_cat_id = int(a[1]) + 1
+                    gid = local_map.get(coco_cat_id, 0)
+                    new_anns.append((a[0], gid, *a[2:]))
+                it['annotations'] = new_anns
+
+        # --- 3. Пишем .txt ---
+        base_json_dir = os.path.dirname(json_paths[0])
+        tmp_dir = os.path.join(base_json_dir, '_coco_labels_tmp')
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        pairs = []
+        for idx, (jp, items, _cats) in enumerate(per_json_data):
+            prefix = f"j{idx:03d}_"
+            pairs_i = write_yolo_txt_for_coco_items(
+                items, tmp_dir,
+                class_remap=None,
+                log_cb=self.log,
+                name_prefix=prefix,
+            )
+            pairs.extend(pairs_i)
+
+        image_paths = [p for p, _ in pairs]
+        label_map = {p: lp for p, lp in pairs}
+
+        self._load_images(
+            image_paths,
+            label_map=label_map,
+            mask_map=None,
+            label_folder=None,
+            mask_folder=None,
+        )
+
+        self.log(f"=== Загрузка из COCO ({len(per_json_data)} json) ===")
+        self.log(f"Изображений: {len(image_paths)}, "
+                 f"классов: {len(name_to_global)}")
+        self.log(f"Временные labels: {tmp_dir}")
+        QMessageBox.information(
+            self, "COCO",
+            f"Загружено изображений: {len(image_paths)}\n"
+            f"Классов: {len(name_to_global)}\n"
+            f"Временные labels: {tmp_dir}"
+        )
+
+    # ------------------------------------------------------------------
+    # U-Net YAML
+    # ------------------------------------------------------------------
+    def load_unet_yaml(self):
+        yaml_path, _ = QFileDialog.getOpenFileName(
+            self, "Select U-Net YAML", "",
+            "YAML files (*.yaml *.yml);;All files (*)")
+        if not yaml_path:
+            return
+        try:
+            self._load_unet_into_viewer(yaml_path)
+        except Exception as e:
+            self._log_exception("Ошибка загрузки U-Net YAML", e)
+            QMessageBox.critical(self, "Ошибка U-Net YAML", str(e))
+
+    def _load_unet_into_viewer(self, yaml_path):
+        pairs_raw, class_names, mask_offset, root, _ = load_unet_yaml_pairs(
+            yaml_path, log_cb=self.log)
+        if not pairs_raw:
+            QMessageBox.warning(self, "U-Net", "Не найдено ни одной пары.")
+            return
+
+        # --- 1. Конвертируем маски в .txt (findContours) ---
+        tmp_dir = os.path.join(os.path.dirname(os.path.abspath(yaml_path)),
+                               '_unet_labels_tmp')
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        pixel_to_cls = {int(cid) + int(mask_offset): int(cid)
+                        for cid in class_names.keys()}
+
+        pairs = []
+        mask_map = {}
+        for img_path, mask_path in pairs_raw:
+            try:
+                mask = read_mask_with_fallback(str(mask_path))
+                if mask is None or mask.ndim != 2:
+                    continue
+                h, w = mask.shape
+                lines = []
+                for pixel_val, cls_id in pixel_to_cls.items():
+                    binary = (mask == pixel_val).astype(np.uint8)
+                    if binary.sum() == 0:
+                        continue
+                    contours, _ = cv2.findContours(
+                        binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    for contour in contours:
+                        if len(contour) < 3:
+                            continue
+                        c = contour.squeeze().astype(np.float32)
+                        if c.ndim != 2:
+                            continue
+                        c[:, 0] /= w
+                        c[:, 1] /= h
+                        flat = c.reshape(-1).tolist()
+                        coord_str = " ".join(f"{x:.6f}" for x in flat)
+                        lines.append(f"{cls_id} {coord_str}")
+
+                stem = os.path.splitext(os.path.basename(img_path))[0]
+                txt_path = os.path.join(tmp_dir, stem + ".txt")
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(lines))
+                pairs.append((img_path, txt_path))
+
+                # Оригинальная маска — для отображения поверх
+                mask_map[img_path] = str(mask_path)
+            except Exception as e:
+                self.log(f"[U-Net] ошибка обработки {mask_path}: {e}")
+
+        if not pairs:
+            QMessageBox.warning(self, "U-Net",
+                                 "Не удалось сконвертировать ни одной маски.")
+            return
+
+        image_paths = [p for p, _ in pairs]
+        label_map = {p: lp for p, lp in pairs}
+
+        self._load_images(
+            image_paths,
+            label_map=label_map,
+            mask_map=mask_map,
+            label_folder=None,
+            mask_folder=None,
+        )
+
+        self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")
+        self.log(f"Root: {root}, пар: {len(image_paths)}, "
+                 f"classes: {len(class_names)}, offset={mask_offset}")
+        self.log(f"Оригинальные маски сохранены для отображения.")
+        QMessageBox.information(
+            self, "U-Net YAML",
+            f"Загружено изображений: {len(image_paths)}\n"
+            f"Классов: {len(class_names)}\n"
+            f"Маски сконвертированы в polygon-аннотации.\n"
+            f"Оригинальные маски отображаются как overlay."
+        )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

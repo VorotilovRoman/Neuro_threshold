@@ -18,6 +18,23 @@ def setup_viewing_dataset_ui(parent):
     parent.btn_load_labels = QPushButton("Load Labels")
     parent.btn_load_masks = QPushButton("Load Masks")
     parent.btn_load_yaml = QPushButton("Load YAML")
+    parent.btn_load_yaml.setToolTip(
+        "Загрузить YOLO-датасет из data.yaml.\n"
+        "Поддерживаются images/... + labels/..., txt-списки, valid/validation.\n"
+        "Маски (если есть) подхватятся автоматически."
+    )
+    parent.btn_load_coco = QPushButton("Load COCO")
+    parent.btn_load_coco.setToolTip(
+        "Загрузить COCO JSON. Можно несколько файлов сразу (train/val/test).\n"
+        "bbox → detect; segmentation → segment или obb.\n"
+        "Категории объединяются по имени."
+    )
+    parent.btn_load_unet = QPushButton("Load U-Net YAML")
+    parent.btn_load_unet.setToolTip(
+        "Загрузить U-Net-датасет (masks_data.yaml).\n"
+        "Маски конвертируются в polygon-аннотации (findContours).\n"
+        "Оригинальные маски остаются для отображения."
+    )
     parent.btn_save = QPushButton("Save Labels")
 
     parent.btn_convert_all_to_obb = QPushButton("All Box → OBB")
@@ -30,6 +47,8 @@ def setup_viewing_dataset_ui(parent):
     top_layout.addWidget(parent.btn_load_labels)
     top_layout.addWidget(parent.btn_load_masks)
     top_layout.addWidget(parent.btn_load_yaml)
+    top_layout.addWidget(parent.btn_load_coco)
+    top_layout.addWidget(parent.btn_load_unet)
     top_layout.addWidget(parent.btn_save)
     top_layout.addWidget(parent.btn_convert_all_to_obb)
 
@@ -40,7 +59,7 @@ def setup_viewing_dataset_ui(parent):
     parent.opacity_slider = QSlider(Qt.Horizontal)
     parent.opacity_slider.setRange(0, 100)
     parent.opacity_slider.setValue(50)
-    parent.opacity_slider.setFixedWidth(100)
+    parent.opacity_slider.setFixedWidth(200)
     top_layout.addWidget(parent.opacity_slider)
     parent.opacity_label = QLabel("50%")
     parent.opacity_label.setFixedWidth(40)
