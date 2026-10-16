@@ -18,6 +18,13 @@ except ImportError:
     ONNX_AVAILABLE = False
 
 
+# Допустимые режимы ресайза
+# Для ОБУЧЕНИЯ:      hard / keep_aspect_pad / random_crop
+# Для ИНФЕРЕНСА:     hard / keep_aspect_pad  (random_crop не используется — теряет кадр)
+VALID_TRAIN_RESIZE_MODES = ("hard", "keep_aspect_pad", "random_crop")
+VALID_INFERENCE_RESIZE_MODES = ("hard", "keep_aspect_pad")
+
+
 class BaseSegmentor:
     """Базовый класс для всех сегментаторов."""
     def __init__(self, model_path=None, device='cpu'):
@@ -55,42 +62,151 @@ class TorchSegmentor(BaseSegmentor):
             return torch.device('mps')
         return torch.device('cpu')
 
+    # ------------------------------------------------------------
+    # Разрешение режима ресайза для ИНФЕРЕНСА
+    # ------------------------------------------------------------
+    def _resolve_resize_mode(self):
+        """
+        Возвращает эффективный режим ресайза для ИНФЕРЕНСА.
+        Гарантированно возвращает только 'hard' или 'keep_aspect_pad'.
+
+        Логика:
+          • metadata['resize_mode'] == 'hard'            → 'hard';
+          • metadata['resize_mode'] == 'keep_aspect_pad' → 'keep_aspect_pad';
+          • metadata['resize_mode'] == 'random_crop'     → берём
+            metadata['inference_resize_mode'] (задаётся пользователем в UI);
+            если не задано — безопасный дефолт 'keep_aspect_pad'
+            (не теряет информацию о кадре);
+          • backward compat: старое поле metadata['keep_aspect_ratio'] (bool).
+        """
+        mode = self.metadata.get('resize_mode')
+
+        if mode == 'hard':
+            return 'hard'
+        if mode == 'keep_aspect_pad':
+            return 'keep_aspect_pad'
+        if mode == 'random_crop':
+            inference_mode = self.metadata.get('inference_resize_mode')
+            if inference_mode in VALID_INFERENCE_RESIZE_MODES:
+                return inference_mode
+            # Safe default — не теряем кадр
+            return 'keep_aspect_pad'
+
+        # Backward compat со старым bool-полем
+        if self.metadata.get('keep_aspect_ratio', False):
+            return 'keep_aspect_pad'
+        return 'hard'
+
+    # ------------------------------------------------------------
+    # Общий препроцессинг
+    # ------------------------------------------------------------
     def _preprocess(self, image, input_size):
-        # image: numpy array (H,W,3) or (H,W)
+        """
+        Ресайз + опциональный padding + опциональная нормализация.
+
+        Режим инференса берётся из self._resolve_resize_mode() —
+        только 'hard' или 'keep_aspect_pad'. Никаких кропов —
+        информация о кадре не теряется.
+
+        Возвращает:
+            tensor, (orig_h, orig_w), (new_h, new_w), pad_info
+            pad_info = (pad_left, pad_top, new_h, new_w) — для обратного вырезания
+                       рабочей области из маски.
+        """
         _log(f"[Preprocess] Входное изображение: shape={image.shape}, dtype={image.dtype}")
+
+        # --- Каналы в RGB ---
         if len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-            _log("[Preprocess] Преобразовано из серого в RGB")
         elif image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
-            _log("[Preprocess] Преобразовано из BGRA в RGB")
         else:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            _log("[Preprocess] Преобразовано из BGR в RGB")
 
         h, w = image.shape[:2]
-        if isinstance(input_size, int):
-            scale = input_size / max(h, w)
-            new_h, new_w = int(h * scale), int(w * scale)
-        else:
-            new_h, new_w = input_size
-        _log(f"[Preprocess] Исходный размер: ({h}, {w}) -> новый размер: ({new_h}, {new_w})")
-        image = cv2.resize(image, (new_w, new_h))
+        normalize = bool(self.metadata.get('normalize', False))
+        resize_mode = self._resolve_resize_mode()
 
-        transform = T.Compose([
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        tensor = transform(image).unsqueeze(0)
-        _log(f"[Preprocess] Тензор shape={tensor.shape}, device={self._get_device()}")
-        return tensor, (h, w), (new_h, new_w)
+        if isinstance(input_size, int):
+            tgt_h, tgt_w = input_size, input_size
+        else:
+            tgt_h, tgt_w = input_size
+
+        pad_info = (0, 0, tgt_h, tgt_w)
+
+        if resize_mode == 'keep_aspect_pad':
+            scale = min(tgt_h / h, tgt_w / w)
+            new_h = max(1, int(round(h * scale)))
+            new_w = max(1, int(round(w * scale)))
+            resized = cv2.resize(image, (new_w, new_h))
+            pad_h = tgt_h - new_h
+            pad_w = tgt_w - new_w
+            pad_top = pad_h // 2
+            pad_bottom = pad_h - pad_top
+            pad_left = pad_w // 2
+            pad_right = pad_w - pad_left
+            image = cv2.copyMakeBorder(
+                resized, pad_top, pad_bottom, pad_left, pad_right,
+                cv2.BORDER_CONSTANT, value=(0, 0, 0),
+            )
+            pad_info = (pad_left, pad_top, new_h, new_w)
+        else:  # 'hard'
+            image = cv2.resize(image, (tgt_w, tgt_h))
+            pad_info = (0, 0, tgt_h, tgt_w)
+
+        # --- Тензор + нормализация ---
+        ops = [T.ToTensor()]
+        if normalize:
+            ops.append(T.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ))
+        tensor = T.Compose(ops)(image).unsqueeze(0)
+        _log(f"[Preprocess] Тензор shape={tensor.shape}, device={self._get_device()}, "
+             f"normalize={normalize}, resize_mode={resize_mode}")
+        return tensor, (h, w), (tgt_h, tgt_w), pad_info
+
+    # ------------------------------------------------------------
+    # Обратное преобразование маски к исходному размеру
+    # ------------------------------------------------------------
+    def _postprocess_mask(self, mask_np, orig_size, pad_info, resize_mode):
+        """
+        Приводит маску (H', W') к исходному (orig_h, orig_w).
+
+        Для 'keep_aspect_pad':
+            вырезаем padding-область, затем ресайзим NEAREST.
+        Для 'hard':
+            просто ресайзим NEAREST.
+        """
+        if resize_mode == 'keep_aspect_pad':
+            pl, pt, nh, nw = pad_info
+            # Обрезаем padding (если рабочая область меньше целевого квадрата)
+            mask_np = mask_np[pt:pt + nh, pl:pl + nw]
+
+        mask_np = cv2.resize(
+            mask_np, (orig_size[1], orig_size[0]),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        return mask_np
 
 
 class UNetSegmentor(TorchSegmentor):
     """
     Сегментатор U-Net с использованием библиотеки segmentation_models_pytorch.
-    При загрузке обязательно требует наличия файла *_meta.json рядом с весами.
-    Поддерживает как бинарную, так и многоклассовую сегментацию.
+    При загрузке требует файл *_meta.json рядом с весами.
+
+    Поддерживает:
+        num_classes = 1  → бинарная через sigmoid + threshold
+        num_classes = 2  → «фон + один объект»: softmax[:, 1] + threshold
+        num_classes > 2  → multiclass через softmax + argmax
+
+    Препроцессинг:
+        normalize           — ImageNet-нормализация (bool)
+        resize_mode         — 'hard' / 'keep_aspect_pad' / 'random_crop'
+                              (random_crop на инференсе заменяется на
+                               inference_resize_mode, см. _resolve_resize_mode)
+        inference_resize_mode — 'hard' / 'keep_aspect_pad', используется только
+                                если обучение шло с random_crop.
     """
     def load(self, weights_path=None, encoder=None, input_size=None):
         """
@@ -98,8 +214,8 @@ class UNetSegmentor(TorchSegmentor):
 
         Параметры:
             weights_path (str): путь к файлу весов (.pth)
-            encoder (str): имя энкодера (игнорируется, если есть метафайл)
-            input_size (int): размер входа (игнорируется, если есть метафайл)
+            encoder (str): игнорируется, если есть метафайл
+            input_size (int): игнорируется, если есть метафайл
 
         Исключения:
             FileNotFoundError: если файл весов или метафайл не найден
@@ -119,10 +235,13 @@ class UNetSegmentor(TorchSegmentor):
                 "Для загрузки модели U-Net необходим файл *_meta.json в той же папке.\n"
                 "Формат файла:\n"
                 "{\n"
-                '  "encoder": "resnet50",           # имя энкодера (resnet18, resnet34, resnet50, efficientnet-b0, vgg16)\n'
-                '  "input_size": 512,               # размер входа (256, 512, 1024)\n'
-                '  "num_classes": 1,                # количество классов (1 для бинарной сегментации)\n'
-                '  "decoder_channels": [256,128,64,32,16]  # опционально, каналы декодера\n'
+                '  "encoder": "resnet50",                    # имя энкодера\n'
+                '  "input_size": 512,                        # размер входа\n'
+                '  "num_classes": 2,                         # число классов, включая фон\n'
+                '  "decoder_channels": [256,128,64,32,16],   # опционально\n'
+                '  "normalize": false,                       # ImageNet-нормализация\n'
+                '  "resize_mode": "hard",                    # hard | keep_aspect_pad | random_crop\n'
+                '  "inference_resize_mode": "keep_aspect_pad"  # только если обучение шло с random_crop\n'
                 "}\n"
                 "Убедитесь, что метафайл создан при обучении модели."
             )
@@ -130,7 +249,7 @@ class UNetSegmentor(TorchSegmentor):
         with open(meta_path, 'r', encoding='utf-8') as f:
             meta = json.load(f)
 
-        # Извлекаем параметры архитектуры
+        # --- Архитектурные параметры ---
         encoder_name = meta.get('encoder')
         input_size_val = meta.get('input_size')
         num_classes = meta.get('num_classes', 1)
@@ -142,31 +261,59 @@ class UNetSegmentor(TorchSegmentor):
                 f"Текущее содержимое: {meta}"
             )
 
-        # Сохраняем метаданные для использования в predict
+        # --- Препроцессинг (с backward compat) ---
+        normalize = bool(meta.get('normalize', False))
+
+        resize_mode = meta.get('resize_mode')
+        if resize_mode not in VALID_TRAIN_RESIZE_MODES:
+            # Backward compat: старое поле keep_aspect_ratio (bool)
+            if 'keep_aspect_ratio' in meta:
+                resize_mode = 'keep_aspect_pad' if meta['keep_aspect_ratio'] else 'hard'
+            else:
+                resize_mode = 'hard'
+
+        inference_resize_mode = meta.get('inference_resize_mode')
+        if inference_resize_mode not in VALID_INFERENCE_RESIZE_MODES:
+            # Если не задано — для random_crop безопасный дефолт
+            if resize_mode == 'random_crop':
+                inference_resize_mode = 'keep_aspect_pad'
+            else:
+                inference_resize_mode = None
+
+        # Сохраняем метаданные для predict
         self.metadata = {
             'model_type': 'U-Net',
             'encoder': encoder_name,
             'input_size': input_size_val,
             'num_classes': num_classes,
             'decoder_channels': decoder_channels,
-            'weights_path': weights_path
+            'weights_path': weights_path,
+            'normalize': normalize,
+            'resize_mode': resize_mode,
+            # Держим старое поле для отладки / обратной совместимости
+            'keep_aspect_ratio': (resize_mode == 'keep_aspect_pad'),
         }
+        if inference_resize_mode is not None:
+            self.metadata['inference_resize_mode'] = inference_resize_mode
 
-        _log(f"[UNet] Создание модели: encoder={encoder_name}, input_size={input_size_val}, num_classes={num_classes}")
+        _log(f"[UNet] Метаданные: encoder={encoder_name}, "
+             f"input_size={input_size_val}, num_classes={num_classes}, "
+             f"normalize={normalize}, resize_mode={resize_mode}, "
+             f"inference_resize_mode={inference_resize_mode}")
 
-        # Создаём модель с параметрами из метафайла
+        # --- Модель ---
         self.model = smp.Unet(
             encoder_name=encoder_name,
             encoder_weights=None,      # веса загружаем из файла, imagenet не используем
             in_channels=3,
             classes=num_classes,
-            decoder_channels=decoder_channels
+            decoder_channels=decoder_channels,
         )
 
-        # Загружаем веса
+        # --- Веса ---
         state_dict = torch.load(weights_path, map_location='cpu')
-        # Удаляем служебные ключи, которые могут вызвать предупреждения
-        cleaned = {k: v for k, v in state_dict.items() if not k.endswith('num_batches_tracked')}
+        cleaned = {k: v for k, v in state_dict.items()
+                   if not k.endswith('num_batches_tracked')}
         missing, unexpected = self.model.load_state_dict(cleaned, strict=False)
         if missing:
             _log(f"[UNet] Отсутствуют ключи: {missing[:3]}...")
@@ -179,60 +326,78 @@ class UNetSegmentor(TorchSegmentor):
 
     def predict(self, image, threshold=0.5):
         """
-        Выполняет инференс и возвращает бинарную маску (0 и 255).
+        Инференс U-Net.
 
-        Параметры:
-            image (np.ndarray): входное изображение (BGR или серое)
-            threshold (float): порог для бинаризации (0..1)
+        Логика по num_classes:
+            1 → sigmoid + threshold
+            2 → softmax[:, 1] + threshold (фон + объект)
+           >2 → softmax + argmax (истинный multiclass)
 
-        Возвращает:
-            np.ndarray: uint8 маска, где 255 — объект, 0 — фон
+        Параметр threshold игнорируется для num_classes > 2.
         """
         start_time = time.time()
-        _log(f"[UNet predict] Начало, входное изображение shape={image.shape}")
 
         input_size = self.metadata.get('input_size', 512)
         num_classes = self.metadata.get('num_classes', 1)
-        print("threshold", threshold)
-        tensor, orig_size, _ = self._preprocess(image, input_size)
+        train_resize_mode = self.metadata.get('resize_mode', '?')
+        resize_mode = self._resolve_resize_mode()
+
+        _log(f"[UNet predict] Начало: shape={image.shape}, "
+             f"num_classes={num_classes}, threshold={threshold}, "
+             f"train_resize_mode={train_resize_mode}, "
+             f"inference_resize_mode={resize_mode}")
+
+        tensor, orig_size, _, pad_info = self._preprocess(image, input_size)
         device = self._get_device()
         tensor = tensor.to(device)
 
         with torch.no_grad():
-            logits = self.model(tensor)  # [1, C, H, W]
+            logits = self.model(tensor)   # [1, C, H, W]
             if num_classes == 1:
-                probs = torch.sigmoid(logits)  # [1, 1, H, W] значения 0..1
-                mask_np = probs.squeeze().cpu().numpy()  # [H, W]
-                # Бинаризация по порогу
-                mask_np = (mask_np > threshold).astype(np.uint8) * 255
+                probs = torch.sigmoid(logits).squeeze().cpu().numpy()   # [H, W]
+                mask_np = (probs > threshold).astype(np.uint8) * 255
+            elif num_classes == 2:
+                # «Фон + один объект»: берём вероятность класса «объект» (index 1)
+                probs = torch.softmax(logits, dim=1)                    # [1, 2, H, W]
+                obj_prob = probs[0, 1].cpu().numpy()                    # [H, W]
+                mask_np = (obj_prob > threshold).astype(np.uint8) * 255
             else:
-                probs = torch.softmax(logits, dim=1)  # [1, C, H, W]
-                pred_class = torch.argmax(probs, dim=1)  # [1, H, W]
+                probs = torch.softmax(logits, dim=1)
+                pred_class = torch.argmax(probs, dim=1)
                 mask_np = pred_class.squeeze().cpu().numpy().astype(np.uint8)
-                # Масштабируем индексы классов для визуализации
-                if num_classes > 1:
-                    mask_np = (mask_np * (255 // (num_classes - 1))).astype(np.uint8)
+                mask_np = (mask_np * (255 // (num_classes - 1))).astype(np.uint8)
 
-        _log(f"[UNet predict] Предсказание shape={mask_np.shape}, min={mask_np.min()}, max={mask_np.max()}")
+        _log(f"[UNet predict] Предсказание shape={mask_np.shape}, "
+             f"min={mask_np.min()}, max={mask_np.max()}")
 
-        # Ресайз к исходному размеру изображения
-        mask_np = cv2.resize(mask_np, (orig_size[1], orig_size[0]), interpolation=cv2.INTER_NEAREST)
+        # Обратный ресайз к исходному размеру (без center crop)
+        mask_np = self._postprocess_mask(mask_np, orig_size, pad_info, resize_mode)
 
         elapsed = time.time() - start_time
-        _log(f"[UNet predict] Готово за {elapsed:.3f} сек. Выходная маска shape={mask_np.shape}")
+        _log(f"[UNet predict] Готово за {elapsed:.3f} сек. "
+             f"Выходная маска shape={mask_np.shape}")
         return mask_np
+
 
 class DeepLabV3Segmentor(TorchSegmentor):
     """DeepLabV3+ из torchvision."""
     def load(self, backbone='resnet50', output_stride=16, input_size=520):
-        from torchvision.models.segmentation import deeplabv3_resnet50, deeplabv3_resnet101, deeplabv3_mobilenet_v3_large
-        _log(f"[DeepLabV3] Загрузка модели: backbone={backbone}, output_stride={output_stride}, input_size={input_size}")
+        from torchvision.models.segmentation import (
+            deeplabv3_resnet50, deeplabv3_resnet101, deeplabv3_mobilenet_v3_large
+        )
+        _log(f"[DeepLabV3] Загрузка модели: backbone={backbone}, "
+             f"output_stride={output_stride}, input_size={input_size}")
+
+        # torchvision-модели ожидают ImageNet-нормализацию
         self.metadata = {
             'model_type': 'DeepLabV3+',
             'backbone': backbone,
             'output_stride': output_stride,
-            'input_size': input_size
+            'input_size': input_size,
+            'normalize': True,
+            'resize_mode': 'hard',
         }
+
         if backbone == 'resnet50':
             self.model = deeplabv3_resnet50(pretrained=True, progress=False)
         elif backbone == 'resnet101':
@@ -241,6 +406,7 @@ class DeepLabV3Segmentor(TorchSegmentor):
             self.model = deeplabv3_mobilenet_v3_large(pretrained=True, progress=False)
         else:
             raise ValueError(f"Unsupported backbone: {backbone}")
+
         self.model.to(self._get_device())
         self.model.eval()
         _log(f"[DeepLabV3] Модель загружена, устройство: {self._get_device()}")
@@ -249,31 +415,35 @@ class DeepLabV3Segmentor(TorchSegmentor):
         start_time = time.time()
         _log(f"[DeepLabV3 predict] Начало, shape={image.shape}")
         input_size = self.metadata.get('input_size', 520)
-        tensor, orig_size, _ = self._preprocess(image, input_size)
+        resize_mode = self._resolve_resize_mode()
+        tensor, orig_size, _, pad_info = self._preprocess(image, input_size)
         tensor = tensor.to(self._get_device())
         with torch.no_grad():
             output = self.model(tensor)['out']
             pred = torch.sigmoid(output).squeeze().cpu().numpy()
-        _log(f"[DeepLabV3 predict] Предсказание shape={pred.shape}, min={pred.min()}, max={pred.max()}")
+        _log(f"[DeepLabV3 predict] Предсказание shape={pred.shape}, "
+             f"min={pred.min()}, max={pred.max()}")
+        # Обратный ресайз к исходному размеру
         pred = cv2.resize(pred, (orig_size[1], orig_size[0]))
         mask = (pred * 255).astype(np.uint8)
         elapsed = time.time() - start_time
-        _log(f"[DeepLabV3 predict] Готово за {elapsed:.3f} сек. Маска shape={mask.shape}")
+        _log(f"[DeepLabV3 predict] Готово за {elapsed:.3f} сек. "
+             f"Маска shape={mask.shape}")
         return mask
 
 
-
-# deep_learning_ops.py - класс YOLOSegmentor
-
+# =============================================================================
+# YOLO
+# =============================================================================
 class YOLOSegmentor(BaseSegmentor):
     """
     YOLO сегментатор (любая версия: v8, v11, v26, ...).
-    Модель загружается из файла .pt (поддерживаются как официальные, так и пользовательские).
+    Модель загружается из файла .pt.
 
     Тип вывода определяется автоматически по результату инференса:
         • segmentation — если у результата есть .masks: используем их как есть;
-        • OBB         — если у результата есть .obb: для каждой OBB-детекции берём
-                        её bbox, внутри ROI применяем Otsu (THRESH_BINARY_INV),
+        • OBB         — если у результата есть .obb: для каждой OBB-детекции
+                        берём bbox, внутри ROI применяем Otsu (THRESH_BINARY_INV),
                         результат маскируем полигоном OBB;
         • detect      — если есть .boxes: для каждого бокса внутри ROI применяем Otsu.
 
@@ -299,13 +469,11 @@ class YOLOSegmentor(BaseSegmentor):
         _log(f"[YOLO] Модель загружена, task={self.metadata['task']}, "
              f"устройство по умолчанию: {self.device}")
 
-    # ---------- Вспомогательное: Otsu внутри ROI ----------
     @staticmethod
     def _otsu_inside_roi(image, x1, y1, x2, y2):
         """
         Возвращает бинарную маску (uint8, 0/255) для ROI [x1:x2, y1:y2]
-        методом Otsu. Инвертированный порог рассчитан на типичный случай
-        «тёмный объект на светлом фоне».
+        методом Otsu (THRESH_BINARY_INV) — «тёмный объект на светлом фоне».
         """
         roi = image[y1:y2, x1:x2]
         if roi.size == 0:
@@ -320,9 +488,8 @@ class YOLOSegmentor(BaseSegmentor):
     def predict(self, image, conf=0.25, iou=0.45, imgsz=640, save=False):
         start_time = time.time()
         original_h, original_w = image.shape[:2]
-        _log(f"[YOLO predict] Начало, исходное изображение размером "
-             f"({original_h}, {original_w}), conf={conf}, iou={iou}, "
-             f"imgsz={imgsz}, save={save}")
+        _log(f"[YOLO predict] Начало, изображение ({original_h}, {original_w}), "
+             f"conf={conf}, iou={iou}, imgsz={imgsz}, save={save}")
 
         device_arg = None if self.device == 'auto' else self.device
         results = self.model.predict(
@@ -371,9 +538,9 @@ class YOLOSegmentor(BaseSegmentor):
 
             n = len(corners_all)
             _log(f"[YOLO predict] Тип вывода: OBB, {n} детекций. "
-                 f"Для каждой OBB: Otsu внутри bbox, маскирование полигоном OBB.")
+                 f"Otsu внутри bbox, маскирование полигоном OBB.")
 
-            for i, corners in enumerate(corners_all):
+            for corners in corners_all:
                 pts = corners.reshape(-1, 2).astype(np.int32)
                 x1 = max(0, int(pts[:, 0].min()))
                 y1 = max(0, int(pts[:, 1].min()))
@@ -386,7 +553,6 @@ class YOLOSegmentor(BaseSegmentor):
                 if roi_mask is None:
                     continue
 
-                # Ограничиваем результат полигоном OBB
                 poly_mask = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
                 shifted = pts - np.array([x1, y1])
                 cv2.fillPoly(poly_mask, [shifted], 255)
@@ -414,7 +580,7 @@ class YOLOSegmentor(BaseSegmentor):
 
             n = len(xyxy_all)
             _log(f"[YOLO predict] Тип вывода: DETECT, {n} боксов. "
-                 f"Для каждого бокса: Otsu внутри bbox.")
+                 f"Otsu внутри bbox.")
 
             for box in xyxy_all:
                 x1 = max(0, int(box[0]))
@@ -447,6 +613,9 @@ class YOLOSegmentor(BaseSegmentor):
         return combined_mask
 
 
+# =============================================================================
+# SAM (заглушка)
+# =============================================================================
 class SAMSegmentor(BaseSegmentor):
     """Segment Anything Model (заглушка)."""
     def load(self, model_type='vit_h', model_path=None):
@@ -454,7 +623,11 @@ class SAMSegmentor(BaseSegmentor):
             from segment_anything import sam_model_registry, SamPredictor
         except ImportError:
             raise ImportError("segment-anything is required for SAM")
-        self.metadata = {'model_type': 'SAM', 'model_type_detail': model_type, 'model_path': model_path}
+        self.metadata = {
+            'model_type': 'SAM',
+            'model_type_detail': model_type,
+            'model_path': model_path,
+        }
         _log("[SAM] Загрузка не реализована, выбрасываем исключение")
         raise NotImplementedError("SAM loading not implemented in this stub")
 
@@ -462,13 +635,18 @@ class SAMSegmentor(BaseSegmentor):
         raise NotImplementedError("SAM prediction not implemented")
 
 
+# =============================================================================
+# ONNX
+# =============================================================================
 class ONNXSegmentor(BaseSegmentor):
     """ONNX Runtime инференс."""
     def load(self, model_path):
         if not ONNX_AVAILABLE:
             raise ImportError("onnxruntime is not installed")
         self.metadata = {'model_type': 'Custom ONNX', 'path': model_path}
-        self.session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+        self.session = ort.InferenceSession(
+            model_path, providers=['CPUExecutionProvider']
+        )
         _log(f"[ONNX] Сессия создана для {model_path}")
 
     def predict(self, image):
@@ -477,9 +655,11 @@ class ONNXSegmentor(BaseSegmentor):
         input_name = self.session.get_inputs()[0].name
         input_shape = self.session.get_inputs()[0].shape
         h_in, w_in = input_shape[2], input_shape[3]
-        _log(f"[ONNX predict] Ожидаемый вход модели: {input_shape}, текущее изображение: ({original_h}, {original_w})")
+        _log(f"[ONNX predict] Ожидаемый вход: {input_shape}, "
+             f"текущее изображение: ({original_h}, {original_w})")
 
-        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if len(image.shape)==3 else cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) \
+            if len(image.shape) == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         img = cv2.resize(img, (w_in, h_in))
         _log(f"[ONNX predict] После ресайза: {img.shape}")
         img = img.astype(np.float32) / 255.0
@@ -488,14 +668,19 @@ class ONNXSegmentor(BaseSegmentor):
 
         outputs = self.session.run(None, {input_name: img})
         mask = outputs[0].squeeze()
-        _log(f"[ONNX predict] Выход модели (до ресайза): {mask.shape}, min={mask.min()}, max={mask.max()}")
+        _log(f"[ONNX predict] Выход модели (до ресайза): {mask.shape}, "
+             f"min={mask.min()}, max={mask.max()}")
         mask = cv2.resize(mask, (original_w, original_h))
         result = (mask * 255).astype(np.uint8)
         elapsed = time.time() - start_time
-        _log(f"[ONNX predict] Готово за {elapsed:.3f} сек. Итоговая маска shape={result.shape}")
+        _log(f"[ONNX predict] Готово за {elapsed:.3f} сек. "
+             f"Итоговая маска shape={result.shape}")
         return result
 
 
+# =============================================================================
+# Фабрика
+# =============================================================================
 def create_segmentor(model_type, **kwargs):
     """Фабрика для создания сегментатора по имени."""
     segmentors = {

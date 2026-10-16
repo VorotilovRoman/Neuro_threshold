@@ -2,6 +2,14 @@
 from import_libs_internal import *
 from import_libs_methods_ui import setup_deep_learning_methods_ui
 
+# Дополнительные Qt-виджеты (на случай, если не подтянуты из import_libs_internal)
+try:
+    from PyQt5.QtWidgets import (
+        QFormLayout, QSpinBox, QDoubleSpinBox, QCheckBox,
+        QComboBox, QLabel, QGroupBox, QLineEdit,
+    )
+except ImportError:
+    pass
 
 
 class DeepLearningWindow(QMainWindow):
@@ -28,6 +36,10 @@ class DeepLearningWindow(QMainWindow):
         self.ignore_ui_changes = False
 
         setup_deep_learning_methods_ui(self)
+
+        # --- Override-поля для отсутствующих в metadata параметров ---
+        # (num_classes, normalize, resize_mode, inference_resize_mode)
+        self._add_unet_inference_overrides()
 
         # Устройство по умолчанию
         auto_device = "Auto (best available)"
@@ -89,6 +101,130 @@ class DeepLearningWindow(QMainWindow):
 
         self.update_navigation_state()
         self.on_model_changed(0)
+
+    # =========================================================================
+    # Override-поля для U-Net (num_classes, normalize, resize_mode, inference_resize_mode)
+    # =========================================================================
+    def _add_unet_inference_overrides(self):
+        """
+        Добавляет в unet_settings поля для ручного override параметров инференса:
+            num_classes
+            normalize
+            resize_mode             (hard / keep_aspect_pad / random_crop)
+            inference_resize_mode   (hard / keep_aspect_pad; показывается только
+                                     если обучение шло с random_crop)
+
+        Логика:
+          • Если параметр есть в metadata — поле заполняется и БЛОКИРУЕТСЯ.
+          • Если параметра нет — поле активно, и его значение применяется при predict.
+        """
+        if getattr(self, '_unet_overrides_added', False):
+            return
+        self._unet_overrides_added = True
+
+        # --- Ищем контейнер для вставки полей ---
+        target_layout = None
+        if hasattr(self.unet_settings, 'form_layout'):
+            target_layout = self.unet_settings.form_layout
+        if target_layout is None:
+            try:
+                target_layout = self.unet_settings.findChild(QFormLayout)
+            except Exception:
+                target_layout = None
+
+        # Универсальный способ добавить строку
+        def add_row(label_text, widget):
+            if target_layout is not None:
+                target_layout.addRow(label_text, widget)
+            else:
+                # Fallback — в общий layout виджета
+                vbox = self.unet_settings.layout()
+                if vbox is not None:
+                    vbox.addWidget(QLabel(label_text))
+                    vbox.addWidget(widget)
+
+        # --- Группа: параметры инференса ---
+        group = QGroupBox("Параметры инференса (override, если нет в meta)")
+        group_layout = QVBoxLayout(group)
+        form_inner = QFormLayout()
+        form_inner.setSpacing(8)
+        group_layout.addLayout(form_inner)
+
+        # 1. num_classes
+        self._unet_num_classes_override = QSpinBox()
+        self._unet_num_classes_override.setRange(1, 100)
+        self._unet_num_classes_override.setValue(2)
+        self._unet_num_classes_override.setEnabled(False)
+        self._unet_num_classes_override.setToolTip(
+            "Общее число классов, включая фон (фон = 0).\n\n"
+            "  • 1 → бинарная сегментация (sigmoid + threshold);\n"
+            "  • 2 → «фон + один объект»: softmax[:, 1] + threshold;\n"
+            "  • >2 → multiclass: argmax (threshold не используется).\n\n"
+            "Заполняется автоматически, если поле есть в *_meta.json.\n"
+            "Иначе — задайте вручную."
+        )
+        form_inner.addRow("num_classes:", self._unet_num_classes_override)
+
+        # 2. normalize
+        self._unet_normalize_override = QCheckBox("Применять ImageNet-нормализацию")
+        self._unet_normalize_override.setChecked(False)
+        self._unet_normalize_override.setEnabled(False)
+        self._unet_normalize_override.setToolTip(
+            "Включайте только если модель обучалась с нормализацией.\n"
+            "Если не совпадает с обучением — предсказания будут некорректны."
+        )
+        form_inner.addRow("Нормализация:", self._unet_normalize_override)
+
+        # 3. resize_mode (режим, использованный при обучении)
+        self._unet_resize_mode_override = QComboBox()
+        self._unet_resize_mode_override.addItems(
+            ["hard", "keep_aspect_pad", "random_crop"]
+        )
+        self._unet_resize_mode_override.setEnabled(False)
+        self._unet_resize_mode_override.setToolTip(
+            "Режим приведения входного кадра при ОБУЧЕНИИ:\n"
+            "  • hard — жёсткий ресайз;\n"
+            "  • keep_aspect_pad — AR + padding;\n"
+            "  • random_crop — случайный кроп (только для обучения).\n\n"
+            "Заполняется автоматически из *_meta.json.\n"
+            "Если поле отсутствует — задайте вручную."
+        )
+        form_inner.addRow("resize_mode (train):", self._unet_resize_mode_override)
+
+        # 4. inference_resize_mode — появляется только если обучение было random_crop
+        self._unet_inference_resize_label = QLabel(
+            "Режим ресайза при ИНФЕРЕНСЕ (обязательно):"
+        )
+        self._unet_inference_resize_override = QComboBox()
+        self._unet_inference_resize_override.addItems(["keep_aspect_pad", "hard"])
+        self._unet_inference_resize_override.setCurrentText("keep_aspect_pad")
+        self._unet_inference_resize_override.setToolTip(
+            "Как приводить кадр к input_size при инференсе, если обучение\n"
+            "шло с random_crop (crop теряет часть кадра, поэтому на инференсе\n"
+            "применяется другая схема — обе НЕ теряют информацию):\n\n"
+            "  • keep_aspect_pad — масштаб с сохранением AR + чёрные поля;\n"
+            "  • hard — жёсткий ресайз до input_size × input_size."
+        )
+        self._unet_inference_resize_label.setVisible(False)
+        self._unet_inference_resize_override.setVisible(False)
+        form_inner.addRow(self._unet_inference_resize_label,
+                          self._unet_inference_resize_override)
+
+        # 5. Подсказка о том, что осталось незаполненным
+        self._unet_override_hint = QLabel("")
+        self._unet_override_hint.setWordWrap(True)
+        self._unet_override_hint.setStyleSheet(
+            "color: #b8860b; font-size: 11px; padding: 4px;"
+        )
+        group_layout.addWidget(self._unet_override_hint)
+
+        # Вставляем группу в конец формы U-Net
+        if target_layout is not None:
+            target_layout.addRow(group)
+        else:
+            vbox = self.unet_settings.layout()
+            if vbox is not None:
+                vbox.addWidget(group)
 
     def _update_segment_button_color(self):
         """Обновляет цвет кнопки сегментации в зависимости от наличия модели."""
@@ -180,7 +316,11 @@ class DeepLearningWindow(QMainWindow):
             self.display_current_image()
 
     def _update_unet_ui_from_metadata(self, metadata):
-        """Заполняет поля U-Net из метаданных (поля уже заблокированы)."""
+        """
+        Заполняет поля U-Net из метаданных; включает/выключает override-поля
+        для отсутствующих параметров.
+        """
+        # --- Заблокированные поля архитектуры ---
         if 'encoder' in metadata:
             encoder = metadata['encoder']
             idx = self.unet_settings._encoder.findText(encoder)
@@ -191,6 +331,110 @@ class DeepLearningWindow(QMainWindow):
             idx = self.unet_settings._input_size.findText(input_size)
             if idx >= 0:
                 self.unet_settings._input_size.setCurrentIndex(idx)
+
+        # --- Override-поля ---
+        missing = []
+
+        # num_classes
+        if hasattr(self, '_unet_num_classes_override'):
+            if 'num_classes' in metadata:
+                try:
+                    self._unet_num_classes_override.setValue(int(metadata['num_classes']))
+                except (TypeError, ValueError):
+                    pass
+                self._unet_num_classes_override.setEnabled(False)
+            else:
+                self._unet_num_classes_override.setEnabled(True)
+                missing.append('num_classes')
+
+        # normalize
+        if hasattr(self, '_unet_normalize_override'):
+            if 'normalize' in metadata:
+                self._unet_normalize_override.setChecked(bool(metadata['normalize']))
+                self._unet_normalize_override.setEnabled(False)
+            else:
+                self._unet_normalize_override.setChecked(False)
+                self._unet_normalize_override.setEnabled(True)
+                missing.append('normalize')
+
+        # resize_mode (с backward-compat fallback на keep_aspect_ratio)
+        train_resize_mode = None
+        if hasattr(self, '_unet_resize_mode_override'):
+            if 'resize_mode' in metadata and metadata['resize_mode'] in (
+                'hard', 'keep_aspect_pad', 'random_crop'
+            ):
+                train_resize_mode = metadata['resize_mode']
+                idx = self._unet_resize_mode_override.findText(train_resize_mode)
+                if idx >= 0:
+                    self._unet_resize_mode_override.setCurrentIndex(idx)
+                self._unet_resize_mode_override.setEnabled(False)
+            elif 'keep_aspect_ratio' in metadata:
+                train_resize_mode = ('keep_aspect_pad'
+                                     if metadata['keep_aspect_ratio'] else 'hard')
+                idx = self._unet_resize_mode_override.findText(train_resize_mode)
+                if idx >= 0:
+                    self._unet_resize_mode_override.setCurrentIndex(idx)
+                self._unet_resize_mode_override.setEnabled(False)
+            else:
+                self._unet_resize_mode_override.setCurrentIndex(0)  # hard
+                self._unet_resize_mode_override.setEnabled(True)
+                train_resize_mode = None
+                missing.append('resize_mode')
+
+        # inference_resize_mode — показываем только если обучение было random_crop
+        if (hasattr(self, '_unet_inference_resize_override')
+                and hasattr(self, '_unet_inference_resize_label')):
+            if train_resize_mode == 'random_crop':
+                self._unet_inference_resize_override.setVisible(True)
+                self._unet_inference_resize_label.setVisible(True)
+                # Если в meta уже сохранён выбор — используем его
+                saved = metadata.get('inference_resize_mode')
+                if saved in ('hard', 'keep_aspect_pad'):
+                    idx = self._unet_inference_resize_override.findText(saved)
+                    if idx >= 0:
+                        self._unet_inference_resize_override.setCurrentIndex(idx)
+                # Иначе — дефолт keep_aspect_pad (безопасный, не теряет кадр)
+            else:
+                self._unet_inference_resize_override.setVisible(False)
+                self._unet_inference_resize_label.setVisible(False)
+
+        # --- Подсказка ---
+        if hasattr(self, '_unet_override_hint'):
+            if missing:
+                self._unet_override_hint.setText(
+                    "⚠️ В *_meta.json отсутствуют параметры: "
+                    f"{', '.join(missing)}.\n"
+                    "Задайте их вручную — они будут применены при инференсе."
+                )
+            else:
+                self._unet_override_hint.setText("")
+
+        # --- Лог ---
+        nc = metadata.get('num_classes', '?')
+        norm = metadata.get('normalize', '?')
+        tr_rm = train_resize_mode or '?'
+        inf_rm = metadata.get('inference_resize_mode')
+        if train_resize_mode == 'random_crop':
+            inf_rm_str = inf_rm if inf_rm in ('hard', 'keep_aspect_pad') \
+                else 'keep_aspect_pad (default)'
+        else:
+            inf_rm_str = '— (не нужен)'
+
+        self.log("=== U-Net метаданные ===")
+        self.log(f"  num_classes: {nc}")
+        self.log(f"  normalize: {norm}")
+        self.log(f"  resize_mode (train): {tr_rm}")
+        self.log(f"  inference_resize_mode: {inf_rm_str}")
+        if nc == 2:
+            self.log("  Режим: бинарная сегментация (фон + объект). Threshold применяется.")
+        elif isinstance(nc, int) and nc > 2:
+            self.log(f"  Режим: {nc}-классовая сегментация. Threshold не применяется (argmax).")
+        if train_resize_mode == 'random_crop':
+            self.log("  ℹ️ Обучение было с random_crop. Выберите режим ресайза "
+                     "для инференса (hard / keep_aspect_pad).")
+        if missing:
+            self.log(f"  ⚠️ Отсутствуют: {missing} → override-поля активированы")
+        self.log("=========================")
 
     def _update_deeplab_ui_from_metadata(self, metadata):
         """Заполняет поля DeepLabV3+ из метаданных (поля уже заблокированы)."""
@@ -216,8 +460,15 @@ class DeepLearningWindow(QMainWindow):
             self.yolo_settings._save,
             self.custom_settings._model_path,
             self.unet_settings._threshold,
+            # Override-поля U-Net
+            getattr(self, '_unet_num_classes_override', None),
+            getattr(self, '_unet_normalize_override', None),
+            getattr(self, '_unet_resize_mode_override', None),
+            getattr(self, '_unet_inference_resize_override', None),
         ]
         for w in widgets:
+            if w is None:
+                continue
             if isinstance(w, QComboBox):
                 w.currentIndexChanged.connect(self.on_any_setting_changed)
             elif isinstance(w, (QSpinBox, QDoubleSpinBox)):
@@ -446,6 +697,48 @@ class DeepLearningWindow(QMainWindow):
             if model_name == "U-Net":
                 kwargs['threshold'] = self.unet_settings._threshold.value()
                 self.log(f"Порог U‑Net: {kwargs['threshold']}")
+
+                if self.segmentor is not None and self.segmentor.metadata is not None:
+                    md = self.segmentor.metadata
+
+                    # --- num_classes override ---
+                    if (hasattr(self, '_unet_num_classes_override')
+                            and self._unet_num_classes_override.isEnabled()):
+                        nc = self._unet_num_classes_override.value()
+                        md['num_classes'] = nc
+                        self.log(f"  Override num_classes = {nc}")
+
+                    # --- normalize override ---
+                    if (hasattr(self, '_unet_normalize_override')
+                            and self._unet_normalize_override.isEnabled()):
+                        norm = self._unet_normalize_override.isChecked()
+                        md['normalize'] = norm
+                        self.log(f"  Override normalize = {norm}")
+
+                    # --- resize_mode override ---
+                    if (hasattr(self, '_unet_resize_mode_override')
+                            and self._unet_resize_mode_override.isEnabled()):
+                        rm = self._unet_resize_mode_override.currentText()
+                        md['resize_mode'] = rm
+                        self.log(f"  Override resize_mode (train) = {rm}")
+
+                    # --- inference_resize_mode (обязательно, если train == random_crop) ---
+                    if md.get('resize_mode') == 'random_crop':
+                        # поле всегда видимо при такой train-модели
+                        if (hasattr(self, '_unet_inference_resize_override')
+                                and self._unet_inference_resize_override.isVisible()):
+                            inf_rm = self._unet_inference_resize_override.currentText()
+                            if inf_rm not in ('hard', 'keep_aspect_pad'):
+                                QMessageBox.warning(
+                                    self, "Ошибка",
+                                    "Для модели, обученной с random_crop, необходимо "
+                                    "выбрать режим ресайза при инференсе:\n"
+                                    "  • keep_aspect_pad\n  • hard"
+                                )
+                                self.segment_button.setEnabled(True)
+                                return
+                            md['inference_resize_mode'] = inf_rm
+                            self.log(f"  inference_resize_mode = {inf_rm}")
 
             mask = self.segmentor.predict(img, **kwargs)
 
@@ -807,7 +1100,6 @@ class DeepLearningWindow(QMainWindow):
         self.update_navigation_state()
         self.nav_widget.set_current_index(self.current_index, total)
 
-    # ---------- Сохранение аннотаций (универсальное) ----------
     # ---------- Сохранение аннотаций (только выбранные) ----------
     def save_current_annotations(self):
         if not self.image_paths or self.original_image is None:
@@ -856,6 +1148,7 @@ class DeepLearningWindow(QMainWindow):
                 self, "Сохранение",
                 f"Сохранено {len(selected)} из {total_objects} объектов в {txt_path}"
             )
+
     # ---------- UI события ----------
     def reset_all_zooms(self):
         for view in (self.original_view, self.dl_view,

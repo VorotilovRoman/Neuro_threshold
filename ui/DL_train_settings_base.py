@@ -383,9 +383,6 @@ class YOLOTrainWidget(BaseTrainWidget):
 # =============================================================================
 # U-Net Training Widget
 # =============================================================================
-# =============================================================================
-# U-Net Training Widget
-# =============================================================================
 class UNetTrainWidget(BaseTrainWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -418,8 +415,8 @@ class UNetTrainWidget(BaseTrainWidget):
         row.addWidget(self.browse_dataset_btn)
         self.form_layout.addRow("📁 Папка датасета:", row)
 
-        # --- NEW: U-Net YAML (masks_data.yaml) ---
-        # Если указан — воркер читает path/num_classes/class_names из него.
+        # --- U-Net YAML (masks_data.yaml) ---
+        # Если указан — воркер читает path/num_classes/class_names/пути сплитов из него.
         # Поля «Папка датасета» и «Количество классов» заполняются автоматически.
         self.unet_yaml = QLineEdit()
         self.unet_yaml.setPlaceholderText(
@@ -433,7 +430,8 @@ class UNetTrainWidget(BaseTrainWidget):
         self.form_layout.addRow("📄 U-Net YAML:", yaml_row)
 
         yaml_hint = QLabel(
-            "Если указан YAML — его поля <code>path</code> и <code>num_classes</code> "
+            "Если указан YAML — его поля <code>path</code>, <code>num_classes</code> и "
+            "пути сплитов (<code>train_images</code>, <code>val_masks</code> и т.п.) "
             "переопределяют значения из этой формы. Удобно, когда датасет "
             "сгенерирован утилитой и уже имеет готовый <code>masks_data.yaml</code>."
         )
@@ -611,8 +609,60 @@ class UNetTrainWidget(BaseTrainWidget):
         self.threshold.setSingleStep(0.01)
         self.threshold.setDecimals(2)
         self.threshold.setValue(0.5)
-        self.threshold.setToolTip("Порог для бинаризации предсказаний при вычислении метрик (0.5 – стандарт)")
+        self.threshold.setToolTip(
+            "Порог для бинаризации предсказаний при вычислении метрик (0.5 – стандарт).\n"
+            "Для num_classes=1 или 2 применяется как порог на сигмоиде / softmax[1].\n"
+            "Для num_classes>2 не используется (argmax)."
+        )
         self.form_layout.addRow("Порог (threshold):", self.threshold)
+
+        # --- Препроцессинг входа (влияет на инференс!) ---
+        prep_group = QGroupBox("Препроцессинг входа")
+        prep_layout = QVBoxLayout(prep_group)
+
+        self.normalize_checkbox = QCheckBox("ImageNet-нормализация входа")
+        self.normalize_checkbox.setChecked(False)
+        self.normalize_checkbox.setToolTip(
+            "Если включено — изображение нормализуется по mean/std ImageNet:\n"
+            "  mean = [0.485, 0.456, 0.406]\n"
+            "  std  = [0.229, 0.224, 0.225]\n\n"
+            "ВАЖНО: значение сохраняется в *_meta.json и должно совпадать\n"
+            "при инференсе. Если обучаете с нормализацией — модель будет\n"
+            "применяться с ней же."
+        )
+        prep_layout.addWidget(self.normalize_checkbox)
+
+        prep_layout.addWidget(QLabel("Режим приведения кадра к input_size:"))
+        self.resize_mode_combo = QComboBox()
+        self.resize_mode_combo.addItems([
+            "hard (жёсткий ресайз)",
+            "keep_aspect_pad (AR + padding)",
+            "random_crop (только для обучения)",
+        ])
+        self.resize_mode_combo.setCurrentIndex(0)
+        self.resize_mode_combo.setToolTip(
+            "Способ приведения кадра к input_size × input_size:\n\n"
+            "  • hard — жёсткий ресайз до квадрата (может искажать пропорции);\n"
+            "  • keep_aspect_pad — масштаб с сохранением AR + чёрные поля;\n"
+            "  • random_crop — ТОЛЬКО при обучении: случайный кроп (аугментация).\n"
+            "    Валидация использует центральный кроп.\n"
+            "    При инференсе пользователь выбирает hard / keep_aspect_pad отдельно,\n"
+            "    чтобы не терять информацию о кадре.\n\n"
+            "ВАЖНО: значение сохраняется в *_meta.json и применяется при инференсе."
+        )
+        prep_layout.addWidget(self.resize_mode_combo)
+
+        hint_prep = QLabel(
+            "Эти настройки фиксируются в метаданных модели\n"
+            "и автоматически применяются на вкладке инференса.\n"
+            "Для random_crop при инференсе пользователь выбирает\n"
+            "hard / keep_aspect_pad вручную."
+        )
+        hint_prep.setWordWrap(True)
+        hint_prep.setStyleSheet("color: #666; font-size: 11px;")
+        prep_layout.addWidget(hint_prep)
+
+        self.form_layout.addRow(prep_group)
 
         # --- Аугментации (по умолчанию выключены) ---
         aug_group = QGroupBox("Аугментации")
@@ -642,6 +692,11 @@ class UNetTrainWidget(BaseTrainWidget):
         aug_layout.addWidget(hint_aug)
 
         self.form_layout.addRow(aug_group)
+
+    def _get_resize_mode_value(self):
+        """Возвращает 'hard' / 'keep_aspect_pad' / 'random_crop'."""
+        text = self.resize_mode_combo.currentText()
+        return text.split(" ", 1)[0]
 
     def get_params(self):
         if self.model_from_preset.isChecked():
@@ -679,7 +734,7 @@ class UNetTrainWidget(BaseTrainWidget):
 
         return {
             "dataset_path": dataset_path or None,
-            "unet_yaml": unet_yaml or None,          # NEW
+            "unet_yaml": unet_yaml or None,
             "model_path": model_path,
             "project_path": self.project_path.text().strip() or None,
             "name": self.experiment_name.text().strip() or None,
@@ -701,5 +756,7 @@ class UNetTrainWidget(BaseTrainWidget):
                 "scale": self.aug_scale.isChecked(),
                 "noise": self.aug_noise.isChecked(),
             },
-            "threshold": self.threshold.value()
+            "threshold": self.threshold.value(),
+            "normalize": self.normalize_checkbox.isChecked(),
+            "resize_mode": self._get_resize_mode_value(),
         }
