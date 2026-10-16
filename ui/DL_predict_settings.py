@@ -45,7 +45,7 @@ class YOLOInferenceSettings(BaseInferenceSettings):
         path_layout.addWidget(self._browse_btn)
         layout.addLayout(path_layout)
 
-        # Строка: порог уверенности и порог IoU в одной строке
+        # Строка: порог уверенности и порог IoU
         conf_iou_row = QHBoxLayout()
         conf_iou_row.addWidget(QLabel("Порог уверенности:"))
         self._conf = QDoubleSpinBox()
@@ -88,8 +88,6 @@ class YOLOInferenceSettings(BaseInferenceSettings):
         self._conf.valueChanged.connect(self.conf_changed.emit)
         self._iou.valueChanged.connect(self.iou_changed.emit)
 
-
-
     def _browse_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите модель YOLO", "", "PyTorch models (*.pt)")
         if path:
@@ -109,15 +107,25 @@ class UNetInferenceSettings(BaseInferenceSettings):
     model_path_changed = pyqtSignal(str)
     encoder_changed = pyqtSignal(str)
     input_size_changed = pyqtSignal(int)
-    threshold_changed = pyqtSignal(float)   # новый сигнал
+    threshold_changed = pyqtSignal(float)
+    override_changed = pyqtSignal()          # эмитится при ручном изменении override-полей
 
     def __init__(self, parent=None):
+        # Флаг выставляем ДО вызова super().__init__, потому что он вызывает
+        # _setup_ui, где могут быть обращения к атрибуту.
+        # _show_inference_resize — логический признак «нужно ли поле
+        # inference_resize_mode», не зависящий от фактической Qt-видимости
+        # (QWidget.isVisible() может быть False, пока не показан родитель).
+        self._show_inference_resize = False
         super().__init__("Параметры U‑Net", parent)
 
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        # Выбор файла
+        # ---------- Файл модели ----------
         path_layout = QHBoxLayout()
         self._model_path = QLineEdit()
         self._model_path.setPlaceholderText("Выберите файл .pth")
@@ -126,8 +134,10 @@ class UNetInferenceSettings(BaseInferenceSettings):
         path_layout.addWidget(self._browse_btn)
         layout.addLayout(path_layout)
 
+        # ---------- Архитектура ----------
         self._encoder = QComboBox()
-        self._encoder.addItems(["resnet18", "resnet34", "resnet50", "efficientnet-b0", "vgg16"])
+        self._encoder.addItems(["resnet18", "resnet34", "resnet50",
+                                "efficientnet-b0", "vgg16"])
         layout.addLayout(self._row("Энкодер", self._encoder))
 
         self._input_size = QComboBox()
@@ -135,30 +145,281 @@ class UNetInferenceSettings(BaseInferenceSettings):
         self._input_size.setCurrentText("512")
         layout.addLayout(self._row("Размер входа", self._input_size))
 
-        # ---------- Новый элемент: порог ----------
+        # ---------- Порог ----------
         self._threshold = QDoubleSpinBox()
         self._threshold.setRange(0.01, 0.99)
         self._threshold.setSingleStep(0.01)
         self._threshold.setDecimals(2)
         self._threshold.setValue(0.5)
-        self._threshold.setToolTip("Порог бинаризации для получения маски (0.5 – стандарт)")
+        self._threshold.setToolTip(
+            "Порог бинаризации для получения маски (0.5 – стандарт).\n"
+            "Для num_classes=1 или 2 применяется; для num_classes>2 "
+            "используется argmax."
+        )
         layout.addLayout(self._row("Threshold", self._threshold))
 
+        # ---------- Override-параметры ----------
+        # Поля активны только если параметра нет в *_meta.json.
+        # Если параметр есть — поле заполняется и блокируется.
+        ov_group = QGroupBox("Override параметров инференса (если нет в meta)")
+        ov_form = QFormLayout()
+        ov_form.setSpacing(8)
+        ov_group.setLayout(ov_form)
+
+        self._num_classes_override = QSpinBox()
+        self._num_classes_override.setRange(1, 100)
+        self._num_classes_override.setValue(2)
+        self._num_classes_override.setEnabled(False)
+        self._num_classes_override.setToolTip(
+            "Общее число классов, включая фон (фон = 0).\n\n"
+            "  • 1 → бинарная (sigmoid + threshold);\n"
+            "  • 2 → «фон + один объект»: softmax[:, 1] + threshold;\n"
+            "  • >2 → multiclass (argmax, threshold не используется).\n\n"
+            "Активно только если параметра нет в *_meta.json."
+        )
+        ov_form.addRow("num_classes:", self._num_classes_override)
+
+        self._normalize_override = QCheckBox("Применять ImageNet-нормализацию")
+        self._normalize_override.setChecked(False)
+        self._normalize_override.setEnabled(False)
+        self._normalize_override.setToolTip(
+            "Только если модель обучалась с нормализацией. Иначе предсказания "
+            "будут некорректны."
+        )
+        ov_form.addRow("Нормализация:", self._normalize_override)
+
+        self._resize_mode_override = QComboBox()
+        self._resize_mode_override.addItems(
+            ["hard", "keep_aspect_pad", "random_crop"]
+        )
+        self._resize_mode_override.setEnabled(False)
+        self._resize_mode_override.setToolTip(
+            "Режим, использованный при ОБУЧЕНИИ:\n"
+            "  • hard — жёсткий ресайз;\n"
+            "  • keep_aspect_pad — AR + padding;\n"
+            "  • random_crop — случайный кроп (только обучение).\n\n"
+            "Если выбран random_crop — требуется отдельный выбор режима\n"
+            "ресайза при инференсе (поле ниже)."
+        )
+        ov_form.addRow("resize_mode (train):", self._resize_mode_override)
+
+        self._inference_resize_label = QLabel("Режим ресайза при ИНФЕРЕНСЕ:")
+        self._inference_resize_override = QComboBox()
+        self._inference_resize_override.addItems(["keep_aspect_pad", "hard"])
+        self._inference_resize_override.setCurrentText("keep_aspect_pad")
+        self._inference_resize_override.setToolTip(
+            "Как приводить кадр к input_size при инференсе.\n"
+            "Используется только если обучение шло с random_crop\n"
+            "(оба варианта НЕ теряют информацию о кадре):\n"
+            "  • keep_aspect_pad — масштаб с сохранением AR + чёрные поля;\n"
+            "  • hard — жёсткий ресайз до input_size × input_size."
+        )
+        self._inference_resize_label.setVisible(False)
+        self._inference_resize_override.setVisible(False)
+        ov_form.addRow(self._inference_resize_label,
+                       self._inference_resize_override)
+
+        self._override_hint = QLabel("")
+        self._override_hint.setWordWrap(True)
+        self._override_hint.setStyleSheet(
+            "color: #b8860b; font-size: 11px; padding: 4px;"
+        )
+        ov_form.addRow(self._override_hint)
+
+        layout.addWidget(ov_group)
+
+        # ---------- Сигналы ----------
         self._model_path.textChanged.connect(self.model_path_changed.emit)
         self._browse_btn.clicked.connect(self._browse_file)
         self._encoder.currentTextChanged.connect(self.encoder_changed.emit)
-        self._input_size.currentTextChanged.connect(lambda v: self.input_size_changed.emit(int(v)))
-        self._threshold.valueChanged.connect(self.threshold_changed.emit)   # новый сигнал
+        self._input_size.currentTextChanged.connect(
+            lambda v: self.input_size_changed.emit(int(v))
+        )
+        self._threshold.valueChanged.connect(self.threshold_changed.emit)
+
+        # Override-поля: любое изменение эмитит override_changed
+        self._num_classes_override.valueChanged.connect(
+            lambda _v: self.override_changed.emit()
+        )
+        self._normalize_override.stateChanged.connect(
+            lambda _s: self.override_changed.emit()
+        )
+        self._resize_mode_override.currentTextChanged.connect(
+            self._on_train_resize_mode_changed
+        )
+        self._inference_resize_override.currentIndexChanged.connect(
+            lambda _i: self.override_changed.emit()
+        )
+
+    # ------------------------------------------------------------------
+    # Внутренние обработчики
+    # ------------------------------------------------------------------
+    def _on_train_resize_mode_changed(self, text):
+        """
+        Обновляет логический флаг _show_inference_resize и видимость поля
+        inference_resize_mode. Флаг НЕ зависит от Qt-видимости, поэтому
+        корректно работает даже когда виджет ещё не отрисован (например,
+        при загрузке модели до первого показа окна).
+        """
+        show = (text == 'random_crop')
+        self._show_inference_resize = show
+        self._inference_resize_label.setVisible(show)
+        self._inference_resize_override.setVisible(show)
+        self.override_changed.emit()
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель U‑Net", "", "PyTorch models (*.pth)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите модель U‑Net", "", "PyTorch models (*.pth)"
+        )
         if path:
             self._model_path.setText(path)
+
+    # ------------------------------------------------------------------
+    # Публичное API для окна инференса
+    # ------------------------------------------------------------------
+    def apply_metadata(self, metadata):
+        """
+        Применяет метаданные модели к UI.
+        Возвращает dict с диагностикой:
+            {
+                'missing': [список отсутствующих параметров],
+                'train_resize_mode': str или None,
+                'inference_resize_mode': str или None,
+            }
+        """
+        result = {
+            'missing': [],
+            'train_resize_mode': None,
+            'inference_resize_mode': None,
+        }
+
+        # --- num_classes ---
+        if 'num_classes' in metadata:
+            try:
+                self._num_classes_override.setValue(int(metadata['num_classes']))
+            except (TypeError, ValueError):
+                pass
+            self._num_classes_override.setEnabled(False)
+        else:
+            self._num_classes_override.setEnabled(True)
+            result['missing'].append('num_classes')
+
+        # --- normalize ---
+        if 'normalize' in metadata:
+            self._normalize_override.setChecked(bool(metadata['normalize']))
+            self._normalize_override.setEnabled(False)
+        else:
+            self._normalize_override.setChecked(False)
+            self._normalize_override.setEnabled(True)
+            result['missing'].append('normalize')
+
+        # --- resize_mode (с backward-compat fallback) ---
+        train_rm = None
+        if 'resize_mode' in metadata and metadata['resize_mode'] in (
+            'hard', 'keep_aspect_pad', 'random_crop'
+        ):
+            train_rm = metadata['resize_mode']
+            idx = self._resize_mode_override.findText(train_rm)
+            if idx >= 0:
+                self._resize_mode_override.setCurrentIndex(idx)
+            self._resize_mode_override.setEnabled(False)
+        elif 'keep_aspect_ratio' in metadata:
+            train_rm = 'keep_aspect_pad' if metadata['keep_aspect_ratio'] else 'hard'
+            idx = self._resize_mode_override.findText(train_rm)
+            if idx >= 0:
+                self._resize_mode_override.setCurrentIndex(idx)
+            self._resize_mode_override.setEnabled(False)
+        else:
+            self._resize_mode_override.setCurrentIndex(0)  # hard
+            self._resize_mode_override.setEnabled(True)
+            result['missing'].append('resize_mode')
+
+        result['train_resize_mode'] = train_rm
+
+        # --- inference_resize_mode ---
+        # 1) Если в meta сохранён явный выбор — используем его.
+        # 2) Иначе — сбрасываем в дефолт 'keep_aspect_pad',
+        #    чтобы не тащить значение от предыдущей модели.
+        saved = metadata.get('inference_resize_mode')
+        if saved in ('hard', 'keep_aspect_pad'):
+            idx = self._inference_resize_override.findText(saved)
+            if idx >= 0:
+                self._inference_resize_override.setCurrentIndex(idx)
+        else:
+            idx = self._inference_resize_override.findText('keep_aspect_pad')
+            if idx >= 0:
+                self._inference_resize_override.setCurrentIndex(idx)
+
+        # Синхронизируем флаг _show_inference_resize и видимость поля.
+        # Вызываем явно, потому что setCurrentIndex мог не сгенерировать
+        # сигнал currentTextChanged (если индекс совпал с текущим).
+        current_train_rm = self._resize_mode_override.currentText()
+        # Используем _on_train_resize_mode_changed, но без эмита override_changed
+        # (метаданные только что применены — перерисовка не нужна).
+        self._show_inference_resize = (current_train_rm == 'random_crop')
+        self._inference_resize_label.setVisible(self._show_inference_resize)
+        self._inference_resize_override.setVisible(self._show_inference_resize)
+
+        if current_train_rm == 'random_crop':
+            result['inference_resize_mode'] = \
+                self._inference_resize_override.currentText()
+        else:
+            result['inference_resize_mode'] = None
+
+        # --- Подсказка ---
+        if result['missing']:
+            self._override_hint.setText(
+                "⚠️ В *_meta.json отсутствуют параметры: "
+                + ", ".join(result['missing']) + ".\n"
+                "Задайте их вручную — они будут применены при инференсе."
+            )
+        else:
+            self._override_hint.setText("")
+
+        return result
+
+    def get_override_params(self):
+        """
+        Возвращает dict с АКТИВНЫМИ override-значениями.
+        Ключи включаются только если соответствующее поле enabled
+        (или, для inference_resize_mode — если установлен логический
+        флаг _show_inference_resize, не зависящий от Qt-видимости).
+        """
+        out = {}
+        if self._num_classes_override.isEnabled():
+            out['num_classes'] = self._num_classes_override.value()
+        if self._normalize_override.isEnabled():
+            out['normalize'] = self._normalize_override.isChecked()
+        if self._resize_mode_override.isEnabled():
+            out['resize_mode'] = self._resize_mode_override.currentText()
+        # inference_resize_mode применяется, если train == random_crop
+        # (проверяем через логический флаг, а не isVisible())
+        if (self._resize_mode_override.currentText() == 'random_crop'
+                and self._show_inference_resize):
+            out['inference_resize_mode'] = \
+                self._inference_resize_override.currentText()
+        return out
+
+    def validate_for_prediction(self):
+        """
+        Проверка перед запуском predict.
+        Возвращает (ok: bool, message: str).
+        """
+        if self._resize_mode_override.currentText() == 'random_crop':
+            if not self._show_inference_resize:
+                return False, ("Для модели, обученной с random_crop, поле "
+                               "«Режим ресайза при ИНФЕРЕНСЕ» должно быть "
+                               "доступно.")
+            val = self._inference_resize_override.currentText()
+            if val not in ('hard', 'keep_aspect_pad'):
+                return False, ("Выберите режим ресайза при инференсе:\n"
+                               "  • keep_aspect_pad\n  • hard")
+        return True, ""
 
     def get_params(self):
         return {
             'model_path': self._model_path.text(),
-            'threshold': self._threshold.value()   # добавили
+            'threshold': self._threshold.value(),
         }
 
 
@@ -192,10 +453,14 @@ class DeepLabV3InferenceSettings(BaseInferenceSettings):
         self._model_path.textChanged.connect(self.model_path_changed.emit)
         self._browse_btn.clicked.connect(self._browse_file)
         self._backbone.currentTextChanged.connect(self.backbone_changed.emit)
-        self._output_stride.currentTextChanged.connect(lambda v: self.output_stride_changed.emit(int(v)))
+        self._output_stride.currentTextChanged.connect(
+            lambda v: self.output_stride_changed.emit(int(v))
+        )
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель DeepLabV3+", "", "PyTorch models (*.pth)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите модель DeepLabV3+", "", "PyTorch models (*.pth)"
+        )
         if path:
             self._model_path.setText(path)
 
@@ -230,7 +495,9 @@ class SegFormerInferenceSettings(BaseInferenceSettings):
         self._variant.currentTextChanged.connect(self.variant_changed.emit)
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель SegFormer", "", "PyTorch models (*.pth)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите модель SegFormer", "", "PyTorch models (*.pth)"
+        )
         if path:
             self._model_path.setText(path)
 
@@ -271,7 +538,9 @@ class SAMInferenceSettings(BaseInferenceSettings):
         self._prompt.currentTextChanged.connect(self.prompt_changed.emit)
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель SAM", "", "PyTorch models (*.pth)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите модель SAM", "", "PyTorch models (*.pth)"
+        )
         if path:
             self._model_path.setText(path)
 
@@ -300,7 +569,9 @@ class CustomONNXInferenceSettings(BaseInferenceSettings):
         self._browse_btn.clicked.connect(self._browse_file)
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите ONNX модель", "", "ONNX files (*.onnx)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите ONNX модель", "", "ONNX files (*.onnx)"
+        )
         if path:
             self._model_path.setText(path)
 
