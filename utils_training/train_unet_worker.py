@@ -61,7 +61,7 @@ except ImportError:
     print("Установите: pip install segmentation-models-pytorch")
     sys.exit(1)
 
-# ========== Глобальные конфигурации (можно менять вручную) ==========
+# ========== Глобальные конфигурации ==========
 DECODER_CHANNELS = (256, 128, 64, 32, 16)   # каналы декодера U-Net
 NUM_WORKERS_DEFAULT = 4                     # количество workers для DataLoader
 AUTO_BATCH_MEM_FACTOR = 0.7                 # использовать 70% доступной памяти
@@ -69,10 +69,22 @@ AUTO_BATCH_MIN = 1                          # минимальный batch
 AUTO_BATCH_MAX = 64                         # максимальный batch
 NUM_TRAIN_BATCHES_TO_SAVE = 3               # сколько тренировочных батчей сохранить как примеры
 NUM_VAL_SAMPLES_TO_SAVE = 8                 # сколько валидационных изображений для предсказаний
-EARLY_STOPPING_PATIENCE = 3                 # количество эпох без улучшения val_loss
-EARLY_STOPPING_TOLERANCE = 0.05             # допустимый относительный рост val_loss (5%)
-OVERFITTING_GAP_THRESHOLD = 0.2             # допустимый разрыв val_loss - train_loss (20% от train_loss)
-THRESHOLD_FACTOR = 0.7                      # порог бинаризации для метрик
+
+# Early stopping — ослабленные значения
+# EARLY_STOPPING_PATIENCE: сколько эпох подряд val_loss может не улучшаться.
+# OVERFITTING_GAP_THRESHOLD: относительный разрыв val_loss / train_loss, после
+#   которого включается «стоп» (только если patience_counter уже >= 3).
+# Раньше было: patience=3, tolerance=0.05, gap=0.2 — тренировка срывалась
+# почти на каждой задаче.
+EARLY_STOPPING_PATIENCE = 5
+OVERFITTING_GAP_THRESHOLD = 0.5
+OVERFITTING_MIN_PATIENCE = 3                 # gap-проверка активна только после этой «задержки»
+
+THRESHOLD_FACTOR = 0.7                       # порог бинаризации для метрик по умолчанию
+
+# Поддерживаемые расширения
+IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
+MASK_EXTS  = ('.png', '.tif', '.tiff', '.bmp')   # без .jpg — плохо для масок
 
 # Глобальные переменные для graceful shutdown
 model = None
@@ -106,7 +118,6 @@ def signal_handler(signum, frame):
     global stop_requested
     log(f"Получен сигнал {signum}. Запрос остановки обучения...")
     stop_requested = True
-    # Сохраняем текущую модель, если нужно
     if model is not None and final_model_path is not None:
         checkpoint_path = final_model_path.replace(".pth", f"_checkpoint_epoch_{current_epoch}.pth")
         torch.save(model.state_dict(), checkpoint_path)
@@ -115,7 +126,6 @@ def signal_handler(signum, frame):
             backup_best = best_model_path.replace(".pth", f"_interrupted.pth")
             torch.save(torch.load(best_model_path), backup_best)
             log(f"Лучшая модель скопирована в {backup_best}")
-    # Не вызываем sys.exit(0) – дадим циклу завершиться корректно
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -131,17 +141,26 @@ class SegmentationDataset(Dataset):
         self.image_paths = []
         self.mask_paths = []
         skipped = 0
-        for f in os.listdir(images_dir):
-            if not f.lower().endswith(('.png', '.jpg', '.jpeg')):
+
+        # Собираем список изображений, для каждого ищем маску с любым расширением
+        for f in sorted(os.listdir(images_dir)):
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in IMAGE_EXTS:
                 continue
             base = os.path.splitext(f)[0]
-            mask_path = os.path.join(masks_dir, base + '.png')
-            if not os.path.exists(mask_path):
-                log(f"⚠️ Пропуск: для {f} не найдена маска {mask_path}")
+            mask_path = None
+            for mext in MASK_EXTS:
+                cand = os.path.join(masks_dir, base + mext)
+                if os.path.exists(cand):
+                    mask_path = cand
+                    break
+            if mask_path is None:
+                log(f"⚠️ Пропуск: для {f} не найдена маска в {masks_dir}")
                 skipped += 1
                 continue
             self.image_paths.append(os.path.join(images_dir, f))
             self.mask_paths.append(mask_path)
+
         if not self.image_paths:
             raise RuntimeError(f"Не найдено ни одной пары изображение-маска в {images_dir} и {masks_dir}")
         log(f"✅ Загружено {len(self.image_paths)} пар (пропущено {skipped})")
@@ -149,14 +168,27 @@ class SegmentationDataset(Dataset):
     def __len__(self):
         return len(self.image_paths)
 
+    def _resize_pair(self, image, mask):
+        """Ресайз изображения (BILINEAR) и маски (NEAREST) — ОБЯЗАТЕЛЬНО NEAREST,
+        иначе на границах классов появятся «промежуточные» значения."""
+        image = transforms.Resize(
+            (self.input_size, self.input_size),
+            interpolation=transforms.InterpolationMode.BILINEAR,
+        )(image)
+        mask = transforms.Resize(
+            (self.input_size, self.input_size),
+            interpolation=transforms.InterpolationMode.NEAREST,
+        )(mask)
+        return image, mask
+
     def __getitem__(self, idx):
         image = Image.open(self.image_paths[idx]).convert('RGB')
         mask = Image.open(self.mask_paths[idx])
-        transform_resize = transforms.Resize((self.input_size, self.input_size))
-        image = transform_resize(image)
-        mask = transform_resize(mask)
 
-        # Аугментации
+        # Базовый ресайз до input_size
+        image, mask = self._resize_pair(image, mask)
+
+        # --- Аугментации ---
         if self.augmentations.get('hflip', False) and np.random.rand() < 0.5:
             image = TF.hflip(image)
             mask = TF.hflip(mask)
@@ -164,14 +196,23 @@ class SegmentationDataset(Dataset):
             image = TF.vflip(image)
             mask = TF.vflip(mask)
         if self.augmentations.get('rotate', False):
-            angle = np.random.uniform(-10, 10)
+            angle = float(np.random.uniform(-10, 10))
             image = TF.rotate(image, angle)
-            mask = TF.rotate(mask, angle)
+            # NEAREST обязателен — иначе маска «поплывёт»
+            mask = TF.rotate(
+                mask, angle,
+                interpolation=transforms.InterpolationMode.NEAREST,
+                fill=0,
+            )
         if self.augmentations.get('scale', False):
-            scale = np.random.uniform(0.9, 1.1)
+            scale = float(np.random.uniform(0.9, 1.1))
             new_size = (int(self.input_size * scale), int(self.input_size * scale))
-            image = transforms.Resize(new_size)(image)
-            mask = transforms.Resize(new_size)(mask)
+            image = transforms.Resize(
+                new_size, interpolation=transforms.InterpolationMode.BILINEAR,
+            )(image)
+            mask = transforms.Resize(
+                new_size, interpolation=transforms.InterpolationMode.NEAREST,
+            )(mask)
             image = transforms.CenterCrop(self.input_size)(image)
             mask = transforms.CenterCrop(self.input_size)(mask)
         if self.augmentations.get('noise', False):
@@ -181,29 +222,43 @@ class SegmentationDataset(Dataset):
             image = Image.fromarray((img_np * 255).astype(np.uint8))
 
         image = transforms.ToTensor()(image)
-        # Преобразование маски в тензор
+
+        # --- Преобразование маски в тензор ---
         mask_np = np.array(mask)
+        if mask_np.ndim == 3:
+            mask_np = mask_np[:, :, 0]
+        mask_np = mask_np.squeeze()
+
         if self.num_classes == 1:
-            # Бинарная: преобразуем в float и порог
-            mask_tensor = torch.from_numpy(mask_np).float() / 255.0
-            mask_tensor = (mask_tensor > 0.5).float().unsqueeze(0)  # [1, H, W]
+            # Бинарная сегментация. Принимаем оба варианта значений пикселей:
+            #   {0, 255} — классическая бинарная PNG-маска;
+            #   {0, 1}   — формат, который генерирует наша утилита (offset=1).
+            if int(mask_np.max()) > 1:
+                binary = (mask_np > 127).astype(np.float32)
+            else:
+                binary = (mask_np > 0).astype(np.float32)
+            mask_tensor = torch.from_numpy(binary).unsqueeze(0)   # [1, H, W]
         else:
-            # Многоклассовая: целочисленные метки от 0 до C-1
-            if mask_np.ndim == 3:
-                mask_np = mask_np[:, :, 0]   # берём первый канал
-            mask_tensor = torch.from_numpy(mask_np).long()
-            if mask_tensor.max() >= self.num_classes:
-                mask_tensor = (mask_tensor > 0).long()
-                if self.num_classes > 2:
-                    log("⚠️ Внимание: маска содержит значения >1, преобразована в бинарную.")
+            # Многоклассовая сегментация.
+            # ПРАВИЛО: значение пикселя = индекс класса (0 — фон, 1..N-1 — объекты).
+            # НИЧЕГО не «схлопываем» в бинарную — это ломает обучение.
+            mask_tensor = torch.from_numpy(mask_np.astype(np.int64))
+            max_val = int(mask_tensor.max())
+            if max_val >= self.num_classes:
+                log(f"⚠️ ВНИМАНИЕ: в маске {os.path.basename(self.mask_paths[idx])} "
+                    f"найдено значение пикселя {max_val}, что >= num_classes={self.num_classes}. "
+                    f"Проверьте поле «Количество классов (вкл. фон)». "
+                    f"Некорректные пиксели будут заменены на 0 (фон).")
+                mask_tensor = mask_tensor.clone()
+                mask_tensor[mask_tensor >= self.num_classes] = 0
         return image, mask_tensor
 
 # ---------- Функции потерь (поддержка бинарной и многоклассовой) ----------
 def get_loss_function(loss_name, num_classes=1):
-    loss_name = loss_name.lower()
+    loss_name = loss_name.lower().replace(' ', '')
     if num_classes > 1:
         # Многоклассовый режим
-        if loss_name == "ce" or loss_name == "crossentropy":
+        if loss_name in ("ce", "crossentropy"):
             return nn.CrossEntropyLoss()
         elif loss_name == "dice":
             return smp.losses.DiceLoss(mode='multiclass', from_logits=True, classes=num_classes)
@@ -211,7 +266,7 @@ def get_loss_function(loss_name, num_classes=1):
             return smp.losses.FocalLoss(mode='multiclass', alpha=0.25, gamma=2, from_logits=True)
         elif loss_name == "tversky":
             return smp.losses.TverskyLoss(mode='multiclass', alpha=0.3, beta=0.7, from_logits=True)
-        elif loss_name == "bce+dice":
+        elif loss_name in ("bce+dice", "ce+dice", "crossentropy+dice"):
             ce = nn.CrossEntropyLoss()
             dice = smp.losses.DiceLoss(mode='multiclass', from_logits=True, classes=num_classes)
             return lambda pred, target: ce(pred, target) + dice(pred, target)
@@ -223,7 +278,7 @@ def get_loss_function(loss_name, num_classes=1):
             return nn.BCEWithLogitsLoss()
         elif loss_name == "dice":
             return smp.losses.DiceLoss(mode='binary', from_logits=True)
-        elif loss_name == "bce+dice":
+        elif loss_name in ("bce+dice", "ce+dice", "crossentropy+dice"):
             bce = nn.BCEWithLogitsLoss()
             dice = smp.losses.DiceLoss(mode='binary', from_logits=True)
             return lambda pred, target: bce(pred, target) + dice(pred, target)
@@ -262,23 +317,16 @@ def get_scheduler(optimizer, scheduler_name, epochs):
 
 # ---------- Метрики ----------
 def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
-    """
-    pred_logits: тензор [B, C, H, W] (логиты)
-    true_masks: тензор [B, 1, H, W] для бинарного; [B, H, W] для мультикласса
-    """
     if num_classes == 1:
-        # Бинарный случай
-        pred_probs = torch.sigmoid(pred_logits)          # [B, 1, H, W]
-        pred = (pred_probs > threshold).float()          # [B, 1, H, W]
-        # Приводим true_masks к [B, 1, H, W] если нужно
+        pred_probs = torch.sigmoid(pred_logits)
+        pred = (pred_probs > threshold).float()
         if true_masks.dim() == 3:
             true = true_masks.unsqueeze(1).float()
         else:
             true = true_masks.float()
-        # Суммируем по H и W (размерности 2 и 3)
-        intersection = (pred * true).sum(dim=(2,3))
-        pred_sum = pred.sum(dim=(2,3))
-        true_sum = true.sum(dim=(2,3))
+        intersection = (pred * true).sum(dim=(2, 3))
+        pred_sum = pred.sum(dim=(2, 3))
+        true_sum = true.sum(dim=(2, 3))
         union = pred_sum + true_sum - intersection
         iou = (intersection + 1e-6) / (union + 1e-6)
         dice = (2 * intersection + 1e-6) / (pred_sum + true_sum + 1e-6)
@@ -288,13 +336,11 @@ def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
         precision = tp / (tp + fp + 1e-6)
         recall = tp / (tp + fn + 1e-6)
         f1 = 2 * precision * recall / (precision + recall + 1e-6)
-        # Accuracy (попиксельная)
-        correct = (pred == true).float().sum(dim=(2,3))
+        correct = (pred == true).float().sum(dim=(2, 3))
         total = pred.shape[2] * pred.shape[3]
         accuracy = correct / total
         map50 = (iou > 0.5).float().mean().item()
         map50_95 = iou.mean().item()
-        log(f"[DEBUG] intersection.mean()={intersection.mean().item():.4f}, union.mean()={union.mean().item():.4f}, pred_sum.mean()={pred_sum.mean().item():.4f}, true_sum.mean()={true_sum.mean().item():.4f}, threshold = {threshold}")
         return {
             'IoU': iou.mean().item(),
             'Dice': dice.mean().item(),
@@ -303,16 +349,13 @@ def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
             'F1': f1.mean().item(),
             'Accuracy': accuracy.mean().item(),
             'mAP50': map50,
-            'mAP50-95': map50_95
+            'mAP50-95': map50_95,
         }
     else:
-        # Многоклассовый случай
-        pred = torch.argmax(pred_logits, dim=1)   # [B, H, W]
-        true = true_masks.long()                 # [B, H, W]
-        iou_per_class = []
-        dice_per_class = []
-        precision_per_class = []
-        recall_per_class = []
+        pred = torch.argmax(pred_logits, dim=1)
+        true = true_masks.long()
+        iou_per_class, dice_per_class = [], []
+        precision_per_class, recall_per_class = [], []
         for c in range(num_classes):
             pred_c = (pred == c)
             true_c = (true == c)
@@ -335,8 +378,6 @@ def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
         recall = torch.mean(torch.tensor(recall_per_class)).item()
         f1 = 2 * precision * recall / (precision + recall + 1e-6)
         accuracy = (pred == true).float().mean().item()
-        map50 = miou
-        map50_95 = miou
         return {
             'IoU': miou,
             'Dice': mdice,
@@ -344,16 +385,16 @@ def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
             'Recall': recall,
             'F1': f1,
             'Accuracy': accuracy,
-            'mAP50': map50,
-            'mAP50-95': map50_95
+            'mAP50': miou,
+            'mAP50-95': miou,
         }
 
-# ---------- Автоматический подбор batch_size ----------
+# ---------- Автоподбор batch_size ----------
 def auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX):
     if device.type == 'cuda' and torch.cuda.is_available():
         try:
             free_mem, _ = torch.cuda.mem_get_info(device)
-            free_mem_gb = free_mem / (1024**3)
+            free_mem_gb = free_mem / (1024 ** 3)
             suggested = int((free_mem_gb * mem_factor) * 4)
             suggested = max(min_batch, min(suggested, max_batch))
             log(f"Auto batch (GPU): free={free_mem_gb:.1f}GB -> batch={suggested}")
@@ -362,7 +403,7 @@ def auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BAT
             log(f"Ошибка при определении памяти GPU: {e}, переключаемся на RAM")
     try:
         import psutil
-        free_ram = psutil.virtual_memory().available / (1024**3)
+        free_ram = psutil.virtual_memory().available / (1024 ** 3)
         suggested = int((free_ram * mem_factor) * 2)
         suggested = max(min_batch, min(suggested, max_batch))
         log(f"Auto batch (RAM): free={free_ram:.1f}GB -> batch={suggested}")
@@ -371,7 +412,7 @@ def auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BAT
         log("⚠️ psutil не установлен, auto batch использует значение по умолчанию 8")
         return 8
 
-# ---------- Сохранение аргументов в YAML / JSON ----------
+# ---------- Сохранение аргументов ----------
 def save_args_yaml(args_dict, save_path):
     if HAS_YAML:
         with open(save_path, 'w', encoding='utf-8') as f:
@@ -383,47 +424,36 @@ def save_args_yaml(args_dict, save_path):
             json.dump(args_dict, f, indent=2, ensure_ascii=False)
         log(f"Аргументы сохранены в JSON (YAML недоступен): {json_path}")
 
-# ---------- Сохранение метаданных модели рядом с весами ----------
 def save_model_meta(meta_dict, model_path):
     meta_path = os.path.splitext(model_path)[0] + '_meta.json'
     with open(meta_path, 'w', encoding='utf-8') as f:
         json.dump(meta_dict, f, indent=2, ensure_ascii=False)
     log(f"Метаданные модели сохранены в {meta_path}")
 
-# ---------- Построение и сохранение графиков обучения ----------
+# ---------- Графики ----------
 def save_training_plots(history_dict, save_dir):
     if not HAS_MATPLOTLIB:
         return
     epochs = history_dict['epoch']
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    # Loss
-    axes[0,0].plot(epochs, history_dict['train_loss'], label='Train Loss')
+    axes[0, 0].plot(epochs, history_dict['train_loss'], label='Train Loss')
     if history_dict['val_loss']:
-        axes[0,0].plot(epochs, history_dict['val_loss'], label='Val Loss')
-    axes[0,0].set_xlabel('Epoch')
-    axes[0,0].set_ylabel('Loss')
-    axes[0,0].legend()
-    axes[0,0].set_title('Loss')
-    # IoU / Dice
-    axes[0,1].plot(epochs, history_dict['iou'], label='IoU')
-    axes[0,1].plot(epochs, history_dict['dice'], label='Dice')
-    axes[0,1].set_xlabel('Epoch')
-    axes[0,1].set_ylabel('Score')
-    axes[0,1].legend()
-    axes[0,1].set_title('IoU & Dice')
-    # Precision/Recall
-    axes[1,0].plot(epochs, history_dict['precision'], label='Precision')
-    axes[1,0].plot(epochs, history_dict['recall'], label='Recall')
-    axes[1,0].plot(epochs, history_dict['f1'], label='F1')
-    axes[1,0].set_xlabel('Epoch')
-    axes[1,0].legend()
-    axes[1,0].set_title('Precision/Recall/F1')
-    # mAP
-    axes[1,1].plot(epochs, history_dict['map50'], label='mAP50')
-    axes[1,1].plot(epochs, history_dict['map50_95'], label='mAP50-95')
-    axes[1,1].set_xlabel('Epoch')
-    axes[1,1].legend()
-    axes[1,1].set_title('mAP')
+        axes[0, 0].plot(epochs, history_dict['val_loss'], label='Val Loss')
+    axes[0, 0].set_xlabel('Epoch'); axes[0, 0].set_ylabel('Loss')
+    axes[0, 0].legend(); axes[0, 0].set_title('Loss')
+    axes[0, 1].plot(epochs, history_dict['iou'], label='IoU')
+    axes[0, 1].plot(epochs, history_dict['dice'], label='Dice')
+    axes[0, 1].set_xlabel('Epoch'); axes[0, 1].set_ylabel('Score')
+    axes[0, 1].legend(); axes[0, 1].set_title('IoU & Dice')
+    axes[1, 0].plot(epochs, history_dict['precision'], label='Precision')
+    axes[1, 0].plot(epochs, history_dict['recall'], label='Recall')
+    axes[1, 0].plot(epochs, history_dict['f1'], label='F1')
+    axes[1, 0].set_xlabel('Epoch'); axes[1, 0].legend()
+    axes[1, 0].set_title('Precision/Recall/F1')
+    axes[1, 1].plot(epochs, history_dict['map50'], label='mAP50')
+    axes[1, 1].plot(epochs, history_dict['map50_95'], label='mAP50-95')
+    axes[1, 1].set_xlabel('Epoch'); axes[1, 1].legend()
+    axes[1, 1].set_title('mAP')
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'results.png'), dpi=150)
     plt.close()
@@ -437,7 +467,6 @@ def save_csv_results(history_dict, save_path):
         writer.writerows(rows)
     log(f"CSV история сохранена: {save_path}")
 
-# ---------- Построение precision-recall кривой по порогу (только для бинарного) ----------
 def save_pr_curve(preds, masks, save_dir, num_classes=1):
     if not HAS_MATPLOTLIB:
         return
@@ -454,52 +483,33 @@ def save_pr_curve(preds, masks, save_dir, num_classes=1):
             prec = tp / (tp + fp + 1e-8)
             rec = tp / (tp + fn + 1e-8)
             f1 = 2 * prec * rec / (prec + rec + 1e-8)
-            precisions.append(prec)
-            recalls.append(rec)
-            f1_scores.append(f1)
-        # PR-кривая
-        plt.figure(figsize=(8,6))
+            precisions.append(prec); recalls.append(rec); f1_scores.append(f1)
+        plt.figure(figsize=(8, 6))
         plt.plot(recalls, precisions, marker='.', label='PR curve')
-        plt.xlabel('Recall')
-        plt.ylabel('Precision')
-        plt.title('Precision-Recall Curve')
-        plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskPR_curve.png'))
-        plt.close()
-        # P, R, F1 по порогу
-        plt.figure(figsize=(10,6))
+        plt.xlabel('Recall'); plt.ylabel('Precision')
+        plt.title('Precision-Recall Curve'); plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskPR_curve.png')); plt.close()
+        plt.figure(figsize=(10, 6))
         plt.plot(thresholds, precisions, label='Precision')
         plt.plot(thresholds, recalls, label='Recall')
         plt.plot(thresholds, f1_scores, label='F1')
-        plt.xlabel('Threshold')
-        plt.ylabel('Score')
-        plt.title('Precision, Recall, F1 vs Threshold')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskF1_curve.png'))
-        plt.close()
-        # Отдельно P и R кривые
-        plt.figure(figsize=(8,6))
+        plt.xlabel('Threshold'); plt.ylabel('Score')
+        plt.title('Precision, Recall, F1 vs Threshold'); plt.legend(); plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskF1_curve.png')); plt.close()
+        plt.figure(figsize=(8, 6))
         plt.plot(thresholds, precisions, label='Precision')
-        plt.xlabel('Threshold')
-        plt.ylabel('Precision')
-        plt.title('Precision vs Threshold')
-        plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskP_curve.png'))
-        plt.close()
-        plt.figure(figsize=(8,6))
+        plt.xlabel('Threshold'); plt.ylabel('Precision')
+        plt.title('Precision vs Threshold'); plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskP_curve.png')); plt.close()
+        plt.figure(figsize=(8, 6))
         plt.plot(thresholds, recalls, label='Recall')
-        plt.xlabel('Threshold')
-        plt.ylabel('Recall')
-        plt.title('Recall vs Threshold')
-        plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskR_curve.png'))
-        plt.close()
+        plt.xlabel('Threshold'); plt.ylabel('Recall')
+        plt.title('Recall vs Threshold'); plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskR_curve.png')); plt.close()
         log(f"Кривые PR, F1, P, R сохранены в {save_dir}")
     else:
         log("PR-кривые не генерируются для многоклассовой сегментации")
 
-# ---------- Построение confusion matrix ----------
 def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=0.5):
     if not HAS_MATPLOTLIB:
         return
@@ -518,11 +528,11 @@ def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=
         conf_matrix = torch.zeros(num_classes, num_classes, dtype=torch.long)
         for t in range(num_classes):
             for p in range(num_classes):
-                conf_matrix[t,p] = ((true == t) & (pred == p)).sum().item()
+                conf_matrix[t, p] = ((true == t) & (pred == p)).sum().item()
         conf_matrix = conf_matrix.numpy()
         tick_labels = [f'Class {i}' for i in range(num_classes)]
 
-    plt.figure(figsize=(max(6, num_classes*0.6), max(5, num_classes*0.5)))
+    plt.figure(figsize=(max(6, num_classes * 0.6), max(5, num_classes * 0.5)))
     if HAS_SEABORN:
         sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
                     xticklabels=tick_labels, yticklabels=tick_labels)
@@ -534,14 +544,12 @@ def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=
                 plt.text(j, i, str(conf_matrix[i, j]), ha='center', va='center')
         plt.xticks(range(len(tick_labels)), tick_labels)
         plt.yticks(range(len(tick_labels)), tick_labels)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
+    plt.xlabel('Predicted'); plt.ylabel('True')
     plt.title('Confusion Matrix')
-    plt.savefig(os.path.join(save_dir, 'confusion_matrix.png'))
-    plt.close()
+    plt.savefig(os.path.join(save_dir, 'confusion_matrix.png')); plt.close()
 
     conf_norm = conf_matrix.astype(np.float32) / (conf_matrix.sum(axis=1, keepdims=True) + 1e-8)
-    plt.figure(figsize=(max(6, num_classes*0.6), max(5, num_classes*0.5)))
+    plt.figure(figsize=(max(6, num_classes * 0.6), max(5, num_classes * 0.5)))
     if HAS_SEABORN:
         sns.heatmap(conf_norm, annot=True, fmt='.2f', cmap='Blues',
                     xticklabels=tick_labels, yticklabels=tick_labels)
@@ -553,66 +561,52 @@ def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=
                 plt.text(j, i, f"{conf_norm[i, j]:.2f}", ha='center', va='center')
         plt.xticks(range(len(tick_labels)), tick_labels)
         plt.yticks(range(len(tick_labels)), tick_labels)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
+    plt.xlabel('Predicted'); plt.ylabel('True')
     plt.title('Normalized Confusion Matrix')
-    plt.savefig(os.path.join(save_dir, 'confusion_matrix_normalized.png'))
-    plt.close()
+    plt.savefig(os.path.join(save_dir, 'confusion_matrix_normalized.png')); plt.close()
     log(f"Матрицы ошибок сохранены в {save_dir}")
 
-# ---------- Сохранение примеров тренировочных батчей (один файл на батч) ----------
 def save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1):
     if not HAS_MATPLOTLIB:
         return
     os.makedirs(save_dir, exist_ok=True)
-    batch_idx = 0
     for batch_idx, (images, masks) in enumerate(train_loader):
         if batch_idx >= num_batches:
             break
         n_images = min(images.size(0), samples_per_batch)
-        images = images[:n_images]
-        masks = masks[:n_images]
-        # Создаём сетку 2 строки (изображения и маски) × n_images столбцов
+        images = images[:n_images]; masks = masks[:n_images]
         fig, axes = plt.subplots(2, n_images, figsize=(n_images * 4, 8))
         if n_images == 1:
             axes = axes.reshape(2, 1)
         for i in range(n_images):
-            img = images[i].cpu().permute(1,2,0).numpy() * 255
-            img = img.astype(np.uint8)
-            axes[0, i].imshow(img)
-            axes[0, i].axis('off')
+            img = images[i].cpu().permute(1, 2, 0).numpy() * 255
+            axes[0, i].imshow(img.astype(np.uint8)); axes[0, i].axis('off')
             axes[0, i].set_title(f'Image {i+1}')
-            # Маска: убираем лишнюю ось канала
-            mask = masks[i].cpu().numpy().squeeze()  # -> (H,W) или (H,W,3) для мультикласса
+            mask = masks[i].cpu().numpy().squeeze()
             if num_classes == 1:
                 mask_vis = (mask > 0.5).astype(np.uint8) * 255
                 axes[1, i].imshow(mask_vis, cmap='gray')
             else:
                 mask_vis = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
                 for c in range(num_classes):
-                    mask_vis[mask == c] = [c * 255 // max(1, num_classes-1), 128, 255 - c*128]
+                    mask_vis[mask == c] = [c * 255 // max(1, num_classes - 1), 128, 255 - c * 128]
                 axes[1, i].imshow(mask_vis)
-            axes[1, i].axis('off')
-            axes[1, i].set_title(f'Mask {i+1}')
+            axes[1, i].axis('off'); axes[1, i].set_title(f'Mask {i+1}')
         plt.tight_layout()
         plt.savefig(os.path.join(save_dir, f'train_batch{batch_idx}.jpg'))
         plt.close()
-    log(f"Сохранено {num_batches} тренировочных батчей (показано до {samples_per_batch} изображений на батч) в {save_dir}")
+    log(f"Сохранено {num_batches} тренировочных батчей в {save_dir}")
 
-# ---------- Сохранение примеров валидации (один файл-коллаж) ----------
 def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1):
     if not HAS_MATPLOTLIB:
         return
     os.makedirs(save_dir, exist_ok=True)
     model.eval()
-    images_list = []
-    true_masks_list = []
-    pred_masks_list = []
+    images_list, true_masks_list, pred_masks_list = [], [], []
     collected = 0
     with torch.no_grad():
         for images, masks in val_loader:
-            images = images.to(device)
-            masks = masks.to(device)
+            images = images.to(device); masks = masks.to(device)
             outputs = model(images)
             if num_classes == 1:
                 preds = (torch.sigmoid(outputs) > 0.5).float()
@@ -621,57 +615,104 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
             for i in range(images.size(0)):
                 if collected >= num_samples:
                     break
-                img = images[i].cpu().permute(1,2,0).numpy() * 255
-                img = img.astype(np.uint8)
-                true_mask = masks[i].cpu().numpy().squeeze()   # убираем ось канала
-                pred_mask = preds[i].cpu().numpy().squeeze()   # убираем ось канала
-                images_list.append(img)
-                true_masks_list.append(true_mask)
-                pred_masks_list.append(pred_mask)
+                img = images[i].cpu().permute(1, 2, 0).numpy() * 255
+                images_list.append(img.astype(np.uint8))
+                true_masks_list.append(masks[i].cpu().numpy().squeeze())
+                pred_masks_list.append(preds[i].cpu().numpy().squeeze())
                 collected += 1
             if collected >= num_samples:
                 break
-
     if not images_list:
-        log("Нет примеров для сохранения валидации")
-        return
-
-    # Создаём сетку: n строк, 3 столбца
+        log("Нет примеров для сохранения валидации"); return
     n = len(images_list)
     fig, axes = plt.subplots(n, 3, figsize=(12, 4 * n))
     if n == 1:
         axes = axes.reshape(1, 3)
     for i in range(n):
-        # Изображение
-        axes[i, 0].imshow(images_list[i])
-        axes[i, 0].axis('off')
-        axes[i, 0].set_title('Image')
-        # Истинная маска
+        axes[i, 0].imshow(images_list[i]); axes[i, 0].axis('off'); axes[i, 0].set_title('Image')
         if num_classes == 1:
-            true_viz = (true_masks_list[i] > 0.5).astype(np.uint8) * 255
-            axes[i, 1].imshow(true_viz, cmap='gray')
+            tv = (true_masks_list[i] > 0.5).astype(np.uint8) * 255
+            axes[i, 1].imshow(tv, cmap='gray')
         else:
-            true_viz = np.zeros((true_masks_list[i].shape[0], true_masks_list[i].shape[1], 3), dtype=np.uint8)
+            tv = np.zeros((true_masks_list[i].shape[0], true_masks_list[i].shape[1], 3), dtype=np.uint8)
             for c in range(num_classes):
-                true_viz[true_masks_list[i] == c] = [c * 255 // max(1, num_classes-1), 128, 255 - c*128]
-            axes[i, 1].imshow(true_viz)
-        axes[i, 1].axis('off')
-        axes[i, 1].set_title('True Mask')
-        # Предсказанная маска
+                tv[true_masks_list[i] == c] = [c * 255 // max(1, num_classes - 1), 128, 255 - c * 128]
+            axes[i, 1].imshow(tv)
+        axes[i, 1].axis('off'); axes[i, 1].set_title('True Mask')
         if num_classes == 1:
-            pred_viz = (pred_masks_list[i] > 0.5).astype(np.uint8) * 255
-            axes[i, 2].imshow(pred_viz, cmap='gray')
+            pv = (pred_masks_list[i] > 0.5).astype(np.uint8) * 255
+            axes[i, 2].imshow(pv, cmap='gray')
         else:
-            pred_viz = np.zeros((pred_masks_list[i].shape[0], pred_masks_list[i].shape[1], 3), dtype=np.uint8)
+            pv = np.zeros((pred_masks_list[i].shape[0], pred_masks_list[i].shape[1], 3), dtype=np.uint8)
             for c in range(num_classes):
-                pred_viz[pred_masks_list[i] == c] = [c * 255 // max(1, num_classes-1), 128, 255 - c*128]
-            axes[i, 2].imshow(pred_viz)
-        axes[i, 2].axis('off')
-        axes[i, 2].set_title('Pred Mask')
+                pv[pred_masks_list[i] == c] = [c * 255 // max(1, num_classes - 1), 128, 255 - c * 128]
+            axes[i, 2].imshow(pv)
+        axes[i, 2].axis('off'); axes[i, 2].set_title('Pred Mask')
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'val_examples.jpg'))
     plt.close()
     log(f"Сохранено {collected} валидационных примеров в {save_dir}/val_examples.jpg")
+
+# ---------- Проверка масок ----------
+def check_dataset_masks_consistency(dataset, num_classes, max_check=20):
+    """
+    Проверяет первые max_check масок: собирает уникальные значения пикселей,
+    сравнивает с num_classes.
+    Возвращает (max_pixel_in_masks, warnings_list).
+    """
+    warnings_out = []
+    global_max = 0
+    n = min(len(dataset), max_check)
+
+    for i in range(n):
+        mask_path = None
+        try:
+            mask_path = dataset.mask_paths[i]
+            with Image.open(mask_path) as im:
+                m = np.array(im)
+
+            if m.size == 0:
+                # Пустая маска — не должна попадать сюда, но защищаемся.
+                continue
+
+            if m.ndim == 3:
+                m = m[:, :, 0]
+            m = m.squeeze()
+
+            # Приводим к целочисленному типу, чтобы .max() и unique()
+            # работали одинаково для uint8 / uint16 / float-масок.
+            try:
+                m_int = m.astype(np.int64)
+            except Exception:
+                # Совсем экзотический dtype — пропускаем файл.
+                continue
+
+            mx = int(m_int.max())
+            if mx > global_max:
+                global_max = mx
+
+            uniq = np.unique(m_int)
+            # uniq — numpy-массив; делаем безопасный tolist через list(...)
+            uniq_preview = list(uniq[:10])
+            preview_str = ", ".join(str(int(v)) for v in uniq_preview)
+            if len(uniq) > 10:
+                preview_str += ", ..."
+
+            if num_classes > 1 and mx >= num_classes:
+                warnings_out.append(
+                    f"  • {os.path.basename(mask_path)}: max={mx}, "
+                    f"уникальные=[{preview_str}]"
+                )
+        except Exception as e:
+            # Никогда не падаем из-за одной битой маски.
+            warnings_out.append(
+                f"  • {os.path.basename(mask_path or '?')}: "
+                f"ошибка чтения ({type(e).__name__}: {e})"
+            )
+            continue
+
+    return global_max, warnings_out
+
 
 # ---------- Основная функция ----------
 def main():
@@ -691,16 +732,15 @@ def main():
         log("Ошибка: укажите --params или --params_file")
         sys.exit(1)
 
-    # Извлечение параметров
     dataset_path = params.get('dataset_path')
     model_source = params.get('model_path')
     project_path = params.get('project_path')
     name = params.get('name')
     encoder = params.get('encoder', 'resnet50')
     input_size = params.get('input_size', 512)
-    num_classes = params.get('num_classes', 1)
+    num_classes = params.get('num_classes', 2)
     optimizer_name = params.get('optimizer', 'Adam')
-    loss_name = params.get('loss', 'BCE')
+    loss_name = params.get('loss', 'BCE+Dice')
     lr = params.get('lr', 0.0001)
     batch_size = params.get('batch_size', 8)
     auto_batch_flag = params.get('auto_batch', False) or (batch_size == -1)
@@ -730,7 +770,7 @@ def main():
     log(f"Модель: {model_source if model_source else 'предустановленная'}")
     log(f"Энкодер: {encoder}")
     log(f"Размер входа: {input_size}")
-    log(f"Классов: {num_classes}")
+    log(f"Классов (включая фон): {num_classes}")
     log(f"Оптимизатор: {optimizer_name}, LR={lr}")
     log(f"Loss: {loss_name}")
     log(f"Batch size: {batch_size}, Epochs: {epochs}")
@@ -741,7 +781,6 @@ def main():
     log(f"Порог (threshold): {threshold}")
     log(f"Результаты будут сохранены в: {save_root}")
 
-    # Проверка датасета
     if not dataset_path or not os.path.exists(dataset_path):
         log(f"Ошибка: папка датасета не существует: {dataset_path}")
         sys.exit(1)
@@ -772,7 +811,7 @@ def main():
         log("Ошибка: batch_size должен быть положительным числом")
         sys.exit(1)
 
-    # Загрузка метаданных пользовательской модели
+    # Метаданные пользовательской модели
     decoder_channels = DECODER_CHANNELS
     if model_source is not None and os.path.exists(model_source):
         base, _ = os.path.splitext(model_source)
@@ -787,26 +826,69 @@ def main():
                 dropout = model_meta.get('dropout', dropout)
                 input_size = model_meta.get('input_size', input_size)
                 num_classes = model_meta.get('num_classes', num_classes)
-                log(f"Архитектура восстановлена: encoder={encoder}, decoder_channels={decoder_channels}, dropout={dropout}, input_size={input_size}, num_classes={num_classes}")
+                log(f"Архитектура восстановлена: encoder={encoder}, "
+                    f"decoder_channels={decoder_channels}, dropout={dropout}, "
+                    f"input_size={input_size}, num_classes={num_classes}")
             except Exception as e:
-                log(f"Предупреждение: не удалось загрузить метафайл {meta_path}: {e}. Используются параметры из JSON.")
+                log(f"Предупреждение: не удалось загрузить метафайл {meta_path}: {e}. "
+                    f"Используются параметры из JSON.")
         else:
-            log(f"⚠️ Метаданные модели не найдены: {meta_path}. Используются параметры из JSON. Возможна несовместимость архитектуры.")
+            log(f"⚠️ Метаданные модели не найдены: {meta_path}. "
+                f"Используются параметры из JSON. Возможна несовместимость архитектуры.")
     elif model_source is not None and not os.path.exists(model_source):
         log(f"Ошибка: файл модели {model_source} не найден")
         sys.exit(1)
 
     # Датасеты
-    train_dataset = SegmentationDataset(train_img_dir, train_mask_dir, input_size, num_classes, augmentations)
+    train_dataset = SegmentationDataset(train_img_dir, train_mask_dir,
+                                         input_size, num_classes, augmentations)
     if val_exists:
-        val_dataset = SegmentationDataset(val_img_dir, val_mask_dir, input_size, num_classes, {})
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        val_dataset = SegmentationDataset(val_img_dir, val_mask_dir,
+                                           input_size, num_classes, {})
+        val_loader = DataLoader(val_dataset, batch_size=batch_size,
+                                 shuffle=False, num_workers=num_workers)
         log(f"Загружено {len(train_dataset)} обучающих, {len(val_dataset)} валидационных образцов")
     else:
         log("⚠️ Валидационные папки не найдены, валидация будет пропущена")
         val_loader = None
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    # --- Проверка масок на согласованность с num_classes ---
+    log("--- Проверка масок на согласованность с num_classes ---")
+    max_pixel, warnings_list = check_dataset_masks_consistency(train_dataset, num_classes, max_check=20)
+    log(f"Максимальное значение пикселя среди первых 20 train-масок: {max_pixel}")
+
+    if num_classes == 1:
+        if max_pixel > 0:
+            log(f"✅ Бинарный режим (num_classes=1). Маски содержат объекты "
+                f"(max pixel = {max_pixel}).")
+        else:
+            log("⚠️ ВНИМАНИЕ: бинарный режим (num_classes=1), но все маски пусты!")
+    else:
+        # Для многокласса нужно, чтобы num_classes >= max_pixel + 1
+        if max_pixel >= num_classes:
+            log("=" * 60)
+            log(f"❌ ОШИБКА КОНФИГУРАЦИИ: num_classes={num_classes}, "
+                f"но в масках встречаются пиксели со значением {max_pixel}.")
+            log(f"Значение пикселя должно быть < num_classes.")
+            log(f"Похоже, в масках {max_pixel + 1} классов (включая фон), "
+                f"а в UI указано {num_classes}.")
+            log("Примеры некорректных масок:")
+            for w in warnings_list[:5]:
+                log(w)
+            log(f"Решение: в UI укажите «Количество классов» = {max_pixel + 1}.")
+            log("=" * 60)
+            # Не падаем — продолжаем с обрезкой в фон, но пользователь предупреждён.
+        else:
+            expected_nc = max_pixel + 1
+            if expected_nc < num_classes:
+                log(f"⚠️ num_classes={num_classes}, но в масках максимум {max_pixel}. "
+                    f"Возможно, у вас лишние «пустые» классы (это допустимо, но модель может "
+                    f"плохо учиться из-за пустых каналов).")
+            else:
+                log(f"✅ Согласовано: num_classes={num_classes}, max pixel={max_pixel}.")
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size,
+                               shuffle=True, num_workers=num_workers)
 
     # Модель
     global model, best_model_path, final_model_path
@@ -825,9 +907,9 @@ def main():
         state_dict = torch.load(model_source, map_location='cpu')
         missing, unexpected = model.load_state_dict(state_dict, strict=False)
         if missing:
-            log(f"⚠️ Отсутствуют ключи: {missing[:5]}..." if len(missing)>5 else f"⚠️ Отсутствуют ключи: {missing}")
+            log(f"⚠️ Отсутствуют ключи: {missing[:5]}..." if len(missing) > 5 else f"⚠️ Отсутствуют ключи: {missing}")
         if unexpected:
-            log(f"⚠️ Лишние ключи: {unexpected[:5]}..." if len(unexpected)>5 else f"⚠️ Лишние ключи: {unexpected}")
+            log(f"⚠️ Лишние ключи: {unexpected[:5]}..." if len(unexpected) > 5 else f"⚠️ Лишние ключи: {unexpected}")
         log(f"Загружены веса из {model_source}")
 
     # Устройство
@@ -856,7 +938,6 @@ def main():
     best_model_path = os.path.join(weights_dir, 'best.pth')
     final_model_path = os.path.join(weights_dir, 'last.pth')
 
-    # Сохраняем аргументы обучения в YAML
     args_dict = {
         'encoder': encoder,
         'input_size': input_size,
@@ -880,7 +961,6 @@ def main():
     }
     save_args_yaml(args_dict, os.path.join(save_root, 'args.yaml'))
 
-    # Сохраняем начальные метаданные
     meta_info_initial = {
         'encoder': encoder,
         'input_size': input_size,
@@ -905,18 +985,15 @@ def main():
     save_model_meta(meta_info_initial, final_model_path)
     log("Метаданные модели сохранены (начальная версия).")
 
-    # Early stopping счётчики
     patience_counter = 0
     best_val_loss = float('inf')
 
-    # Тренировочный цикл
     global current_epoch, stop_requested
     log("=== Начало обучения ===")
 
     for epoch in range(1, epochs + 1):
         current_epoch = epoch
 
-        # Проверка ручной остановки
         if stop_requested:
             log("Обучение остановлено пользователем. Завершаем...")
             break
@@ -928,12 +1005,7 @@ def main():
             masks = masks.to(device)
             optimizer.zero_grad()
             outputs = model(images)
-            if num_classes == 1:
-                # masks: [B, 1, H, W]
-                loss = criterion(outputs, masks)
-            else:
-                # masks: [B, H, W]
-                loss = criterion(outputs, masks)
+            loss = criterion(outputs, masks)
             loss.backward()
             optimizer.step()
             train_loss += loss.item() * images.size(0)
@@ -950,13 +1022,11 @@ def main():
                     images = images.to(device)
                     masks = masks.to(device)
                     outputs = model(images)
+                    loss = criterion(outputs, masks)
                     if num_classes == 1:
-                        loss = criterion(outputs, masks)
-                        preds_sigmoid = torch.sigmoid(outputs)
-                        all_preds.append(preds_sigmoid.cpu())
-                        all_masks.append(masks.cpu())   # masks already [B,1,H,W]
+                        all_preds.append(torch.sigmoid(outputs).cpu())
+                        all_masks.append(masks.cpu())
                     else:
-                        loss = criterion(outputs, masks)
                         all_preds.append(outputs.cpu())
                         all_masks.append(masks.cpu())
                     val_loss += loss.item() * images.size(0)
@@ -976,30 +1046,29 @@ def main():
                 patience_counter = 0
                 log(f"✅ Новая лучшая модель сохранена (val_loss={best_val_loss:.4f})")
             else:
-                # Проверка на резкий рост val_loss (переобучение)
-                rel_increase = (val_loss - best_val_loss) / (best_val_loss + 1e-8)
-                if rel_increase > EARLY_STOPPING_TOLERANCE:
-                    log(f"⚠️ Переобучение: val_loss вырос на {rel_increase*100:.1f}% > {EARLY_STOPPING_TOLERANCE*100:.0f}%. Остановка обучения.")
-                    break
-
-                # Проверка на большой разрыв train-val loss
-                loss_gap = (val_loss - train_loss) / (train_loss + 1e-8)
-                if loss_gap > OVERFITTING_GAP_THRESHOLD and patience_counter >= 1:
-                    log(f"⚠️ Переобучение: разрыв val_loss ({val_loss:.4f}) и train_loss ({train_loss:.4f}) слишком велик ({loss_gap*100:.1f}%). Остановка обучения.")
-                    break
-
                 patience_counter += 1
+                # Проверка на большой разрыв train-val loss (переобучение).
+                # Активируется только при достаточно длинной серии неудач,
+                # чтобы не «убивать» обучение на ранних колебаниях.
+                if patience_counter >= OVERFITTING_MIN_PATIENCE:
+                    loss_gap = (val_loss - train_loss) / (train_loss + 1e-8)
+                    if loss_gap > OVERFITTING_GAP_THRESHOLD:
+                        log(f"⚠️ Переобучение: разрыв val_loss ({val_loss:.4f}) и "
+                            f"train_loss ({train_loss:.4f}) слишком велик "
+                            f"({loss_gap * 100:.1f}% > "
+                            f"{OVERFITTING_GAP_THRESHOLD * 100:.0f}%). Остановка обучения.")
+                        break
                 if patience_counter >= EARLY_STOPPING_PATIENCE:
-                    log(f"⚠️ Early stopping: val_loss не улучшается {EARLY_STOPPING_PATIENCE} эпох. Остановка обучения.")
+                    log(f"⚠️ Early stopping: val_loss не улучшается "
+                        f"{EARLY_STOPPING_PATIENCE} эпох. Остановка обучения.")
                     break
         else:
-            # Если валидации нет, сохраняем текущую модель один раз
             if best_val_loss == float('inf'):
                 best_val_loss = train_loss
                 torch.save(model.state_dict(), best_model_path)
                 log(f"✅ Модель сохранена (нет валидации)")
 
-        # Обновление истории
+        # История
         history['epoch'].append(epoch)
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss if val_loss is not None else float('nan'))
@@ -1013,7 +1082,7 @@ def main():
             history['map50'].append(metrics['mAP50'])
             history['map50_95'].append(metrics['mAP50-95'])
         else:
-            for k in ['iou','dice','f1','precision','recall','accuracy','map50','map50_95']:
+            for k in ['iou', 'dice', 'f1', 'precision', 'recall', 'accuracy', 'map50', 'map50_95']:
                 history[k].append(float('nan'))
 
         # Scheduler
@@ -1038,11 +1107,10 @@ def main():
         else:
             log(f"Эпоха {epoch}/{epochs} | Train Loss: {train_loss:.4f} | Валидация пропущена")
 
-    # Сохранение финальной модели
+    # Финальная модель
     torch.save(model.state_dict(), final_model_path)
     log(f"Финальная модель сохранена: {final_model_path}")
 
-    # Обновляем метаданные
     meta_info_final = {
         'encoder': encoder,
         'input_size': input_size,
@@ -1067,7 +1135,7 @@ def main():
     save_model_meta(meta_info_final, final_model_path)
     log("Метаданные модели обновлены (финальная версия).")
 
-    # Пост-обработка и визуализации
+    # Пост-обработка
     if val_loader is not None:
         log("=== Генерация итоговых отчётов и графиков ===")
         best_state = torch.load(best_model_path, map_location='cpu')
@@ -1095,8 +1163,10 @@ def main():
             save_training_plots(history, save_root)
             save_pr_curve(all_preds, all_masks, save_root, num_classes)
             save_confusion_matrix(all_preds, all_masks, save_root, num_classes)
-        save_train_batch_examples(train_loader, save_root, num_batches=NUM_TRAIN_BATCHES_TO_SAVE,
-                                  samples_per_batch=min(4, batch_size), num_classes=num_classes)
+        save_train_batch_examples(train_loader, save_root,
+                                   num_batches=NUM_TRAIN_BATCHES_TO_SAVE,
+                                   samples_per_batch=min(4, batch_size),
+                                   num_classes=num_classes)
         save_val_examples(val_loader, save_root, num_samples=NUM_VAL_SAMPLES_TO_SAVE,
                           device=device, num_classes=num_classes)
 

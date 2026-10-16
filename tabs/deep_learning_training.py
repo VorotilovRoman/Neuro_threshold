@@ -232,12 +232,95 @@ class YoloTrainWindow(QMainWindow):
                 self.log("Процесс YOLO остановлен корректно.")
             self.yolo_train_widget.set_running(False)
 
+
+    # ===================== U‑NET =====================
+    # ---------- Валидация параметров U-Net перед запуском ----------
+    def _validate_unet_params(self, params):
+        """
+        Быстрая проверка параметров U-Net перед запуском воркера.
+        Возвращает (ok: bool, err_msg: str).
+        """
+        if not params:
+            return False, "Параметры не переданы."
+
+        dataset_path = params.get("dataset_path")
+        if not dataset_path:
+            return False, "Не указана папка датасета."
+        if not os.path.isdir(dataset_path):
+            return False, f"Папка датасета не существует:\n{dataset_path}"
+
+        # Базовая структура
+        train_img = os.path.join(dataset_path, 'images', 'train')
+        train_msk = os.path.join(dataset_path, 'masks', 'train')
+        if not os.path.isdir(train_img):
+            return False, f"Не найдена папка с изображениями:\n{train_img}"
+        if not os.path.isdir(train_msk):
+            return False, f"Не найдена папка с масками:\n{train_msk}"
+
+        # num_classes — минимум 2 (фон + хотя бы один объект)
+        try:
+            nc = int(params.get("num_classes", 2))
+        except (ValueError, TypeError):
+            return False, "num_classes должно быть целым числом."
+        if nc < 2:
+            return False, (
+                f"num_classes = {nc}, а должно быть ≥ 2.\n"
+                f"«Класс 0» — это фон. Для 1 объекта укажите 2, для N — N+1."
+            )
+
+        # input_size — должен быть положительным
+        try:
+            isz = int(params.get("input_size", 512))
+        except (ValueError, TypeError):
+            return False, "input_size должно быть целым числом."
+        if isz < 32:
+            return False, f"input_size = {isz} слишком мал (минимум 32)."
+
+        # lr — положительный
+        try:
+            lr = float(params.get("lr", 1e-4))
+        except (ValueError, TypeError):
+            return False, "lr должно быть числом."
+        if lr <= 0:
+            return False, f"lr = {lr}, должен быть > 0."
+
+        # Пользовательская модель — проверить существование файла
+        model_path = params.get("model_path")
+        if model_path:
+            if not os.path.isfile(model_path):
+                return False, f"Файл модели не найден:\n{model_path}"
+
+        return True, ""
+
     # ===================== U‑NET =====================
     def _run_unet_training_from_widget(self, params):
         """Запуск обучения U-Net по параметрам из виджета."""
-        if not params.get("dataset_path") or not os.path.exists(params["dataset_path"]):
-            QMessageBox.warning(self, "Ошибка", "Укажите существующую папку датасета.")
+        # --- 1. Быстрая валидация обязательных параметров ---
+        ok, err = self._validate_unet_params(params)
+        if not ok:
+            QMessageBox.warning(self, "Ошибка параметров U-Net", err)
+            self.log(f"❌ Параметры U-Net некорректны: {err}")
+            self.unet_train_widget.set_running(False)
             return
+
+        # --- 2. Расширенный лог ключевых параметров ---
+        self.log("=== Параметры обучения U‑Net ===")
+        for key, val in params.items():
+            self.log(f"{key}: {val}")
+        # Явно подсвечиваем критичные для обучения поля
+        nc = params.get("num_classes")
+        loss = params.get("loss")
+        augs = params.get("augmentations") or {}
+        enabled_augs = [k for k, v in augs.items() if v]
+        self.log("-" * 30)
+        self.log(f"⚠️  num_classes (вкл. фон): {nc}  "
+                 f"→ должно быть = (число классов объектов) + 1")
+        self.log(f"⚠️  loss: {loss}")
+        if enabled_augs:
+            self.log(f"⚠️  аугментации включены: {', '.join(enabled_augs)}")
+        else:
+            self.log("✅ аугментации выключены")
+        self.log("=" * 30)
 
         params_json = json.dumps(params, ensure_ascii=False)
 
@@ -249,13 +332,10 @@ class YoloTrainWindow(QMainWindow):
         if not os.path.exists(worker_script):
             self.log("ОШИБКА: скрипт воркера U-Net не найден: " + worker_script)
             QMessageBox.critical(self, "Ошибка", "Не найден скрипт обучения train_unet_worker.py")
+            self.unet_train_widget.set_running(False)
             return
 
-        self.log("=== Параметры обучения U‑Net ===")
-        for key, val in params.items():
-            self.log(f"{key}: {val}")
-        self.log("=" * 30)
-
+        # --- 3. Запуск процесса ---
         self.unet_process = QProcess()
         self.unet_process.setProcessChannelMode(QProcess.MergedChannels)
         self.unet_process.readyReadStandardOutput.connect(self._on_unet_output)

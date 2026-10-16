@@ -4,6 +4,7 @@ from PyQt5.QtCore import pyqtSignal, Qt
 import os
 import sys
 
+
 class BaseTrainWidget(QWidget):
     run_training = pyqtSignal(dict)
     stop_training = pyqtSignal()
@@ -309,7 +310,6 @@ class YOLOTrainWidget(BaseTrainWidget):
         self.disable_aug = QCheckBox("Disable default augmentations")
         self.disable_aug.setChecked(True)
         self.form_layout.addRow(self.disable_aug)
-        # Примечание: параметр disable_aug обрабатывается в train_yolo_worker.py
 
         self.lr0 = QDoubleSpinBox()
         self.lr0.setRange(0.0001, 0.1)
@@ -387,6 +387,9 @@ class UNetTrainWidget(BaseTrainWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        # Подсказка про структуру датасета — исправленная.
+        # Раньше было «PNG, бинарные (0 и 255)» — это вводило в заблуждение:
+        # наш генератор пишет значения {0, 1, 2, ...} = индексы классов.
         hint = (
             "<b>📁 Структура датасета U‑Net:</b><br>"
             "dataset/<br>"
@@ -394,9 +397,14 @@ class UNetTrainWidget(BaseTrainWidget):
             "│   ├── train/<br>"
             "│   └── val/<br>"
             "└── masks/<br>"
-            "    ├── train/   # PNG, бинарные (0 и 255)<br>"
+            "    ├── train/<br>"
             "    └── val/<br>"
-            "Имена файлов совпадают."
+            "Имена файлов изображений и масок совпадают.<br><br>"
+            "<b>Значения пикселей в маске:</b><br>"
+            "• 0 — фон (всегда);<br>"
+            "• 1, 2, 3, … — индексы классов объектов.<br><br>"
+            "<b>«Количество классов» в форме — ВКЛЮЧАЯ фон.</b><br>"
+            "Пример: фон + 1 объект → 2; фон + 3 объекта → 4."
         )
         self.add_dataset_structure_hint(hint)
 
@@ -477,13 +485,34 @@ class UNetTrainWidget(BaseTrainWidget):
         self.preset_layout.addRow("Размер входа:", self.input_size)
 
     def _add_unet_specific(self):
+        # --- Количество классов (включая фон) ---
+        # Минимум 2: класс 0 — фон, минимум класс 1 — объект.
+        # Значение 1 приводило к поломке: маски {0,1} после /255 → все нули.
         self.num_classes = QSpinBox()
-        self.num_classes.setRange(1, 100)
+        self.num_classes.setRange(2, 100)
         self.num_classes.setValue(2)
-        self.form_layout.addRow("Количество классов:", self.num_classes)
+        self.num_classes.setToolTip(
+            "Общее число классов, ВКЛЮЧАЯ фон.\n"
+            "• 0 — всегда фон;\n"
+            "• 1, 2, … — индексы классов объектов в маске.\n\n"
+            "Примеры:\n"
+            "  фон + 1 объект   → 2\n"
+            "  фон + 3 объекта → 4\n\n"
+            "Значение должно быть строго больше максимального пикселя в масках."
+        )
+        self.form_layout.addRow("Количество классов (вкл. фон):", self.num_classes)
 
+        # --- Функция потерь (BCE+Dice по умолчанию) ---
+        # Для сегментации это самый надёжный старт: CE/BCE даёт стабильные
+        # градиенты, Dice напрямую оптимизирует перекрытие и борется с
+        # дисбалансом классов.
         self.loss = QComboBox()
-        self.loss.addItems(["BCE", "Dice", "BCE+Dice", "Focal", "Tversky"])
+        self.loss.addItems(["BCE+Dice", "BCE", "Dice", "Focal", "Tversky"])
+        self.loss.setToolTip(
+            "Функция потерь.\n"
+            "«BCE+Dice» — рекомендуется для сегментации по умолчанию:\n"
+            "  BCE даёт стабильные градиенты, Dice оптимизирует IoU."
+        )
         self.form_layout.addRow("Функция потерь:", self.loss)
 
         self.dropout = QDoubleSpinBox()
@@ -494,6 +523,11 @@ class UNetTrainWidget(BaseTrainWidget):
 
         self.scheduler = QComboBox()
         self.scheduler.addItems(["None", "ReduceLROnPlateau", "CosineAnnealing", "StepLR"])
+        self.scheduler.setToolTip(
+            "Планировщик learning rate.\n"
+            "«ReduceLROnPlateau» — самый безопасный вариант:\n"
+            "снижает LR, когда val_loss перестаёт падать."
+        )
         self.form_layout.addRow("LR Scheduler:", self.scheduler)
 
         self.lr = QDoubleSpinBox()
@@ -507,7 +541,7 @@ class UNetTrainWidget(BaseTrainWidget):
         self.optimizer.addItems(["Adam", "SGD", "RMSprop", "AdamW"])
         self.form_layout.addRow("optimizer:", self.optimizer)
 
-        # ---------- Порог бинаризации (для метрик) ----------
+        # --- Порог бинаризации (для метрик) ---
         self.threshold = QDoubleSpinBox()
         self.threshold.setRange(0.01, 0.99)
         self.threshold.setSingleStep(0.01)
@@ -516,25 +550,37 @@ class UNetTrainWidget(BaseTrainWidget):
         self.threshold.setToolTip("Порог для бинаризации предсказаний при вычислении метрик (0.5 – стандарт)")
         self.form_layout.addRow("Порог (threshold):", self.threshold)
 
+        # --- Аугментации (по умолчанию ВЫКЛЮЧЕНЫ) ---
+        # Пользователь включает только если действительно нужно.
+        # Раньше по умолчанию стояли все пять — это маскировало реальные
+        # проблемы с данными и затрудняло отладку.
         aug_group = QGroupBox("Аугментации")
         aug_layout = QVBoxLayout(aug_group)
         self.aug_hflip = QCheckBox("Горизонтальное отражение")
-        self.aug_hflip.setChecked(True)
+        self.aug_hflip.setChecked(False)
         self.aug_vflip = QCheckBox("Вертикальное отражение")
-        self.aug_vflip.setChecked(True)
+        self.aug_vflip.setChecked(False)
         self.aug_rotate = QCheckBox("Поворот (±10°)")
-        self.aug_rotate.setChecked(True)
+        self.aug_rotate.setChecked(False)
         self.aug_scale = QCheckBox("Масштабирование")
-        self.aug_scale.setChecked(True)
+        self.aug_scale.setChecked(False)
         self.aug_noise = QCheckBox("Гауссов шум")
-        self.aug_noise.setChecked(True)
+        self.aug_noise.setChecked(False)
         aug_layout.addWidget(self.aug_hflip)
         aug_layout.addWidget(self.aug_vflip)
         aug_layout.addWidget(self.aug_rotate)
         aug_layout.addWidget(self.aug_scale)
         aug_layout.addWidget(self.aug_noise)
+
+        hint_aug = QLabel(
+            "Аугментации применяются синхронно к изображению и маске.\n"
+            "Для масок используется интерполяция NEAREST — без размытия границ."
+        )
+        hint_aug.setWordWrap(True)
+        hint_aug.setStyleSheet("color: #666; font-size: 11px;")
+        aug_layout.addWidget(hint_aug)
+
         self.form_layout.addRow(aug_group)
-        # Примечание: если batch_size = -1, воркер train_unet_worker.py самостоятельно подбирает размер батча
 
     def get_params(self):
         if self.model_from_preset.isChecked():
