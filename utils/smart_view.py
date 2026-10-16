@@ -18,9 +18,11 @@ class SmartGraphicsView(QGraphicsView):
     Интерактивный виджет для отображения изображений и разметки.
 
     Инструменты рисования:
-        • rect    — axis-aligned bounding box (detect)
-        • segment — полигон (клики по вершинам, замыкание — клик по первой)
-        • obb     — oriented bounding box (3 клика: угол → ширина → высота)
+        • rect         — axis-aligned bounding box (detect)
+        • segment      — полигон (клики по вершинам, замыкание — клик по первой)
+        • segment_line — свободное рисование полигона: зажать ЛКМ, вести,
+                         отпустить — контур автоматически замыкается на начало
+        • obb          — oriented bounding box (3 клика: угол → ширина → высота)
 
     Режимы редактирования:
         • detect  — 4 угловых маркера, перетаскивание за угол / за тело
@@ -55,9 +57,22 @@ class SmartGraphicsView(QGraphicsView):
     HIT_OBB_EDGE_PX        = 8      # середины сторон OBB
     HIT_OBB_ROTATE_PX      = 11     # ручка вращения
 
+    # Двойной клик по сегменту:
+    # попадание по вершине (удаление) — заметно больше визуального маркера,
+    # чтобы по «точечке» было легко попасть мышью.
+    HIT_SEGMENT_POINT_DBL_PX = 20   # экранные пиксели
+    HIT_SEGMENT_EDGE_DBL_PX  = 20    # экранные пиксели (попадание по ребру)
+
     # Доля меньшей стороны объекта, выше которой маркер не увеличивается.
     # Защита от ситуации «объект крошечный, а маркер в нём занимает пол-объекта».
     MARKER_MAX_FRACTION    = 0.22
+    # Минимальное число вершин полигона сегментации. Если пользователь
+    # нарисовал меньше — недостающие точки добавляются на самых длинных
+    # сегментах (середины сторон). Относится и к "segment", и к "segment_line".
+    MIN_SEGMENT_POINTS     = 5
+    # Минимальное расстояние между сохраняемыми точками при свободном
+    # рисовании segment_line (в пикселях изображения).
+    FREEHAND_MIN_STEP_PX   = 3
 
     # ==================================================================
     # Конструктор
@@ -90,9 +105,13 @@ class SmartGraphicsView(QGraphicsView):
         self.temp_rect = None
         self.temp_scribble = None
 
-        # ----- Состояние рисования segment -----
+        # ----- Состояние рисования segment (кликами) -----
         self.temp_polygon_points = []
         self.temp_polygon_cursor = None
+
+        # ----- Состояние свободного рисования segment_line -----
+        self.freehand_points = []
+        self.freehand_drawing = False
 
         # ----- Состояние рисования OBB -----
         self.obb_draw_stage = 0
@@ -158,6 +177,8 @@ class SmartGraphicsView(QGraphicsView):
         self.temp_scribble = None
         self.temp_polygon_points = []
         self.temp_polygon_cursor = None
+        self.freehand_points = []
+        self.freehand_drawing = False
         self.obb_draw_stage = 0
         self.obb_draw_p1 = None
         self.obb_draw_p2 = None
@@ -173,6 +194,8 @@ class SmartGraphicsView(QGraphicsView):
         self.temp_scribble = None
         self.temp_polygon_points = []
         self.temp_polygon_cursor = None
+        self.freehand_points = []
+        self.freehand_drawing = False
         self.obb_draw_stage = 0
 
     def set_suggested_save_name(self, name):
@@ -193,6 +216,8 @@ class SmartGraphicsView(QGraphicsView):
             self.cursor_scene_pos = None
             self.temp_polygon_points = []
             self.temp_polygon_cursor = None
+            self.freehand_points = []
+            self.freehand_drawing = False
             self.obb_draw_stage = 0
             if not self.edit_mode:
                 self._setup_pan_mode()
@@ -368,6 +393,23 @@ class SmartGraphicsView(QGraphicsView):
                             inside = not inside
             p1x, p1y = p2x, p2y
         return inside
+
+    @staticmethod
+    def _point_to_segment_dist(px, py, x1, y1, x2, y2):
+        """Кратчайшее расстояние от точки (px,py) до отрезка (x1,y1)-(x2,y2)."""
+        dx = x2 - x1
+        dy = y2 - y1
+        seg_len2 = dx * dx + dy * dy
+        if seg_len2 < 1e-12:
+            return math.hypot(px - x1, py - y1)
+        t = ((px - x1) * dx + (py - y1) * dy) / seg_len2
+        if t < 0.0:
+            t = 0.0
+        elif t > 1.0:
+            t = 1.0
+        cx = x1 + t * dx
+        cy = y1 + t * dy
+        return math.hypot(px - cx, py - cy)
 
     def _hit_test_point(self, point, pos_pixel, radius=None):
         if radius is None:
@@ -724,7 +766,7 @@ class SmartGraphicsView(QGraphicsView):
                 event.ignore()
                 return
 
-            # NEW: если курсор попал в выделенную аннотацию — показать меню
+            # Если курсор попал в выделенную аннотацию — показать меню
             # действий с объектом (Edit / Convert to OBB / Delete).
             # Приоритет отдаём уже выделенному объекту, но если он не под
             # курсором, разрешаем найти другой — родитель синхронизирует
@@ -775,8 +817,28 @@ class SmartGraphicsView(QGraphicsView):
             event.accept()
             return
 
-        # --- Режим редактирования: выделение + drag через единый _find_hit ---
-        if self.edit_mode:
+        # --- Режим редактирования ИЛИ клик по объекту ---
+        # Если инструмент рисования активен — клик обычно рисует, НО:
+        #   • если клик попал по уже выделенному объекту — приоритет
+        #     отдаём редактированию (удобно сразу после рисования);
+        #   • если инструмент не активен — клик по объекту выделяет
+        #     и включает edit-mode.
+        tool_active = self.drawing_mode and self.current_tool is not None
+
+        # «Клик по выделенному» — короткая разведка для случая, когда
+        # инструмент активен, но пользователь явно тыкает в свой объект.
+        click_on_selected = False
+        if tool_active and not self.edit_mode and self.selected_index != -1:
+            scene_probe = self.mapToScene(event.pos())
+            if (0 <= scene_probe.x() < self.img_width
+                    and 0 <= scene_probe.y() < self.img_height):
+                probe_pixel = (scene_probe.x(), scene_probe.y())
+                if self._hit_test_any(
+                        self.annotations[self.selected_index],
+                        probe_pixel) is not None:
+                    click_on_selected = True
+
+        if self.edit_mode or not tool_active or click_on_selected:
             scene_pos = self.mapToScene(event.pos())
             if not (0 <= scene_pos.x() < self.img_width
                     and 0 <= scene_pos.y() < self.img_height):
@@ -791,16 +853,27 @@ class SmartGraphicsView(QGraphicsView):
             idx, hit = self._find_hit(pos_pixel, self.selected_index)
 
             if idx == -1:
-                # Клик вне объектов — выходим из edit-режима.
-                self.set_selected_index(-1)
-                self.set_edit_mode(False)
-                event.accept()
-                QTimer.singleShot(0, self.viewport().update)
+                if self.edit_mode:
+                    # Клик вне объектов — выходим из edit-режима.
+                    self.set_selected_index(-1)
+                    self.set_edit_mode(False)
+                    # Если инструмент рисования активен — сразу начинаем
+                    # новый объект, чтобы пользователь не «терял» клик.
+                    if tool_active:
+                        self.drawing = False
+                        self._start_drawing(event)
+                    event.accept()
+                    QTimer.singleShot(0, self.viewport().update)
+                    return
+                # Не в edit-mode и не попали в объект — отдаём panning.
+                super().mousePressEvent(event)
                 return
 
-            # Применяем выделение (если сменился объект).
+            # Нашли объект: выделяем и входим в edit-mode.
             if idx != self.selected_index:
                 self.set_selected_index(idx)
+            if not self.edit_mode:
+                self.set_edit_mode(True)
 
             # Универсальная инициализация drag для любого типа хендла.
             if isinstance(hit, tuple):
@@ -859,6 +932,8 @@ class SmartGraphicsView(QGraphicsView):
                         self._continue_drawing(event)
                 elif self.current_tool == 'segment':
                     self._update_segment_cursor(event)
+                elif self.current_tool == 'segment_line':
+                    self._update_segment_line(event)
                 elif self.current_tool == 'obb':
                     self._update_obb_draw(event)
 
@@ -1212,7 +1287,181 @@ class SmartGraphicsView(QGraphicsView):
                     self.on_display_update_callback()
                 return
 
+            elif self.drawing_mode and self.drawing and self.current_tool == "segment_line":
+                # Отпустили мышь — замыкаем контур на первую точку.
+                event.accept()
+                self._finish_segment_line()
+                return
+
         super().mouseReleaseEvent(event)
+
+    # ==================================================================
+    # Двойной клик: удаление / вставка точек сегмента
+    # ==================================================================
+    def mouseDoubleClickEvent(self, event):
+        # Обрабатываем только ЛКМ.
+        if event.button() != Qt.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        # Не мешаем активному инструменту рисования.
+        if self.drawing_mode and self.current_tool is not None:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        if self._current_pixmap is None or self._current_pixmap.isNull():
+            super().mouseDoubleClickEvent(event)
+            return
+        if self.img_width <= 0 or self.img_height <= 0:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        scene_pos = self.mapToScene(event.pos())
+        if not (0 <= scene_pos.x() < self.img_width
+                and 0 <= scene_pos.y() < self.img_height):
+            super().mouseDoubleClickEvent(event)
+            return
+
+        pos_pixel = (float(scene_pos.x()), float(scene_pos.y()))
+        if self._try_segment_double_click(pos_pixel):
+            event.accept()
+            return
+
+        super().mouseDoubleClickEvent(event)
+
+    def _try_segment_double_click(self, pos_pixel):
+        """Обрабатывает двойной клик по сегментации.
+
+        • клик в увеличенной невидимой зоне вершины — удаляет вершину
+          (если после удаления останется ≥ 3 точки);
+        • клик рядом с ребром между вершинами — вставляет новую точку
+          в проекцию клика на это ребро.
+
+        Возвращает True, если что-то сделали.
+        """
+        # Порядок обхода: сначала выделенный объект, потом все остальные.
+        order = []
+        if 0 <= self.selected_index < len(self.annotations):
+            order.append(self.selected_index)
+        for i in range(len(self.annotations)):
+            if i != self.selected_index:
+                order.append(i)
+
+        spx = self._scene_per_px()
+        point_r = self.HIT_SEGMENT_POINT_DBL_PX * spx
+        edge_r  = self.HIT_SEGMENT_EDGE_DBL_PX  * spx
+
+        for idx in order:
+            ann = self.annotations[idx]
+            if not ann or ann[0] != 'segment':
+                continue
+
+            norm_flat = list(ann[2])
+            if len(norm_flat) < 6 or len(norm_flat) % 2 != 0:
+                continue
+            n = len(norm_flat) // 2
+
+            # Пиксельные координаты без округления до int — чтобы не
+            # терять точность при повторных правках.
+            pts_pixel = [
+                (norm_flat[2 * i] * self.img_width,
+                 norm_flat[2 * i + 1] * self.img_height)
+                for i in range(n)
+            ]
+
+            # ----- 1) Попадание по вершине → удалить. -----
+            best_i = -1
+            best_d = None
+            for i, pt in enumerate(pts_pixel):
+                d = math.hypot(pt[0] - pos_pixel[0], pt[1] - pos_pixel[1])
+                if d <= point_r and (best_d is None or d < best_d):
+                    best_d = d
+                    best_i = i
+
+            if best_i != -1:
+                if n <= 3:
+                    if self.on_log_callback:
+                        self.on_log_callback(
+                            "Нельзя удалить точку: в полигоне минимум 3 вершины.")
+                    return True
+                new_flat = list(norm_flat)
+                del new_flat[2 * best_i:2 * best_i + 2]
+                self._apply_segment_change(
+                    idx, new_flat,
+                    f"Удалена точка #{best_i + 1} сегмента "
+                    f"(осталось {len(new_flat) // 2})."
+                )
+                return True
+
+            # ----- 2) Попадание по ребру → вставить точку. -----
+            best_edge_i = -1
+            best_edge_d = None
+            best_edge_xy = None
+            for i in range(n):
+                x1, y1 = pts_pixel[i]
+                x2, y2 = pts_pixel[(i + 1) % n]
+                d = self._point_to_segment_dist(
+                    pos_pixel[0], pos_pixel[1], x1, y1, x2, y2)
+                if d <= edge_r and (best_edge_d is None or d < best_edge_d):
+                    # Проекция клика на отрезок — чтобы точка встала
+                    # ровно туда, куда указал пользователь.
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    seg_len2 = dx * dx + dy * dy
+                    if seg_len2 < 1e-9:
+                        nx, ny = x1, y1
+                    else:
+                        t = ((pos_pixel[0] - x1) * dx
+                             + (pos_pixel[1] - y1) * dy) / seg_len2
+                        t = max(0.0, min(1.0, t))
+                        nx, ny = x1 + t * dx, y1 + t * dy
+                    best_edge_d = d
+                    best_edge_i = i
+                    best_edge_xy = (nx, ny)
+
+            if best_edge_i != -1:
+                nx_norm = max(0.0, min(1.0, best_edge_xy[0] / self.img_width))
+                ny_norm = max(0.0, min(1.0, best_edge_xy[1] / self.img_height))
+                new_flat = list(norm_flat)
+                pos = 2 * (best_edge_i + 1)
+                new_flat.insert(pos, nx_norm)
+                new_flat.insert(pos + 1, ny_norm)
+                self._apply_segment_change(
+                    idx, new_flat,
+                    f"Добавлена точка на ребре {best_edge_i + 1} "
+                    f"(всего {len(new_flat) // 2})."
+                )
+                return True
+
+        return False
+
+    def _apply_segment_change(self, idx, norm_flat, log_msg):
+        """Применяет новое множество нормализованных точек сегмента
+        и уведомляет родителя."""
+        ann = self.annotations[idx]
+        new_ann = ('segment', ann[1], list(norm_flat))
+        self.annotations[idx] = new_ann
+        # Синхронизируем состояние редактирования — если пользователь
+        # продолжит тащить точки без переоткрытия сцены.
+        self.edit_original_ann = new_ann
+        self.edit_original_points = self._get_points_pixel(new_ann)
+        # Если правка пришла в объект, который во view не выделен —
+        # переключаем выделение и включаем edit-mode, чтобы пользователь
+        # оставался в контексте редактирования.
+        if self.selected_index != idx:
+            self.set_selected_index(idx)
+        if not self.edit_mode:
+            self.set_edit_mode(True)
+
+        if self.on_annotation_modified_callback:
+            self.on_annotation_modified_callback(idx, new_ann)
+        if self.on_display_update_callback:
+            self.on_display_update_callback()
+        if self.on_log_callback:
+            self.on_log_callback(log_msg)
+
+        QTimer.singleShot(0, self.viewport().update)
+
 
     def leaveEvent(self, event):
         self.cursor_scene_pos = None
@@ -1258,6 +1507,13 @@ class SmartGraphicsView(QGraphicsView):
             self.drawing = True
             QTimer.singleShot(0, self.viewport().update)
 
+        elif self.current_tool == "segment_line":
+            # Первый клик — начинаем собирать траекторию.
+            self.freehand_points = [(x, y)]
+            self.freehand_drawing = True
+            self.drawing = True
+            QTimer.singleShot(0, self.viewport().update)
+
         elif self.current_tool == "obb":
             if self.obb_draw_stage == 0:
                 self.obb_draw_p1 = (x, y)
@@ -1284,6 +1540,26 @@ class SmartGraphicsView(QGraphicsView):
         if 0 <= x < self.img_width and 0 <= y < self.img_height:
             self.temp_polygon_cursor = (x, y)
             QTimer.singleShot(0, self.viewport().update)
+
+    def _update_segment_line(self, event):
+        """Свободное рисование: накапливает точки, пока ЛКМ зажата."""
+        if not self.freehand_drawing:
+            return
+        scene_pos = self.mapToScene(event.pos())
+        x = int(scene_pos.x())
+        y = int(scene_pos.y())
+        if not (0 <= x < self.img_width and 0 <= y < self.img_height):
+            return
+
+        # Фильтр по минимальному расстоянию: не плодим почти одинаковые
+        # точки, когда мышь двигается медленно и Qt шлёт события часто.
+        if self.freehand_points:
+            lx, ly = self.freehand_points[-1]
+            if math.hypot(x - lx, y - ly) < self.FREEHAND_MIN_STEP_PX:
+                return
+
+        self.freehand_points.append((x, y))
+        QTimer.singleShot(0, self.viewport().update)
 
     def _update_obb_draw(self, event):
         scene_pos = self.mapToScene(event.pos())
@@ -1321,14 +1597,21 @@ class SmartGraphicsView(QGraphicsView):
                 self.on_rect_drawn_callback(rect)
         self.temp_scribble = None
 
+
+
     def _finish_segment(self):
         pts = self.temp_polygon_points
+        # Минимум 3 вершины — иначе это не полигон, а случайный клик.
         if len(pts) < 3:
             self.temp_polygon_points = []
             self.temp_polygon_cursor = None
             self.drawing = False
             QTimer.singleShot(0, self.viewport().update)
             return
+
+        # NEW: добиваем до минимального количества точек.
+        pts = self._ensure_min_polygon_points(pts)
+
         norm_pts = []
         for px, py in pts:
             norm_pts.append(px / self.img_width)
@@ -1340,6 +1623,80 @@ class SmartGraphicsView(QGraphicsView):
         if self.on_segment_drawn_callback:
             self.on_segment_drawn_callback(norm_pts)
 
+    def _ensure_min_polygon_points(self, pts):
+        """Если вершин меньше MIN_SEGMENT_POINTS — вставляет середины
+        на самых длинных сегментах (с учётом замыкающего ребра), пока
+        точек не станет >= MIN_SEGMENT_POINTS.
+
+        pts — список пар (x, y) в пикселях. Возвращает новый список.
+        """
+        pts = list(pts)
+        target = int(self.MIN_SEGMENT_POINTS)
+        guard = 0
+        while len(pts) < target and len(pts) >= 2 and guard < 100:
+            guard += 1
+            n = len(pts)
+            best_i = 0
+            best_len = -1.0
+            for i in range(n):
+                x1, y1 = pts[i]
+                x2, y2 = pts[(i + 1) % n]
+                d = math.hypot(x2 - x1, y2 - y1)
+                if d > best_len:
+                    best_len = d
+                    best_i = i
+            if best_len <= 0.0:
+                # Все вершины совпали — расширять некуда.
+                break
+            x1, y1 = pts[best_i]
+            x2, y2 = pts[(best_i + 1) % n]
+            mid = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+            pts.insert(best_i + 1, mid)
+        return pts
+
+    def _finish_segment_line(self):
+        """Завершает свободный сегмент: прореживает точки, добивает
+        до минимального количества, нормирует, отдаёт в
+        on_segment_drawn_callback. Автозамыкание контура выполняет
+        cv2.polylines(isClosed=True) в родителе."""
+        pts = list(self.freehand_points)
+        self.freehand_points = []
+        self.freehand_drawing = False
+        self.drawing = False
+        QTimer.singleShot(0, self.viewport().update)
+
+        # Минимум 3 вершины — иначе это не полигон, а случайный мазок.
+        if len(pts) < 3:
+            return
+
+        # Прореживание: убираем близкие точки, сохраняя форму.
+        # approxPolyDP — идеальный вариант: допуск 2 пикселя сохраняет
+        # изгибы, но выкидывает «дрожание» руки.
+        try:
+            pts_np = np.array(pts, dtype=np.int32).reshape(-1, 1, 2)
+            simplified = cv2.approxPolyDP(pts_np, epsilon=2.0, closed=True)
+            if simplified is not None and len(simplified) >= 3:
+                pts = [(int(p[0][0]), int(p[0][1])) for p in simplified]
+        except Exception:
+            # cv2/np могут быть недоступны в этом окружении — тогда
+            # используем сырые точки. Это не критично.
+            pass
+
+        if len(pts) < 3:
+            return
+
+        # NEW: добиваем до минимального количества точек.
+        pts = self._ensure_min_polygon_points(pts)
+
+        norm_pts = []
+        for px, py in pts:
+            nx = max(0.0, min(1.0, px / self.img_width))
+            ny = max(0.0, min(1.0, py / self.img_height))
+            norm_pts.append(nx)
+            norm_pts.append(ny)
+
+        if self.on_segment_drawn_callback:
+            self.on_segment_drawn_callback(norm_pts)
     def _finish_obb(self):
         params = self._compute_obb_preview_params()
         if params is None:
@@ -1403,7 +1760,7 @@ class SmartGraphicsView(QGraphicsView):
             painter.drawRect(QRectF(min(x1, x2), min(y1, y2),
                                     abs(x2 - x1), abs(y2 - y1)))
 
-        # --- Временный полигон (segment) ---
+        # --- Временный полигон (segment, кликами) ---
         if self.current_tool == "segment" and self.temp_polygon_points:
             painter.setPen(QPen(QColor(0, 200, 0), 2))
             painter.setBrush(QBrush(QColor(0, 200, 0, 80)))
@@ -1420,6 +1777,24 @@ class SmartGraphicsView(QGraphicsView):
                 painter.setPen(QPen(QColor(255, 0, 0), 2))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(QPointF(first[0], first[1]), 12, 12)
+
+        # --- Временный свободный сегмент (segment_line) ---
+        if self.current_tool == "segment_line" and self.freehand_points:
+            painter.setPen(QPen(QColor(0, 200, 0), 2))
+            painter.setBrush(Qt.NoBrush)
+            pts_q = [QPointF(px, py) for px, py in self.freehand_points]
+            if len(pts_q) >= 2:
+                painter.drawPolyline(pts_q)
+                # Пунктирная линия к началу — визуальная подсказка,
+                # что контур замкнётся при отпускании мыши.
+                painter.setPen(QPen(QColor(0, 200, 0, 160), 1, Qt.DashLine))
+                painter.drawLine(pts_q[-1], pts_q[0])
+
+            # Точка старта — красный кружок.
+            fx, fy = self.freehand_points[0]
+            painter.setPen(QPen(QColor(255, 0, 0), 2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QPointF(fx, fy), 8, 8)
 
         # --- Временный OBB при рисовании ---
         if self.current_tool == "obb":

@@ -22,7 +22,8 @@ class DatasetGeneratorThread(QThread):
                  mask_class_remap, included_orig_ids=None, included_class_ids=None,
                  total_orig_classes=1, resize_mode="fixed",
                  include_empty_annotations=False,
-                 delete_source_after_success=False):
+                 delete_source_after_success=False,
+                 output_masks=False):
         super().__init__()
         self.images_folder = images_folder
         self.labels_folder = labels_folder
@@ -48,7 +49,9 @@ class DatasetGeneratorThread(QThread):
         self.included_orig_ids = included_orig_ids
         self.included_class_ids = included_class_ids
         self.include_empty_annotations = include_empty_annotations
-        self.delete_source_after_success = delete_source_after_success   # ← НОВОЕ
+        self.delete_source_after_success = delete_source_after_success
+        # NEW: генерировать маски из итоговых аннотаций
+        self.output_masks = bool(output_masks)
 
         # Уникальные исходные файлы, которые реально попали в датасет:
         # (img_path, label_path_or_None, mask_path_or_None)
@@ -70,7 +73,8 @@ class DatasetGeneratorThread(QThread):
         ])
         self.complex_aug_needed = any([
             self.augmentations.get('random_rotate', False),
-            self.augmentations.get('shear', False)
+            self.augmentations.get('shear', False),
+            self.augmentations.get('random_crop', False),   # NEW
         ])
         self.simple_mask_aug_needed = any([
             self.augmentations.get('horizontal_flip', False),
@@ -79,7 +83,8 @@ class DatasetGeneratorThread(QThread):
         ])
         self.complex_mask_aug_needed = any([
             self.augmentations.get('random_rotate', False),
-            self.augmentations.get('shear', False)
+            self.augmentations.get('shear', False),
+            self.augmentations.get('random_crop', False),   # NEW
         ])
 
     def _compute_image_hash(self, img):
@@ -555,6 +560,153 @@ class DatasetGeneratorThread(QThread):
         move_pairs(test_pairs, 'test')
         shutil.rmtree(output_path / 'all', ignore_errors=True)
 
+    # ==================================================================
+    # Генерация масок из итоговых .txt-аннотаций
+    # ==================================================================
+    def _generate_masks_from_annotations(self, output_path):
+        """Проходит по labels/{split}/*.txt, рисует одноканальную маску
+        (пиксель = class_id) и сохраняет её в masks/{split}/{stem}.png.
+
+        Возвращает число успешно записанных масок.
+        """
+        if self.dataset_type == 2:
+            self.log("Генерация масок: датасет без аннотаций — пропускаем.")
+            return 0
+        if not self.class_names:
+            self.log("Генерация масок: нет классов — пропускаем.")
+            return 0
+
+        # 8 или 16 бит в зависимости от числа классов.
+        if self.num_classes is not None and self.num_classes > 255:
+            mask_dtype = np.uint16
+            self.log("Генерация масок: class_id > 255, используем uint16.")
+        else:
+            mask_dtype = np.uint8
+
+        splits = ('train', 'val', 'test')
+        total = 0
+        errors = 0
+
+        for split in splits:
+            img_dir = output_path / 'images' / split
+            lbl_dir = output_path / 'labels' / split
+            mask_dir = output_path / 'masks' / split
+
+            if not lbl_dir.is_dir():
+                continue
+            mask_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                txt_files = [f for f in os.listdir(lbl_dir)
+                             if f.lower().endswith('.txt')]
+            except Exception as e:
+                self.log(f"Генерация масок: не читается {lbl_dir}: {e}")
+                continue
+
+            if not txt_files:
+                continue
+
+            for txt_name in txt_files:
+                if self._is_cancelled:
+                    self.log("Генерация масок: отменено пользователем.")
+                    return total
+
+                stem = os.path.splitext(txt_name)[0]
+                lbl_path = lbl_dir / txt_name
+
+                # Ищем соответствующее изображение.
+                img_path = None
+                if img_dir.is_dir():
+                    for ext in ('.png', '.jpg', '.jpeg', '.bmp',
+                                '.tif', '.tiff', '.webp'):
+                        cand = img_dir / (stem + ext)
+                        if cand.exists():
+                            img_path = cand
+                            break
+                    if img_path is None:
+                        for f in os.listdir(img_dir):
+                            if os.path.splitext(f)[0] == stem:
+                                img_path = img_dir / f
+                                break
+
+                if img_path is None:
+                    self.log(f"Генерация масок: нет изображения для {txt_name}, пропуск.")
+                    errors += 1
+                    continue
+
+                img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
+                if img is None:
+                    self.log(f"Генерация масок: не удалось прочитать {img_path}")
+                    errors += 1
+                    continue
+
+                h, w = img.shape[:2]
+                mask = np.zeros((h, w), dtype=mask_dtype)
+
+                try:
+                    annotations = load_annotations(str(lbl_path), w, h)
+                except Exception as e:
+                    self.log(f"Генерация масок: ошибка чтения {lbl_path}: {e}")
+                    errors += 1
+                    continue
+
+                for ann in annotations:
+                    try:
+                        typ = ann[0]
+                        cls_id = int(ann[1])
+                    except Exception:
+                        continue
+
+                    if cls_id < 0:
+                        continue
+
+                    try:
+                        if typ == 'detect':
+                            _, _, cx, cy, bw, bh = ann
+                            x1 = int(round((cx - bw / 2.0) * w))
+                            y1 = int(round((cy - bh / 2.0) * h))
+                            x2 = int(round((cx + bw / 2.0) * w))
+                            y2 = int(round((cy + bh / 2.0) * h))
+                            x1 = max(0, min(x1, w - 1))
+                            y1 = max(0, min(y1, h - 1))
+                            x2 = max(0, min(x2, w - 1))
+                            y2 = max(0, min(y2, h - 1))
+                            cv2.rectangle(mask, (x1, y1), (x2, y2),
+                                          int(cls_id), thickness=-1)
+
+                        elif typ in ('obb', 'segment'):
+                            pts_norm = ann[2]
+                            pts = []
+                            for i in range(0, len(pts_norm) - 1, 2):
+                                px = int(round(pts_norm[i] * w))
+                                py = int(round(pts_norm[i + 1] * h))
+                                px = max(0, min(px, w - 1))
+                                py = max(0, min(py, h - 1))
+                                pts.append([px, py])
+                            if len(pts) >= 3:
+                                cv2.fillPoly(
+                                    mask,
+                                    [np.array(pts, dtype=np.int32)],
+                                    int(cls_id),
+                                )
+                    except Exception as e:
+                        self.log(f"Генерация масок: ошибка отрисовки в {txt_name}: {e}")
+
+                out_mask_path = mask_dir / (stem + '.png')
+                try:
+                    ok = cv2.imwrite(str(out_mask_path), mask)
+                    if ok:
+                        total += 1
+                    else:
+                        errors += 1
+                        self.log(f"Генерация масок: не удалось записать {out_mask_path}")
+                except Exception as e:
+                    errors += 1
+                    self.log(f"Генерация масок: исключение при записи {out_mask_path}: {e}")
+
+        self.log(f"Генерация масок завершена: успешно={total}, ошибок={errors}")
+        return total
+
     def run(self):
         try:
             self.log("=== Начало генерации датасета ===")
@@ -601,7 +753,17 @@ class DatasetGeneratorThread(QThread):
 
             self._split_and_move(output_path, all_pairs)
 
-            # --- НОВОЕ: удаление исходников после успешной генерации ---
+            # --- NEW: генерация масок из итоговых .txt-аннотаций ---
+            if self.output_masks:
+                self.log("=== Генерация масок из аннотаций ===")
+                masks_count = self._generate_masks_from_annotations(output_path)
+                if masks_count == 0:
+                    self.log("⚠️ Маски не созданы. Проверьте, есть ли "
+                             "непустые .txt в labels/{split}.")
+            else:
+                self.log("Генерация масок отключена (output_masks=False).")
+
+            # --- Удаление исходников после успешной генерации ---
             if self.delete_source_after_success:
                 self.log("=== Удаление исходных файлов (по флагу пользователя) ===")
                 self._delete_processed_sources()

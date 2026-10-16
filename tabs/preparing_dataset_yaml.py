@@ -1357,6 +1357,20 @@ class DatasetPreparationWindow(QMainWindow):
                                 if k not in ['random_rotate_angle', 'shear_angle'])
         aug_multiplier = self.aug_multiplier_slider.value() if has_augmentations else 1
 
+        # --- NEW: тип выходного датасета ---
+        output_masks = False
+        try:
+            output_masks = (self.output_format_combo.currentData() == "annotations_masks")
+        except Exception:
+            output_masks = False
+        # Принудительная защита: маски генерим только из аннотаций (dataset_type==0).
+        # Для dataset_type==1 маски уже есть во входных данных.
+        if self.dataset_type != 0:
+            if output_masks:
+                self.log("⚠️ output_masks=True проигнорирован: "
+                         "маски создаются только из аннотаций (dataset_type=0).")
+            output_masks = False
+
         if target_size is None and has_augmentations:
             reply = QMessageBox.question(
                 self, "Предупреждение",
@@ -1415,6 +1429,8 @@ class DatasetPreparationWindow(QMainWindow):
             self.log(f"Augmentation multiplier: {aug_multiplier}x")
         self.log(f"Classes: {num_classes}")
         self.log(f"Channels (для data.yaml): {selected_channels}")
+        self.log(f"Output format: "
+                 f"{'annotations + masks' if output_masks else 'annotations only'}")
         self.log(f"Include empty annotations: {include_empty_annotations}")
         self.log(f"Delete source files after success: {delete_source_after_success}")
         if skipped_invalid:
@@ -1455,6 +1471,7 @@ class DatasetPreparationWindow(QMainWindow):
             resize_mode=resize_mode,
             include_empty_annotations=include_empty_annotations,
             delete_source_after_success=delete_source_after_success,
+            output_masks=output_masks,
         )
 
         self.generator_thread.log_signal.connect(self.log)

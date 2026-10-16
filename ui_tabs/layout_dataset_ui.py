@@ -28,6 +28,7 @@ def setup_layout_dataset_ui(parent):
         "Изменения затрагивают только память — не забудьте Save All."
     )
 
+
     # --- Группа эксклюзивных инструментов рисования ---
     parent.tool_group = QButtonGroup(parent)
     parent.tool_group.setExclusive(True)
@@ -38,10 +39,21 @@ def setup_layout_dataset_ui(parent):
     parent.btn_tool_segment = QPushButton("✏️ Segment")
     parent.btn_tool_segment.setToolTip("Рисовать полигон сегментации (segment)")
 
+
+    # NEW: свободное рисование сегмента
+    parent.btn_tool_segment_line = QPushButton("📏 Segment Line")
+    parent.btn_tool_segment_line.setCheckable(True)
+    parent.btn_tool_segment_line.setToolTip(
+        "Свободное рисование полигона:\n"
+        "  • зажать ЛКМ и вести по изображению — контур рисуется «от руки»;\n"
+        "  • отпустить ЛКМ — контур автоматически замыкается на первую точку."
+    )
+
     parent.btn_tool_obb = QPushButton("🔷 OBB")
     parent.btn_tool_obb.setToolTip("Рисовать ориентированный прямоугольник (OBB)")
 
-    for b in (parent.btn_tool_rect, parent.btn_tool_segment, parent.btn_tool_obb):
+    for b in (parent.btn_tool_rect, parent.btn_tool_segment,
+              parent.btn_tool_obb, parent.btn_tool_segment_line):
         b.setCheckable(True)
         parent.tool_group.addButton(b)
 
@@ -68,6 +80,7 @@ def setup_layout_dataset_ui(parent):
     top_layout.addWidget(parent.btn_tool_rect)
     top_layout.addWidget(parent.btn_tool_segment)
     top_layout.addWidget(parent.btn_tool_obb)
+    top_layout.addWidget(parent.btn_tool_segment_line)
     top_layout.addWidget(parent.chk_obb_xywhr)
     top_layout.addWidget(parent.save_button)
     top_layout.addWidget(parent.btn_save_all)
@@ -155,6 +168,32 @@ def setup_layout_dataset_ui(parent):
         "☑  Очистить текущие аннотации и записать только найденные."
     )
     auto_layout.addWidget(parent.chk_auto_replace)
+
+    # NEW: сглаживание сегментации (convex hull)
+    parent.chk_auto_convex_hull = QCheckBox(
+        "Выпуклая форма сегментации (convex hull)"
+    )
+    parent.chk_auto_convex_hull.setChecked(False)
+    parent.chk_auto_convex_hull.setToolTip(
+        "Применить выпуклую оболочку (convex hull) к контурам сегментации.\n"
+        "• резко уменьшает число точек;\n"
+        "• убирает «дрожание» и ложные вмятины контура.\n"
+        "Применяется только к выводу типа segment.\n"
+        "Игнорируется, если включено «Преобразовать в bbox»."
+    )
+    auto_layout.addWidget(parent.chk_auto_convex_hull)
+
+    # NEW: принудительное преобразование в обычный bbox (detect)
+    parent.chk_auto_to_bbox = QCheckBox("Преобразовать в bbox")
+    parent.chk_auto_to_bbox.setChecked(False)
+    parent.chk_auto_to_bbox.setToolTip(
+        "Игнорировать OBB / сегментацию и сохранить обычные\n"
+        "axis-aligned bounding box, которые модель выдаёт для каждого\n"
+        "объекта независимо от задачи.\n\n"
+        "Если модель не отдала .boxes напрямую (OBB-задача) —\n"
+        "координаты вычисляются из углов OBB или из маски."
+    )
+    auto_layout.addWidget(parent.chk_auto_to_bbox)
 
     # Индикатор типа вывода модели (obb / seg / detect)
     parent.auto_kind_label = QLabel("Тип вывода: —")

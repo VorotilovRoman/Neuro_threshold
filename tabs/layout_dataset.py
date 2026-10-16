@@ -256,11 +256,14 @@ class Labeler(QMainWindow):
             return "segment"
         if self.btn_tool_obb.isChecked():
             return "obb"
+        if self.btn_tool_segment_line.isChecked():   # NEW
+            return "segment_line"
         return None
 
     def _uncheck_all_tools(self):
         self.tool_group.setExclusive(False)
-        for b in (self.btn_tool_rect, self.btn_tool_segment, self.btn_tool_obb):
+        for b in (self.btn_tool_rect, self.btn_tool_segment,
+                  self.btn_tool_obb, self.btn_tool_segment_line):   # NEW
             b.setChecked(False)
         self.tool_group.setExclusive(True)
 
@@ -271,6 +274,8 @@ class Labeler(QMainWindow):
             tool = "segment"
         elif btn is self.btn_tool_obb:
             tool = "obb"
+        elif btn is self.btn_tool_segment_line:      # NEW
+            tool = "segment_line"
         else:
             return
 
@@ -826,6 +831,7 @@ class Labeler(QMainWindow):
         self.btn_tool_rect.setEnabled(has_images)
         self.btn_tool_segment.setEnabled(has_images)
         self.btn_tool_obb.setEnabled(has_images)
+        self.btn_tool_segment_line.setEnabled(has_images)
         self.delete_button.setEnabled(has_images and len(self.current_annotations) > 0)
         self.delete_all_button.setEnabled(has_images and len(self.current_annotations) > 0)
         self.nav_widget.set_navigation_enabled(has_images)
@@ -838,10 +844,12 @@ class Labeler(QMainWindow):
         self._sync_current_annotations_to_storage()
         self.image_view.set_annotations(self.current_annotations,
                                         self.img_w, self.img_h)
-        # Новый объект — выделения в списке пока нет; после добавления
-        # удобно выделить именно его.
         new_row = len(self.current_annotations) - 1
         self._rebuild_object_list(keep_row=new_row)
+        # NEW: синхронизируем выделение во view, иначе объект окажется
+        # выделенным в списке, но не в представлении — и сразу после
+        # рисования его нельзя ни выделить кликом, ни редактировать.
+        self.image_view.set_selected_index(new_row)
         self.update_image_display()
         self.log(log_text)
         self._revalidate_current()
@@ -964,6 +972,20 @@ class Labeler(QMainWindow):
         if W <= 0 or H <= 0:
             return [], "unknown"
 
+        # --- Опции постобработки ---
+        try:
+            to_bbox = bool(self.chk_auto_to_bbox.isChecked())
+            convex_hull = bool(self.chk_auto_convex_hull.isChecked())
+        except AttributeError:
+            # На случай, если UI-файл почему-то не обновили.
+            to_bbox = False
+            convex_hull = False
+
+        # --- 0. Принудительное преобразование в обычный bbox ---
+        if to_bbox:
+            unified = self._auto_extract_boxes_as_detect(r, W, H)
+            return unified, "detect"
+
         # --- 1. OBB ---
         obb = getattr(r, "obb", None)
         if (obb is not None
@@ -998,6 +1020,13 @@ class Labeler(QMainWindow):
                 if poly is None or len(poly) < 3:
                     continue
                 cls_id = int(cls_all[i]) if i < len(cls_all) else 0
+
+                # NEW: сглаживание контура выпуклой оболочкой
+                if convex_hull:
+                    poly = self._segment_convex_hull(poly)
+                    if poly is None or len(poly) < 3:
+                        continue
+
                 flat = []
                 for p in poly:
                     nx = max(0.0, min(1.0, float(p[0]) / W))
@@ -1011,25 +1040,128 @@ class Labeler(QMainWindow):
         # --- 3. Detection ---
         boxes = getattr(r, "boxes", None)
         if boxes is not None and len(boxes) > 0:
-            xyxy_all = boxes.xyxy.cpu().numpy()
-            cls_all = boxes.cls.cpu().numpy().astype(int)
-            unified = []
-            for i in range(len(cls_all)):
-                x1, y1, x2, y2 = [float(v) for v in xyxy_all[i].tolist()]
-                x1 = max(0.0, min(x1, W))
-                y1 = max(0.0, min(y1, H))
-                x2 = max(0.0, min(x2, W))
-                y2 = max(0.0, min(y2, H))
-                bw = (x2 - x1) / W
-                bh = (y2 - y1) / H
-                if bw <= 0 or bh <= 0:
-                    continue
-                cx = ((x1 + x2) / 2.0) / W
-                cy = ((y1 + y2) / 2.0) / H
-                unified.append(("detect", int(cls_all[i]), cx, cy, bw, bh))
+            unified = self._auto_extract_boxes_as_detect(r, W, H)
             return unified, "detect"
 
         return [], "unknown"
+
+    # ------------------------------------------------------------------
+    #  Извлечение обычных bounding box из результатов YOLO
+    # ------------------------------------------------------------------
+    def _auto_extract_boxes_as_detect(self, r, W, H):
+        """Возвращает список ('detect', cls, cx, cy, bw, bh) из любой
+        задачи YOLO (detect / segment / OBB).
+
+        Порядок источников:
+          1) r.boxes.xyxy — «родные» axis-aligned bbox модели;
+          2) r.obb.xyxy — axis-aligned bbox из OBB (ultralytics свойство);
+          3) r.obb.xyxyxyxy — вычисляем габарит по 4 углам;
+          4) r.masks.xy — вычисляем габарит по контуру маски."""
+        xyxy_all = None
+        cls_all = None
+
+        # 1) boxes.xyxy
+        boxes = getattr(r, "boxes", None)
+        if boxes is not None and len(boxes) > 0:
+            try:
+                xyxy_all = boxes.xyxy.cpu().numpy()
+                cls_all = boxes.cls.cpu().numpy().astype(int)
+            except Exception:
+                xyxy_all = None
+                cls_all = None
+
+        # 2) obb.xyxy / obb.xyxyxyxy
+        if xyxy_all is None:
+            obb = getattr(r, "obb", None)
+            if obb is not None and len(obb) > 0:
+                try:
+                    obb_xyxy = getattr(obb, "xyxy", None)
+                    if obb_xyxy is not None:
+                        xyxy_all = obb_xyxy.cpu().numpy()
+                    else:
+                        corners_all = obb.xyxyxyxy.cpu().numpy()
+                        xyxy_all = []
+                        for corners in corners_all:
+                            xs = corners[:, 0]
+                            ys = corners[:, 1]
+                            xyxy_all.append(
+                                [xs.min(), ys.min(), xs.max(), ys.max()]
+                            )
+                        xyxy_all = np.array(xyxy_all, dtype=np.float32)
+                    cls_all = obb.cls.cpu().numpy().astype(int)
+                except Exception:
+                    xyxy_all = None
+                    cls_all = None
+
+        # 3) masks.xy
+        if xyxy_all is None:
+            masks = getattr(r, "masks", None)
+            if (masks is not None
+                    and getattr(masks, "xy", None) is not None
+                    and len(masks.xy) > 0):
+                xyxy_all = []
+                for poly in masks.xy:
+                    if poly is None or len(poly) < 3:
+                        xyxy_all.append([0, 0, 0, 0])
+                        continue
+                    xs = poly[:, 0]
+                    ys = poly[:, 1]
+                    xyxy_all.append(
+                        [xs.min(), ys.min(), xs.max(), ys.max()]
+                    )
+                xyxy_all = np.array(xyxy_all, dtype=np.float32)
+                cls_all = np.zeros(len(xyxy_all), dtype=int)
+                boxes = getattr(r, "boxes", None)
+                if (boxes is not None
+                        and getattr(boxes, "cls", None) is not None
+                        and len(boxes) == len(xyxy_all)):
+                    try:
+                        cls_all = boxes.cls.cpu().numpy().astype(int)
+                    except Exception:
+                        pass
+
+        if xyxy_all is None or cls_all is None:
+            return []
+
+        unified = []
+        n = min(len(xyxy_all), len(cls_all))
+        for i in range(n):
+            try:
+                x1, y1, x2, y2 = [float(v) for v in xyxy_all[i]]
+            except Exception:
+                continue
+            x1 = max(0.0, min(x1, W))
+            y1 = max(0.0, min(y1, H))
+            x2 = max(0.0, min(x2, W))
+            y2 = max(0.0, min(y2, H))
+            bw = (x2 - x1) / W
+            bh = (y2 - y1) / H
+            if bw <= 0 or bh <= 0:
+                continue
+            cx = ((x1 + x2) / 2.0) / W
+            cy = ((y1 + y2) / 2.0) / H
+            unified.append(("detect", int(cls_all[i]), cx, cy, bw, bh))
+        return unified
+
+    # ------------------------------------------------------------------
+    #  Сглаживание контура сегментации
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _segment_convex_hull(poly):
+        """Возвращает выпуклую оболочку контура poly.
+        poly — numpy (N, 2) или список [x, y]. При неудаче возвращает
+        исходный poly, чтобы вызов не «съел» объект."""
+        try:
+            pts = np.asarray(poly, dtype=np.float32).reshape(-1, 1, 2)
+            if len(pts) < 3:
+                return poly
+            hull = cv2.convexHull(pts)
+            if hull is None or len(hull) < 3:
+                return poly
+            return hull.reshape(-1, 2)
+        except Exception:
+            return poly
+
 
     def _apply_auto_annotations(self, unified, replace):
         if replace:
@@ -1103,6 +1235,16 @@ class Labeler(QMainWindow):
 
         self.auto_kind_label.setText(f"Тип вывода: {kind}")
         replace = self.chk_auto_replace.isChecked()
+        opts = []
+        if self.chk_auto_to_bbox.isChecked():
+            opts.append("→ bbox")
+        if self.chk_auto_convex_hull.isChecked():
+            opts.append("convex hull")
+        if self.chk_auto_replace.isChecked():
+            opts.append("replace")
+        opt_str = ", ".join(opts) if opts else "—"
+        self.log(f"[Auto-label] Опции: {opt_str}")
+
         self._apply_auto_annotations(unified, replace)
 
         action = "заменено" if replace else "добавлено"
@@ -1133,6 +1275,16 @@ class Labeler(QMainWindow):
         progress.setValue(0)
 
         replace = self.chk_auto_replace.isChecked()
+
+        # NEW: единый набор опций для логов и итогового сообщения
+        opts = []
+        if self.chk_auto_to_bbox.isChecked():
+            opts.append("→ bbox")
+        if self.chk_auto_convex_hull.isChecked():
+            opts.append("convex hull")
+        if self.chk_auto_replace.isChecked():
+            opts.append("replace")
+        opt_str = ", ".join(opts) if opts else "—"
         kind_seen = None
         processed = 0
         errors = 0
@@ -1240,6 +1392,7 @@ class Labeler(QMainWindow):
         QMessageBox.information(
             self, "Auto-label",
             f"Обработано изображений: {processed}/{total}\n"
+            f"Опции: {opt_str}\n"
             f"Добавлено/заменено объектов: {added_objects}\n"
             f"Ошибок чтения/инференса: {errors}\n"
             f"Тип вывода модели: {kind_seen or '—'}\n\n"
@@ -1255,8 +1408,13 @@ class Labeler(QMainWindow):
             return
         self.current_annotations[idx] = new_ann
         self._sync_current_annotations_to_storage()
-        # Пересобираем список с сохранением выделения на idx.
         self._rebuild_object_list(keep_row=idx)
+        # NEW: если после пересборки списка выделение во view «отвалилось»
+        # (или в него прилетел другой индекс) — восстанавливаем.
+        if self.image_view.selected_index != idx:
+            self.image_view.set_selected_index(idx)
+        if not self.image_view.edit_mode:
+            self.image_view.set_edit_mode(True)
         self.update_image_display()
         self.log(f"Modified object {idx + 1}")
         self._revalidate_current()

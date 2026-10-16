@@ -213,6 +213,24 @@ def setup_preparing_dataset_yaml_ui(parent):
     )
     preproc_layout.addRow("Channels:", parent.channels_combo)
 
+    # NEW: тип выходного датасета — только аннотации или аннотации + маски
+    parent.output_format_combo = QComboBox()
+    parent.output_format_combo.addItem(
+        "Только аннотации (labels/*.txt)", "annotations"
+    )
+    parent.output_format_combo.addItem(
+        "Аннотации + маски (labels/ + masks/)", "annotations_masks"
+    )
+    parent.output_format_combo.setCurrentIndex(0)
+    parent.output_format_combo.setToolTip(
+        "Что сохранять в датасет:\n"
+        "• Только аннотации — как сейчас: .txt с полигонами/боксами в labels/.\n"
+        "• Аннотации + маски — дополнительно к .txt будут созданы маски\n"
+        "  (одноканальные PNG, где пиксель = class_id) в masks/{split}/.\n"
+        "  Структура зеркальна labels/{split}: masks/train, masks/val, masks/test."
+    )
+    preproc_layout.addRow("Output format:", parent.output_format_combo)
+
     parent.include_empty_annotations = QCheckBox("Include images with empty annotations")
     parent.include_empty_annotations.setChecked(False)
     parent.include_empty_annotations.setToolTip(
@@ -222,7 +240,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     preproc_layout.addRow("", parent.include_empty_annotations)
 
     parent.delete_source_after_success = QCheckBox(
-        "Delete source files after successful generation"
+        "Delete source files after successful generation. Исходные снимки удалятся!"
     )
     parent.delete_source_after_success.setChecked(False)
     parent.delete_source_after_success.setToolTip(
@@ -264,8 +282,12 @@ def setup_preparing_dataset_yaml_ui(parent):
     shear_layout.addWidget(parent.shear_angle)
     aug_layout.addLayout(shear_layout, 3, 0, 1, 2)
     parent.random_crop = QCheckBox("Random Crop")
-    parent.random_crop.setEnabled(False)
-    parent.random_crop.setToolTip("Функционал временно недоступен")
+    parent.random_crop.setToolTip(
+        "Случайный кроп: вырезает прямоугольную область случайного размера\n"
+        "(от 70% до 100% кадра) из изображения, маски и аннотаций.\n"
+        "Работает для всех режимов Image size.\n"
+        "При 'Keep original size' итоговый размер снимка уменьшится."
+    )
     aug_layout.addWidget(parent.random_crop, 4, 0)
     aug_group.setLayout(aug_layout)
     right_layout.addWidget(aug_group)
@@ -345,7 +367,45 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.hist_container.setVisible(False)
     main_layout.addWidget(parent.hist_container)
 
+    # --- Подключения ---
     parent.btn_folder.clicked.connect(parent.select_images_folder)
     parent.btn_labels.clicked.connect(parent.select_labels_folder)
     parent.btn_load_yaml.clicked.connect(parent.load_from_yaml)
     parent.btn_output.clicked.connect(parent.select_output_folder)
+
+    # ============================================================
+    # Управление output_format_combo в зависимости от типа датасета
+    # ============================================================
+    _OUTPUT_FORMAT_TOOLTIP_ANNOT = (
+        "Что сохранять в датасет:\n"
+        "• Только аннотации — как сейчас: .txt с полигонами/боксами в labels/.\n"
+        "• Аннотации + маски — дополнительно к .txt будут созданы маски\n"
+        "  (одноканальные PNG, где пиксель = class_id) в masks/{split}/.\n"
+        "  Структура зеркальна labels/{split}: masks/train, masks/val, masks/test."
+    )
+    _OUTPUT_FORMAT_TOOLTIP_MASKS = (
+        "Для датасета из масок маски уже присутствуют во входных данных.\n"
+        "Опция «аннотации + маски» недоступна.\n"
+        "Аннотации (.txt с полигонами) будут созданы автоматически."
+    )
+    _OUTPUT_FORMAT_TOOLTIP_IMAGES = (
+        "Для датасета только из изображений ни аннотации, ни маски не создаются."
+    )
+
+    def _sync_output_format_state(idx):
+        if idx == 0:
+            parent.output_format_combo.setEnabled(True)
+            parent.output_format_combo.setToolTip(_OUTPUT_FORMAT_TOOLTIP_ANNOT)
+        else:
+            # Принудительно возвращаем значение в "annotations" и блокируем.
+            parent.output_format_combo.setCurrentIndex(0)
+            parent.output_format_combo.setEnabled(False)
+            if idx == 1:
+                parent.output_format_combo.setToolTip(_OUTPUT_FORMAT_TOOLTIP_MASKS)
+            else:
+                parent.output_format_combo.setToolTip(_OUTPUT_FORMAT_TOOLTIP_IMAGES)
+
+    # Первичная синхронизация + подписка на переключение типа датасета.
+    parent.output_format_combo.setToolTip(_OUTPUT_FORMAT_TOOLTIP_ANNOT)
+    parent.dataset_type_combo.currentIndexChanged.connect(_sync_output_format_state)
+    _sync_output_format_state(parent.dataset_type_combo.currentIndex())

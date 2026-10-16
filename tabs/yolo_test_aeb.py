@@ -227,6 +227,7 @@ class YoloInspectWindow(QMainWindow):
         # --- Сохранение ---
         self.btn_save_image.clicked.connect(self.save_image)
         self.btn_save_errmap.clicked.connect(self.save_error_map)
+        self.btn_save_all_crops.clicked.connect(self.save_all_crops)
 
         # --- Авто-трансформации ---
         self.chk_auto_crop.toggled.connect(self.on_auto_crop_toggled)
@@ -941,6 +942,83 @@ class YoloInspectWindow(QMainWindow):
             return data
         return "none"
 
+    def _build_transformed_for_detection(self, det):
+        """Полный пайплайн обработки original_image для заданного детекта.
+
+        Повторяет логику _rebuild_displayed (морфология → авто-кроп/доворот
+        → точный доворот → ручные трансформации → инверсия), но
+        не трогает UI и не пишет в лог.
+        """
+        if self.original_image is None:
+            return None
+
+        img = self.original_image.copy()
+
+        img, _ = apply_object_morphology(
+            img,
+            det,
+            int(self.erosion_slider.value()),
+            int(self.dilation_slider.value()),
+            shape_name=self.kernel_shape_combo.currentText(),
+            contour_only=self.chk_contour_only.isChecked(),
+        )
+
+        do_rotate = self.chk_auto_rotate.isChecked()
+        do_crop = self.chk_auto_crop.isChecked()
+        fill_mode = self._get_fill_mode()
+        padding = int(self.crop_padding_spin.value())
+        off_x = int(self.crop_offset_x_spin.value())
+        off_y = int(self.crop_offset_y_spin.value())
+
+        if (do_rotate or do_crop) and det is not None:
+            if do_rotate and det.get("angle_deg") is not None:
+                img = rotate_with_optional_crop(
+                    img, det, auto_crop=do_crop,
+                    padding=padding, off_x=off_x, off_y=off_y,
+                    fill_mode=fill_mode,
+                )
+            elif do_crop:
+                img = crop_to_detection(
+                    img, det, padding=padding,
+                    off_x=off_x, off_y=off_y, fill_mode=fill_mode,
+                )
+
+        fine_angle = float(self.crop_rotation_spin.value())
+        if abs(fine_angle) > 1e-6:
+            h, w = img.shape[:2]
+            center = (w / 2.0, h / 2.0)
+            M = cv2.getRotationMatrix2D(center, fine_angle, 1.0)
+            if fill_mode == "white":
+                img = cv2.warpAffine(
+                    img, M, (w, h), flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255),
+                )
+            elif fill_mode == "black":
+                img = cv2.warpAffine(
+                    img, M, (w, h), flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0),
+                )
+            else:
+                img = cv2.warpAffine(
+                    img, M, (w, h), flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REPLICATE,
+                )
+
+        for op in self._manual_ops:
+            if op == "rot_cw":
+                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+            elif op == "rot_ccw":
+                img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            elif op == "flip_v":
+                img = cv2.flip(img, 0)
+            elif op == "flip_h":
+                img = cv2.flip(img, 1)
+
+        if self.invert_image_checkbox.isChecked():
+            img = cv2.bitwise_not(img)
+
+        return img
+
     # --------------------------------------------------------
     # Ручные трансформации / сброс
     # --------------------------------------------------------
@@ -1058,6 +1136,101 @@ class YoloInspectWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка",
                                  f"Не удалось сохранить карту дефектов:\n{e}")
+
+
+    def save_all_crops(self):
+        """Сохранить обработанный снимок для КАЖДОГО объекта из списка.
+
+        • Параметры кропа/доворота/морфологии — текущие.
+        • Папка выбирается один раз.
+        • При совпадении имён — запрос на перезапись для каждого файла
+          (с опциями «Да», «Да для всех», «Нет», «Отмена»).
+        """
+        if self.original_image is None:
+            QMessageBox.information(self, "Нет изображения", "Нечего сохранять.")
+            return
+        if not self.current_detections:
+            QMessageBox.information(
+                self, "Нет объектов",
+                "Список найденных объектов пуст — сохранять нечего."
+            )
+            return
+
+        # --- Куда сохранять ---
+        start_dir = ""
+        base_name = "image"
+        if self.image_paths and 0 <= self.current_index < len(self.image_paths):
+            src = self.image_paths[self.current_index]
+            start_dir = os.path.dirname(src)
+            base_name = os.path.splitext(os.path.basename(src))[0]
+
+        save_dir = QFileDialog.getExistingDirectory(
+            self, "Папка для сохранения кропов", start_dir
+        )
+        if not save_dir:
+            return
+
+        total = len(self.current_detections)
+        self.log(f"[Сохранить все кропы] папка: {save_dir}")
+        self.log(f"[Сохранить все кропы] объектов: {total}")
+
+        overwrite_all = False
+        saved = 0
+        skipped = 0
+        aborted = False
+
+        for i, det in enumerate(self.current_detections):
+            try:
+                img = self._build_transformed_for_detection(det)
+            except Exception as e:
+                self.log(f"[Сохранить все кропы] объект #{i+1}: ошибка обработки: {e}")
+                continue
+            if img is None:
+                continue
+
+            suffix = cls_suffix_from_detection(det, i + 1)
+            suf = f"_{suffix}" if suffix else f"_{i+1}"
+            fname = f"{base_name}{suf}_transformed.png"
+            fpath = os.path.join(save_dir, fname)
+
+            if os.path.exists(fpath) and not overwrite_all:
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Файл существует")
+                msg_box.setText(f"Файл уже существует:\n{fpath}\n\nПерезаписать?")
+                btn_yes    = msg_box.addButton("Да",          QMessageBox.YesRole)
+                btn_yes_all= msg_box.addButton("Да для всех", QMessageBox.YesRole)
+                btn_no     = msg_box.addButton("Нет",         QMessageBox.NoRole)
+                btn_cancel = msg_box.addButton("Отмена",      QMessageBox.RejectRole)
+                msg_box.setDefaultButton(btn_yes)
+                msg_box.exec_()
+                clicked = msg_box.clickedButton()
+
+                if clicked is btn_cancel:
+                    aborted = True
+                    break
+                if clicked is btn_no:
+                    skipped += 1
+                    self.log(f"[Сохранить все кропы] пропущен: {fpath}")
+                    continue
+                if clicked is btn_yes_all:
+                    overwrite_all = True
+                # btn_yes — просто продолжаем, overwrite_all остаётся False
+
+            try:
+                ok = cv2.imwrite(fpath, img)
+                if not ok:
+                    raise RuntimeError("cv2.imwrite вернул False")
+                saved += 1
+                self.log(f"[Сохранить все кропы] сохранён: {fpath}")
+            except Exception as e:
+                self.log(f"[Сохранить все кропы] ошибка сохранения {fpath}: {e}")
+
+        if aborted:
+            self.log(f"[Сохранить все кропы] прервано пользователем. "
+                     f"Сохранено={saved}, пропущено={skipped}")
+        else:
+            self.log(f"[Сохранить все кропы] завершено. "
+                     f"Сохранено={saved}, пропущено={skipped}, всего={total}")
 
     # --------------------------------------------------------
     # Загрузка / очистка модели AE/VAE

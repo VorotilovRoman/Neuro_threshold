@@ -43,10 +43,24 @@ def setup_yolo_ae_vae_ui(parent):
         "QPushButton { background-color: #16a085; color: white; font-weight: 600; }"
     )
 
+
+    # NEW: сохранить все кропы
+    parent.btn_save_all_crops = QPushButton("📁 Сохранить все кропы")
+    parent.btn_save_all_crops.setToolTip(
+        "Для каждого объекта из списка построить изображение\n"
+        "с текущими параметрами кропа/доворота/морфологии\n"
+        "и сохранить его в выбранную папку.\n"
+        "Папка выбирается один раз; при совпадении имён — запрос на перезапись."
+    )
+    parent.btn_save_all_crops.setStyleSheet(
+        "QPushButton { background-color: #2980b9; color: white; font-weight: 600; }"
+    )
+
     top_layout = QHBoxLayout()
     top_layout.addWidget(parent.nav_widget)
     top_layout.addWidget(parent.btn_save_image)
     top_layout.addWidget(parent.btn_save_errmap)
+    top_layout.addWidget(parent.btn_save_all_crops)
     top_layout.addWidget(parent.reset_zoom_button)
     top_layout.addStretch()
     main_layout.addLayout(top_layout)
