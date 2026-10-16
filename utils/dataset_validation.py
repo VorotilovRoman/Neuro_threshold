@@ -1,93 +1,33 @@
-# dataset_validation.py
-"""
-Валидация пар «изображение ↔ метка/маска», статистика цветности/битности,
-приведение изображений к целевому формату, сканирование папок,
-диалог детального просмотра пары.
-
-Модуль инкапсулирует шесть задач:
-
-    1. Определение характеристик снимка и приведение dtype/каналов (ImageStats).
-       - detect_color_type / detect_bit_type — что за снимок;
-       - to_uint8 / to_display_bgr / to_gray / to_bgr3 — приведение к
-         нужному формату для отображения или перезаписи;
-       - format_stats_text — многострочный текст для метки статистики.
-
-    2. Валидация пар (PairValidator).
-       Проверяет, что изображение читается, а .txt-метка или маска
-       согласованы по формату и размеру. Поддерживает detect / obb /
-       segment и маски сегментации. Кэширует результаты.
-
-    3. Сканирование папок (scan_detection_pairs / scan_segmentation_pairs /
-       scan_image_only_pairs) — сопоставление изображений с метками
-       или масками по stem-имени.
-
-    4. Пакетные конвертации (convert_pairs_color / convert_pairs_to_8bit_png
-       + селекторы select_pairs_for_conversion / select_pairs_for_8bit_png).
-       Чистый I/O: пробегаются по парам, перезаписывают файлы, отдают
-       прогресс через колбэк.
-
-    5. Формирование отображения пары в списке (build_pair_display).
-       Собирает всё, что нужно для одной строки QListWidget: маркеры
-       цветности/битности, тип аннотации, tag для раскраски.
-
-    6. Диалог детального просмотра пары (PairValidationDialog) и
-       отрисовка разметки (draw_annotations_on_image / apply_mask_overlay).
-
-Модуль не знает про DatasetPreparationWindow: он принимает пути и
-dataset_type, возвращает результаты. Это позволяет использовать его
-и в других вкладках, где нужна такая же валидация.
-"""
+# utils/dataset_validation.py
 from import_libs_internal import *
 from utils.smart_view import SmartGraphicsView
 
-# ============================================================
-# Общие константы
-# ============================================================
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
 
+# Допустимые значения input_format (совпадают с image_io.FORMAT_HINT_*)
+INPUT_FORMAT_AUTO        = 'auto'
+INPUT_FORMAT_MIXED       = 'mixed'
+INPUT_FORMAT_DETECT      = 'detect'
+INPUT_FORMAT_OBB_CORNERS = 'obb_corners'
+INPUT_FORMAT_OBB_XYWHR   = 'obb_xywhr'
+INPUT_FORMAT_SEGMENT     = 'segment'
 
-# ============================================================
-# Определение характеристик и приведение форматов
-# ============================================================
+_VALID_INPUT_FORMATS = {
+    INPUT_FORMAT_AUTO, INPUT_FORMAT_MIXED, INPUT_FORMAT_DETECT,
+    INPUT_FORMAT_OBB_CORNERS, INPUT_FORMAT_OBB_XYWHR, INPUT_FORMAT_SEGMENT,
+}
+
+
 class ImageStats:
-    """
-    Определение цветности и битности одного изображения, приведение
-    dtype/каналов, форматирование строки статистики для UI.
-
-    Формат цветности:
-        'gray_real'   — реально 1-канальное (HxW или HxWx1);
-        'gray_visual' — 3+ канала, но B==G==R (визуально Ч/Б);
-        'color'       — 3+ канала, разные;
-        'unknown'     — не удалось определить.
-
-    Формат битности:
-        'uint8_png'   — uint8 + .png;
-        'uint8_other' — uint8 + jpg/bmp/tiff/webp;
-        'uint16'      — беззнаковый 16-бит;
-        'int16'       — знаковый 16-бит;
-        'float'       — с плавающей точкой;
-        'other'       — прочее;
-        'unknown'     — файл не читается.
-    """
-
-    # ---------- пустые словари статистики ----------
     @staticmethod
     def empty_color_stats():
         return {'gray_real': 0, 'gray_visual': 0, 'color': 0, 'unknown': 0}
 
     @staticmethod
     def empty_bit_stats():
-        return {
-            'uint8_png': 0,
-            'uint8_other': 0,
-            'uint16': 0,
-            'int16': 0,
-            'float': 0,
-            'other': 0,
-            'unknown': 0,
-        }
+        return {'uint8_png': 0, 'uint8_other': 0, 'uint16': 0,
+                'int16': 0, 'float': 0, 'other': 0, 'unknown': 0}
 
-    # ---------- определение характеристик ----------
     @staticmethod
     def detect_color_type(img):
         if img is None:
@@ -98,9 +38,7 @@ class ImageStats:
             if img.shape[2] == 1:
                 return 'gray_real'
             bgr = img[:, :, :3] if img.shape[2] >= 3 else img
-            b = bgr[:, :, 0]
-            g = bgr[:, :, 1]
-            r = bgr[:, :, 2]
+            b = bgr[:, :, 0]; g = bgr[:, :, 1]; r = bgr[:, :, 2]
             if np.array_equal(b, g) and np.array_equal(g, r):
                 return 'gray_visual'
             return 'color'
@@ -127,16 +65,8 @@ class ImageStats:
         except Exception:
             return 'unknown'
 
-    # ---------- приведение dtype/каналов ----------
     @staticmethod
     def to_uint8(img):
-        """
-        Приводит любой dtype к uint8:
-            uint8  — как есть;
-            uint16 — делит на 256 (стандарт для большинства форматов);
-            float  — если max<=1, умножает на 255; иначе нормализует;
-            прочее — MIN-MAX нормализация.
-        """
         if img is None:
             return None
         if img.dtype == np.uint8:
@@ -150,7 +80,6 @@ class ImageStats:
 
     @staticmethod
     def to_display_bgr(img):
-        """uint8 + гарантированно 3 канала BGR — для QPixmap/просмотра."""
         img = ImageStats.to_uint8(img)
         if img is None:
             return None
@@ -164,7 +93,6 @@ class ImageStats:
 
     @staticmethod
     def to_gray(img):
-        """Приведение к одноканальному uint8 (для конвертации в ЧБ)."""
         img = ImageStats.to_uint8(img)
         if img is None:
             return None
@@ -178,7 +106,6 @@ class ImageStats:
 
     @staticmethod
     def to_bgr3(img):
-        """Приведение к 3-канальному uint8 (для конвертации в цвет)."""
         img = ImageStats.to_uint8(img)
         if img is None:
             return None
@@ -190,24 +117,14 @@ class ImageStats:
             return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
         return img
 
-    # ---------- форматирование ----------
     @staticmethod
     def format_stats_text(color_stats, bit_stats, has_pairs):
-        """
-        Формирует текст для метки статистики.
-
-        Возвращает (text, buttons_enabled):
-            text             — многострочная строка (или "" если пар нет);
-            buttons_enabled  — включать ли кнопки конвертации.
-        """
         if not has_pairs:
             return "", False
-
         gr = color_stats.get('gray_real', 0)
         gv = color_stats.get('gray_visual', 0)
         c = color_stats.get('color', 0)
         u = color_stats.get('unknown', 0)
-
         p8 = bit_stats.get('uint8_png', 0)
         o8 = bit_stats.get('uint8_other', 0)
         b16 = bit_stats.get('uint16', 0)
@@ -230,38 +147,38 @@ class ImageStats:
             if fl: parts.append(f"float: {fl}")
             if oth: parts.append(f"other: {oth}")
             line2 += "   |   ⚠️ " + ", ".join(parts)
-
         return line1 + "\n" + line2, True
 
 
-# ============================================================
-# Валидация пар
-# ============================================================
 class PairValidator:
     """
-    Валидация пар «изображение + .txt-метка / маска» с кэшированием.
+    dataset_type:
+        0 — labels (.txt);
+        1 — masks (.png);
+        2 — images-only.
 
-    Параметр dataset_type:
-        0 — detection:  ожидается .txt с YOLO-строками;
-        1 — segmentation: ожидается маска (uint8, совпадающая по HxW);
-        2 — images-only: aux-файл не ожидается.
-
-    Результат validate_full(pair) — кортеж:
-        (is_valid: bool, error: str, color_type: str, bit_type: str)
+    input_format (только для dataset_type=0):
+        'auto'/'mixed' — эвристика;
+        'detect' / 'obb_corners' / 'obb_xywhr' / 'segment' — жёстко.
     """
 
-    def __init__(self, dataset_type=0):
+    def __init__(self, dataset_type=0, input_format=INPUT_FORMAT_AUTO):
         self.dataset_type = dataset_type
+        self.input_format = input_format if input_format in _VALID_INPUT_FORMATS \
+            else INPUT_FORMAT_AUTO
         self._cache = {}
 
     def set_dataset_type(self, dataset_type):
         self.dataset_type = dataset_type
         self._cache.clear()
 
+    def set_input_format(self, fmt):
+        self.input_format = fmt if fmt in _VALID_INPUT_FORMATS else INPUT_FORMAT_AUTO
+        self._cache.clear()
+
     def clear_cache(self):
         self._cache.clear()
 
-    # ---------- публичный интерфейс ----------
     def validate_full(self, pair):
         key = (pair[0], pair[1] if len(pair) > 1 else None)
         if key in self._cache:
@@ -275,33 +192,21 @@ class PairValidator:
         return ok, err
 
     def validate_all(self, pairs, progress_cb=None):
-        """
-        Прогоняет валидацию по всем парам.
-        progress_cb(current, total) вызывается не чаще 100 раз за проход.
-        Возвращает (valid_count, invalid_count).
-        """
         self._cache.clear()
         total = len(pairs)
         if total == 0:
             return 0, 0
-        valid = 0
-        invalid = 0
+        valid = 0; invalid = 0
         step = max(1, total // 100)
         for idx, pair in enumerate(pairs):
             ok, _ = self.validate(pair)
-            if ok:
-                valid += 1
-            else:
-                invalid += 1
+            if ok: valid += 1
+            else: invalid += 1
             if progress_cb and ((idx + 1) % step == 0 or idx == total - 1):
                 progress_cb(idx + 1, total)
         return valid, invalid
 
     def recompute_stats(self, pairs):
-        """
-        Считает словари color_type_stats и bit_type_stats по всем парам.
-        Возвращает (color_stats, bit_stats).
-        """
         color_stats = ImageStats.empty_color_stats()
         bit_stats = ImageStats.empty_bit_stats()
         for pair in pairs:
@@ -310,7 +215,6 @@ class PairValidator:
             bit_stats[btype] = bit_stats.get(btype, 0) + 1
         return color_stats, bit_stats
 
-    # ---------- низкоуровневая валидация ----------
     def _validate_impl(self, pair):
         img_path = pair[0]
         aux_path = pair[1] if len(pair) > 1 else None
@@ -336,15 +240,16 @@ class PairValidator:
             if not os.path.exists(aux_path):
                 return False, "Mask file not found", color_type, bit_type
             try:
-                mask = cv2.imread(str(aux_path), cv2.IMREAD_UNCHANGED)
+                mask = read_mask_with_fallback(str(aux_path))
                 if mask is None:
                     return False, "Cannot decode mask", color_type, bit_type
-                if len(mask.shape) == 3:
-                    mask = mask[:, :, 0]
-                mask = mask.squeeze()
-                if mask.dtype != np.uint8:
+                if mask.ndim != 2:
                     return (False,
-                            f"Mask dtype {mask.dtype} (expected uint8)",
+                            f"Mask expected 2D, got shape {mask.shape}",
+                            color_type, bit_type)
+                if mask.dtype not in (np.uint8, np.uint16):
+                    return (False,
+                            f"Mask dtype {mask.dtype} (expected uint8 or uint16)",
                             color_type, bit_type)
                 if mask.shape[:2] != (img_h, img_w):
                     return (False,
@@ -379,7 +284,6 @@ class PairValidator:
             if len(parts) < 5:
                 return (False, f"Line {ln}: too few values ({len(parts)})",
                         color_type, bit_type)
-
             try:
                 cls = int(parts[0])
                 if cls < 0:
@@ -388,7 +292,6 @@ class PairValidator:
             except ValueError:
                 return (False, f"Line {ln}: invalid class id '{parts[0]}'",
                         color_type, bit_type)
-
             try:
                 coords = [float(p) for p in parts[1:]]
             except ValueError as e:
@@ -399,7 +302,51 @@ class PairValidator:
                 return 0.0 <= v <= 1.0
 
             n = len(parts)
-            if n == 5:
+
+            # Учитываем input_format: жёсткое правило или эвристика.
+            fmt = self.input_format
+            if fmt in (INPUT_FORMAT_AUTO, INPUT_FORMAT_MIXED):
+                if n == 5:
+                    kind = 'detect'
+                elif n == 6:
+                    kind = 'obb_xywhr'
+                elif n == 9:
+                    kind = 'obb_corners'
+                elif n >= 7 and (n - 1) % 2 == 0:
+                    kind = 'segment'
+                else:
+                    return (False,
+                            f"Line {ln}: unknown format ({n} values)",
+                            color_type, bit_type)
+            elif fmt == INPUT_FORMAT_DETECT:
+                if n != 5:
+                    return (False,
+                            f"Line {ln}: expected detect (5 values), got {n}",
+                            color_type, bit_type)
+                kind = 'detect'
+            elif fmt == INPUT_FORMAT_OBB_CORNERS:
+                if n != 9:
+                    return (False,
+                            f"Line {ln}: expected obb_corners (9 values), got {n}",
+                            color_type, bit_type)
+                kind = 'obb_corners'
+            elif fmt == INPUT_FORMAT_OBB_XYWHR:
+                if n != 6:
+                    return (False,
+                            f"Line {ln}: expected obb_xywhr (6 values), got {n}",
+                            color_type, bit_type)
+                kind = 'obb_xywhr'
+            elif fmt == INPUT_FORMAT_SEGMENT:
+                if not (n >= 7 and (n - 1) % 2 == 0):
+                    return (False,
+                            f"Line {ln}: expected segment (even >= 6 coords), got {n}",
+                            color_type, bit_type)
+                kind = 'segment'
+            else:
+                return (False, f"Line {ln}: unknown input_format {fmt}",
+                        color_type, bit_type)
+
+            if kind == 'detect':
                 types_in_file.add('detect')
                 cx, cy, bw, bh = coords
                 if not in_range(cx) or not in_range(cy):
@@ -411,14 +358,23 @@ class PairValidator:
                 if bw > 1 or bh > 1:
                     return (False, f"Line {ln}: bbox size > 1",
                             color_type, bit_type)
-            elif n == 9:
+            elif kind == 'obb_corners':
                 types_in_file.add('obb')
                 for i in range(0, 8, 2):
                     if not in_range(coords[i]) or not in_range(coords[i + 1]):
                         return (False,
                                 f"Line {ln}: OBB point {i // 2 + 1} out of [0,1]",
                                 color_type, bit_type)
-            elif n >= 7 and (n - 1) % 2 == 0:
+            elif kind == 'obb_xywhr':
+                types_in_file.add('obb')
+                cx, cy, bw, bh, angle = coords
+                if not in_range(cx) or not in_range(cy):
+                    return (False, f"Line {ln}: center out of [0,1]",
+                            color_type, bit_type)
+                if bw <= 0 or bh <= 0:
+                    return (False, f"Line {ln}: non-positive OBB size",
+                            color_type, bit_type)
+            else:  # segment
                 types_in_file.add('segment')
                 num_pts = (n - 1) // 2
                 if num_pts < 3:
@@ -430,9 +386,6 @@ class PairValidator:
                         return (False,
                                 f"Line {ln}: polygon point out of [0,1]",
                                 color_type, bit_type)
-            else:
-                return (False, f"Line {ln}: unknown format ({n} values)",
-                        color_type, bit_type)
 
         if len(types_in_file) > 1:
             return (False,
@@ -441,11 +394,8 @@ class PairValidator:
 
         return True, "", color_type, bit_type
 
-    # ---------- определение типа аннотаций ----------
     @staticmethod
-    def detect_annotation_type(label_path):
-        """Возвращает 'detect' / 'obb' / 'segment' / 'empty' / 'mixed' /
-        'unknown' / 'error' по содержимому .txt-файла."""
+    def detect_annotation_type(label_path, format_hint=INPUT_FORMAT_AUTO):
         types = set()
         try:
             with open(label_path, 'r', encoding='utf-8') as f:
@@ -457,14 +407,27 @@ class PairValidator:
                     if len(parts) < 1:
                         continue
                     l = len(parts)
-                    if l == 5:
-                        types.add('detect')
-                    elif l == 9:
-                        types.add('obb')
-                    elif l >= 7 and (l - 1) % 2 == 0:
-                        types.add('segment')
-                    else:
-                        types.add('unknown')
+                    if format_hint in (INPUT_FORMAT_AUTO, INPUT_FORMAT_MIXED):
+                        if l == 5:
+                            types.add('detect')
+                        elif l == 6:
+                            types.add('obb')
+                        elif l == 9:
+                            types.add('obb')
+                        elif l >= 7 and (l - 1) % 2 == 0:
+                            types.add('segment')
+                        else:
+                            types.add('unknown')
+                    elif format_hint == INPUT_FORMAT_DETECT:
+                        types.add('detect' if l == 5 else 'unknown')
+                    elif format_hint == INPUT_FORMAT_OBB_CORNERS:
+                        types.add('obb' if l == 9 else 'unknown')
+                    elif format_hint == INPUT_FORMAT_OBB_XYWHR:
+                        types.add('obb' if l == 6 else 'unknown')
+                    elif format_hint == INPUT_FORMAT_SEGMENT:
+                        types.add('segment'
+                                  if (l >= 7 and (l - 1) % 2 == 0)
+                                  else 'unknown')
         except Exception:
             return 'error'
         if len(types) == 0:
@@ -475,15 +438,13 @@ class PairValidator:
 
     @staticmethod
     def check_pair_type_consistency():
-        """Заглушка на будущее: проверка согласованности типов аннотаций."""
         return None
 
 
 # ============================================================
-# Сканирование папок
+# Сканирование
 # ============================================================
 def _list_images(folder):
-    """Словарь {stem: full_path} для всех изображений в папке."""
     result = {}
     for f in os.listdir(folder):
         name, ext = os.path.splitext(f)
@@ -492,16 +453,8 @@ def _list_images(folder):
     return result
 
 
-def scan_detection_pairs(images_folder, labels_folder, log_cb=None):
-    """
-    Пары (img, label.txt) по совпадению stem-имени.
-
-    Возвращает (pairs, types_stats):
-        pairs       — список кортежей (img_path, label_path);
-        types_stats — {ann_type: count}, где ann_type ∈
-                      {'detect', 'obb', 'segment', 'empty', 'mixed',
-                       'unknown', 'error'}.
-    """
+def scan_detection_pairs(images_folder, labels_folder, log_cb=None,
+                          format_hint=INPUT_FORMAT_AUTO):
     types_stats = {}
     pairs = []
     img_files = _list_images(images_folder)
@@ -510,7 +463,7 @@ def scan_detection_pairs(images_folder, labels_folder, log_cb=None):
         if not os.path.exists(label_path):
             continue
         try:
-            ann_type = PairValidator.detect_annotation_type(label_path)
+            ann_type = PairValidator.detect_annotation_type(label_path, format_hint)
             types_stats[ann_type] = types_stats.get(ann_type, 0) + 1
             pairs.append((img_path, label_path))
         except Exception as e:
@@ -520,11 +473,6 @@ def scan_detection_pairs(images_folder, labels_folder, log_cb=None):
 
 
 def scan_segmentation_pairs(images_folder, masks_folder, log_cb=None):
-    """
-    Пары (img, mask) по совпадению stem-имени. Пропускает пары, где
-    маска — тот же файл, что и изображение, а также пары с нечитаемой
-    маской.
-    """
     pairs = []
     img_files = _list_images(images_folder)
     for name, img_path in img_files.items():
@@ -539,9 +487,7 @@ def scan_segmentation_pairs(images_folder, masks_folder, log_cb=None):
                     break
                 mask_path = cand
                 break
-
         if mask_path is None:
-            # Fallback — полный обход папки масок
             for f in os.listdir(masks_folder):
                 mask_name, mask_ext = os.path.splitext(f)
                 if mask_name == name and mask_ext.lower() in IMG_EXTENSIONS:
@@ -549,11 +495,9 @@ def scan_segmentation_pairs(images_folder, masks_folder, log_cb=None):
                     if os.path.abspath(cand) != os.path.abspath(img_path):
                         mask_path = cand
                     break
-
         if mask_path is None:
             continue
-
-        test = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
+        test = read_mask_with_fallback(str(mask_path))
         if test is None:
             if log_cb:
                 log_cb(f"Предупреждение: не удалось прочитать маску {mask_path}")
@@ -563,21 +507,13 @@ def scan_segmentation_pairs(images_folder, masks_folder, log_cb=None):
 
 
 def scan_image_only_pairs(images_folder):
-    """Список (img, None) для всех изображений в папке."""
     return [(p, None) for p in _list_images(images_folder).values()]
 
 
 # ============================================================
-# Пакетные конвертации
+# Пакетные конвертации (без изменений в логике)
 # ============================================================
 def select_pairs_for_conversion(pairs, validator, target):
-    """
-    Возвращает список пар, которые надо перезаписать:
-        target='gray'  — реально цветные и 'gray_visual';
-        target='color' — реально одноканальные ('gray_real').
-
-    Формат элемента: (pair, img_path, ctype).
-    """
     to_convert = []
     for pair in pairs:
         img_path = pair[0]
@@ -592,19 +528,10 @@ def select_pairs_for_conversion(pairs, validator, target):
 
 
 def convert_pairs_color(pairs, target, progress_cb=None, log_cb=None):
-    """
-    Перезаписывает изображения из списка (pair, img_path, ctype) в
-    ЧБ (target='gray') или RGB (target='color').
-
-    progress_cb(current, total) — вызывается не чаще 100 раз за проход.
-    Возвращает (converted, errors).
-    """
-    converted = 0
-    errors = 0
+    converted = 0; errors = 0
     total = len(pairs)
     step = max(1, total // 100) if total else 1
     for idx, item in enumerate(pairs):
-        # допускаем как (pair, img_path, ctype), так и просто (pair, img_path)
         img_path = item[1] if len(item) > 1 else item[0][0]
         try:
             img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
@@ -622,18 +549,16 @@ def convert_pairs_color(pairs, target, progress_cb=None, log_cb=None):
             errors += 1
             if log_cb:
                 log_cb(f"Ошибка конвертации {img_path}: {e}")
-
-        if progress_cb and total and \
-                ((idx + 1) % step == 0 or idx == total - 1):
+        if progress_cb and total and ((idx + 1) % step == 0 or idx == total - 1):
             progress_cb(idx + 1, total)
     return converted, errors
 
 
 def select_pairs_for_8bit_png(pairs, validator):
     """
-    Возвращает (all_pairs, need_convert):
-        all_pairs     — все пары (для диалога «всё или только нужное»);
-        need_convert  — только те, что не являются 8-битным PNG.
+    Возвращает (all_pairs, need_convert).
+    ВАЖНО: для dataset_type==1 (masks) маски НЕ включаются —
+    они должны оставаться в исходном dtype.
     """
     need = []
     for pair in pairs:
@@ -643,16 +568,13 @@ def select_pairs_for_8bit_png(pairs, validator):
     return list(pairs), need
 
 
-def convert_pairs_to_8bit_png(pairs, progress_cb=None, log_cb=None):
+def convert_pairs_to_8bit_png(pairs, progress_cb=None, log_cb=None,
+                              skip_masks=False):
     """
-    Перезаписывает изображения в 8-битный PNG. Если путь менялся
-    (jpg/bmp/tiff → png), удаляет оригинал.
-
-    Возвращает (converted, errors, path_map):
-        path_map — {old_path: new_path} для обновления self.pairs в UI.
+    skip_masks: если True — pairs трактуются как pairs из (img, mask),
+                но конвертируем только изображения (pair[0]), не маски.
     """
-    converted = 0
-    errors = 0
+    converted = 0; errors = 0
     path_map = {}
     total = len(pairs)
     step = max(1, total // 100) if total else 1
@@ -665,9 +587,7 @@ def convert_pairs_to_8bit_png(pairs, progress_cb=None, log_cb=None):
             else:
                 img8 = ImageStats.to_uint8(img)
                 base, ext = os.path.splitext(str(img_path))
-                target_path = str(img_path) if ext.lower() == '.png' \
-                    else base + '.png'
-
+                target_path = str(img_path) if ext.lower() == '.png' else base + '.png'
                 if not cv2.imwrite(target_path, img8):
                     errors += 1
                     if log_cb:
@@ -685,33 +605,15 @@ def convert_pairs_to_8bit_png(pairs, progress_cb=None, log_cb=None):
             errors += 1
             if log_cb:
                 log_cb(f"Ошибка конвертации {img_path}: {e}")
-
-        if progress_cb and total and \
-                ((idx + 1) % step == 0 or idx == total - 1):
+        if progress_cb and total and ((idx + 1) % step == 0 or idx == total - 1):
             progress_cb(idx + 1, total)
     return converted, errors, path_map
 
 
 # ============================================================
-# Формирование отображения пары в списке
+# Отображение
 # ============================================================
 def build_pair_display(pair, validator, dataset_type, include_empty):
-    """
-    Считает всё, что нужно для отображения пары в списке.
-
-    Возвращает dict:
-        {
-            'name':       str,
-            'is_valid':   bool,
-            'err':        str,
-            'color_type': str,
-            'bit_type':   str,
-            'ann_type':   str|None,
-            'tag':        str|None,  # 'invalid'/'empty'/'detect'/'obb'/
-                                     # 'segment'/'error'/'mixed'/'unknown'
-            'text':       str,
-        }
-    """
     img_path = pair[0]
     aux_path = pair[1] if len(pair) > 1 else None
     name = os.path.splitext(os.path.basename(img_path))[0]
@@ -720,7 +622,9 @@ def build_pair_display(pair, validator, dataset_type, include_empty):
 
     if dataset_type == 0 and aux_path:
         try:
-            ann_type = PairValidator.detect_annotation_type(aux_path)
+            ann_type = PairValidator.detect_annotation_type(
+                aux_path, validator.input_format
+            )
         except Exception:
             ann_type = 'error'
     elif dataset_type == 1:
@@ -736,15 +640,15 @@ def build_pair_display(pair, validator, dataset_type, include_empty):
 
     bit_marker = {
         'uint8_other': " [8b не-PNG]",
-        'uint16':      " [16bit!]",
-        'int16':       " [int16!]",
-        'float':       " [float!]",
+        'uint16':      " [16bit]",
+        'int16':       " [int16]",
+        'float':       " [float]",
         'other':       " [??bit]",
     }.get(bit_type, "")
 
     if not is_valid:
         tag = 'invalid'
-        kind = 'label' if dataset_type == 0 else 'mask'
+        kind = 'label' if dataset_type == 0 else ('mask' if dataset_type == 1 else '')
         text = f"{name}{color_marker}{bit_marker} (image + {kind}) [INVALID: {err}]"
     elif ann_type == 'empty':
         tag = 'empty'
@@ -759,34 +663,22 @@ def build_pair_display(pair, validator, dataset_type, include_empty):
         text = f"{name}{color_marker}{bit_marker} ({suffix})"
 
     return {
-        'name': name,
-        'is_valid': is_valid,
-        'err': err,
-        'color_type': color_type,
-        'bit_type': bit_type,
-        'ann_type': ann_type,
-        'tag': tag,
-        'text': text,
+        'name': name, 'is_valid': is_valid, 'err': err,
+        'color_type': color_type, 'bit_type': bit_type,
+        'ann_type': ann_type, 'tag': tag, 'text': text,
     }
 
 
-# ============================================================
-# Отрисовка поверх снимка
-# ============================================================
 def draw_annotations_on_image(img, annotations):
-    """Рисует detect / obb / segment аннотации поверх снимка."""
     out = img.copy()
     h, w = out.shape[:2]
     for ann in annotations:
-        typ = ann[0]
-        cls = ann[1]
+        typ = ann[0]; cls = ann[1]
         color = (0, 255, 0)
         if typ == 'detect':
             _, cls, cx, cy, bw, bh = ann
-            x1 = int((cx - bw / 2) * w)
-            y1 = int((cy - bh / 2) * h)
-            x2 = int((cx + bw / 2) * w)
-            y2 = int((cy + bh / 2) * h)
+            x1 = int((cx - bw / 2) * w); y1 = int((cy - bh / 2) * h)
+            x2 = int((cx + bw / 2) * w); y2 = int((cy + bh / 2) * h)
             cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
             cv2.putText(out, f"cls={cls}", (x1, max(15, y1 - 5)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
@@ -797,8 +689,7 @@ def draw_annotations_on_image(img, annotations):
                 pts.append([int(points[i] * w), int(points[i + 1] * h)])
             if len(pts) >= 3:
                 pts_np = np.array(pts, dtype=np.int32)
-                cv2.polylines(out, [pts_np], isClosed=True, color=color,
-                              thickness=2)
+                cv2.polylines(out, [pts_np], isClosed=True, color=color, thickness=2)
                 cv2.putText(out, f"cls={cls}",
                             (pts[0][0], max(15, pts[0][1] - 5)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
@@ -806,30 +697,29 @@ def draw_annotations_on_image(img, annotations):
 
 
 def apply_mask_overlay(img, mask):
-    """Накладывает цветной overlay по уникальным ненулевым значениям маски."""
+    """
+    Накладывает цветной overlay.
+    Маска — одноканальная uint8 или uint16.
+    """
     overlay = img.copy()
+    if mask is None:
+        return img
+    if mask.ndim != 2:
+        return img
     unique_vals = np.unique(mask)
     for val in unique_vals:
         if val == 0:
             continue
+        # Если val > 255 — берём модуль для цвета, но отображение пикселя работает.
         hue = (int(val) * 37) % 180
         bgr = cv2.cvtColor(np.uint8([[[hue, 255, 255]]]),
-                           cv2.COLOR_HSV2BGR)[0][0]
+                            cv2.COLOR_HSV2BGR)[0][0]
         color = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
         overlay[mask == val] = color
     return cv2.addWeighted(img, 0.5, overlay, 0.5, 0)
 
 
-# ============================================================
-# Диалог просмотра пары
-# ============================================================
 class PairValidationDialog(QDialog):
-    """
-    Модальный диалог: показывает снимок с наложенными аннотациями (для
-    dataset_type=0) или маской (dataset_type=1), а также краткую сводку
-    о валидности, цветности и битности пары.
-    """
-
     def __init__(self, parent, pair, dataset_type, validator):
         super().__init__(parent)
         self.dataset_type = dataset_type
@@ -841,7 +731,6 @@ class PairValidationDialog(QDialog):
         self.setWindowTitle(f"Валидация: {os.path.basename(img_path)}")
         self.resize(1100, 800)
 
-        # --- читаем изображение, приводим к BGR uint8 для отображения ---
         img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
         if img is None:
             QMessageBox.warning(self, "Ошибка",
@@ -851,25 +740,21 @@ class PairValidationDialog(QDialog):
 
         disp = ImageStats.to_display_bgr(img)
 
-        # --- накладываем разметку ---
         annotations = []
         if self.dataset_type == 0 and aux_path:
-            annotations = load_annotations(aux_path, disp.shape[1],
-                                           disp.shape[0])
+            annotations = load_annotations(aux_path, disp.shape[1], disp.shape[0],
+                                            format_hint=validator.input_format)
 
         if self.dataset_type == 1 and aux_path:
-            mask = cv2.imread(str(aux_path), cv2.IMREAD_UNCHANGED)
+            mask = read_mask_with_fallback(str(aux_path))
             if mask is not None:
-                if len(mask.shape) == 3:
-                    mask = mask[:, :, 0]
                 if mask.shape[:2] != disp.shape[:2]:
                     mask = cv2.resize(mask, (disp.shape[1], disp.shape[0]),
-                                      interpolation=cv2.INTER_NEAREST)
+                                       interpolation=cv2.INTER_NEAREST)
                 disp = apply_mask_overlay(disp, mask)
         elif annotations:
             disp = draw_annotations_on_image(disp, annotations)
 
-        # --- верстка ---
         layout = QVBoxLayout(self)
 
         is_valid, err, color_type, bit_type = self.validator.validate_full(pair)
@@ -880,13 +765,9 @@ class PairValidationDialog(QDialog):
             'unknown': '—',
         }.get(color_type, '—')
         bit_str = {
-            'uint8_png': 'uint8 PNG',
-            'uint8_other': 'uint8 (не PNG)',
-            'uint16': 'uint16',
-            'int16': 'int16',
-            'float': 'float',
-            'other': 'other',
-            'unknown': '—',
+            'uint8_png': 'uint8 PNG', 'uint8_other': 'uint8 (не PNG)',
+            'uint16': 'uint16', 'int16': 'int16', 'float': 'float',
+            'other': 'other', 'unknown': '—',
         }.get(bit_type, '—')
         status = (f"{'✅ Пара корректна' if is_valid else f'❌ Ошибка валидации: {err}'}"
                   f"   |   Цвет: {color_str}   |   Битность: {bit_str}")
@@ -905,8 +786,7 @@ class PairValidationDialog(QDialog):
 
         path_label = QLabel(f"Image: {img_path}\nAux:   {aux_path or '—'}")
         path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        path_label.setStyleSheet(
-            "font-family: Consolas, monospace; font-size: 11px;")
+        path_label.setStyleSheet("font-family: Consolas, monospace; font-size: 11px;")
         layout.addWidget(path_label)
 
         btn_row = QHBoxLayout()
