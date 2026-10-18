@@ -211,6 +211,8 @@ class DeepLearningWindow(QMainWindow):
         diag = self.unet_settings.apply_metadata(metadata)
 
         # Лог
+
+        arch = metadata.get('architecture', 'unet').upper()
         nc = metadata.get('num_classes', '?')
         norm = metadata.get('normalize', '?')
         tr_rm = diag['train_resize_mode'] or '?'
@@ -223,6 +225,7 @@ class DeepLearningWindow(QMainWindow):
             inf_rm_str = '— (не нужен)'
 
         self.log("=== U-Net метаданные ===")
+        self.log(f"  Архитектура: {arch}")
         self.log(f"  num_classes: {nc}")
         self.log(f"  normalize: {norm}")
         self.log(f"  resize_mode (train): {tr_rm}")

@@ -11,6 +11,13 @@
 # Пути сплитов (train_images / val_images / test_images и т.д.) читаются
 # из masks_data.yaml, если он указан; иначе — дефолтная структура
 # dataset/images/{train,val,test} + dataset/masks/{train,val,test}.
+#
+# Режим ресайза (resize_mode):
+#   "hard"            — жёсткий ресайз до (input_size, input_size);
+#   "keep_aspect_pad" — масштаб с сохранением AR + padding до квадрата;
+#   "random_crop"     — обучение: случайный кроп; валидация/тест: центральный кроп.
+#                       Для инференса в приложении пользователь отдельно выбирает
+#                       hard / keep_aspect_pad (в metadata: inference_resize_mode).
 
 import sys
 import io
@@ -90,6 +97,9 @@ THRESHOLD_FACTOR = 0.7                       # порог бинаризации
 IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
 MASK_EXTS  = ('.png', '.tif', '.tiff', '.bmp')   # без .jpg — плохо для масок
 
+# Допустимые значения resize_mode
+VALID_RESIZE_MODES = ("hard", "keep_aspect_pad", "random_crop")
+
 # Глобальные переменные для graceful shutdown
 model = None
 optimizer = None
@@ -140,17 +150,23 @@ def signal_handler(signum, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
+
 # ---------- Dataset (поддержка бинарной и многоклассовой сегментации) ----------
 class SegmentationDataset(Dataset):
     def __init__(self, images_dir, masks_dir, input_size=512, num_classes=1,
-                 augmentations=None, normalize=False, keep_aspect_ratio=False):
+                 augmentations=None, normalize=False,
+                 resize_mode="hard", is_train=True):
         self.images_dir = images_dir
         self.masks_dir = masks_dir
         self.input_size = input_size
         self.num_classes = num_classes
         self.augmentations = augmentations or {}
         self.normalize = normalize
-        self.keep_aspect_ratio = keep_aspect_ratio
+        if resize_mode not in VALID_RESIZE_MODES:
+            log(f"⚠️ Неизвестный resize_mode={resize_mode!r}, использую 'hard'")
+            resize_mode = "hard"
+        self.resize_mode = resize_mode
+        self.is_train = bool(is_train)
         self.image_paths = []
         self.mask_paths = []
         skipped = 0
@@ -176,49 +192,82 @@ class SegmentationDataset(Dataset):
 
         if not self.image_paths:
             raise RuntimeError(f"Не найдено ни одной пары изображение-маска в {images_dir} и {masks_dir}")
-        log(f"✅ Загружено {len(self.image_paths)} пар (пропущено {skipped})")
+        log(f"✅ Загружено {len(self.image_paths)} пар "
+            f"(пропущено {skipped}, режим: {resize_mode}, is_train={is_train})")
 
     def __len__(self):
         return len(self.image_paths)
 
     def _resize_pair(self, image, mask):
         """
-        Ресайз изображения и маски.
-        keep_aspect_ratio=False → жёсткий ресайз до (input_size, input_size).
-        keep_aspect_ratio=True  → ресайз с сохранением AR + padding до квадрата.
-        Маска всегда ресайзится с INTER_NEAREST (без размытия границ классов).
+        Приведение пары (image, mask) к (input_size, input_size).
+
+        resize_mode:
+          hard             — жёсткий ресайз до (S, S) (искажает AR);
+          keep_aspect_pad  — масштаб с сохранением AR + padding до (S, S);
+          random_crop      — при обучении random crop; при val/test — center crop.
+                             Примечание: кроп теряет часть кадра. Поэтому при инференсе
+                             пользователь выбирает hard / keep_aspect_pad отдельно
+                             (в metadata: inference_resize_mode).
+
+        Маска всегда интерполируется NEAREST — без размытия границ классов.
         """
-        if self.keep_aspect_ratio:
+        S = self.input_size
+        mode = self.resize_mode
+
+        if mode == "keep_aspect_pad":
             w, h = image.size  # PIL: (w, h)
-            scale = self.input_size / max(h, w)
+            scale = S / max(h, w)
             new_h = max(1, int(round(h * scale)))
             new_w = max(1, int(round(w * scale)))
             image = image.resize((new_w, new_h), Image.BILINEAR)
             mask = mask.resize((new_w, new_h), Image.NEAREST)
 
-            pad_h = self.input_size - new_h
-            pad_w = self.input_size - new_w
+            pad_h = S - new_h
+            pad_w = S - new_w
             pad_top = pad_h // 2
             pad_left = pad_w // 2
             pad_bottom = pad_h - pad_top
             pad_right = pad_w - pad_left
             image = TF.pad(image, (pad_left, pad_top, pad_right, pad_bottom), fill=0)
             mask = TF.pad(mask, (pad_left, pad_top, pad_right, pad_bottom), fill=0)
-        else:
+
+        elif mode == "random_crop":
+            w, h = image.size
+            # Масштабируем так, чтобы обе стороны были >= S
+            scale = max(S / h, S / w)
+            new_h = max(S, int(round(h * scale)))
+            new_w = max(S, int(round(w * scale)))
+            image = image.resize((new_w, new_h), Image.BILINEAR)
+            mask = mask.resize((new_w, new_h), Image.NEAREST)
+
+            if self.is_train:
+                x = int(np.random.randint(0, max(1, new_w - S + 1)))
+                y = int(np.random.randint(0, max(1, new_h - S + 1)))
+            else:
+                # Валидация/тест — детерминированный центр
+                x = (new_w - S) // 2
+                y = (new_h - S) // 2
+            image = TF.crop(image, y, x, S, S)
+            mask = TF.crop(mask, y, x, S, S)
+
+        else:  # "hard"
             image = transforms.Resize(
-                (self.input_size, self.input_size),
+                (S, S),
                 interpolation=transforms.InterpolationMode.BILINEAR,
             )(image)
             mask = transforms.Resize(
-                (self.input_size, self.input_size),
+                (S, S),
                 interpolation=transforms.InterpolationMode.NEAREST,
             )(mask)
+
         return image, mask
+
     def __getitem__(self, idx):
         image = Image.open(self.image_paths[idx]).convert('RGB')
         mask = Image.open(self.mask_paths[idx])
 
-        # Базовый ресайз до input_size
+        # Базовый ресайз (hard / keep_aspect_pad / random_crop)
         image, mask = self._resize_pair(image, mask)
 
         # --- Аугментации ---
@@ -279,7 +328,6 @@ class SegmentationDataset(Dataset):
         else:
             # Многоклассовая сегментация.
             # ПРАВИЛО: значение пикселя = индекс класса (0 — фон, 1..N-1 — объекты).
-            # НИЧЕГО не «схлопываем» в бинарную — это ломает обучение.
             mask_tensor = torch.from_numpy(mask_np.astype(np.int64))
             max_val = int(mask_tensor.max())
             if max_val >= self.num_classes:
@@ -290,6 +338,7 @@ class SegmentationDataset(Dataset):
                 mask_tensor = mask_tensor.clone()
                 mask_tensor[mask_tensor >= self.num_classes] = 0
         return image, mask_tensor
+
 
 # ---------- Функции потерь (поддержка бинарной и многоклассовой) ----------
 def get_loss_function(loss_name, num_classes=1):
@@ -327,6 +376,7 @@ def get_loss_function(loss_name, num_classes=1):
         else:
             return nn.BCEWithLogitsLoss()
 
+
 # ---------- Оптимизатор ----------
 def get_optimizer(model, opt_name, lr):
     opt_name = opt_name.lower()
@@ -341,6 +391,7 @@ def get_optimizer(model, opt_name, lr):
     else:
         return optim.Adam(model.parameters(), lr=lr)
 
+
 # ---------- Scheduler ----------
 def get_scheduler(optimizer, scheduler_name, epochs):
     scheduler_name = scheduler_name.lower()
@@ -352,6 +403,7 @@ def get_scheduler(optimizer, scheduler_name, epochs):
         return optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
     else:
         return None
+
 
 # ---------- Метрики ----------
 def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
@@ -427,6 +479,7 @@ def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
             'mAP50-95': miou,
         }
 
+
 # ---------- Автоподбор batch_size ----------
 def auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX):
     if device.type == 'cuda' and torch.cuda.is_available():
@@ -450,6 +503,7 @@ def auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BAT
         log("⚠️ psutil не установлен, auto batch использует значение по умолчанию 8")
         return 8
 
+
 # ---------- Сохранение аргументов ----------
 def save_args_yaml(args_dict, save_path):
     if HAS_YAML:
@@ -467,6 +521,7 @@ def save_model_meta(meta_dict, model_path):
     with open(meta_path, 'w', encoding='utf-8') as f:
         json.dump(meta_dict, f, indent=2, ensure_ascii=False)
     log(f"Метаданные модели сохранены в {meta_path}")
+
 
 # ---------- Графики ----------
 def save_training_plots(history_dict, save_dir):
@@ -691,6 +746,7 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
     plt.close()
     log(f"Сохранено {collected} валидационных примеров в {save_dir}/val_examples.jpg")
 
+
 # ---------- Проверка масок ----------
 def check_dataset_masks_consistency(dataset, num_classes, max_check=20):
     """
@@ -783,8 +839,22 @@ def main():
     device_pref = params.get('device', 'auto')
     threshold = params.get('threshold', THRESHOLD_FACTOR)
     num_workers = params.get('num_workers', NUM_WORKERS_DEFAULT)
+
+    # --- Препроцессинг ---
     normalize = bool(params.get('normalize', False))
-    keep_aspect_ratio = bool(params.get('keep_aspect_ratio', False))
+
+    # resize_mode: новый параметр. При отсутствии — backward compat с keep_aspect_ratio.
+    resize_mode = params.get('resize_mode')
+    if resize_mode not in VALID_RESIZE_MODES:
+        if 'keep_aspect_ratio' in params:
+            resize_mode = "keep_aspect_pad" if bool(params['keep_aspect_ratio']) else "hard"
+            log(f"ℹ️ resize_mode не задан, использую keep_aspect_ratio={params['keep_aspect_ratio']} → {resize_mode}")
+        else:
+            resize_mode = "hard"
+            log(f"ℹ️ resize_mode не задан, использую дефолт 'hard'")
+
+    # Для обратной совместимости сохраняем и старое поле
+    keep_aspect_ratio = (resize_mode == "keep_aspect_pad")
 
     # --- Если пользователь указал U-Net YAML — читаем оттуда path, num_classes и пути сплитов ---
     unet_yaml = params.get('unet_yaml')
@@ -889,7 +959,11 @@ def main():
     log(f"Num workers: {num_workers}")
     log(f"Порог (threshold): {threshold}")
     log(f"Нормализация входа (ImageNet): {normalize}")
-    log(f"Сохранять пропорции (padding): {keep_aspect_ratio}")
+    log(f"Режим ресайза (resize_mode): {resize_mode}")
+    if resize_mode == "random_crop":
+        log("⚠️ random_crop: обучение идёт на случайных кропах. "
+            "Валидация/тест используют центральный кроп. "
+            "Для инференса пользователь выберет hard / keep_aspect_pad отдельно.")
     log(f"Результаты будут сохранены в: {save_root}")
 
     if not dataset_path or not os.path.exists(dataset_path):
@@ -961,12 +1035,11 @@ def main():
         sys.exit(1)
 
 
-
     # ---------- Датасеты ----------
     train_dataset = SegmentationDataset(
         train_img_dir, train_mask_dir,
         input_size, num_classes, augmentations,
-        normalize=normalize, keep_aspect_ratio=keep_aspect_ratio,
+        normalize=normalize, resize_mode=resize_mode, is_train=True,
     )
 
     # --- Валидация — с защитой от пустых папок ---
@@ -977,7 +1050,7 @@ def main():
             val_dataset = SegmentationDataset(
                 val_img_dir, val_mask_dir,
                 input_size, num_classes, {},
-                normalize=normalize, keep_aspect_ratio=keep_aspect_ratio,
+                normalize=normalize, resize_mode=resize_mode, is_train=False,
             )
             val_loader = DataLoader(val_dataset, batch_size=batch_size,
                                      shuffle=False, num_workers=num_workers)
@@ -1000,7 +1073,7 @@ def main():
             test_dataset = SegmentationDataset(
                 test_img_dir, test_mask_dir,
                 input_size, num_classes, {},
-                normalize=normalize, keep_aspect_ratio=keep_aspect_ratio,
+                normalize=normalize, resize_mode=resize_mode, is_train=False,
             )
             test_loader = DataLoader(test_dataset, batch_size=batch_size,
                                       shuffle=False, num_workers=num_workers)
@@ -1013,8 +1086,6 @@ def main():
     else:
         log(f"ℹ️ Тестовые папки не найдены ({test_img_dir}, {test_mask_dir}), "
             f"тестовая оценка будет пропущена")
-
-
 
 
     # --- Проверка масок на согласованность с num_classes ---
@@ -1127,7 +1198,8 @@ def main():
         'date': datetime.now().isoformat(),
         'decoder_channels': decoder_channels,
         'normalize': normalize,
-        'keep_aspect_ratio': keep_aspect_ratio,
+        'resize_mode': resize_mode,
+        'keep_aspect_ratio': keep_aspect_ratio,   # для обратной совместимости
     }
     save_args_yaml(args_dict, os.path.join(save_root, 'args.yaml'))
 
@@ -1151,7 +1223,8 @@ def main():
         'best_val_loss': None,
         'best_iou': None,
         'normalize': normalize,
-        'keep_aspect_ratio': keep_aspect_ratio,
+        'resize_mode': resize_mode,
+        'keep_aspect_ratio': keep_aspect_ratio,   # для обратной совместимости
         'date': datetime.now().isoformat()
     }
     save_model_meta(meta_info_initial, best_loss_model_path)
@@ -1314,7 +1387,8 @@ def main():
         'best_val_loss': best_val_loss if best_val_loss != float('inf') else None,
         'best_iou': best_iou if best_iou > -float('inf') else None,
         'normalize': normalize,
-        'keep_aspect_ratio': keep_aspect_ratio,
+        'resize_mode': resize_mode,
+        'keep_aspect_ratio': keep_aspect_ratio,   # для обратной совместимости
         'date': datetime.now().isoformat()
     }
     save_model_meta(meta_info_final, best_loss_model_path)

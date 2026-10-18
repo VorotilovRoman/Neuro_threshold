@@ -541,11 +541,17 @@ class UNetTrainWidget(BaseTrainWidget):
         if path:
             self.custom_model_path.setText(path)
 
+    # В методе _add_preset_unet_fields (класс UNetTrainWidget):
     def _add_preset_unet_fields(self):
         self.encoder = QComboBox()
         self.encoder.addItems(["resnet18", "resnet34", "resnet50", "efficientnet-b0", "vgg16"])
         self.preset_layout.addRow("Энкодер (backbone):", self.encoder)
-
+        # --- ДОБАВЛЯЕМ ВЫБОР АРХИТЕКТУРЫ ---
+        self.architecture = QComboBox()
+        self.architecture.addItems(["U-Net", "U-Net++"])
+        self.architecture.setToolTip("Выбор архитектуры сегментации: классический U-Net или UNet++")
+        self.preset_layout.addRow("Архитектура:", self.architecture)
+        # -----------------------------------
         self.input_size = QComboBox()
         self.input_size.addItems(["256", "512", "1024"])
         self.input_size.setCurrentText("512")
@@ -744,6 +750,7 @@ class UNetTrainWidget(BaseTrainWidget):
             "optimizer": self.optimizer.currentText(),
             "lr": self.lr.value(),
             "encoder": self.encoder.currentText(),
+            "architecture": "unet++" if self.architecture.currentText() == "U-Net++" else "unet",
             "input_size": int(self.input_size.currentText()),
             "num_classes": self.num_classes.value(),
             "loss": self.loss.currentText(),

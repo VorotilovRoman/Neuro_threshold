@@ -145,6 +145,13 @@ class UNetInferenceSettings(BaseInferenceSettings):
         self._input_size.setCurrentText("512")
         layout.addLayout(self._row("Размер входа", self._input_size))
 
+
+        # --- ДОБАВЛЯЕМ ОТОБРАЖЕНИЕ АРХИТЕКТУРЫ ---
+        self._architecture = QLineEdit()
+        self._architecture.setReadOnly(True)
+        self._architecture.setPlaceholderText("Читается из метаданных модели")
+        layout.addLayout(self._row("Архитектура", self._architecture))
+
         # ---------- Порог ----------
         self._threshold = QDoubleSpinBox()
         self._threshold.setRange(0.01, 0.99)
@@ -334,7 +341,17 @@ class UNetInferenceSettings(BaseInferenceSettings):
             self._resize_mode_override.setEnabled(True)
             result['missing'].append('resize_mode')
 
+
         result['train_resize_mode'] = train_rm
+
+
+        # --- Архитектура ---
+        if 'architecture' in metadata:
+            arch = metadata['architecture'].upper()
+            self._architecture.setText(arch)
+        else:
+            self._architecture.setText("U-Net (по умолчанию)")
+
 
         # --- inference_resize_mode ---
         # 1) Если в meta сохранён явный выбор — используем его.

@@ -254,6 +254,7 @@ class UNetSegmentor(TorchSegmentor):
         input_size_val = meta.get('input_size')
         num_classes = meta.get('num_classes', 1)
         decoder_channels = meta.get('decoder_channels', (256, 128, 64, 32, 16))
+        architecture = meta.get('architecture', 'unet').lower()
 
         if not encoder_name or not input_size_val:
             raise ValueError(
@@ -261,17 +262,28 @@ class UNetSegmentor(TorchSegmentor):
                 f"Текущее содержимое: {meta}"
             )
 
-        # --- Модель ---
-        self.model = smp.Unet(
-            encoder_name=encoder_name,
-            encoder_weights=None,
-            in_channels=3,
-            classes=num_classes,
-            decoder_channels=decoder_channels,
-        )
+
+        # --- Модель (ВЫБОР АРХИТЕКТУРЫ) ---
+        if architecture in ('unet++', 'unetplusplus'):
+            self.model = smp.UnetPlusPlus(
+                encoder_name=encoder_name,
+                encoder_weights=None,
+                in_channels=3,
+                classes=num_classes,
+                decoder_channels=decoder_channels,
+            )
+        else:
+            self.model = smp.Unet(
+                encoder_name=encoder_name,
+                encoder_weights=None,
+                in_channels=3,
+                classes=num_classes,
+                decoder_channels=decoder_channels,
+            )
 
         # --- Веса ---
         state_dict = torch.load(weights_path, map_location='cpu')
+
         cleaned = {k: v for k, v in state_dict.items()
                    if not k.endswith('num_batches_tracked')}
         missing, unexpected = self.model.load_state_dict(cleaned, strict=False)
@@ -292,7 +304,8 @@ class UNetSegmentor(TorchSegmentor):
         # «параметр известен из обучения» vs «параметр неизвестен,
         # пользователь должен выбрать сам».
         self.metadata = {
-            'model_type': 'U-Net',
+            'model_type': 'U-Net++' if architecture in ('unet++', 'unetplusplus') else 'U-Net',
+            'architecture': architecture,
             'encoder': encoder_name,
             'input_size': input_size_val,
             'num_classes': num_classes,

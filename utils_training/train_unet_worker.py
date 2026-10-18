@@ -50,8 +50,10 @@ HAS_YAML = False
 
 try:
     import matplotlib
+
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+
     HAS_MATPLOTLIB = True
 except ImportError:
     print("Предупреждение: matplotlib не установлен. Графики и визуализации сохранены не будут.")
@@ -59,12 +61,14 @@ except ImportError:
 if HAS_MATPLOTLIB:
     try:
         import seaborn as sns
+
         HAS_SEABORN = True
     except ImportError:
         print("Предупреждение: seaborn не установлен. Матрицы ошибок будут отображены без тепловой карты.")
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     print("Предупреждение: PyYAML не установлен. Параметры будут сохранены в JSON.")
@@ -78,24 +82,24 @@ except ImportError:
     sys.exit(1)
 
 # ========== Глобальные конфигурации ==========
-DECODER_CHANNELS = (256, 128, 64, 32, 16)   # каналы декодера U-Net
-NUM_WORKERS_DEFAULT = 4                     # количество workers для DataLoader
-AUTO_BATCH_MEM_FACTOR = 0.7                 # использовать 70% доступной памяти
-AUTO_BATCH_MIN = 1                          # минимальный batch
-AUTO_BATCH_MAX = 64                         # максимальный batch
-NUM_TRAIN_BATCHES_TO_SAVE = 3               # сколько тренировочных батчей сохранить как примеры
-NUM_VAL_SAMPLES_TO_SAVE = 8                 # сколько валидационных изображений для предсказаний
+DECODER_CHANNELS = (256, 128, 64, 32, 16)  # каналы декодера U-Net
+NUM_WORKERS_DEFAULT = 4  # количество workers для DataLoader
+AUTO_BATCH_MEM_FACTOR = 0.5  # использовать не более 50% общей памяти
+AUTO_BATCH_MIN = 1  # минимальный batch
+AUTO_BATCH_MAX = 64  # максимальный batch
+NUM_TRAIN_BATCHES_TO_SAVE = 3  # сколько тренировочных батчей сохранить как примеры
+NUM_VAL_SAMPLES_TO_SAVE = 8  # сколько валидационных изображений для предсказаний
 
 # Early stopping — ослабленные значения
 EARLY_STOPPING_PATIENCE = 5
 OVERFITTING_GAP_THRESHOLD = 0.5
 OVERFITTING_MIN_PATIENCE = 3
 
-THRESHOLD_FACTOR = 0.7                       # порог бинаризации для метрик по умолчанию
+THRESHOLD_FACTOR = 0.7  # порог бинаризации для метрик по умолчанию
 
 # Поддерживаемые расширения
 IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
-MASK_EXTS  = ('.png', '.tif', '.tiff', '.bmp')   # без .jpg — плохо для масок
+MASK_EXTS = ('.png', '.tif', '.tiff', '.bmp')  # без .jpg — плохо для масок
 
 # Допустимые значения resize_mode
 VALID_RESIZE_MODES = ("hard", "keep_aspect_pad", "random_crop")
@@ -104,7 +108,7 @@ VALID_RESIZE_MODES = ("hard", "keep_aspect_pad", "random_crop")
 model = None
 optimizer = None
 scheduler = None
-best_model_path = None            # алиас на best_loss (для обратной совместимости)
+best_model_path = None  # алиас на best_loss (для обратной совместимости)
 best_loss_model_path = None
 best_iou_model_path = None
 final_model_path = None
@@ -127,9 +131,11 @@ history = {  # для сбора метрик по эпохам
     'map50_95': []
 }
 
+
 def log(msg):
     print(msg)
     sys.stdout.flush()
+
 
 def signal_handler(signum, frame):
     global stop_requested
@@ -141,11 +147,12 @@ def signal_handler(signum, frame):
         log(f"Модель сохранена как {checkpoint_path}")
         # Бэкапим лучшие модели, если они уже есть
         for src_path, suffix in ((best_loss_model_path, "_interrupted"),
-                                  (best_iou_model_path, "_interrupted")):
+                                 (best_iou_model_path, "_interrupted")):
             if src_path and os.path.exists(src_path):
                 backup = src_path.replace(".pth", f"{suffix}.pth")
                 torch.save(torch.load(src_path), backup)
                 log(f"Лучшая модель скопирована в {backup}")
+
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -201,15 +208,6 @@ class SegmentationDataset(Dataset):
     def _resize_pair(self, image, mask):
         """
         Приведение пары (image, mask) к (input_size, input_size).
-
-        resize_mode:
-          hard             — жёсткий ресайз до (S, S) (искажает AR);
-          keep_aspect_pad  — масштаб с сохранением AR + padding до (S, S);
-          random_crop      — при обучении random crop; при val/test — center crop.
-                             Примечание: кроп теряет часть кадра. Поэтому при инференсе
-                             пользователь выбирает hard / keep_aspect_pad отдельно
-                             (в metadata: inference_resize_mode).
-
         Маска всегда интерполируется NEAREST — без размытия границ классов.
         """
         S = self.input_size
@@ -317,17 +315,14 @@ class SegmentationDataset(Dataset):
         mask_np = mask_np.squeeze()
 
         if self.num_classes == 1:
-            # Бинарная сегментация. Принимаем оба варианта значений пикселей:
-            #   {0, 255} — классическая бинарная PNG-маска;
-            #   {0, 1}   — формат, который генерирует наша утилита (offset=1).
+            # Бинарная сегментация.
             if int(mask_np.max()) > 1:
                 binary = (mask_np > 127).astype(np.float32)
             else:
                 binary = (mask_np > 0).astype(np.float32)
-            mask_tensor = torch.from_numpy(binary).unsqueeze(0)   # [1, H, W]
+            mask_tensor = torch.from_numpy(binary).unsqueeze(0)  # [1, H, W]
         else:
             # Многоклассовая сегментация.
-            # ПРАВИЛО: значение пикселя = индекс класса (0 — фон, 1..N-1 — объекты).
             mask_tensor = torch.from_numpy(mask_np.astype(np.int64))
             max_val = int(mask_tensor.max())
             if max_val >= self.num_classes:
@@ -480,24 +475,43 @@ def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
         }
 
 
-# ---------- Автоподбор batch_size ----------
-def auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX):
+# ---------- Автоподбор batch_size (УЛУЧШЕННЫЙ) ----------
+def auto_batch_size(device, input_size, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN,
+                    max_batch=AUTO_BATCH_MAX):
     if device.type == 'cuda' and torch.cuda.is_available():
         try:
+            # Получаем общую и свободную память
+            total_mem = torch.cuda.get_device_properties(device).total_memory
             free_mem, _ = torch.cuda.mem_get_info(device)
+            total_mem_gb = total_mem / (1024 ** 3)
             free_mem_gb = free_mem / (1024 ** 3)
-            suggested = int((free_mem_gb * mem_factor) * 4)
+
+            # Ограничиваем использование 50% от общей памяти (оставляем на пики)
+            max_allowed_mem_gb = min(total_mem_gb * mem_factor, free_mem_gb)
+
+            # Оценка памяти на 1 изображение (в ГБ) для U-Net
+            # Для 1024x1024 эмпирически нужно ~2.5 ГБ (прямой + обратный проход + активации)
+            # Зависимость квадратичная от размера входа
+            mem_per_img_gb = 2.5 * (input_size / 1024.0) ** 2
+
+            suggested = int(max_allowed_mem_gb / mem_per_img_gb)
             suggested = max(min_batch, min(suggested, max_batch))
-            log(f"Auto batch (GPU): free={free_mem_gb:.1f}GB -> batch={suggested}")
+
+            log(f"Auto batch (GPU): total={total_mem_gb:.1f}GB, free={free_mem_gb:.1f}GB, "
+                f"limit={mem_factor * 100:.0f}% ({max_allowed_mem_gb:.1f}GB), "
+                f"mem/img≈{mem_per_img_gb:.2f}GB -> batch={suggested}")
             return suggested
         except Exception as e:
             log(f"Ошибка при определении памяти GPU: {e}, переключаемся на RAM")
     try:
         import psutil
         free_ram = psutil.virtual_memory().available / (1024 ** 3)
-        suggested = int((free_ram * mem_factor) * 2)
+        # Для RAM также ограничиваем 50% и учитываем размер
+        max_allowed_ram = free_ram * mem_factor
+        mem_per_img_gb = 2.5 * (input_size / 1024.0) ** 2
+        suggested = int(max_allowed_ram / mem_per_img_gb)
         suggested = max(min_batch, min(suggested, max_batch))
-        log(f"Auto batch (RAM): free={free_ram:.1f}GB -> batch={suggested}")
+        log(f"Auto batch (RAM): free={free_ram:.1f}GB, limit={mem_factor * 100:.0f}% ({max_allowed_ram:.1f}GB) -> batch={suggested}")
         return suggested
     except ImportError:
         log("⚠️ psutil не установлен, auto batch использует значение по умолчанию 8")
@@ -516,6 +530,7 @@ def save_args_yaml(args_dict, save_path):
             json.dump(args_dict, f, indent=2, ensure_ascii=False)
         log(f"Аргументы сохранены в JSON (YAML недоступен): {json_path}")
 
+
 def save_model_meta(meta_dict, model_path):
     meta_path = os.path.splitext(model_path)[0] + '_meta.json'
     with open(meta_path, 'w', encoding='utf-8') as f:
@@ -532,25 +547,32 @@ def save_training_plots(history_dict, save_dir):
     axes[0, 0].plot(epochs, history_dict['train_loss'], label='Train Loss')
     if history_dict['val_loss']:
         axes[0, 0].plot(epochs, history_dict['val_loss'], label='Val Loss')
-    axes[0, 0].set_xlabel('Epoch'); axes[0, 0].set_ylabel('Loss')
-    axes[0, 0].legend(); axes[0, 0].set_title('Loss')
+    axes[0, 0].set_xlabel('Epoch');
+    axes[0, 0].set_ylabel('Loss')
+    axes[0, 0].legend();
+    axes[0, 0].set_title('Loss')
     axes[0, 1].plot(epochs, history_dict['iou'], label='IoU')
     axes[0, 1].plot(epochs, history_dict['dice'], label='Dice')
-    axes[0, 1].set_xlabel('Epoch'); axes[0, 1].set_ylabel('Score')
-    axes[0, 1].legend(); axes[0, 1].set_title('IoU & Dice')
+    axes[0, 1].set_xlabel('Epoch');
+    axes[0, 1].set_ylabel('Score')
+    axes[0, 1].legend();
+    axes[0, 1].set_title('IoU & Dice')
     axes[1, 0].plot(epochs, history_dict['precision'], label='Precision')
     axes[1, 0].plot(epochs, history_dict['recall'], label='Recall')
     axes[1, 0].plot(epochs, history_dict['f1'], label='F1')
-    axes[1, 0].set_xlabel('Epoch'); axes[1, 0].legend()
+    axes[1, 0].set_xlabel('Epoch');
+    axes[1, 0].legend()
     axes[1, 0].set_title('Precision/Recall/F1')
     axes[1, 1].plot(epochs, history_dict['map50'], label='mAP50')
     axes[1, 1].plot(epochs, history_dict['map50_95'], label='mAP50-95')
-    axes[1, 1].set_xlabel('Epoch'); axes[1, 1].legend()
+    axes[1, 1].set_xlabel('Epoch');
+    axes[1, 1].legend()
     axes[1, 1].set_title('mAP')
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'results.png'), dpi=150)
     plt.close()
     log(f"График обучения сохранён: {os.path.join(save_dir, 'results.png')}")
+
 
 def save_csv_results(history_dict, save_path):
     with open(save_path, 'w', newline='', encoding='utf-8') as f:
@@ -559,6 +581,7 @@ def save_csv_results(history_dict, save_path):
         rows = [dict(zip(history_dict, t)) for t in zip(*history_dict.values())]
         writer.writerows(rows)
     log(f"CSV история сохранена: {save_path}")
+
 
 def save_pr_curve(preds, masks, save_dir, num_classes=1):
     if not HAS_MATPLOTLIB:
@@ -576,32 +599,48 @@ def save_pr_curve(preds, masks, save_dir, num_classes=1):
             prec = tp / (tp + fp + 1e-8)
             rec = tp / (tp + fn + 1e-8)
             f1 = 2 * prec * rec / (prec + rec + 1e-8)
-            precisions.append(prec); recalls.append(rec); f1_scores.append(f1)
+            precisions.append(prec);
+            recalls.append(rec);
+            f1_scores.append(f1)
         plt.figure(figsize=(8, 6))
         plt.plot(recalls, precisions, marker='.', label='PR curve')
-        plt.xlabel('Recall'); plt.ylabel('Precision')
-        plt.title('Precision-Recall Curve'); plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskPR_curve.png')); plt.close()
+        plt.xlabel('Recall');
+        plt.ylabel('Precision')
+        plt.title('Precision-Recall Curve');
+        plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskPR_curve.png'));
+        plt.close()
         plt.figure(figsize=(10, 6))
         plt.plot(thresholds, precisions, label='Precision')
         plt.plot(thresholds, recalls, label='Recall')
         plt.plot(thresholds, f1_scores, label='F1')
-        plt.xlabel('Threshold'); plt.ylabel('Score')
-        plt.title('Precision, Recall, F1 vs Threshold'); plt.legend(); plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskF1_curve.png')); plt.close()
+        plt.xlabel('Threshold');
+        plt.ylabel('Score')
+        plt.title('Precision, Recall, F1 vs Threshold');
+        plt.legend();
+        plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskF1_curve.png'));
+        plt.close()
         plt.figure(figsize=(8, 6))
         plt.plot(thresholds, precisions, label='Precision')
-        plt.xlabel('Threshold'); plt.ylabel('Precision')
-        plt.title('Precision vs Threshold'); plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskP_curve.png')); plt.close()
+        plt.xlabel('Threshold');
+        plt.ylabel('Precision')
+        plt.title('Precision vs Threshold');
+        plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskP_curve.png'));
+        plt.close()
         plt.figure(figsize=(8, 6))
         plt.plot(thresholds, recalls, label='Recall')
-        plt.xlabel('Threshold'); plt.ylabel('Recall')
-        plt.title('Recall vs Threshold'); plt.grid(True)
-        plt.savefig(os.path.join(save_dir, 'MaskR_curve.png')); plt.close()
+        plt.xlabel('Threshold');
+        plt.ylabel('Recall')
+        plt.title('Recall vs Threshold');
+        plt.grid(True)
+        plt.savefig(os.path.join(save_dir, 'MaskR_curve.png'));
+        plt.close()
         log(f"Кривые PR, F1, P, R сохранены в {save_dir}")
     else:
         log("PR-кривые не генерируются для многоклассовой сегментации")
+
 
 def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=0.5):
     if not HAS_MATPLOTLIB:
@@ -637,9 +676,11 @@ def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=
                 plt.text(j, i, str(conf_matrix[i, j]), ha='center', va='center')
         plt.xticks(range(len(tick_labels)), tick_labels)
         plt.yticks(range(len(tick_labels)), tick_labels)
-    plt.xlabel('Predicted'); plt.ylabel('True')
+    plt.xlabel('Predicted');
+    plt.ylabel('True')
     plt.title('Confusion Matrix')
-    plt.savefig(os.path.join(save_dir, 'confusion_matrix.png')); plt.close()
+    plt.savefig(os.path.join(save_dir, 'confusion_matrix.png'));
+    plt.close()
 
     conf_norm = conf_matrix.astype(np.float32) / (conf_matrix.sum(axis=1, keepdims=True) + 1e-8)
     plt.figure(figsize=(max(6, num_classes * 0.6), max(5, num_classes * 0.5)))
@@ -654,12 +695,16 @@ def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=
                 plt.text(j, i, f"{conf_norm[i, j]:.2f}", ha='center', va='center')
         plt.xticks(range(len(tick_labels)), tick_labels)
         plt.yticks(range(len(tick_labels)), tick_labels)
-    plt.xlabel('Predicted'); plt.ylabel('True')
+    plt.xlabel('Predicted');
+    plt.ylabel('True')
     plt.title('Normalized Confusion Matrix')
-    plt.savefig(os.path.join(save_dir, 'confusion_matrix_normalized.png')); plt.close()
+    plt.savefig(os.path.join(save_dir, 'confusion_matrix_normalized.png'));
+    plt.close()
     log(f"Матрицы ошибок сохранены в {save_dir}")
 
-def save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1):
+
+def save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1,
+                              normalize=False):
     if not HAS_MATPLOTLIB:
         return
     os.makedirs(save_dir, exist_ok=True)
@@ -667,14 +712,23 @@ def save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per
         if batch_idx >= num_batches:
             break
         n_images = min(images.size(0), samples_per_batch)
-        images = images[:n_images]; masks = masks[:n_images]
+        images = images[:n_images];
+        masks = masks[:n_images]
         fig, axes = plt.subplots(2, n_images, figsize=(n_images * 4, 8))
         if n_images == 1:
             axes = axes.reshape(2, 1)
         for i in range(n_images):
-            img = images[i].cpu().permute(1, 2, 0).numpy() * 255
-            axes[0, i].imshow(img.astype(np.uint8)); axes[0, i].axis('off')
-            axes[0, i].set_title(f'Image {i+1}')
+            # Денормализация для корректной отрисовки
+            img = images[i].cpu().permute(1, 2, 0).numpy()
+            if normalize:
+                mean = np.array([0.485, 0.456, 0.406])
+                std = np.array([0.229, 0.224, 0.225])
+                img = img * std + mean
+                img = np.clip(img, 0, 1)
+
+            axes[0, i].imshow((img * 255).astype(np.uint8));
+            axes[0, i].axis('off')
+            axes[0, i].set_title(f'Image {i + 1}')
             mask = masks[i].cpu().numpy().squeeze()
             if num_classes == 1:
                 mask_vis = (mask > 0.5).astype(np.uint8) * 255
@@ -684,13 +738,15 @@ def save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per
                 for c in range(num_classes):
                     mask_vis[mask == c] = [c * 255 // max(1, num_classes - 1), 128, 255 - c * 128]
                 axes[1, i].imshow(mask_vis)
-            axes[1, i].axis('off'); axes[1, i].set_title(f'Mask {i+1}')
+            axes[1, i].axis('off');
+            axes[1, i].set_title(f'Mask {i + 1}')
         plt.tight_layout()
         plt.savefig(os.path.join(save_dir, f'train_batch{batch_idx}.jpg'))
         plt.close()
     log(f"Сохранено {num_batches} тренировочных батчей в {save_dir}")
 
-def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1):
+
+def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1, normalize=False):
     if not HAS_MATPLOTLIB:
         return
     os.makedirs(save_dir, exist_ok=True)
@@ -699,7 +755,8 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
     collected = 0
     with torch.no_grad():
         for images, masks in val_loader:
-            images = images.to(device); masks = masks.to(device)
+            images = images.to(device);
+            masks = masks.to(device)
             outputs = model(images)
             if num_classes == 1:
                 preds = (torch.sigmoid(outputs) > 0.5).float()
@@ -708,21 +765,31 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
             for i in range(images.size(0)):
                 if collected >= num_samples:
                     break
-                img = images[i].cpu().permute(1, 2, 0).numpy() * 255
-                images_list.append(img.astype(np.uint8))
+                # Денормализация
+                img = images[i].cpu().permute(1, 2, 0).numpy()
+                if normalize:
+                    mean = np.array([0.485, 0.456, 0.406])
+                    std = np.array([0.229, 0.224, 0.225])
+                    img = img * std + mean
+                    img = np.clip(img, 0, 1)
+
+                images_list.append((img * 255).astype(np.uint8))
                 true_masks_list.append(masks[i].cpu().numpy().squeeze())
                 pred_masks_list.append(preds[i].cpu().numpy().squeeze())
                 collected += 1
             if collected >= num_samples:
                 break
     if not images_list:
-        log("Нет примеров для сохранения валидации"); return
+        log("Нет примеров для сохранения валидации");
+        return
     n = len(images_list)
     fig, axes = plt.subplots(n, 3, figsize=(12, 4 * n))
     if n == 1:
         axes = axes.reshape(1, 3)
     for i in range(n):
-        axes[i, 0].imshow(images_list[i]); axes[i, 0].axis('off'); axes[i, 0].set_title('Image')
+        axes[i, 0].imshow(images_list[i]);
+        axes[i, 0].axis('off');
+        axes[i, 0].set_title('Image')
         if num_classes == 1:
             tv = (true_masks_list[i] > 0.5).astype(np.uint8) * 255
             axes[i, 1].imshow(tv, cmap='gray')
@@ -731,7 +798,8 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
             for c in range(num_classes):
                 tv[true_masks_list[i] == c] = [c * 255 // max(1, num_classes - 1), 128, 255 - c * 128]
             axes[i, 1].imshow(tv)
-        axes[i, 1].axis('off'); axes[i, 1].set_title('True Mask')
+        axes[i, 1].axis('off');
+        axes[i, 1].set_title('True Mask')
         if num_classes == 1:
             pv = (pred_masks_list[i] > 0.5).astype(np.uint8) * 255
             axes[i, 2].imshow(pv, cmap='gray')
@@ -740,7 +808,8 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
             for c in range(num_classes):
                 pv[pred_masks_list[i] == c] = [c * 255 // max(1, num_classes - 1), 128, 255 - c * 128]
             axes[i, 2].imshow(pv)
-        axes[i, 2].axis('off'); axes[i, 2].set_title('Pred Mask')
+        axes[i, 2].axis('off');
+        axes[i, 2].set_title('Pred Mask')
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'val_examples.jpg'))
     plt.close()
@@ -749,11 +818,6 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
 
 # ---------- Проверка масок ----------
 def check_dataset_masks_consistency(dataset, num_classes, max_check=20):
-    """
-    Проверяет первые max_check масок: собирает уникальные значения пикселей,
-    сравнивает с num_classes.
-    Возвращает (max_pixel_in_masks, warnings_list).
-    """
     warnings_out = []
     global_max = 0
     n = min(len(dataset), max_check)
@@ -840,10 +904,12 @@ def main():
     threshold = params.get('threshold', THRESHOLD_FACTOR)
     num_workers = params.get('num_workers', NUM_WORKERS_DEFAULT)
 
+    # НОВЫЙ ПАРАМЕТР: Архитектура
+    architecture = params.get('architecture', 'unet').lower()
+
     # --- Препроцессинг ---
     normalize = bool(params.get('normalize', False))
 
-    # resize_mode: новый параметр. При отсутствии — backward compat с keep_aspect_ratio.
     resize_mode = params.get('resize_mode')
     if resize_mode not in VALID_RESIZE_MODES:
         if 'keep_aspect_ratio' in params:
@@ -853,20 +919,17 @@ def main():
             resize_mode = "hard"
             log(f"ℹ️ resize_mode не задан, использую дефолт 'hard'")
 
-    # Для обратной совместимости сохраняем и старое поле
     keep_aspect_ratio = (resize_mode == "keep_aspect_pad")
 
-    # --- Если пользователь указал U-Net YAML — читаем оттуда path, num_classes и пути сплитов ---
     unet_yaml = params.get('unet_yaml')
 
-    # Словарь с относительными путями сплитов (будут заполнены из YAML, если он задан)
     split_paths = {
         'train_images': 'images/train',
-        'train_masks':  'masks/train',
-        'val_images':   'images/val',
-        'val_masks':    'masks/val',
-        'test_images':  'images/test',
-        'test_masks':   'masks/test',
+        'train_masks': 'masks/train',
+        'val_images': 'images/val',
+        'val_masks': 'masks/val',
+        'test_images': 'images/test',
+        'test_masks': 'masks/test',
     }
 
     if unet_yaml and os.path.isfile(unet_yaml):
@@ -874,7 +937,6 @@ def main():
             with open(unet_yaml, 'r', encoding='utf-8') as f:
                 cfg = yaml.safe_load(f) or {}
 
-            # 1. path → dataset_path
             yaml_root = cfg.get('path', '')
             if yaml_root:
                 if not os.path.isabs(yaml_root):
@@ -890,7 +952,6 @@ def main():
                 log(f"📄 В YAML нет поля 'path', использую папку YAML: {yaml_root}")
                 dataset_path = yaml_root
 
-            # 2. Чтение путей сплитов из YAML (если заданы)
             for key in split_paths.keys():
                 val = cfg.get(key)
                 if isinstance(val, str) and val.strip():
@@ -899,7 +960,6 @@ def main():
                     split_paths[key] = val
                     log(f"📄 {key} из YAML: {val}")
 
-            # 3. num_classes → num_classes
             nc_yaml = cfg.get('num_classes')
             if nc_yaml is not None:
                 try:
@@ -915,12 +975,10 @@ def main():
                     log(f"⚠️ num_classes в YAML = {nc_yaml_int}, ожидалось ≥ 2. "
                         f"Оставляю значение из UI: {num_classes}")
 
-            # 4. class_names (только для информации)
             cn_list = cfg.get('class_names', [])
             if cn_list:
                 log(f"📄 Классы из YAML ({len(cn_list)}): {cn_list}")
 
-            # 5. mask_class_offset (для справки)
             mco = cfg.get('mask_class_offset')
             if mco is not None:
                 log(f"📄 mask_class_offset из YAML: {mco}")
@@ -944,7 +1002,8 @@ def main():
     weights_dir = os.path.join(save_root, 'weights')
     os.makedirs(weights_dir, exist_ok=True)
 
-    log("=== Запуск обучения U‑Net ===")
+    log("=== Запуск обучения ===")
+    log(f"Архитектура: {architecture.upper()}")
     log(f"Датасет: {dataset_path}")
     log(f"Модель: {model_source if model_source else 'предустановленная'}")
     log(f"Энкодер: {encoder}")
@@ -970,19 +1029,16 @@ def main():
         log(f"Ошибка: папка датасета не существует: {dataset_path}")
         sys.exit(1)
 
-    # Если YAML не задан (или в нём не было соответствующих ключей),
-    # делаем дефолтные пути абсолютными относительно dataset_path
     for key, val in split_paths.items():
         if not os.path.isabs(val):
             split_paths[key] = os.path.normpath(os.path.join(dataset_path, val))
 
-    # Пути уже абсолютные (после нормализации выше)
-    train_img_dir  = split_paths['train_images']
+    train_img_dir = split_paths['train_images']
     train_mask_dir = split_paths['train_masks']
-    val_img_dir    = split_paths['val_images']
-    val_mask_dir   = split_paths['val_masks']
-    test_img_dir   = split_paths['test_images']
-    test_mask_dir  = split_paths['test_masks']
+    val_img_dir = split_paths['val_images']
+    val_mask_dir = split_paths['val_masks']
+    test_img_dir = split_paths['test_images']
+    test_mask_dir = split_paths['test_masks']
 
     if not os.path.exists(train_img_dir) or not os.path.exists(train_mask_dir):
         log(f"Ошибка: не найдены папки:\n{train_img_dir}\n{train_mask_dir}")
@@ -1000,7 +1056,8 @@ def main():
             temp_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             temp_device = torch.device(device_pref)
-        batch_size = auto_batch_size(temp_device)
+        # Передаем input_size для корректного расчета
+        batch_size = auto_batch_size(temp_device, input_size)
         log(f"Auto batch: выбран batch_size = {batch_size}")
     elif batch_size <= 0:
         log("Ошибка: batch_size должен быть положительным числом")
@@ -1021,7 +1078,9 @@ def main():
                 dropout = model_meta.get('dropout', dropout)
                 input_size = model_meta.get('input_size', input_size)
                 num_classes = model_meta.get('num_classes', num_classes)
-                log(f"Архитектура восстановлена: encoder={encoder}, "
+                # Восстанавливаем архитектуру, если она была сохранена
+                architecture = model_meta.get('architecture', architecture)
+                log(f"Архитектура восстановлена: type={architecture}, encoder={encoder}, "
                     f"decoder_channels={decoder_channels}, dropout={dropout}, "
                     f"input_size={input_size}, num_classes={num_classes}")
             except Exception as e:
@@ -1034,7 +1093,6 @@ def main():
         log(f"Ошибка: файл модели {model_source} не найден")
         sys.exit(1)
 
-
     # ---------- Датасеты ----------
     train_dataset = SegmentationDataset(
         train_img_dir, train_mask_dir,
@@ -1042,7 +1100,6 @@ def main():
         normalize=normalize, resize_mode=resize_mode, is_train=True,
     )
 
-    # --- Валидация — с защитой от пустых папок ---
     val_dataset = None
     val_loader = None
     if val_exists:
@@ -1053,7 +1110,7 @@ def main():
                 normalize=normalize, resize_mode=resize_mode, is_train=False,
             )
             val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                                     shuffle=False, num_workers=num_workers)
+                                    shuffle=False, num_workers=num_workers)
             log(f"Загружено {len(train_dataset)} обучающих, "
                 f"{len(val_dataset)} валидационных образцов")
         except RuntimeError as e:
@@ -1065,7 +1122,6 @@ def main():
         log(f"⚠️ Валидационные папки не найдены ({val_img_dir}, {val_mask_dir}), "
             f"валидация будет пропущена")
 
-    # --- Тест — только для финальной оценки ---
     test_dataset = None
     test_loader = None
     if os.path.exists(test_img_dir) and os.path.exists(test_mask_dir):
@@ -1076,7 +1132,7 @@ def main():
                 normalize=normalize, resize_mode=resize_mode, is_train=False,
             )
             test_loader = DataLoader(test_dataset, batch_size=batch_size,
-                                      shuffle=False, num_workers=num_workers)
+                                     shuffle=False, num_workers=num_workers)
             log(f"Загружено {len(test_dataset)} тестовых образцов "
                 f"({test_img_dir})")
         except RuntimeError as e:
@@ -1086,7 +1142,6 @@ def main():
     else:
         log(f"ℹ️ Тестовые папки не найдены ({test_img_dir}, {test_mask_dir}), "
             f"тестовая оценка будет пропущена")
-
 
     # --- Проверка масок на согласованность с num_classes ---
     log("--- Проверка масок на согласованность с num_classes ---")
@@ -1122,21 +1177,36 @@ def main():
                 log(f"✅ Согласовано: num_classes={num_classes}, max pixel={max_pixel}.")
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size,
-                               shuffle=True, num_workers=num_workers)
+                              shuffle=True, num_workers=num_workers)
 
     # Модель
     global model, best_model_path, final_model_path
     global best_loss_model_path, best_iou_model_path, best_iou
     load_pretrained = (model_source is None) or (not os.path.exists(model_source))
-    model = smp.Unet(
-        encoder_name=encoder,
-        encoder_weights='imagenet' if load_pretrained else None,
-        in_channels=3,
-        classes=num_classes,
-        decoder_use_batchnorm=True,
-        decoder_channels=decoder_channels,
-        decoder_dropout=dropout,
-    )
+
+    # Выбор архитектуры
+    if architecture in ('unet++', 'unetplusplus'):
+        log("Инициализация архитектуры: UNet++")
+        model = smp.UnetPlusPlus(
+            encoder_name=encoder,
+            encoder_weights='imagenet' if load_pretrained else None,
+            in_channels=3,
+            classes=num_classes,
+            decoder_use_batchnorm=True,
+            decoder_channels=decoder_channels,
+            decoder_dropout=dropout,
+        )
+    else:
+        log("Инициализация архитектуры: U-Net (vanilla)")
+        model = smp.Unet(
+            encoder_name=encoder,
+            encoder_weights='imagenet' if load_pretrained else None,
+            in_channels=3,
+            classes=num_classes,
+            decoder_use_batchnorm=True,
+            decoder_channels=decoder_channels,
+            decoder_dropout=dropout,
+        )
 
     if model_source is not None and os.path.exists(model_source):
         state_dict = torch.load(model_source, map_location='cpu')
@@ -1172,12 +1242,12 @@ def main():
 
     # --- Пути сохранения моделей ---
     best_loss_model_path = os.path.join(weights_dir, 'best_loss.pth')
-    best_iou_model_path  = os.path.join(weights_dir, 'best_iou.pth')
-    final_model_path     = os.path.join(weights_dir, 'last.pth')
-    # best.pth = алиас на best_loss для обратной совместимости
+    best_iou_model_path = os.path.join(weights_dir, 'best_iou.pth')
+    final_model_path = os.path.join(weights_dir, 'last.pth')
     best_model_path = best_loss_model_path
 
     args_dict = {
+        'architecture': architecture,
         'encoder': encoder,
         'input_size': input_size,
         'num_classes': num_classes,
@@ -1199,11 +1269,12 @@ def main():
         'decoder_channels': decoder_channels,
         'normalize': normalize,
         'resize_mode': resize_mode,
-        'keep_aspect_ratio': keep_aspect_ratio,   # для обратной совместимости
+        'keep_aspect_ratio': keep_aspect_ratio,
     }
     save_args_yaml(args_dict, os.path.join(save_root, 'args.yaml'))
 
     meta_info_initial = {
+        'architecture': architecture,
         'encoder': encoder,
         'input_size': input_size,
         'num_classes': num_classes,
@@ -1224,7 +1295,7 @@ def main():
         'best_iou': None,
         'normalize': normalize,
         'resize_mode': resize_mode,
-        'keep_aspect_ratio': keep_aspect_ratio,   # для обратной совместимости
+        'keep_aspect_ratio': keep_aspect_ratio,
         'date': datetime.now().isoformat()
     }
     save_model_meta(meta_info_initial, best_loss_model_path)
@@ -1287,7 +1358,6 @@ def main():
 
         # Сохранение лучших моделей и early stopping
         if val_loss is not None:
-            # --- best_loss.pth ---
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 torch.save(model.state_dict(), best_loss_model_path)
@@ -1309,7 +1379,6 @@ def main():
                         f"{EARLY_STOPPING_PATIENCE} эпох. Остановка обучения.")
                     break
 
-            # --- best_iou.pth (независимо от loss) ---
             if metrics is not None:
                 current_iou = metrics['IoU']
                 if current_iou > best_iou:
@@ -1318,7 +1387,6 @@ def main():
                     log(f"✅ Новая лучшая модель по IoU сохранена "
                         f"(IoU={best_iou:.4f}) → {os.path.basename(best_iou_model_path)}")
         else:
-            # Нет валидации — сохраняем best_loss по train_loss (на первой эпохе)
             if best_val_loss == float('inf'):
                 best_val_loss = train_loss
                 torch.save(model.state_dict(), best_loss_model_path)
@@ -1368,6 +1436,7 @@ def main():
     log(f"Финальная модель сохранена: {final_model_path}")
 
     meta_info_final = {
+        'architecture': architecture,
         'encoder': encoder,
         'input_size': input_size,
         'num_classes': num_classes,
@@ -1388,7 +1457,7 @@ def main():
         'best_iou': best_iou if best_iou > -float('inf') else None,
         'normalize': normalize,
         'resize_mode': resize_mode,
-        'keep_aspect_ratio': keep_aspect_ratio,   # для обратной совместимости
+        'keep_aspect_ratio': keep_aspect_ratio,
         'date': datetime.now().isoformat()
     }
     save_model_meta(meta_info_final, best_loss_model_path)
@@ -1397,7 +1466,7 @@ def main():
     save_model_meta(meta_info_final, final_model_path)
     log("Метаданные модели обновлены (финальная версия).")
 
-    # ---------- Пост-обработка: используем best_iou для отчётов (fallback на best_loss) ----------
+    # ---------- Пост-обработка ----------
     if val_loader is not None:
         log("=== Генерация итоговых отчётов и графиков ===")
         if os.path.exists(best_iou_model_path):
@@ -1432,12 +1501,18 @@ def main():
             save_training_plots(history, save_root)
             save_pr_curve(all_preds, all_masks, save_root, num_classes)
             save_confusion_matrix(all_preds, all_masks, save_root, num_classes)
+
+        # Передаем normalize
         save_train_batch_examples(train_loader, save_root,
-                                   num_batches=NUM_TRAIN_BATCHES_TO_SAVE,
-                                   samples_per_batch=min(4, batch_size),
-                                   num_classes=num_classes)
+                                  num_batches=NUM_TRAIN_BATCHES_TO_SAVE,
+                                  samples_per_batch=min(4, batch_size),
+                                  num_classes=num_classes,
+                                  normalize=normalize)
+
+        # Передаем normalize
         save_val_examples(val_loader, save_root, num_samples=NUM_VAL_SAMPLES_TO_SAVE,
-                          device=device, num_classes=num_classes)
+                          device=device, num_classes=num_classes,
+                          normalize=normalize)
 
         final_metrics = compute_metrics(all_preds, all_masks, num_classes, threshold=threshold)
         log(f"METRICS: {json.dumps(final_metrics)}")
@@ -1477,7 +1552,6 @@ def main():
                   encoding='utf-8') as f:
             json.dump(test_metrics, f, indent=2, ensure_ascii=False)
 
-        # Дополняем метаданные тестовыми метриками
         meta_info_final['test_metrics'] = test_metrics
         save_model_meta(meta_info_final, best_loss_model_path)
         if os.path.exists(best_iou_model_path):
@@ -1493,6 +1567,7 @@ def main():
         log(f"Best IoU model:  {best_iou_model_path} (IoU={best_iou:.4f})")
     log(f"Last model:      {final_model_path}")
     log("SUCCESS")
+
 
 if __name__ == "__main__":
     main()
