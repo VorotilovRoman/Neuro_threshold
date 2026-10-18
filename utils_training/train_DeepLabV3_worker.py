@@ -1734,11 +1734,12 @@ def main():
                 dummy_input,
                 onnx_path,
                 export_params=True,
-                opset_version=17,
+                opset_version=18,
                 do_constant_folding=True,
                 input_names=['input'],
                 output_names=['output'],
                 dynamic_axes=dynamic_axes,
+                dynamo=False,
             )
             log(f"✅ ONNX-модель сохранена: {onnx_path}")
 
@@ -1757,7 +1758,7 @@ def main():
             onnx_meta = {
                 'format': 'ONNX',
                 'source_weights': os.path.basename(best_weights),
-                'onnx_opset': 17,
+                'onnx_opset': 18,
                 'architecture': architecture,
                 'backbone': backbone, # ИСПРАВЛЕНО: здесь был encoder
                 'output_stride': output_stride,
