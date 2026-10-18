@@ -405,57 +405,284 @@ class UNetSegmentor(TorchSegmentor):
         return mask_np
 
 
+
 class DeepLabV3Segmentor(TorchSegmentor):
-    """DeepLabV3+ из torchvision."""
-    def load(self, backbone='resnet50', output_stride=16, input_size=520):
-        from torchvision.models.segmentation import (
-            deeplabv3_resnet50, deeplabv3_resnet101, deeplabv3_mobilenet_v3_large
-        )
-        _log(f"[DeepLabV3] Загрузка модели: backbone={backbone}, "
-             f"output_stride={output_stride}, input_size={input_size}")
+    """
+    Сегментатор DeepLabV3 / DeepLabV3+ на основе segmentation_models_pytorch.
+    При загрузке требует файл *_meta.json рядом с весами.
 
-        # torchvision-модели ожидают ImageNet-нормализацию
-        self.metadata = {
-            'model_type': 'DeepLabV3+',
-            'backbone': backbone,
-            'output_stride': output_stride,
-            'input_size': input_size,
-            'normalize': True,
-            'resize_mode': 'hard',
-        }
+    Поддерживает:
+        num_classes = 1  → sigmoid + threshold
+        num_classes = 2  → softmax[:, 1] + threshold
+                           (или sigmoid+threshold, если output_activation='sigmoid')
+        num_classes > 2  → softmax + argmax (класс масштабируется в 0..255)
 
-        if backbone == 'resnet50':
-            self.model = deeplabv3_resnet50(pretrained=True, progress=False)
-        elif backbone == 'resnet101':
-            self.model = deeplabv3_resnet101(pretrained=True, progress=False)
-        elif backbone == 'mobilenet_v3':
-            self.model = deeplabv3_mobilenet_v3_large(pretrained=True, progress=False)
+    Препроцессинг:
+        normalize             — ImageNet-нормализация (bool)
+        resize_mode           — 'hard' / 'keep_aspect_pad' / 'random_crop'
+                                (random_crop на инференсе заменяется на
+                                 inference_resize_mode, см. _resolve_resize_mode)
+        inference_resize_mode — 'hard' / 'keep_aspect_pad', используется только
+                                если обучение шло с random_crop.
+
+    Архитектура:
+        meta['architecture']  — 'deeplabv3plus' | 'deeplabv3'
+                                (если нет — считается deeplabv3plus для обратной совместимости)
+    """
+    def load(self, weights_path=None, backbone=None, output_stride=None):
+        """
+        Загружает модель DeepLabV3/V3+.
+
+        Параметры:
+            weights_path (str): путь к файлу весов (.pth) — обязателен
+            backbone (str): игнорируется, если в *_meta.json есть 'backbone'
+            output_stride (int): игнорируется, если есть в *_meta.json
+
+        Исключения:
+            FileNotFoundError: если файл весов не найден
+            ValueError: если отсутствует *_meta.json
+        """
+        import segmentation_models_pytorch as smp
+        import json
+
+        if not weights_path or not os.path.exists(weights_path):
+            raise FileNotFoundError(f"Файл модели DeepLab не найден: {weights_path}")
+
+        # ---------- Поиск и чтение метафайла ----------
+        meta_path = os.path.splitext(weights_path)[0] + '_meta.json'
+        if not os.path.exists(meta_path):
+            raise ValueError(
+                f"Файл метаданных не найден: {meta_path}\n"
+                "Для загрузки DeepLabV3/V3+ необходим *_meta.json в той же папке.\n"
+                "Формат файла:\n"
+                "{\n"
+                '  "architecture": "deeplabv3plus",          # или "deeplabv3"\n'
+                '  "backbone": "resnet50",\n'
+                '  "output_stride": 16,                      # 8 | 16 | 32\n'
+                '  "atrous_rates": [6, 12, 18],              # опционально\n'
+                '  "input_size": 513,                        # 513 (OS=16) | 1025 (OS=8)\n'
+                '  "num_classes": 21,\n'
+                '  "output_activation": "argmax",           # argmax | softmax | sigmoid\n'
+                '  "normalize": true,\n'
+                '  "resize_mode": "hard"\n'
+                "}\n"
+                "Убедитесь, что метафайл создан при обучении модели."
+            )
+
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            meta = json.load(f)
+
+        # ---------- Архитектурные параметры ----------
+        architecture = str(meta.get('architecture', 'deeplabv3plus')).lower()
+        if architecture in ('deeplabv3plus', 'deeplabv3+'):
+            architecture = 'deeplabv3plus'
+        elif architecture == 'deeplabv3':
+            architecture = 'deeplabv3'
         else:
-            raise ValueError(f"Unsupported backbone: {backbone}")
+            _log(f"[DeepLab] Неизвестная архитектура '{architecture}', "
+                 f"использую deeplabv3plus")
+            architecture = 'deeplabv3plus'
+
+        # Backbone: приоритет — meta, затем аргумент, затем дефолт
+        backbone_name = meta.get('backbone') or backbone or 'resnet50'
+
+        # Output stride: приоритет — meta, затем аргумент, затем дефолт
+        output_stride_val = meta.get('output_stride', output_stride if output_stride else 16)
+        try:
+            output_stride_val = int(output_stride_val)
+        except (TypeError, ValueError):
+            output_stride_val = 16
+
+        num_classes = int(meta.get('num_classes', 21))
+        input_size_val = meta.get('input_size', 513)
+        output_activation = str(meta.get('output_activation', 'argmax')).lower()
+        if output_activation not in ('argmax', 'softmax', 'sigmoid'):
+            output_activation = 'argmax'
+
+        # ---------- Atrous rates ----------
+        # Приоритет: meta → авто по OS
+        atrous_rates_meta = meta.get('atrous_rates')
+        if atrous_rates_meta:
+            try:
+                atrous_rates = tuple(int(r) for r in atrous_rates_meta)
+            except (TypeError, ValueError):
+                atrous_rates = None
+        else:
+            atrous_rates = None
+
+        if atrous_rates is None:
+            atrous_rates = {
+                32: (3, 6, 9),
+                16: (6, 12, 18),
+                8:  (12, 24, 36),
+            }.get(output_stride_val, (6, 12, 18))
+
+        # ---------- Создание модели ----------
+        _log(f"[DeepLab] Создаю {architecture}: backbone={backbone_name}, "
+             f"OS={output_stride_val}, atrous_rates={atrous_rates}, "
+             f"classes={num_classes}")
+
+        if architecture == 'deeplabv3plus':
+            self.model = smp.DeepLabV3Plus(
+                encoder_name=backbone_name,
+                encoder_weights=None,       # веса загрузим из файла
+                in_channels=3,
+                classes=num_classes,
+                encoder_output_stride=output_stride_val,
+                decoder_atrous_rates=atrous_rates,
+                decoder_use_batchnorm=True,
+            )
+        else:  # deeplabv3
+            self.model = smp.DeepLabV3(
+                encoder_name=backbone_name,
+                encoder_weights=None,
+                in_channels=3,
+                classes=num_classes,
+                encoder_output_stride=output_stride_val,
+                decoder_atrous_rates=atrous_rates,
+            )
+
+        # ---------- Загрузка весов ----------
+        state_dict = torch.load(weights_path, map_location='cpu')
+        cleaned = {k: v for k, v in state_dict.items()
+                   if not k.endswith('num_batches_tracked')}
+        missing, unexpected = self.model.load_state_dict(cleaned, strict=False)
+        if missing:
+            _log(f"[DeepLab] Отсутствуют ключи ({len(missing)}): {missing[:3]}...")
+        if unexpected:
+            _log(f"[DeepLab] Лишние ключи ({len(unexpected)}): {unexpected[:3]}...")
 
         self.model.to(self._get_device())
         self.model.eval()
-        _log(f"[DeepLabV3] Модель загружена, устройство: {self._get_device()}")
+        _log(f"[DeepLab] Модель загружена, устройство: {self._get_device()}")
 
-    def predict(self, image):
+        # ---------- Формируем metadata ----------
+        self.metadata = {
+            'model_type': 'DeepLabV3+' if architecture == 'deeplabv3plus' else 'DeepLabV3',
+            'architecture': architecture,
+            'backbone': backbone_name,
+            'output_stride': output_stride_val,
+            'atrous_rates': list(atrous_rates),
+            'input_size': int(input_size_val),
+            'num_classes': num_classes,
+            'output_activation': output_activation,
+            'weights_path': weights_path,
+        }
+
+        # normalize: только если был в meta
+        if 'normalize' in meta:
+            self.metadata['normalize'] = bool(meta['normalize'])
+
+        # resize_mode: с backward-compat
+        if 'resize_mode' in meta and meta['resize_mode'] in VALID_TRAIN_RESIZE_MODES:
+            self.metadata['resize_mode'] = meta['resize_mode']
+            self.metadata['keep_aspect_ratio'] = (meta['resize_mode'] == 'keep_aspect_pad')
+        elif 'keep_aspect_ratio' in meta:
+            self.metadata['resize_mode'] = ('keep_aspect_pad'
+                                            if meta['keep_aspect_ratio'] else 'hard')
+            self.metadata['keep_aspect_ratio'] = bool(meta['keep_aspect_ratio'])
+
+        # inference_resize_mode
+        if 'inference_resize_mode' in meta and \
+                meta['inference_resize_mode'] in VALID_INFERENCE_RESIZE_MODES:
+            self.metadata['inference_resize_mode'] = meta['inference_resize_mode']
+        elif self.metadata.get('resize_mode') == 'random_crop':
+            self.metadata['inference_resize_mode'] = 'keep_aspect_pad'
+
+        _log(f"[DeepLab] Метаданные: arch={architecture}, backbone={backbone_name}, "
+             f"OS={output_stride_val}, input_size={input_size_val}, "
+             f"num_classes={num_classes}, activation={output_activation}")
+        _log(f"[DeepLab]   в meta: "
+             f"normalize={'yes' if 'normalize' in self.metadata else 'NO'}, "
+             f"resize_mode={'yes' if 'resize_mode' in self.metadata else 'NO'}, "
+             f"inference_resize_mode="
+             f"{'yes' if 'inference_resize_mode' in self.metadata else 'NO'}")
+
+    def predict(self, image, threshold=0.5):
+        """
+        Инференс DeepLabV3/V3+.
+
+        Логика по num_classes:
+            1 → sigmoid + threshold
+            2 → softmax[:, 1] + threshold
+                (или sigmoid[:, 1] + threshold при output_activation='sigmoid')
+           >2 → softmax + argmax (класс масштабируется в 0..255 для визуализации)
+
+        Параметр threshold игнорируется для num_classes > 2.
+        """
         start_time = time.time()
-        _log(f"[DeepLabV3 predict] Начало, shape={image.shape}")
-        input_size = self.metadata.get('input_size', 520)
+
+        input_size = self.metadata.get('input_size', 513)
+        num_classes = self.metadata.get('num_classes', 21)
+        output_activation = self.metadata.get('output_activation', 'argmax')
+        train_resize_mode = self.metadata.get('resize_mode', '?')
         resize_mode = self._resolve_resize_mode()
+
+        _log(f"[DeepLab predict] Начало: shape={image.shape}, "
+             f"num_classes={num_classes}, activation={output_activation}, "
+             f"threshold={threshold}, train_rm={train_resize_mode}, "
+             f"infer_rm={resize_mode}")
+
         tensor, orig_size, _, pad_info = self._preprocess(image, input_size)
-        tensor = tensor.to(self._get_device())
+        device = self._get_device()
+        tensor = tensor.to(device)
+
+        # smp.DeepLabV3/V3+ требуют кратности output_stride.
+        # Паддим до ближайшего кратного 16 и обрезаем обратно.
+        h_in, w_in = tensor.shape[-2], tensor.shape[-1]
+        nh = ((h_in + 15) // 16) * 16
+        nw = ((w_in + 15) // 16) * 16
+        if nh != h_in or nw != w_in:
+            tensor = torch.nn.functional.pad(
+                tensor, (0, nw - w_in, 0, nh - h_in), mode='constant', value=0
+            )
+
+
         with torch.no_grad():
-            output = self.model(tensor)['out']
-            pred = torch.sigmoid(output).squeeze().cpu().numpy()
-        _log(f"[DeepLabV3 predict] Предсказание shape={pred.shape}, "
-             f"min={pred.min()}, max={pred.max()}")
+            logits = self.model(tensor)  # [1, C, H, W]
+            if nh != h_in or nw != w_in:
+                logits = logits[..., :h_in, :w_in]
+
+            if num_classes == 1:
+                # Бинарная сегментация — всегда sigmoid
+                probs = torch.sigmoid(logits).squeeze().cpu().numpy()
+                mask_np = (probs > threshold).astype(np.uint8) * 255
+
+            elif num_classes == 2:
+                # «Фон + один объект»
+                if output_activation == 'sigmoid':
+                    probs = torch.sigmoid(logits)
+                else:
+                    if output_activation == 'sigmoid':
+                        _log("[DeepLab predict] ВНИМАНИЕ: output_activation='sigmoid' при "
+                             f"num_classes={num_classes} > 2 — использую softmax + argmax.")
+                    probs = torch.softmax(logits, dim=1)
+                obj_prob = probs[0, 1].cpu().numpy()  # [H, W]
+                mask_np = (obj_prob > threshold).astype(np.uint8) * 255
+
+            else:
+                # Истинный multiclass
+                probs = torch.softmax(logits, dim=1)
+                pred_class = torch.argmax(probs, dim=1)
+                mask_np = pred_class.squeeze().cpu().numpy().astype(np.uint8)
+                # Масштабируем индексы классов в 0..255 для совместимости
+                # с downstream-морфологией (бинарная обработка).
+                mask_np = (mask_np * (255 // (num_classes - 1))).astype(np.uint8)
+
+        _log(f"[DeepLab predict] Предсказание shape={mask_np.shape}, "
+             f"min={mask_np.min()}, max={mask_np.max()}")
+
         # Обратный ресайз к исходному размеру
-        pred = cv2.resize(pred, (orig_size[1], orig_size[0]))
-        mask = (pred * 255).astype(np.uint8)
+        mask_np = self._postprocess_mask(mask_np, orig_size, pad_info, resize_mode)
+
         elapsed = time.time() - start_time
-        _log(f"[DeepLabV3 predict] Готово за {elapsed:.3f} сек. "
-             f"Маска shape={mask.shape}")
-        return mask
+        _log(f"[DeepLab predict] Готово за {elapsed:.3f} сек. "
+             f"Выходная маска shape={mask_np.shape}")
+        return mask_np
+
+
+
+
 
 
 # =============================================================================
@@ -708,10 +935,10 @@ class ONNXSegmentor(BaseSegmentor):
 # Фабрика
 # =============================================================================
 def create_segmentor(model_type, **kwargs):
-    """Фабрика для создания сегментатора по имени."""
     segmentors = {
         'U-Net': UNetSegmentor,
         'DeepLabV3+': DeepLabV3Segmentor,
+        'DeepLabV3': DeepLabV3Segmentor,      # <--- добавить
         'SegFormer': None,
         'SAM': SAMSegmentor,
         'YOLOv8-seg': YOLOSegmentor,

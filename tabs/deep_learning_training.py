@@ -35,6 +35,8 @@ class YoloTrainWindow(QMainWindow):
 
         # Сохраняем параметры последнего запуска YOLO для анализа best.pt
         self.last_yolo_params = None
+        # Сохраняем параметры последнего запуска DeepLab для анализа моделей
+        self.last_deeplab_params = None
 
     # ---------- Логирование (общее) ----------
     def log(self, message):
@@ -422,29 +424,101 @@ class YoloTrainWindow(QMainWindow):
                 self.log("Процесс U-Net остановлен корректно.")
             self.unet_train_widget.set_running(False)
 
-    # ===================== DeepLabV3+ =====================
+
+
+    # ===================== DeepLabV3 / DeepLabV3+ =====================
+    def _validate_deeplab_params(self, params):
+        """
+        Быстрая проверка параметров DeepLab перед запуском воркера.
+        Возвращает (ok: bool, err_msg: str).
+        """
+        if not params:
+            return False, "Параметры не переданы."
+
+        dataset_path = params.get("dataset_path")
+        deeplab_yaml = params.get("deeplab_yaml")
+
+        # YAML приоритетнее папки
+        if deeplab_yaml:
+            if not os.path.isfile(deeplab_yaml):
+                return False, f"DeepLab YAML не найден:\n{deeplab_yaml}"
+        else:
+            if not dataset_path:
+                return False, ("Укажите либо папку датасета, "
+                               "либо DeepLab YAML с путями.")
+            if not os.path.isdir(dataset_path):
+                return False, f"Папка датасета не существует:\n{dataset_path}"
+
+        arch = str(params.get("architecture", "deeplabv3plus")).lower()
+        if arch not in ("deeplabv3plus", "deeplabv3+", "deeplabv3"):
+            return False, (f"Неизвестная архитектура '{arch}'.\n"
+                           f"Ожидается 'deeplabv3plus' или 'deeplabv3'.")
+
+        try:
+            nc = int(params.get("num_classes", 21))
+        except (ValueError, TypeError):
+            return False, "num_classes должно быть целым числом."
+        if nc < 1:
+            return False, f"num_classes = {nc}, должно быть ≥ 1."
+
+        try:
+            isz = int(params.get("input_size", 513))
+        except (ValueError, TypeError):
+            return False, "input_size должно быть целым числом."
+        if isz < 32:
+            return False, f"input_size = {isz} слишком мал (минимум 32)."
+
+        try:
+            os_val = int(params.get("output_stride", 16))
+        except (ValueError, TypeError):
+            return False, "output_stride должно быть целым числом."
+        if os_val not in (8, 16, 32):
+            return False, f"output_stride = {os_val}, допустимо 8, 16 или 32."
+
+        k = (isz - 1) / os_val if os_val > 0 else None
+        if k is None or abs(k - round(k)) > 1e-6:
+            self.log(f"⚠️ input_size={isz} не соответствует формуле "
+                     f"crop_size = output_stride * k + 1 "
+                     f"(OS={os_val}). Рекомендуется 513 для OS=16, "
+                     f"1025 для OS=8.")
+
+        ar = params.get("atrous_rates")
+        if ar:
+            try:
+                if len(ar) != 3:
+                    return False, "atrous_rates должен содержать ровно 3 числа."
+                _ = [int(x) for x in ar]
+            except (TypeError, ValueError):
+                return False, "atrous_rates должен быть списком из 3 целых чисел."
+
+        try:
+            lr = float(params.get("lr", 1e-3))
+        except (ValueError, TypeError):
+            return False, "lr должно быть числом."
+        if lr <= 0:
+            return False, f"lr = {lr}, должен быть > 0."
+
+        model_path = params.get("model_path")
+        if model_path and not os.path.isfile(model_path):
+            return False, f"Файл модели не найден:\n{model_path}"
+
+        return True, ""
+
+
+
     def _run_deeplab_training(self, params):
-        """Запуск обучения DeepLabV3+ с использованием воркера."""
-        # Проверка обязательных параметров
-        if not params.get("dataset_path") or not os.path.exists(params["dataset_path"]):
-            QMessageBox.warning(self, "Ошибка", "Укажите существующую папку датасета (VOCdevkit или images/masks).")
+        """Запуск обучения DeepLabV3 / DeepLabV3+ с использованием воркера."""
+        # --- 1. Валидация ---
+        ok, err = self._validate_deeplab_params(params)
+        if not ok:
+            QMessageBox.warning(self, "Ошибка параметров DeepLab", err)
+            self.log(f"❌ Параметры DeepLab некорректны: {err}")
+            self.deeplab_train_widget.set_running(False)
             return
 
-        params_json = json.dumps(params, ensure_ascii=False)
+        # --- 2. Расширенный лог ---
+        self.log("=== Параметры обучения DeepLabV3 / DeepLabV3+ ===")
 
-        worker_script = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "utils_training", "train_deeplabv3_worker.py"
-        )
-        worker_script = os.path.abspath(worker_script)
-        if not os.path.exists(worker_script):
-            self.log("ОШИБКА: скрипт воркера DeepLabV3+ не найден: " + worker_script)
-            QMessageBox.critical(self, "Ошибка", "Не найден скрипт обучения train_deeplabv3_worker.py")
-            return
-
-        self.log("=== Параметры обучения DeepLabV3+ ===")
-
-        # Красивый вывод параметров с рекурсией
         def log_params(d, indent=0):
             for key, val in d.items():
                 if isinstance(val, dict):
@@ -454,24 +528,88 @@ class YoloTrainWindow(QMainWindow):
                     self.log("  " * indent + f"{key}: {val}")
 
         log_params(params)
+
+        # Ключевые предупреждения
+        arch = str(params.get("architecture", "deeplabv3plus")).lower()
+        arch_display = "DeepLabV3+" if arch in ("deeplabv3plus", "deeplabv3+") else "DeepLabV3"
+        nc = params.get("num_classes")
+        ar = params.get("atrous_rates")
+        os_val = params.get("output_stride") or 16
+        isz = params.get("input_size") or 513
+
+        self.log("-" * 30)
+        self.log(f"⚠️  Архитектура: {arch_display}")
+        self.log(f"⚠️  Output stride: {os_val}, input_size: {isz}")
+        if ar:
+            self.log(f"⚠️  atrous_rates: {ar}")
+        else:
+            self.log(f"⚠️  atrous_rates: авто (по OS={os_val})")
+        self.log(f"⚠️  num_classes (вкл. фон): {nc}  "
+                 f"→ должно быть = (число классов объектов) + 1")
+
+        augs = params.get("augmentations") or {}
+        enabled_augs = [k for k, v in augs.items() if v]
+        if enabled_augs:
+            self.log(f"⚠️  аугментации включены: {', '.join(enabled_augs)}")
+        else:
+            self.log("✅ аугментации выключены")
+
+        self.log(f"⚠️  two_phase_training: {params.get('two_phase_training')}")
+        if params.get("two_phase_training"):
+            self.log(f"     freeze={params.get('freeze_epochs')}, "
+                     f"unfreeze={params.get('unfreeze_epochs')}, "
+                     f"unfreeze_last_n_stages={params.get('unfreeze_last_n_stages')}, "
+                     f"freeze_bn_second_phase={params.get('freeze_bn_second_phase')}")
+        self.log(f"⚠️  use_ema: {params.get('use_ema')}, "
+                 f"use_layerwise_lr: {params.get('use_layerwise_lr')}, "
+                 f"use_amp: {params.get('use_amp')}")
         self.log("=" * 30)
 
+        # Сохраняем параметры для анализа после обучения
+        self.last_deeplab_params = params
+
+        # --- 3. Поиск воркера ---
+        params_json = json.dumps(params, ensure_ascii=False)
+        worker_script = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "utils_training", "train_DeepLabV3_worker.py"
+        )
+        worker_script = os.path.abspath(worker_script)
+        if not os.path.exists(worker_script):
+            # Fallback на старое имя (на случай, если файл ещё не переименован)
+            worker_script_alt = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "utils_training", "train_deeplabv3_worker.py"
+            )
+            worker_script_alt = os.path.abspath(worker_script_alt)
+            if os.path.exists(worker_script_alt):
+                worker_script = worker_script_alt
+            else:
+                self.log("ОШИБКА: скрипт воркера DeepLab не найден: " + worker_script)
+                QMessageBox.critical(self, "Ошибка",
+                                     "Не найден скрипт обучения DeepLab "
+                                     "(train_DeepLabV3_worker.py)")
+                self.deeplab_train_widget.set_running(False)
+                return
+
+        # --- 4. Запуск процесса ---
         self.deeplab_process = QProcess()
         self.deeplab_process.setProcessChannelMode(QProcess.MergedChannels)
         self.deeplab_process.readyReadStandardOutput.connect(self._on_deeplab_output)
         self.deeplab_process.finished.connect(self._on_deeplab_finished)
 
-        self.deeplab_process.start(sys.executable, [worker_script, "--params", params_json])
+        self.deeplab_process.start(sys.executable,
+                                   [worker_script, "--params", params_json])
 
         if not self.deeplab_process.waitForStarted(3000):
-            self.log("Ошибка запуска процесса обучения DeepLabV3+")
+            self.log("Ошибка запуска процесса обучения DeepLab")
             self.deeplab_train_widget.set_running(False)
             return
 
         self.deeplab_train_widget.set_running(True)
 
     def _on_deeplab_output(self):
-        """Обработка вывода воркера DeepLabV3+."""
+        """Обработка вывода воркера DeepLab."""
         data = self.deeplab_process.readAllStandardOutput()
         text = bytes(data).decode('utf-8', errors='replace')
         for line in text.splitlines():
@@ -487,39 +625,108 @@ class YoloTrainWindow(QMainWindow):
                         total = int(parts[3])
                         bar = self.deeplab_train_widget.progress_bar
                         bar.setValue(percent)
-                        bar.setFormat(f"Обучение DeepLabV3+: {percent}% ({epoch}/{total} эпох)")
+                        bar.setFormat(f"Обучение DeepLab: {percent}% "
+                                      f"({epoch}/{total} эпох)")
                     except ValueError:
                         pass
                 continue
             self.log(line)
 
     def _on_deeplab_finished(self, exit_code, exit_status):
-        """Завершение обучения DeepLabV3+."""
+        """Завершение обучения DeepLab."""
         self.deeplab_train_widget.set_running(False)
 
         if exit_code == 0 and exit_status == QProcess.NormalExit:
-            self.log("=== Обучение DeepLabV3+ успешно завершено ===")
-            QMessageBox.information(self, "Обучение", "DeepLabV3+ успешно обучена!")
+            self.log("=== Обучение DeepLab успешно завершено ===")
+            QMessageBox.information(self, "Обучение",
+                                    "DeepLab успешно обучена!")
             self.deeplab_train_widget.open_folder_btn.setEnabled(True)
-            # Можно добавить анализ лучшей модели, если нужно
+
+            # Анализ обученной модели
+            if self.last_deeplab_params:
+                self._analyze_best_model_deeplab(self.last_deeplab_params)
         else:
-            self.log("=== Процесс обучения DeepLabV3+ завершился с ошибкой ===")
-            QMessageBox.critical(self, "Ошибка", "Обучение DeepLabV3+ завершилось ошибкой. Смотрите лог.")
+            self.log("=== Процесс обучения DeepLab завершился с ошибкой ===")
+            QMessageBox.critical(self, "Ошибка",
+                                 "Обучение DeepLab завершилось ошибкой. "
+                                 "Смотрите лог.")
         self.deeplab_process = None
         self.deeplab_train_widget.progress_bar.setValue(0)
         self.deeplab_train_widget.progress_bar.setFormat("Готов")
 
+    def _analyze_best_model_deeplab(self, params):
+        """
+        Читает *_meta.json у лучших моделей (best_loss / best_iou) после обучения
+        и выводит сводку в лог.
+        """
+        project = params.get("project_path")
+        name = params.get("name")
+
+        if name and project:
+            base_dir = os.path.join(project, name)
+        elif name:
+            base_dir = name
+        elif project:
+            base_dir = project
+        else:
+            base_dir = "runs/deeplabv3plus"
+
+        weights_dir = os.path.join(base_dir, "weights")
+        if not os.path.isdir(weights_dir):
+            self.log(f"Папка весов не найдена: {weights_dir}")
+            return
+
+        self.log("=== Анализ обученных моделей DeepLab ===")
+        for fname, label in (("best_iou.pth", "best_iou"),
+                             ("best_loss.pth", "best_loss"),
+                             ("last.pth", "last")):
+            wpath = os.path.join(weights_dir, fname)
+            if not os.path.exists(wpath):
+                continue
+            meta_path = os.path.splitext(wpath)[0] + "_meta.json"
+            if not os.path.exists(meta_path):
+                self.log(f"  {label}: {fname} (нет *_meta.json)")
+                continue
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                arch = meta.get("architecture", "?")
+                arch_disp = ("DeepLabV3+"
+                             if str(arch).lower() in ("deeplabv3plus", "deeplabv3+")
+                             else "DeepLabV3")
+                self.log(f"  {label}: {fname}")
+                self.log(f"     архитектура: {arch_disp}")
+                self.log(f"     backbone: {meta.get('backbone', '?')}, "
+                         f"OS: {meta.get('output_stride', '?')}")
+                self.log(f"     input_size: {meta.get('input_size', '?')}, "
+                         f"num_classes: {meta.get('num_classes', '?')}")
+                self.log(f"     atrous_rates: {meta.get('atrous_rates', '?')}")
+                self.log(f"     output_activation: "
+                         f"{meta.get('output_activation', '?')}")
+                self.log(f"     normalize: {meta.get('normalize', '?')}, "
+                         f"resize_mode: {meta.get('resize_mode', '?')}")
+                if meta.get("best_val_loss") is not None:
+                    self.log(f"     best_val_loss: {meta['best_val_loss']}")
+                if meta.get("best_iou") is not None:
+                    self.log(f"     best_iou: {meta['best_iou']}")
+            except Exception as e:
+                self.log(f"  ⚠️ Не удалось прочитать {meta_path}: {e}")
+        self.log("=======================================")
+
     def on_stop_deeplab(self):
-        """Остановка обучения DeepLabV3+."""
+        """Остановка обучения DeepLab."""
         if self.deeplab_process and self.deeplab_process.state() == QProcess.Running:
-            self.log("Останавливаем обучение DeepLabV3+...")
+            self.log("Останавливаем обучение DeepLab...")
             self.deeplab_process.terminate()
             if not self.deeplab_process.waitForFinished(5000):
                 self.deeplab_process.kill()
-                self.log("Процесс DeepLabV3+ принудительно завершён.")
+                self.log("Процесс DeepLab принудительно завершён.")
             else:
-                self.log("Процесс DeepLabV3+ остановлен корректно.")
+                self.log("Процесс DeepLab остановлен корректно.")
             self.deeplab_train_widget.set_running(False)
+
+
+
 
 
 

@@ -252,7 +252,71 @@ def main():
         if save_dir:
             log(f"Результаты сохранены в: {save_dir}")
 
+
+
+        # =========================================================================
+        # ЭКСПОРТ В ONNX
+        # =========================================================================
+        log("=== Экспорт модели в ONNX ===")
+        try:
+            import onnx
+        except ImportError:
+            log("⚠️ Пропуск экспорта в ONNX: не установлена библиотека 'onnx'.")
+            log("   Установите: pip install onnx")
+        else:
+            try:
+                # Ultralytics сам сохраняет .onnx рядом с .pt в папке weights
+                export_results = model.export(format='onnx', imgsz=train_args['imgsz'])
+                onnx_path = str(export_results) if export_results else None
+
+                if onnx_path and os.path.exists(onnx_path):
+                    log(f"✅ ONNX-модель сохранена: {onnx_path}")
+
+                    # Валидация ONNX-модели
+                    onnx_model = onnx.load(onnx_path)
+                    onnx.checker.check_model(onnx_model)
+                    log("✅ ONNX-граф прошел проверку checker.")
+
+                    # Метаданные для ONNX
+                    onnx_meta = {
+                        'format': 'ONNX',
+                        'source_weights': os.path.basename(best_pt) if 'best_pt' in locals() and os.path.exists(best_pt) else model_path,
+                        'onnx_opset': getattr(onnx_model.opset_import[0], 'version', 'unknown') if onnx_model.opset_import else 'unknown',
+                        'model_type': 'YOLO-seg',
+                        'task': 'segmentation',
+                        'imgsz': train_args['imgsz'],
+                        'export_date': datetime.now().isoformat(),
+                        'description': 'YOLO-модель сегментации, экспортированная в ONNX. '
+                                       'Вход: [B, 3, imgsz, imgsz]. '
+                                       'Выходные тензоры соответствуют формату Ultralytics (см. документацию YOLO). '
+                                       'Для декодирования используйте функции постобработки Ultralytics.'
+                    }
+                    onnx_meta_path = os.path.splitext(onnx_path)[0] + '_onnx_meta.json'
+                    with open(onnx_meta_path, 'w', encoding='utf-8') as f:
+                        json.dump(onnx_meta, f, indent=2, ensure_ascii=False)
+                    log(f"✅ Метаданные ONNX сохранены: {onnx_meta_path}")
+
+                    # Дополнительно: копируем ONNX в папку weights, если она есть
+                    if save_dir:
+                        weights_dir = os.path.join(save_dir, 'weights')
+                        if os.path.isdir(weights_dir) and os.path.dirname(onnx_path) != weights_dir:
+                            dest = os.path.join(weights_dir, os.path.basename(onnx_path))
+                            shutil.copy2(onnx_path, dest)
+                            log(f"✅ ONNX также скопирован в: {dest}")
+                            # Копируем и метаданные
+                            dest_meta = os.path.splitext(dest)[0] + '_onnx_meta.json'
+                            shutil.copy2(onnx_meta_path, dest_meta)
+                else:
+                    log("⚠️ Экспорт в ONNX не вернул путь к файлу или файл не был создан.")
+            except Exception as e:
+                log(f"❌ Ошибка при экспорте YOLO в ONNX: {type(e).__name__}: {e}")
+                import traceback
+                log(traceback.format_exc())
+
+        # =========================================================================
         log("SUCCESS")
+
+
 
     except KeyboardInterrupt:
         log("Обучение прервано пользователем (внешнее прерывание)")

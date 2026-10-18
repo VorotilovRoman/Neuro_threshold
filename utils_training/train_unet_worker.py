@@ -1566,7 +1566,98 @@ def main():
     if os.path.exists(best_iou_model_path):
         log(f"Best IoU model:  {best_iou_model_path} (IoU={best_iou:.4f})")
     log(f"Last model:      {final_model_path}")
-    log("SUCCESS")
+
+
+
+
+    # =========================================================================
+    # ЭКСПОРТ В ONNX
+    # =========================================================================
+    log("=== Экспорт финальной модели в ONNX ===")
+    try:
+        import onnx
+        import onnxruntime as ort
+    except ImportError:
+        log("⚠️ Пропуск экспорта в ONNX: не установлены 'onnx' или 'onnxruntime'.")
+        log("   Установите: pip install onnx onnxruntime")
+    else:
+        onnx_path = os.path.join(weights_dir, 'model.onnx')
+        onnx_meta_path = os.path.join(weights_dir, 'model_onnx_meta.json')
+
+        # Загружаем лучшие веса в модель (лучше всего экспортировать best_iou или last)
+        best_weights = best_iou_model_path if os.path.exists(best_iou_model_path) else final_model_path
+        log(f"Загрузка весов для экспорта: {os.path.basename(best_weights)}")
+        model.load_state_dict(torch.load(best_weights, map_location='cpu'))
+        model.eval()
+        model.to('cpu')  # Экспорт стабильнее на CPU
+
+        # Создаем dummy input
+        dummy_input = torch.randn(1, 3, input_size, input_size, device='cpu')
+
+        # Динамические оси: разрешаем менять batch size и H/W
+        dynamic_axes = {
+            'input': {0: 'batch_size', 2: 'height', 3: 'width'},
+            'output': {0: 'batch_size', 2: 'height', 3: 'width'},
+        }
+
+        log(f"Запуск torch.onnx.export (opset=17, dynamic_axes=True)...")
+        try:
+            torch.onnx.export(
+                model,
+                dummy_input,
+                onnx_path,
+                export_params=True,
+                opset_version=17,
+                do_constant_folding=True,
+                input_names=['input'],
+                output_names=['output'],
+                dynamic_axes=dynamic_axes,
+            )
+            log(f"✅ ONNX-модель сохранена: {onnx_path}")
+
+            # Проверка валидности ONNX-графа
+            onnx_model = onnx.load(onnx_path)
+            onnx.checker.check_model(onnx_model)
+            log("✅ ONNX-граф прошел проверку checker.")
+
+            # Быстрый прогон через ONNX Runtime для проверки
+            ort_session = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
+            ort_inputs = {ort_session.get_inputs()[0].name: dummy_input.numpy()}
+            ort_outs = ort_session.run(None, ort_inputs)
+            log(f"✅ Тестовый инференс ONNX Runtime успешен. Выход: shape={ort_outs[0].shape}")
+
+            # Метаданные для ONNX-модели
+            onnx_meta = {
+                'format': 'ONNX',
+                'source_weights': os.path.basename(best_weights),
+                'onnx_opset': 17,
+                'architecture': architecture,
+                'encoder': encoder, # ИСПРАВЛЕНО: здесь был encoder
+                'num_classes': num_classes,
+                'input_size': input_size,
+                'input_names': ['input'],
+                'output_names': ['output'],
+                'dynamic_axes': dynamic_axes,
+                'normalize': normalize,
+                'resize_mode': resize_mode,
+                'threshold': threshold,
+                'export_date': datetime.now().isoformat(),
+                'description': 'Модель DeepLabV3/V3+, экспортированная из PyTorch. '
+                               'Вход: [B, 3, H, W] RGB-изображение (нормализованное при необходимости). '
+                               'Выход: логиты [B, num_classes, H, W]. '
+                               'Для получения маски примените argmax (multiclass) или sigmoid+threshold (binary).'
+            }
+            with open(onnx_meta_path, 'w', encoding='utf-8') as f:
+                json.dump(onnx_meta, f, indent=2, ensure_ascii=False)
+            log(f"✅ Метаданные ONNX сохранены: {onnx_meta_path}")
+
+        except Exception as e:
+            log(f"❌ Ошибка при экспорте в ONNX: {type(e).__name__}: {e}")
+            import traceback
+            log(traceback.format_exc())
+    # =========================================================================
+
+    log("=== Обучение завершено ===")
 
 
 if __name__ == "__main__":

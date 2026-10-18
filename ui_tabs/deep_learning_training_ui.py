@@ -56,7 +56,7 @@ def setup_deep_learning_training_ui(parent):
     # 3. DeepLabV3+
     deeplab_widget = DeepLabV3TrainWidget(parent)
     deeplab_scroll = wrap_in_scroll(deeplab_widget)
-    parent.tab_widget.addTab(deeplab_scroll, "DeepLabV3+")
+    parent.tab_widget.addTab(deeplab_scroll, "DeepLabV3/V3+")
     deeplab_widget.run_training.connect(parent._run_deeplab_training)
     deeplab_widget.stop_training.connect(parent.on_stop_deeplab)
     parent.deeplab_train_widget = deeplab_widget

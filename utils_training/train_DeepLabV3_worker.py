@@ -1,19 +1,98 @@
 #!/usr/bin/env python
 # train_DeepLabV3_worker.py
-# Обучение DeepLabV3 / DeepLabV3+ (segmentation_models_pytorch).
+# =============================================================================
+# Обучение DeepLabV3 / DeepLabV3+ (segmentation_models_pytorch)
 #
-# Возможности:
-#   - Архитектуры: DeepLabV3+ и DeepLabV3 (без плюса)
+# ПРЕСЕТЫ ОБУЧЕНИЯ (скопируйте нужный в UI/JSON):
+#
+# 1) DeepLabV3+ PASCAL VOC Standard (OS=16, 513x513)
+#    architecture: deeplabv3plus
+#    backbone: resnet101
+#    output_stride: 16
+#    input_size: 513
+#    lr: 0.007
+#    optimizer: SGD (momentum=0.9, wd=1e-4)
+#    scheduler: Poly (power=0.9)
+#    epochs: 60
+#    batch_size: 16 (или -1 для авто)
+#    loss: CrossEntropy
+#    use_ema: True, ema_decay: 0.999
+#    two_phase_training: True, freeze_epochs: 30, unfreeze_epochs: 30
+#    unfreeze_last_n_stages: 2
+#    freeze_bn_second_phase: True
+#    use_layerwise_lr: False
+#    multi_scale_infer: True, infer_scales: [0.75, 1.0, 1.25]
+#
+# 2) DeepLabV3+ High-Resolution (OS=8, 1025x1025)
+#    architecture: deeplabv3plus
+#    backbone: resnet101
+#    output_stride: 8
+#    input_size: 1025
+#    lr: 0.001
+#    optimizer: AdamW (wd=1e-4)
+#    scheduler: Poly (power=0.9)
+#    epochs: 40
+#    batch_size: 4-8 (OS=8 требует много памяти)
+#    loss: CrossEntropy
+#    use_ema: True, ema_decay: 0.999
+#    two_phase_training: False
+#    use_layerwise_lr: True, layerwise_decay: 0.1
+#    multi_scale_infer: False (память)
+#
+# 3) DeepLabV3 Memory-Efficient (OS=32, 513x513)
+#    architecture: deeplabv3
+#    backbone: resnet50
+#    output_stride: 32
+#    input_size: 513
+#    lr: 0.01
+#    optimizer: SGD (momentum=0.9, wd=1e-4)
+#    scheduler: Poly (power=0.9)
+#    epochs: 80
+#    batch_size: -1 (авто)
+#    loss: CrossEntropy
+#    use_ema: True, ema_decay: 0.999
+#    two_phase_training: False
+#    multi_scale_infer: True, infer_scales: [0.75, 1.0]
+#
+# 4) DeepLabV3+ Fine-Tuning on Small Dataset (OS=16, 513x513)
+#    architecture: deeplabv3plus
+#    backbone: resnet50
+#    output_stride: 16
+#    input_size: 513
+#    lr: 0.0001
+#    optimizer: AdamW (wd=1e-4)
+#    scheduler: Poly (power=0.9)
+#    epochs: 30
+#    batch_size: 8
+#    loss: CrossEntropy+Dice (loss_weights: ce=1.0, dice=1.0)
+#    class_weights: auto (для дисбаланса)
+#    use_ema: True, ema_decay: 0.99
+#    two_phase_training: True, freeze_epochs: 10, unfreeze_epochs: 20
+#    unfreeze_last_n_stages: 2
+#    freeze_bn_second_phase: True
+#    use_layerwise_lr: True, layerwise_decay: 0.1
+#    multi_scale_infer: True, infer_scales: [0.75, 1.0, 1.25]
+#
+# =============================================================================
+# Ключевые возможности:
+#   - Архитектуры: DeepLabV3+ и DeepLabV3
 #   - Бинарная и многоклассовая сегментация, ignore_index, class_weights
 #   - Двухфазное обучение (freeze/unfreeze backbone, опц. только последних N стадий)
+#   - Заморозка BatchNorm на первой и второй фазах
 #   - Безопасный auto_batch_size (50% VRAM + учёт input_size)
-#   - Mixed Precision (AMP) + Gradient Accumulation
-#   - EMA (Exponential Moving Average) весов
+#   - Mixed Precision (AMP): bf16 → без GradScaler; fp16 → с GradScaler
+#   - Gradient Accumulation
+#   - EMA (Exponential Moving Average) с адаптацией decay под размер датасета
 #   - Layer-wise LR для энкодера
 #   - Poly LR по итерациям (а не по эпохам)
 #   - Multi-scale inference на валидации/тестах
-#   - Три точки сохранения: best_loss, best_iou, last (все — EMA-веса)
-#   - Денормализация при визуализации батчей
+#   - Три точки сохранения: best_loss, best_iou, last
+#   - Авто-паддинг входа до кратного output_stride (513 → 528, 1025 → 1032)
+#   - Проверка crop_size по формуле output_stride * k + 1
+#   - LR ×0.1 на первой фазе (frozen backbone)
+#   - isfinite(loss) guard — пропуск nan/inf батчей
+#   - Диагностика class balance на train
+#   - class_weights автоматически на нужном device
 # ------------------------------------------------------------------------------
 
 import sys
@@ -81,11 +160,17 @@ AUTO_BATCH_MAX = 64
 NUM_TRAIN_BATCHES_TO_SAVE = 3
 NUM_VAL_SAMPLES_TO_SAVE = 8
 
-EARLY_STOPPING_PATIENCE = 5
+# Патч 4: увеличено с 5 до 15 (малые датасеты требуют больше эпох без улучшений)
+EARLY_STOPPING_PATIENCE = 15
 OVERFITTING_GAP_THRESHOLD = 0.5
 OVERFITTING_MIN_PATIENCE = 3
 
-# Глобальные переменные для graceful shutdown
+ATROUS_RATES_MAP = {
+    32: (3, 6, 9),
+    16: (6, 12, 18),
+    8: (12, 24, 36),
+}
+
 model = None
 optimizer = None
 scheduler = None
@@ -131,8 +216,8 @@ def find_image_file(jpeg_dir, basename):
             return path
     return None
 
-def read_voc_file_list(txt_path, root_dir):
-    if not os.path.exists(txt_path):
+def read_voc_pairs(txt_path, jpeg_dir, seg_dir):
+    if not txt_path or not os.path.exists(txt_path):
         return []
     try:
         with open(txt_path, 'r', encoding='utf-8') as f:
@@ -140,17 +225,144 @@ def read_voc_file_list(txt_path, root_dir):
     except UnicodeDecodeError:
         with open(txt_path, 'r', encoding='cp1251') as f:
             lines = [l.strip() for l in f if l.strip()]
-    jpeg_dir = os.path.join(root_dir, 'JPEGImages')
-    seg_dir = os.path.join(root_dir, 'SegmentationClass')
     pairs = []
     for name in lines:
-        img = find_image_file(jpeg_dir, name)
+        img = None
+        for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
+            cand = os.path.join(jpeg_dir, name + ext)
+            if os.path.exists(cand):
+                img = cand
+                break
         mask = os.path.join(seg_dir, name + '.png')
         if img is not None and os.path.exists(mask):
             pairs.append((img, mask))
         else:
             log(f"⚠️ Пропуск: {name} — нет изображения или маски")
     return pairs
+
+
+def read_voc_file_list(txt_path, root_dir):
+    jpeg_dir = os.path.join(root_dir, 'JPEGImages')
+    seg_dir = os.path.join(root_dir, 'SegmentationClass')
+    return read_voc_pairs(txt_path, jpeg_dir, seg_dir)
+
+def _resolve_path(root, p):
+    if not p:
+        return None
+    p = str(p).strip()
+    if not p:
+        return None
+    if os.path.isabs(p):
+        return p
+    return os.path.normpath(os.path.join(root, p))
+
+
+def create_loaders_from_yaml(yaml_path, default_input_size, default_num_classes,
+                              augmentations, ignore_index, batch_size,
+                              num_workers, normalize, resize_mode):
+    with open(yaml_path, 'r', encoding='utf-8') as f:
+        cfg = yaml.safe_load(f) or {}
+
+    root_raw = str(cfg.get('path', '') or '').strip()
+    if root_raw:
+        if os.path.isabs(root_raw):
+            root = root_raw
+        else:
+            root = os.path.normpath(os.path.join(os.path.dirname(yaml_path), root_raw))
+    else:
+        root = os.path.dirname(os.path.abspath(yaml_path))
+    log(f"📄 YAML dataset root: {root}")
+
+    nc_raw = cfg.get('num_classes')
+    try:
+        nc = int(nc_raw) if nc_raw is not None else default_num_classes
+    except (TypeError, ValueError):
+        nc = default_num_classes
+    if nc < 1:
+        nc = default_num_classes
+    log(f"📄 YAML num_classes: {nc}")
+
+    class_names = cfg.get('class_names')
+    if class_names:
+        if isinstance(class_names, (list, tuple)):
+            log(f"📄 YAML class_names ({len(class_names)}): {class_names}")
+        else:
+            log(f"📄 YAML class_names: {class_names}")
+
+    train_pairs = []
+    val_pairs = []
+
+    if cfg.get('train_images'):
+        tr_imgs = _resolve_path(root, cfg.get('train_images'))
+        tr_masks = _resolve_path(root, cfg.get('train_masks', ''))
+        if not tr_imgs or not tr_masks:
+            raise RuntimeError("YAML: указан 'train_images', но нет 'train_masks'")
+
+        def mk_pairs(imgs_dir, masks_dir):
+            if not imgs_dir or not masks_dir:
+                return []
+            if not os.path.isdir(imgs_dir) or not os.path.isdir(masks_dir):
+                log(f"⚠️ Папка не существует: imgs={imgs_dir}, masks={masks_dir}")
+                return []
+            from glob import glob
+            pairs = []
+            for img in sorted(glob(os.path.join(imgs_dir, '*.*'))):
+                stem = os.path.splitext(os.path.basename(img))[0]
+                for ext in ('.png', '.tif', '.tiff', '.bmp'):
+                    cand = os.path.join(masks_dir, stem + ext)
+                    if os.path.exists(cand):
+                        pairs.append((img, cand))
+                        break
+            return pairs
+
+        train_pairs = mk_pairs(tr_imgs, tr_masks)
+        va_imgs = _resolve_path(root, cfg.get('val_images', '') or '')
+        va_masks = _resolve_path(root, cfg.get('val_masks', '') or '')
+        if va_imgs and va_masks:
+            val_pairs = mk_pairs(va_imgs, va_masks)
+        log(f"📄 U-Net-style: train={len(train_pairs)}, val={len(val_pairs)}")
+
+    elif cfg.get('train_txt'):
+        jpeg_dir = _resolve_path(root, cfg.get('jpeg_dir', 'JPEGImages'))
+        seg_dir = _resolve_path(root, cfg.get('seg_dir', 'SegmentationClass'))
+        train_txt = _resolve_path(root, cfg.get('train_txt'))
+        val_txt = _resolve_path(root, cfg['val_txt']) if cfg.get('val_txt') else None
+
+        if not jpeg_dir or not seg_dir or not train_txt:
+            raise RuntimeError("YAML: для VOC нужны 'jpeg_dir', 'seg_dir', 'train_txt'")
+
+        train_pairs = read_voc_pairs(train_txt, jpeg_dir, seg_dir)
+        if val_txt:
+            val_pairs = read_voc_pairs(val_txt, jpeg_dir, seg_dir)
+        log(f"📄 VOC-style: train={len(train_pairs)}, val={len(val_pairs)}")
+
+    else:
+        raise RuntimeError(
+            "YAML должен содержать 'train_images' (U-Net-style) "
+            "или 'train_txt' (VOC-style)."
+        )
+
+    if not train_pairs:
+        raise RuntimeError("YAML: не удалось собрать ни одной обучающей пары.")
+
+    train_ds = VOCSegmentationPairs(
+        train_pairs, default_input_size, nc, ignore_index,
+        augmentations, normalize=normalize, resize_mode=resize_mode
+    )
+    val_ds = (
+        VOCSegmentationPairs(
+            val_pairs, default_input_size, nc, ignore_index,
+            {}, normalize=normalize, resize_mode=resize_mode
+        ) if val_pairs else None
+    )
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers, drop_last=False)
+    val_loader = (
+        DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                   num_workers=num_workers) if val_ds else None
+    )
+    return train_loader, val_loader, len(train_ds), (len(val_ds) if val_ds else 0), nc
+
 
 def create_voc_loaders(root, input_size, num_classes, augmentations,
                        ignore_index, batch_size, num_workers,
@@ -253,10 +465,13 @@ class VOCSegmentationPairs(Dataset):
 
 
 # =============================================================================
-# Loss / Optimizer / Scheduler / EMA / Layer-wise / Multi-scale
+# Loss / Optimizer / Scheduler
 # =============================================================================
 def get_loss_function(loss_name, num_classes, ignore_index=None,
-                      class_weights=None, loss_weights=None):
+                      class_weights=None, loss_weights=None, device='cpu'):
+    """
+    Патч 1: weights_tensor создаётся на нужном устройстве (device).
+    """
     loss_weights = loss_weights or {'ce': 1.0, 'dice': 1.0, 'focal': 0.0}
 
     weights_tensor = None
@@ -265,7 +480,7 @@ def get_loss_function(loss_name, num_classes, ignore_index=None,
             if isinstance(class_weights, str) and os.path.exists(class_weights):
                 with open(class_weights, 'r') as f:
                     class_weights = json.load(f)
-            weights_tensor = torch.tensor(class_weights, dtype=torch.float)
+            weights_tensor = torch.tensor(class_weights, dtype=torch.float, device=device)
         except Exception as e:
             log(f"⚠️ Ошибка загрузки class_weights: {e}")
 
@@ -317,11 +532,27 @@ def get_optimizer(model, opt_name, lr, momentum=0.9, weight_decay=0.0001):
 
 def get_layerwise_optimizer(model, opt_name, base_lr, momentum=0.9,
                              weight_decay=0.0001, decay_factor=0.1):
-    """Layer-wise LR: глубокие стадии энкодера учатся быстрее мелких."""
+    """
+    Layer-wise LR. Устойчив к тому, что get_stages() может возвращать
+    смешанный список (модули + int / другие объекты).
+    """
     try:
-        stages = model.encoder.get_stages()
+        raw_stages = model.encoder.get_stages()
     except AttributeError:
         log("⚠️ encoder.get_stages() недоступен — использую единый LR")
+        return get_optimizer(model, opt_name, base_lr, momentum, weight_decay)
+
+    stages = []
+    skipped = 0
+    for s in raw_stages:
+        if hasattr(s, 'parameters'):
+            stages.append(s)
+        else:
+            skipped += 1
+    if skipped:
+        log(f"⚠️ get_stages() вернул {skipped} не-модульных элементов — пропущены.")
+    if not stages:
+        log("⚠️ В get_stages() нет модулей — использую единый LR")
         return get_optimizer(model, opt_name, base_lr, momentum, weight_decay)
 
     n = len(stages)
@@ -330,15 +561,22 @@ def get_layerwise_optimizer(model, opt_name, base_lr, momentum=0.9,
         stage_lr = base_lr * (decay_factor ** (n - 1 - i))
         params = [p for p in stage.parameters() if p.requires_grad]
         if params:
-            param_groups.append({'params': params, 'lr': stage_lr, 'name': f'enc_stage_{i}'})
-            log(f"   encoder_stage_{i}: lr={stage_lr:.2e}")
+            param_groups.append({'params': params, 'lr': stage_lr,
+                                 'name': f'enc_stage_{i}'})
+            log(f"   encoder_stage_{i}: lr={stage_lr:.2e}, params={len(params)}")
 
     dec_params = [p for p in model.decoder.parameters() if p.requires_grad]
     if getattr(model, 'segmentation_head', None) is not None:
-        dec_params += [p for p in model.segmentation_head.parameters() if p.requires_grad]
+        dec_params += [p for p in model.segmentation_head.parameters()
+                       if p.requires_grad]
     if dec_params:
-        param_groups.append({'params': dec_params, 'lr': base_lr, 'name': 'decoder_head'})
-        log(f"   decoder_head: lr={base_lr:.2e}")
+        param_groups.append({'params': dec_params, 'lr': base_lr,
+                             'name': 'decoder_head'})
+        log(f"   decoder_head: lr={base_lr:.2e}, params={len(dec_params)}")
+
+    if not param_groups:
+        log("⚠️ Не удалось собрать param_groups — использую единый LR")
+        return get_optimizer(model, opt_name, base_lr, momentum, weight_decay)
 
     opt_name = opt_name.lower()
     if opt_name == 'sgd':
@@ -352,10 +590,8 @@ def get_layerwise_optimizer(model, opt_name, base_lr, momentum=0.9,
 
 
 def get_scheduler(optimizer, scheduler_name, epochs, eta_min=1e-6):
-    """Scheduler'ы, кроме Poly, шагают по эпохам. Poly — по итерациям (PolyLRSchedulerIter)."""
     sn = scheduler_name.lower()
     if sn == 'poly':
-        # Возвращаем None — Poly будет создан отдельно как PolyLRSchedulerIter
         return None
     elif sn == 'step':
         return optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
@@ -367,7 +603,6 @@ def get_scheduler(optimizer, scheduler_name, epochs, eta_min=1e-6):
 
 
 class PolyLRSchedulerIter:
-    """Poly LR по итерациям: lr = base_lr * (1 - iter/max_iter)^power."""
     def __init__(self, optimizer, max_iter, power=0.9, min_lr=0.0):
         self.optimizer = optimizer
         self.max_iter = max(1, int(max_iter))
@@ -387,7 +622,6 @@ class PolyLRSchedulerIter:
 
 
 class ModelEMA:
-    """Exponential Moving Average весов модели."""
     def __init__(self, model, decay=0.999, device=None):
         self.ema = copy.deepcopy(model)
         self.ema.eval()
@@ -414,12 +648,61 @@ class ModelEMA:
         return self.ema.state_dict()
 
 
+def set_bn_eval(module):
+    for m in module.modules():
+        if isinstance(m, (nn.BatchNorm2d, nn.SyncBatchNorm)):
+            m.eval()
+
+
+def _pad_to_multiple(x, multiple=16):
+    h, w = x.shape[-2], x.shape[-1]
+    nh = ((h + multiple - 1) // multiple) * multiple
+    nw = ((w + multiple - 1) // multiple) * multiple
+    if nh == h and nw == w:
+        return x, (h, w)
+    x = torch.nn.functional.pad(x, (0, nw - w, 0, nh - h), mode='constant', value=0)
+    return x, (h, w)
+
+
+def _crop_to_hw(x, hw):
+    h, w = hw
+    return x[..., :h, :w]
+
+
+def _forward_safe(model, x, use_amp, device, output_stride=None):
+    """
+    Патч 3: убран nan_to_num(nan=0.0) — он маскировал проблему,
+    превращая nan-логиты в 0 → softmax([0,0]) = [0.5,0.5] → argmax = «всё фон».
+    Теперь nan передаётся наружу, его ловит isfinite(loss) guard в цикле.
+    """
+    if output_stride is None:
+        output_stride = getattr(model.encoder, 'output_stride', 16)
+    try:
+        output_stride = int(output_stride)
+    except (TypeError, ValueError):
+        output_stride = 16
+
+    padded, hw = _pad_to_multiple(x, output_stride)
+
+    if use_amp and device.type == 'cuda':
+        try:
+            bf16_ok = torch.cuda.is_bf16_supported()
+        except Exception:
+            bf16_ok = False
+        amp_dtype = torch.bfloat16 if bf16_ok else torch.float16
+        with torch.amp.autocast('cuda', dtype=amp_dtype):
+            out = model(padded)
+    else:
+        out = model(padded)
+
+    out = _crop_to_hw(out, hw)
+    return out.float()
+
+
 def predict_batch_multiscale(model, images, device, scales, use_amp):
-    """Усредняет логиты модели по нескольким масштабам входа."""
     H, W = images.shape[2], images.shape[3]
     if not scales or len(scales) == 1:
-        with torch.cuda.amp.autocast(enabled=(use_amp and device.type == 'cuda')):
-            return model(images)
+        return _forward_safe(model, images, use_amp, device)
 
     avg = None
     for s in scales:
@@ -430,13 +713,12 @@ def predict_batch_multiscale(model, images, device, scales, use_amp):
             nw = max(16, int(round(W * s / 16)) * 16)
             scaled = torch.nn.functional.interpolate(
                 images, size=(nh, nw), mode='bilinear', align_corners=False)
-        with torch.cuda.amp.autocast(enabled=(use_amp and device.type == 'cuda')):
-            out = model(scaled)
+        out = _forward_safe(model, scaled, use_amp, device)
         if out.shape[2:] != (H, W):
             out = torch.nn.functional.interpolate(
-                out.float(), size=(H, W), mode='bilinear', align_corners=False)
+                out, size=(H, W), mode='bilinear', align_corners=False)
         avg = out if avg is None else avg + out
-    return avg / len(scales)
+    return (avg / len(scales)).float()
 
 
 # =============================================================================
@@ -687,14 +969,13 @@ def save_val_examples(loader, model, device, save_dir, num_samples=8,
             if multi_scale:
                 outputs = predict_batch_multiscale(model, images, device, scales, use_amp)
             else:
-                with torch.cuda.amp.autocast(enabled=(use_amp and device.type == 'cuda')):
-                    outputs = model(images)
+                outputs = _forward_safe(model, images, use_amp, device)
             if num_classes == 1:
-                preds = (torch.sigmoid(outputs) > 0.5).float()
+                preds = (torch.sigmoid(outputs.float()) > 0.5).float()
             else:
-                preds = (torch.argmax(torch.softmax(outputs, dim=1), dim=1)
+                preds = (torch.argmax(torch.softmax(outputs.float(), dim=1), dim=1)
                          if output_activation == 'softmax'
-                         else torch.argmax(outputs, dim=1)).float()
+                         else torch.argmax(outputs.float(), dim=1)).float()
             for i in range(images.size(0)):
                 if collected >= num_samples:
                     break
@@ -748,7 +1029,6 @@ def main():
     else:
         log("Ошибка: укажите --params или --params_file"); sys.exit(1)
 
-    # ---------- Извлечение параметров ----------
     dataset_path = params.get('dataset_path')
     model_path = params.get('model_path')
     project_path = params.get('project_path')
@@ -771,7 +1051,8 @@ def main():
     two_phase = params.get('two_phase_training', False)
     freeze_epochs = params.get('freeze_epochs', 0)
     unfreeze_epochs = params.get('unfreeze_epochs', 0)
-    unfreeze_last_n_stages = params.get('unfreeze_last_n_stages', None)  # None = весь энкодер
+    unfreeze_last_n_stages = params.get('unfreeze_last_n_stages', None)
+    freeze_bn_second_phase = bool(params.get('freeze_bn_second_phase', True))
     augmentations = params.get('augmentations', {})
     device_pref = params.get('device', 'auto')
     threshold = params.get('threshold', 0.5)
@@ -780,7 +1061,6 @@ def main():
     normalize = bool(params.get('normalize', False))
     resize_mode = params.get('resize_mode', 'hard')
 
-    # Архитектура
     architecture = params.get('architecture', 'deeplabv3plus').lower()
     if architecture in ('deeplabv3plus', 'deeplabv3+'):
         architecture = 'deeplabv3plus'
@@ -790,7 +1070,6 @@ def main():
         log(f"⚠️ Неизвестная архитектура '{architecture}', использую deeplabv3plus")
         architecture = 'deeplabv3plus'
 
-    # Обучение: улучшения
     use_amp = bool(params.get('use_amp', True))
     accum_steps = max(1, int(params.get('accum_steps', 1)))
     use_ema = bool(params.get('use_ema', True))
@@ -803,7 +1082,28 @@ def main():
     if isinstance(infer_scales, str):
         infer_scales = [float(s) for s in infer_scales.replace(' ', '').split(',') if s]
 
-    # ---------- Устройство для auto-batch ----------
+    # Патч 7: предупреждение про мало эпох
+    if two_phase and epochs < 30:
+        log(f"⚠️ Эпох {epochs} при early_stopping_patience={EARLY_STOPPING_PATIENCE}. "
+            f"Модель может не успеть сойтись.")
+
+    atrous_rates = params.get('atrous_rates')
+    if atrous_rates is None:
+        atrous_rates = ATROUS_RATES_MAP.get(output_stride, (6, 12, 18))
+        log(f"atrous_rates не заданы явно, выбираю автоматически для OS={output_stride}: {atrous_rates}")
+    else:
+        atrous_rates = tuple(int(r) for r in atrous_rates)
+        log(f"atrous_rates заданы явно: {atrous_rates}")
+
+    expected_k = (input_size - 1) / output_stride if output_stride > 0 else None
+    if expected_k is None or abs(expected_k - round(expected_k)) > 1e-6:
+        log(f"⚠️ input_size={input_size} не соответствует формуле crop_size = output_stride * k + 1 "
+            f"для output_stride={output_stride}. Рекомендуется 513 (OS=16) или 1025 (OS=8/16).")
+    else:
+        log(f"✅ input_size={input_size} соответствует формуле crop_size = {output_stride}*{int(round(expected_k))}+1")
+        log(f"ℹ️ smp.DeepLabV3/V3+ требует H,W % {output_stride} == 0 — "
+            f"к модели будет применён авто-паддинг до {((input_size + output_stride - 1) // output_stride) * output_stride}")
+
     if device_pref == 'auto':
         tmp_dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     elif device_pref.isdigit():
@@ -822,7 +1122,6 @@ def main():
     elif batch_size <= 0:
         log(f"Ошибка: batch_size={batch_size} должен быть положительным"); sys.exit(1)
 
-    # ---------- Путь сохранения ----------
     if name and project_path:
         save_root = os.path.join(project_path, name)
     elif name:
@@ -835,69 +1134,128 @@ def main():
     weights_dir = os.path.join(save_root, 'weights')
     os.makedirs(weights_dir, exist_ok=True)
 
-    # ---------- Лог старта ----------
     log("=== Запуск обучения DeepLabV3 / DeepLabV3+ ===")
     log(f"Архитектура: {architecture}")
-    log(f"Датасет: {dataset_path}")
+    log(f"Датасет (папка): {dataset_path}")
+    log(f"Датасет (YAML):  {params.get('deeplab_yaml')}")
     log(f"Backbone: {backbone}, output_stride={output_stride}")
+    log(f"Atrous rates: {atrous_rates}")
     log(f"Выходная активация: {output_activation}")
     log(f"Классов: {num_classes}, ignore_index={ignore_index}")
     log(f"Веса классов: {class_weights}")
     log(f"Loss: {loss_name}, веса: {loss_weights}")
     log(f"Оптимизатор: {optimizer_name}, LR={lr}, momentum={momentum}, WD={weight_decay}")
-    log(f"Scheduler: {scheduler_name}")
+    log(f"Scheduler: {scheduler_name} (power={poly_power})")
     log(f"Эпохи: {epochs}, two_phase={two_phase} (freeze={freeze_epochs}, unfreeze={unfreeze_epochs})")
     if unfreeze_last_n_stages is not None:
         log(f"Размораживать только последние {unfreeze_last_n_stages} стадий энкодера")
+    log(f"Заморозка BatchNorm на 2-й фазе: {freeze_bn_second_phase}")
     log(f"Batch size: {batch_size}, device: {device_pref}")
     log(f"Input size: {input_size}, normalize={normalize}, resize_mode={resize_mode}")
     log(f"AMP: {use_amp}, Accum: {accum_steps}")
     log(f"EMA: {use_ema} (decay={ema_decay})")
     log(f"Layer-wise LR: {use_layerwise_lr} (decay={layerwise_decay})")
-    log(f"Poly power: {poly_power}")
     log(f"Multi-scale infer: {multi_scale_infer} (scales={infer_scales})")
     log(f"Аугментации: {augmentations}")
     log(f"Результаты: {save_root}")
 
-    if not dataset_path or not os.path.exists(dataset_path):
-        log(f"Ошибка: папка датасета не существует: {dataset_path}"); sys.exit(1)
+    deeplab_yaml = params.get('deeplab_yaml')
 
-    # ---------- Создание датасетов ----------
-    try:
-        if os.path.exists(os.path.join(dataset_path, 'images', 'train')) and \
-           os.path.exists(os.path.join(dataset_path, 'masks', 'train')):
-            log("Обнаружена U-Net-style структура (images/, masks/)")
-            from glob import glob
-            tr_imgs = sorted(glob(os.path.join(dataset_path, 'images', 'train', '*.*')))
-            va_imgs = sorted(glob(os.path.join(dataset_path, 'images', 'val', '*.*')))
-            def mk_pairs(imgs, mask_dir):
-                return [(img, os.path.join(mask_dir, os.path.splitext(os.path.basename(img))[0] + '.png'))
-                        for img in imgs
-                        if os.path.exists(os.path.join(mask_dir,
-                            os.path.splitext(os.path.basename(img))[0] + '.png'))]
-            train_pairs = mk_pairs(tr_imgs, os.path.join(dataset_path, 'masks', 'train'))
-            val_pairs = mk_pairs(va_imgs, os.path.join(dataset_path, 'masks', 'val'))
-            train_ds = VOCSegmentationPairs(train_pairs, input_size, num_classes, ignore_index,
-                                            augmentations, normalize=normalize, resize_mode=resize_mode)
-            val_ds = (VOCSegmentationPairs(val_pairs, input_size, num_classes, ignore_index,
-                                           {}, normalize=normalize, resize_mode=resize_mode)
-                      if val_pairs else None)
-            train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-            val_loader = (DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-                          if val_ds else None)
-            train_len = len(train_ds)
-            val_len = len(val_ds) if val_ds else 0
-        else:
-            log("Обнаружена PASCAL VOC структура (ImageSets/Segmentation)")
-            train_loader, val_loader, train_len, val_len = create_voc_loaders(
-                dataset_path, input_size, num_classes, augmentations, ignore_index,
-                batch_size, num_workers, normalize=normalize, resize_mode=resize_mode)
-    except Exception as e:
-        log(f"Ошибка создания датасета: {e}"); sys.exit(1)
+    if deeplab_yaml:
+        if not os.path.isfile(deeplab_yaml):
+            log(f"Ошибка: DeepLab YAML не найден: {deeplab_yaml}")
+            sys.exit(1)
+        log(f"📄 DeepLab YAML задан: {deeplab_yaml}")
+        log("📄 path, num_classes и пути сплитов будут прочитаны из YAML "
+            "(приоритет над папкой датасета).")
+        try:
+            train_loader, val_loader, train_len, val_len, num_classes_yaml = \
+                create_loaders_from_yaml(
+                    deeplab_yaml,
+                    default_input_size=input_size,
+                    default_num_classes=num_classes,
+                    augmentations=augmentations,
+                    ignore_index=ignore_index,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    normalize=normalize,
+                    resize_mode=resize_mode,
+                )
+            if num_classes_yaml != num_classes:
+                log(f"📄 num_classes переопределён из YAML: {num_classes} → {num_classes_yaml}")
+                num_classes = num_classes_yaml
+        except Exception as e:
+            log(f"Ошибка создания датасета из YAML: {e}")
+            sys.exit(1)
+    else:
+        if not dataset_path or not os.path.exists(dataset_path):
+            log(f"Ошибка: папка датасета не существует: {dataset_path}")
+            sys.exit(1)
+        try:
+            if os.path.exists(os.path.join(dataset_path, 'images', 'train')) and \
+               os.path.exists(os.path.join(dataset_path, 'masks', 'train')):
+                log("Обнаружена U-Net-style структура (images/, masks/)")
+                from glob import glob
+                tr_imgs = sorted(glob(os.path.join(dataset_path, 'images', 'train', '*.*')))
+                va_imgs = sorted(glob(os.path.join(dataset_path, 'images', 'val', '*.*')))
+                def mk_pairs(imgs, mask_dir):
+                    return [(img, os.path.join(mask_dir, os.path.splitext(os.path.basename(img))[0] + '.png'))
+                            for img in imgs
+                            if os.path.exists(os.path.join(mask_dir,
+                                os.path.splitext(os.path.basename(img))[0] + '.png'))]
+                train_pairs = mk_pairs(tr_imgs, os.path.join(dataset_path, 'masks', 'train'))
+                val_pairs = mk_pairs(va_imgs, os.path.join(dataset_path, 'masks', 'val'))
+                train_ds = VOCSegmentationPairs(train_pairs, input_size, num_classes, ignore_index,
+                                                augmentations, normalize=normalize, resize_mode=resize_mode)
+                val_ds = (VOCSegmentationPairs(val_pairs, input_size, num_classes, ignore_index,
+                                               {}, normalize=normalize, resize_mode=resize_mode)
+                          if val_pairs else None)
+                train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+                val_loader = (DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+                              if val_ds else None)
+                train_len = len(train_ds)
+                val_len = len(val_ds) if val_ds else 0
+            else:
+                log("Обнаружена PASCAL VOC структура (ImageSets/Segmentation)")
+                train_loader, val_loader, train_len, val_len = create_voc_loaders(
+                    dataset_path, input_size, num_classes, augmentations, ignore_index,
+                    batch_size, num_workers, normalize=normalize, resize_mode=resize_mode)
+        except Exception as e:
+            log(f"Ошибка создания датасета: {e}")
+            sys.exit(1)
 
     log(f"Загружено {train_len} train, {val_len} val")
 
-    # ---------- Модель ----------
+    # Диагностика масок (первые 3)
+    try:
+        _pairs = train_loader.dataset.pairs[:3] if hasattr(train_loader.dataset, 'pairs') else []
+        for _ip, _mp in _pairs:
+            _m = np.array(Image.open(_mp))
+            _u = np.unique(_m)
+            log(f"  mask {os.path.basename(_mp)}: dtype={_m.dtype}, "
+                f"shape={_m.shape}, unique={_u[:10].tolist()}, max={int(_m.max())}")
+    except Exception as _e:
+        log(f"  ⚠️ Диагностика масок: {_e}")
+
+    # Патч 6: статистика class balance
+    try:
+        fg_pixels = 0
+        total_pixels = 0
+        for _ip, _mp in train_loader.dataset.pairs:
+            _m = np.array(Image.open(_mp))
+            if num_classes == 2 and _m.max() == 255:
+                _m = (_m > 127).astype(np.int64)
+            fg_pixels += int((_m > 0).sum())
+            total_pixels += int(_m.size)
+        fg_ratio = fg_pixels / max(total_pixels, 1)
+        log(f"📊 Class balance (train): foreground={fg_ratio*100:.2f}%, "
+            f"background={100 - fg_ratio*100:.2f}%")
+        if fg_ratio < 0.05:
+            log("⚠️ Сильный дисбаланс классов (< 5% foreground). "
+                "Рекомендуется class_weights='auto' или loss='CrossEntropy+Dice'.")
+    except Exception as _e:
+        log(f"⚠️ Диагностика class balance: {_e}")
+
     global model, best_loss_model_path, best_iou_model_path, final_model_path
     global best_val_loss, best_iou, current_epoch, stop_requested
     load_pretrained = (model_path is None) or (not os.path.exists(model_path))
@@ -909,6 +1267,7 @@ def main():
             encoder_weights='imagenet' if load_pretrained else None,
             in_channels=3, classes=num_classes,
             encoder_output_stride=output_stride,
+            decoder_atrous_rates=atrous_rates,
             decoder_use_batchnorm=True,
         )
     else:
@@ -918,6 +1277,7 @@ def main():
             encoder_weights='imagenet' if load_pretrained else None,
             in_channels=3, classes=num_classes,
             encoder_output_stride=output_stride,
+            decoder_atrous_rates=atrous_rates,
         )
 
     if model_path is not None and os.path.exists(model_path):
@@ -927,7 +1287,6 @@ def main():
         if unexpected: log(f"⚠️ Лишние ключи: {unexpected[:5]}...")
         log(f"Загружены веса: {model_path}")
 
-    # ---------- Устройство ----------
     if device_pref == 'auto':
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     elif device_pref.isdigit():
@@ -943,7 +1302,6 @@ def main():
     model = model.to(device)
     log(f"Device: {device}")
 
-    # ---------- Auto class weights ----------
     if class_weights == 'auto':
         log("Автоматический расчёт весов классов...")
         counts = torch.zeros(num_classes, dtype=torch.long, device=device)
@@ -961,10 +1319,10 @@ def main():
         class_weights = (total / (num_classes * (counts.float() + 1e-6))).tolist()
         log(f"Авто-веса: {class_weights}")
 
+    # Патч 1: device передаётся в criterion
     criterion = get_loss_function(loss_name, num_classes, ignore_index,
-                                  class_weights, loss_weights)
+                                  class_weights, loss_weights, device=device)
 
-    # ---------- Двухфазный режим: подготовка ----------
     def freeze_backbone():
         for p in model.encoder.parameters():
             p.requires_grad = False
@@ -982,8 +1340,9 @@ def main():
                 k = min(unfreeze_last_n_stages, n)
                 for i, stage in enumerate(stages):
                     if i >= n - k:
-                        for p in stage.parameters():
-                            p.requires_grad = True
+                        if hasattr(stage, 'parameters'):
+                            for p in stage.parameters():
+                                p.requires_grad = True
                 log(f"Разморожены последние {k} из {n} стадий энкодера.")
             except AttributeError:
                 log("⚠️ get_stages() недоступен — размораживаю весь энкодер.")
@@ -999,7 +1358,6 @@ def main():
     else:
         freeze_epochs = 0
 
-    # ---------- Оптимизатор и Scheduler ----------
     if use_layerwise_lr:
         log("Создаю layer-wise оптимизатор")
         optimizer = get_layerwise_optimizer(model, optimizer_name, lr,
@@ -1015,25 +1373,41 @@ def main():
         return get_scheduler(opt, scheduler_name, n_epochs)
 
     current_phase_epochs = epochs
+    # LR ×0.1 на первой фазе (frozen backbone)
+    if two_phase and freeze_epochs > 0:
+        for g in optimizer.param_groups:
+            g['lr'] = g['lr'] * 0.1
+        log(f"ℹ️ Первая фаза (frozen backbone): LR уменьшен в 10×")
     scheduler = make_scheduler(optimizer, current_phase_epochs)
 
-    # ---------- EMA ----------
+    # Патч 5: EMA decay адаптивно под размер датасета
+    total_iters = epochs * len(train_loader)
+    if use_ema and total_iters < 500 and ema_decay >= 0.99:
+        ema_decay_eff = max(0.9, 1.0 - 10.0 / max(total_iters, 1))
+        log(f"ℹ️ EMA decay адаптирован под {total_iters} итераций: "
+            f"{ema_decay} → {ema_decay_eff:.4f}")
+        ema_decay = ema_decay_eff
     ema = ModelEMA(model, decay=ema_decay, device=device) if use_ema else None
     if use_ema:
         log(f"EMA инициализирован (decay={ema_decay})")
 
-    # ---------- Скаляр AMP ----------
-    scaler = torch.cuda.amp.GradScaler(enabled=(use_amp and device.type == 'cuda'))
+    # Патч 2: GradScaler только для fp16
+    try:
+        bf16_ok = (device.type == 'cuda') and torch.cuda.is_bf16_supported()
+    except Exception:
+        bf16_ok = False
+    use_fp16_amp = bool(use_amp and device.type == 'cuda' and not bf16_ok)
+    scaler = torch.amp.GradScaler('cuda', enabled=use_fp16_amp)
+    log(f"AMP: bf16={bf16_ok}, fp16={use_fp16_amp}, scaler_enabled={use_fp16_amp}")
 
-    # ---------- Точки сохранения ----------
     best_loss_model_path = os.path.join(weights_dir, 'best_loss.pth')
     best_iou_model_path = os.path.join(weights_dir, 'best_iou.pth')
     final_model_path = os.path.join(weights_dir, 'last.pth')
 
-    # ---------- Сохранение args / meta ----------
     args_dict = {
         'architecture': architecture, 'backbone': backbone,
-        'output_stride': output_stride, 'output_activation': output_activation,
+        'output_stride': output_stride, 'atrous_rates': list(atrous_rates),
+        'output_activation': output_activation,
         'num_classes': num_classes, 'ignore_index': ignore_index,
         'class_weights': class_weights, 'loss': loss_name, 'loss_weights': loss_weights,
         'optimizer': optimizer_name, 'lr': lr, 'momentum': momentum,
@@ -1041,6 +1415,7 @@ def main():
         'epochs': epochs, 'batch_size': batch_size,
         'two_phase_training': two_phase, 'freeze_epochs': freeze_epochs,
         'unfreeze_epochs': unfreeze_epochs, 'unfreeze_last_n_stages': unfreeze_last_n_stages,
+        'freeze_bn_second_phase': freeze_bn_second_phase,
         'augmentations': augmentations, 'device': device_pref,
         'threshold': threshold, 'num_workers': num_workers,
         'input_size': input_size, 'normalize': normalize, 'resize_mode': resize_mode,
@@ -1051,12 +1426,15 @@ def main():
         'multi_scale_infer': multi_scale_infer, 'infer_scales': infer_scales,
         'project': project_path, 'name': name,
         'date': datetime.now().isoformat(),
+        'dataset_path': dataset_path,
+        'deeplab_yaml': deeplab_yaml,
     }
     save_args_yaml(args_dict, os.path.join(save_root, 'args.yaml'))
 
     meta_info = {
         'architecture': architecture, 'backbone': backbone,
-        'output_stride': output_stride, 'output_activation': output_activation,
+        'output_stride': output_stride, 'atrous_rates': list(atrous_rates),
+        'output_activation': output_activation,
         'num_classes': num_classes, 'ignore_index': ignore_index,
         'loss': loss_name, 'optimizer': optimizer_name, 'lr': lr,
         'batch_size': batch_size, 'epochs': epochs,
@@ -1069,12 +1447,13 @@ def main():
         'multi_scale_infer': multi_scale_infer, 'infer_scales': infer_scales,
         'best_val_loss': None, 'best_iou': None,
         'date': datetime.now().isoformat(),
+        'dataset_path': dataset_path,
+        'deeplab_yaml': deeplab_yaml,
     }
     save_model_meta(meta_info, best_loss_model_path)
     save_model_meta(meta_info, final_model_path)
     log("Метаданные сохранены (начальная версия).")
 
-    # ---------- Цикл обучения ----------
     patience_counter = 0
     best_val_loss = float('inf')
     best_iou = -float('inf')
@@ -1085,32 +1464,38 @@ def main():
         if stop_requested:
             log("Остановка по запросу пользователя."); break
 
-        # --- Переключение фазы ---
         if two_phase and epoch == freeze_epochs + 1:
             log("=" * 60)
             log(f"Переключение во вторую фазу (эпоха {epoch}).")
             unfreeze_backbone()
 
-            # Пересоздаём optimizer (layer-wise или обычный)
+            if freeze_bn_second_phase:
+                set_bn_eval(model.encoder)
+                log("BatchNorm энкодера переведён в eval() (running-статистики заморожены).")
+
             if use_layerwise_lr:
                 optimizer = get_layerwise_optimizer(
                     model, optimizer_name, lr, momentum, weight_decay, layerwise_decay)
             else:
                 optimizer = get_optimizer(model, optimizer_name, lr, momentum, weight_decay)
 
-            # Scheduler для второй фазы
             current_phase_epochs = epochs - freeze_epochs
             scheduler = make_scheduler(optimizer, current_phase_epochs)
 
-            # Сбрасываем EMA — начинаем усреднять размороженную модель заново
             if use_ema:
                 ema = ModelEMA(model, decay=ema_decay, device=device)
                 log(f"EMA сброшен (decay={ema_decay})")
 
-            # Scaler не зависит от optimizer, оставляем
             log("=" * 60)
 
         model.train()
+        # BN энкодера в eval, пока backbone frozen (1-я фаза)
+        if two_phase and epoch <= freeze_epochs:
+            set_bn_eval(model.encoder)
+        # И на 2-й фазе, если пользователь выбрал freeze_bn_second_phase
+        elif freeze_bn_second_phase and two_phase and epoch > freeze_epochs:
+            set_bn_eval(model.encoder)
+
         train_loss = 0.0
         optimizer.zero_grad()
 
@@ -1118,15 +1503,26 @@ def main():
             images, masks = images.to(device), masks.to(device)
             target = masks.unsqueeze(1).float() if num_classes == 1 else masks.long()
 
-            with torch.cuda.amp.autocast(enabled=(use_amp and device.type == 'cuda')):
-                outputs = model(images)
-                loss = criterion(outputs, target) / accum_steps
+            outputs = _forward_safe(model, images, use_amp, device)
+            loss = criterion(outputs, target) / accum_steps
 
-            scaler.scale(loss).backward()
+            if not torch.isfinite(loss):
+                log(f"⚠️ Skipping non-finite loss (batch {b_idx}): {loss.item()}")
+                optimizer.zero_grad()
+                continue
+
+            # Патч 2: fp16 → scaler, bf16/no-amp → обычный backward
+            if use_fp16_amp:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
             if (b_idx + 1) % accum_steps == 0:
-                scaler.step(optimizer)
-                scaler.update()
+                if use_fp16_amp:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 optimizer.zero_grad()
                 if ema is not None:
                     ema.update(model)
@@ -1135,9 +1531,12 @@ def main():
 
             train_loss += loss.item() * accum_steps * images.size(0)
 
-        # Остаток накопленных градиентов
         if len(train_loader) % accum_steps != 0:
-            scaler.step(optimizer); scaler.update(); optimizer.zero_grad()
+            if use_fp16_amp:
+                scaler.step(optimizer); scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad()
             if ema is not None:
                 ema.update(model)
             if isinstance(scheduler, PolyLRSchedulerIter):
@@ -1145,7 +1544,6 @@ def main():
 
         train_loss /= train_len
 
-        # ---------- Валидация (с EMA и multi-scale) ----------
         if val_loader is not None:
             eval_model = ema.ema if ema is not None else model
             eval_model.eval()
@@ -1159,8 +1557,7 @@ def main():
                         outputs = predict_batch_multiscale(
                             eval_model, images, device, infer_scales, use_amp)
                     else:
-                        with torch.cuda.amp.autocast(enabled=(use_amp and device.type == 'cuda')):
-                            outputs = eval_model(images)
+                        outputs = _forward_safe(eval_model, images, use_amp, device)
 
                     target = masks.unsqueeze(1).float() if num_classes == 1 else masks.long()
                     vloss = criterion(outputs, target)
@@ -1177,7 +1574,6 @@ def main():
         else:
             val_loss, metrics = None, None
 
-        # ---------- Сохранение лучших ----------
         state_to_save = ema.state_dict() if ema is not None else model.state_dict()
         ema_note = " (EMA)" if ema is not None else ""
 
@@ -1208,13 +1604,11 @@ def main():
                 torch.save(state_to_save, best_loss_model_path)
                 log(f"✅ Модель сохранена (нет валидации){ema_note}")
 
-        # ---------- История ----------
         history['epoch'].append(epoch)
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss if val_loss is not None else float('nan'))
         for k in ['iou', 'dice', 'f1', 'precision', 'recall', 'accuracy', 'map50', 'map50_95']:
             if metrics:
-                # ключи в metrics — с заглавной буквы
                 key_map = {'iou': 'IoU', 'dice': 'Dice', 'f1': 'F1',
                            'precision': 'Precision', 'recall': 'Recall',
                            'accuracy': 'Accuracy', 'map50': 'mAP50', 'map50_95': 'mAP50-95'}
@@ -1222,14 +1616,12 @@ def main():
             else:
                 history[k].append(float('nan'))
 
-        # ---------- Scheduler step (для НЕ-Poly) ----------
         if scheduler is not None and not isinstance(scheduler, PolyLRSchedulerIter):
             if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
                 scheduler.step(val_loss if val_loss is not None else train_loss)
             else:
                 scheduler.step()
 
-        # ---------- Лог эпохи ----------
         pct = int(epoch / epochs * 100)
         log(f"PROGRESS:{pct}:{epoch}:{epochs}")
         cur_lrs = [f"{g['lr']:.2e}" for g in optimizer.param_groups]
@@ -1240,7 +1632,6 @@ def main():
         else:
             log(f"Эпоха {epoch}/{epochs} | Train: {train_loss:.4f} | (нет val) | {lr_str}")
 
-    # ---------- Финал ----------
     final_state = ema.state_dict() if ema is not None else model.state_dict()
     torch.save(final_state, final_model_path)
     log(f"Финальная модель{ema_note}: {final_model_path}")
@@ -1253,7 +1644,6 @@ def main():
         save_model_meta(meta_info, best_iou_model_path)
     save_model_meta(meta_info, final_model_path)
 
-    # ---------- Пост-обработка ----------
     if val_loader is not None:
         log("=== Итоговые отчёты ===")
         eval_path = best_iou_model_path if os.path.exists(best_iou_model_path) else best_loss_model_path
@@ -1269,8 +1659,7 @@ def main():
                 if multi_scale_infer:
                     outputs = predict_batch_multiscale(model, images, device, infer_scales, use_amp)
                 else:
-                    with torch.cuda.amp.autocast(enabled=(use_amp and device.type == 'cuda')):
-                        outputs = model(images)
+                    outputs = _forward_safe(model, images, use_amp, device)
                 all_preds.append(outputs.float().cpu())
                 all_masks.append(masks.cpu())
         all_preds = torch.cat(all_preds, dim=0)
@@ -1301,13 +1690,105 @@ def main():
         log("METRICS: null (нет валидации)")
         save_csv_results(history, os.path.join(save_root, 'results.csv'))
 
-    log("=== Обучение завершено ===")
     if os.path.exists(best_loss_model_path):
         log(f"best_loss: {best_loss_model_path}")
     if os.path.exists(best_iou_model_path):
         log(f"best_iou:  {best_iou_model_path}")
     log(f"last:      {final_model_path}")
-    log("SUCCESS")
+
+
+    # =========================================================================
+    # ЭКСПОРТ В ONNX
+    # =========================================================================
+    log("=== Экспорт финальной модели в ONNX ===")
+    try:
+        import onnx
+        import onnxruntime as ort
+    except ImportError:
+        log("⚠️ Пропуск экспорта в ONNX: не установлены 'onnx' или 'onnxruntime'.")
+        log("   Установите: pip install onnx onnxruntime")
+    else:
+        onnx_path = os.path.join(weights_dir, 'model.onnx')
+        onnx_meta_path = os.path.join(weights_dir, 'model_onnx_meta.json')
+
+        # Загружаем лучшие веса в модель (лучше всего экспортировать best_iou или last)
+        best_weights = best_iou_model_path if os.path.exists(best_iou_model_path) else final_model_path
+        log(f"Загрузка весов для экспорта: {os.path.basename(best_weights)}")
+        model.load_state_dict(torch.load(best_weights, map_location='cpu'))
+        model.eval()
+        model.to('cpu')  # Экспорт стабильнее на CPU
+
+        # Создаем dummy input
+        dummy_input = torch.randn(1, 3, input_size, input_size, device='cpu')
+
+        # Динамические оси: разрешаем менять batch size и H/W
+        dynamic_axes = {
+            'input': {0: 'batch_size', 2: 'height', 3: 'width'},
+            'output': {0: 'batch_size', 2: 'height', 3: 'width'},
+        }
+
+        log(f"Запуск torch.onnx.export (opset=17, dynamic_axes=True)...")
+        try:
+            torch.onnx.export(
+                model,
+                dummy_input,
+                onnx_path,
+                export_params=True,
+                opset_version=17,
+                do_constant_folding=True,
+                input_names=['input'],
+                output_names=['output'],
+                dynamic_axes=dynamic_axes,
+            )
+            log(f"✅ ONNX-модель сохранена: {onnx_path}")
+
+            # Проверка валидности ONNX-графа
+            onnx_model = onnx.load(onnx_path)
+            onnx.checker.check_model(onnx_model)
+            log("✅ ONNX-граф прошел проверку checker.")
+
+            # Быстрый прогон через ONNX Runtime для проверки
+            ort_session = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
+            ort_inputs = {ort_session.get_inputs()[0].name: dummy_input.numpy()}
+            ort_outs = ort_session.run(None, ort_inputs)
+            log(f"✅ Тестовый инференс ONNX Runtime успешен. Выход: shape={ort_outs[0].shape}")
+
+            # Метаданные для ONNX-модели
+            onnx_meta = {
+                'format': 'ONNX',
+                'source_weights': os.path.basename(best_weights),
+                'onnx_opset': 17,
+                'architecture': architecture,
+                'backbone': backbone, # ИСПРАВЛЕНО: здесь был encoder
+                'output_stride': output_stride,
+                'num_classes': num_classes,
+                'input_size': input_size,
+                'input_names': ['input'],
+                'output_names': ['output'],
+                'dynamic_axes': dynamic_axes,
+                'normalize': normalize,
+                'resize_mode': resize_mode,
+                'threshold': threshold,
+                'export_date': datetime.now().isoformat(),
+                'description': 'Модель DeepLabV3/V3+, экспортированная из PyTorch. '
+                               'Вход: [B, 3, H, W] RGB-изображение (нормализованное при необходимости). '
+                               'Выход: логиты [B, num_classes, H, W]. '
+                               'Для получения маски примените argmax (multiclass) или sigmoid+threshold (binary).'
+            }
+            with open(onnx_meta_path, 'w', encoding='utf-8') as f:
+                json.dump(onnx_meta, f, indent=2, ensure_ascii=False)
+            log(f"✅ Метаданные ONNX сохранены: {onnx_meta_path}")
+
+        except Exception as e:
+            log(f"❌ Ошибка при экспорте в ONNX: {type(e).__name__}: {e}")
+            import traceback
+            log(traceback.format_exc())
+    # =========================================================================
+
+    log("=== Обучение завершено ===")
+
+
+
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ class DeepLearningWindow(QMainWindow):
 
         # Подключение кнопок "Обзор" в виджетах
         self.unet_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("U-Net"))
-        self.deeplab_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("DeepLabV3+"))
+        self.deeplab_settings._browse_btn.clicked.connect(self._browse_deeplab_model)
         self.segformer_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("SegFormer"))
         self.sam_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("SAM"))
         self.yolo_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("YOLO-seg"))
@@ -108,11 +108,22 @@ class DeepLearningWindow(QMainWindow):
         else:
             self.segment_button.setStyleSheet("background-color: #b22222; color: black;")
 
+    def _browse_deeplab_model(self):
+        """
+        Загружает DeepLabV3/V3+ из пути, указанного в deeplab_settings.
+        Реальная архитектура читается из *_meta.json сегментатором;
+        имя в model_combo нужно только для выбора ветки в load_model_from_widget.
+        """
+        model_name = self.model_combo.currentText()
+        if model_name not in ("DeepLabV3+", "DeepLabV3"):
+            model_name = "DeepLabV3+"
+        self.load_model_from_widget(model_name)
+
     # ---------- Загрузка модели из виджета ----------
     def load_model_from_widget(self, model_name):
         if model_name == "U-Net":
             file_path = self.unet_settings._model_path.text().strip()
-        elif model_name == "DeepLabV3+":
+        elif model_name in ("DeepLabV3+", "DeepLabV3"):
             file_path = self.deeplab_settings._model_path.text().strip()
         elif model_name == "SegFormer":
             file_path = self.segformer_settings._model_path.text().strip()
@@ -162,13 +173,22 @@ class DeepLearningWindow(QMainWindow):
                     self.display_current_image()
                     return
 
-            elif model_name == "DeepLabV3+":
-                self.segmentor.load(
-                    backbone=self.deeplab_settings._backbone.currentText(),
-                    output_stride=int(self.deeplab_settings._output_stride.currentText())
-                )
-                if hasattr(self.segmentor, 'metadata'):
-                    self._update_deeplab_ui_from_metadata(self.segmentor.metadata)
+
+            elif model_name in ("DeepLabV3+", "DeepLabV3"):
+                try:
+                    self.segmentor.load(weights_path=file_path)
+                    if hasattr(self.segmentor, 'metadata') and self.segmentor.metadata:
+                        self._update_deeplab_ui_from_metadata(self.segmentor.metadata)
+                    else:
+                        self.log("Предупреждение: метаданные DeepLab не загружены.")
+                except Exception as e:
+                    self.log(f"Ошибка загрузки DeepLab: {e}")
+                    QMessageBox.critical(self, "Ошибка",
+                                         f"Не удалось загрузить модель DeepLab:\n{e}")
+                    self.segmentor = None
+                    self._update_segment_button_color()
+                    self.display_current_image()
+                    return
 
             elif model_name == "YOLO-seg":
                 self.segmentor.load(model_path=file_path)
@@ -247,17 +267,56 @@ class DeepLearningWindow(QMainWindow):
 
 
     def _update_deeplab_ui_from_metadata(self, metadata):
-        """Заполняет поля DeepLabV3+ из метаданных (поля уже заблокированы)."""
-        if 'backbone' in metadata:
-            backbone = metadata['backbone']
-            idx = self.deeplab_settings._backbone.findText(backbone)
-            if idx >= 0:
-                self.deeplab_settings._backbone.setCurrentIndex(idx)
-        if 'output_stride' in metadata:
-            stride = str(metadata['output_stride'])
-            idx = self.deeplab_settings._output_stride.findText(stride)
-            if idx >= 0:
-                self.deeplab_settings._output_stride.setCurrentIndex(idx)
+        """
+        Заполняет поля DeepLabV3/V3+ из метаданных через публичное API
+        DeepLabV3InferenceSettings.apply_metadata и логирует диагностику.
+        """
+        diag = self.deeplab_settings.apply_metadata(metadata)
+
+        arch = diag.get('architecture') or '?'
+        nc = metadata.get('num_classes', '?')
+        norm = metadata.get('normalize', '?')
+        os_val = metadata.get('output_stride', '?')
+        act = metadata.get('output_activation', '?')
+        tr_rm = diag['train_resize_mode'] or '?'
+        inf_rm = diag['inference_resize_mode']
+
+        if diag['train_resize_mode'] == 'random_crop':
+            inf_rm_str = inf_rm if inf_rm in ('hard', 'keep_aspect_pad') \
+                else 'hard (default)'
+        else:
+            inf_rm_str = '— (не нужен)'
+
+        self.log("=== DeepLab метаданные ===")
+        self.log(f"  Архитектура: {arch}")
+        self.log(f"  Backbone: {metadata.get('backbone', '?')}")
+        self.log(f"  Output stride: {os_val}")
+        self.log(f"  Atrous rates: {metadata.get('atrous_rates', '?')}")
+        self.log(f"  input_size: {metadata.get('input_size', '?')}")
+        self.log(f"  num_classes: {nc}")
+        self.log(f"  output_activation: {act}")
+        self.log(f"  normalize: {norm}")
+        self.log(f"  resize_mode (train): {tr_rm}")
+        self.log(f"  inference_resize_mode: {inf_rm_str}")
+
+        try:
+            nc_int = int(nc)
+        except (TypeError, ValueError):
+            nc_int = None
+        if nc_int == 1:
+            self.log("  Режим: бинарная (sigmoid + threshold).")
+        elif nc_int == 2:
+            self.log("  Режим: «фон + объект» (softmax[:,1] или sigmoid + threshold).")
+        elif nc_int is not None and nc_int > 2:
+            self.log(f"  Режим: {nc_int}-классовая сегментация (argmax).")
+
+        if diag['train_resize_mode'] == 'random_crop':
+            self.log("  ℹ️ Обучение было с random_crop. Выберите режим ресайза "
+                     "для инференса (hard / keep_aspect_pad).")
+        if diag['missing']:
+            self.log(f"  ⚠️ Отсутствуют: {diag['missing']} → "
+                     "override-поля активированы")
+        self.log("=========================")
 
     # ---------- Подключение виджетов для отслеживания изменений ----------
     def _connect_settings_widgets(self):
@@ -270,10 +329,15 @@ class DeepLearningWindow(QMainWindow):
             self.yolo_settings._save,
             self.custom_settings._model_path,
             self.unet_settings._threshold,
+            self.deeplab_settings._threshold,
         ]
         # Override-поля U-Net теперь внутри виджета — подключаемся к сигналу
         try:
             self.unet_settings.override_changed.connect(self.on_any_setting_changed)
+        except Exception:
+            pass
+        try:
+            self.deeplab_settings.override_changed.connect(self.on_any_setting_changed)
         except Exception:
             pass
         for w in widgets:
@@ -364,7 +428,7 @@ class DeepLearningWindow(QMainWindow):
 
         if model_name == "U-Net":
             self.unet_settings.setVisible(True)
-        elif model_name == "DeepLabV3+":
+        elif model_name in ("DeepLabV3+", "DeepLabV3"):
             self.deeplab_settings.setVisible(True)
         elif model_name == "SegFormer":
             self.segformer_settings.setVisible(True)
@@ -382,7 +446,7 @@ class DeepLearningWindow(QMainWindow):
 
         if model_name == "U-Net":
             path = self.unet_settings._model_path.text().strip()
-        elif model_name == "DeepLabV3+":
+        elif model_name in ("DeepLabV3+", "DeepLabV3"):
             path = self.deeplab_settings._model_path.text().strip()
         elif model_name == "SegFormer":
             path = self.segformer_settings._model_path.text().strip()
@@ -400,7 +464,7 @@ class DeepLearningWindow(QMainWindow):
         elif path and not os.path.exists(path):
             if model_name == "U-Net":
                 self.unet_settings._model_path.setText("")
-            elif model_name == "DeepLabV3+":
+            elif model_name in ("DeepLabV3+", "DeepLabV3"):
                 self.deeplab_settings._model_path.setText("")
             elif model_name == "SegFormer":
                 self.segformer_settings._model_path.setText("")
@@ -437,7 +501,7 @@ class DeepLearningWindow(QMainWindow):
             model_name = self.model_combo.currentText()
             if model_name == "U-Net":
                 path = self.unet_settings._model_path.text().strip()
-            elif model_name == "DeepLabV3+":
+            elif model_name in ("DeepLabV3+", "DeepLabV3"):
                 path = self.deeplab_settings._model_path.text().strip()
             elif model_name == "SegFormer":
                 path = self.segformer_settings._model_path.text().strip()
@@ -525,6 +589,23 @@ class DeepLearningWindow(QMainWindow):
                         self.log(f"  Override {k} = {v}")
 
 
+            if model_name in ("DeepLabV3+", "DeepLabV3"):
+                kwargs['threshold'] = self.deeplab_settings._threshold.value()
+                self.log(f"Порог DeepLab: {kwargs['threshold']}")
+
+                ok, err = self.deeplab_settings.validate_for_prediction()
+                if not ok:
+                    QMessageBox.warning(self, "Ошибка", err)
+                    self.log(f"❌ {err}")
+                    self.segment_button.setEnabled(True)
+                    return
+
+                if self.segmentor is not None and self.segmentor.metadata is not None:
+                    md = self.segmentor.metadata
+                    overrides = self.deeplab_settings.get_override_params()
+                    for k, v in overrides.items():
+                        md[k] = v
+                        self.log(f"  Override {k} = {v}")
 
             mask = self.segmentor.predict(img, **kwargs)
 
