@@ -12,4 +12,4 @@ from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
 from ui_tabs.yolo_find_img_ui import setup_yolo_find_img_ui
 from ui_tabs.yolo_test_aeb_ui import setup_yolo_ae_vae_ui
 from ui_tabs.dataset_analysis_ui import setup_dataset_analysis_ui
-
+from ui_tabs.slice_dataset_sahi_ui import setup_sahi_slicer_ui

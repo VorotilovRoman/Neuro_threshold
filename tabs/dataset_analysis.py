@@ -32,6 +32,9 @@ import numpy as np
 # ============================================================
 # Валидация YOLO в отдельном потоке
 # ============================================================
+# ============================================================
+# Валидация YOLO в отдельном потоке
+# ============================================================
 class YoloValThread(QThread):
     log_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(dict)
@@ -129,211 +132,133 @@ class YoloValThread(QThread):
         return {'summary': summary, 'per_class': per_class}
 
     def run(self):
-        self.log_signal.emit(
-            f"[LossInspection] старт (device: {self.device})")
         try:
             from ultralytics import YOLO
+            from ultralytics.utils import LOGGER
         except ImportError:
             self.finished_signal.emit({
-                'error': 'ultralytics не установлен', 'suspicious': []})
+                'error': 'ultralytics не установлен',
+                'metrics': None})
             return
 
-        try:
-            model = YOLO(self.model_path)
-            task = getattr(model, 'task', '?')
-            if self.device.startswith('cuda'):
+        import logging
+
+        class _QtLoggerHandler(logging.Handler):
+            """Пересылает записи Ultralytics-LOGGER в Qt-сигнал."""
+            def __init__(self, emit_fn):
+                super().__init__()
+                self._emit = emit_fn
+            def emit(self, record):
                 try:
-                    model.to(self.device)
-                except Exception as e:
+                    msg = self.format(record).strip()
+                    if msg:
+                        self._emit(msg)
+                except Exception:
+                    pass
+
+        handler = _QtLoggerHandler(
+            lambda s: self.log_signal.emit(f"[VAL] {s}"))
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.setLevel(logging.INFO)
+        LOGGER.addHandler(handler)
+
+        try:
+            self.log_signal.emit(
+                f"[VAL] Загрузка модели: {self.model_path}")
+            model = YOLO(self.model_path)
+
+            if not os.path.exists(self.data_path):
+                raise FileNotFoundError(
+                    f"data.yaml не найден: {self.data_path}")
+
+            self.log_signal.emit(
+                f"[VAL] Модель загружена. Старт валидации: "
+                f"data={self.data_path}, split={self.split}, "
+                f"imgsz={self.imgsz}, conf={self.conf}, iou={self.iou}, "
+                f"device={self.device}")
+
+            # Callback отмены — срабатывает между батчами
+            try:
+                def _stop_cb(*args, **kwargs):
+                    if self._stop:
+                        raise SystemExit("__VAL_CANCEL__")
+                model.add_callback("on_val_batch_end", _stop_cb)
+            except Exception as e:
+                self.log_signal.emit(
+                    f"[VAL] Не удалось добавить callback отмены: {e}")
+
+            try:
+                metrics = model.val(
+                    data=self.data_path,
+                    split=self.split,
+                    imgsz=self.imgsz,
+                    conf=self.conf,
+                    iou=self.iou,
+                    device=self.device,
+                    verbose=True,
+                )
+            except Exception as e:
+                # Один автоматический fallback на CPU при сбое GPU
+                msg = str(e).lower()
+                if (self.device != 'cpu'
+                        and any(k in msg for k in
+                                ('cuda', 'out of memory',
+                                 'device', 'cublas', 'cudnn'))):
                     self.log_signal.emit(
-                        f"[LossInspection] Не удалось на {self.device} "
-                        f"({e}), fallback на cpu")
+                        f"[VAL] Ошибка на {self.device} ({e}), "
+                        f"повтор на cpu")
                     try:
                         model.to('cpu')
                     except Exception:
                         pass
                     self.device = 'cpu'
-            self.log_signal.emit(
-                f"[LossInspection] модель загружена "
-                f"(task={task}, device={self.device}, "
-                f"conf={self.conf_threshold}, imgsz={self.imgsz})")
+                    metrics = model.val(
+                        data=self.data_path,
+                        split=self.split,
+                        imgsz=self.imgsz,
+                        conf=self.conf,
+                        iou=self.iou,
+                        device='cpu',
+                        verbose=True,
+                    )
+                else:
+                    raise
+        except SystemExit as e:
+            if str(e) == "__VAL_CANCEL__":
+                self.finished_signal.emit({
+                    'error': 'Валидация отменена пользователем',
+                    'metrics': None})
+            else:
+                self.finished_signal.emit({
+                    'error': f'Валидация прервана: {e}',
+                    'metrics': None})
+            return
         except Exception as e:
+            tb = traceback.format_exc()
+            self.log_signal.emit(f"[VAL][ERROR] {e}")
+            self.log_signal.emit(tb)
+            self.finished_signal.emit({'error': str(e), 'metrics': None})
+            return
+        finally:
+            try:
+                LOGGER.removeHandler(handler)
+            except Exception:
+                pass
+
+        if self._stop:
             self.finished_signal.emit({
-                'error': f'Не удалось загрузить модель: {e}',
-                'suspicious': []})
+                'error': 'Валидация отменена пользователем',
+                'metrics': None})
             return
 
-        suspicious = []
-        total = len(self.pairs)
-        processed = 0
-        errors = 0
-        zero_pred_logged = 0
-
-        for i, pair in enumerate(self.pairs):
-            if self._cancel:
-                self.log_signal.emit("[LossInspection] отменено")
-                break
-
-            img_path = pair[0]
-            lbl_path = pair[1] if len(pair) > 1 else None
-
-            if not lbl_path or not os.path.exists(lbl_path):
-                _safe_progress(self.progress.emit, i, total, step=10)
-                continue
-
-            try:
-                results = model(
-                    img_path,
-                    conf=self.conf_threshold,
-                    imgsz=self.imgsz,
-                    device=self.device,
-                    verbose=False)
-                if not results:
-                    _safe_progress(self.progress.emit, i, total, step=10)
-                    continue
-
-                r = results[0]
-                gt_anns = load_annotations(
-                    lbl_path, 1, 1, format_hint=self.input_format)
-                processed += 1
-
-                # --- Предсказания: .boxes, при пустоте — .obb ---
-                boxes = getattr(r, 'boxes', None)
-                obb = getattr(r, 'obb', None)
-
-                pred_xyxy = None
-                pred_conf = None
-
-                if boxes is not None and len(boxes) > 0:
-                    try:
-                        pred_xyxy = boxes.xyxy.cpu().numpy()
-                        pred_conf = boxes.conf.cpu().numpy()
-                    except Exception as e:
-                        self.log_signal.emit(
-                            f"[LossInspection] boxes extract: {e}")
-
-                if ((pred_xyxy is None or len(pred_xyxy) == 0)
-                        and obb is not None and len(obb) > 0):
-                    try:
-                        pred_xyxy = obb.xyxy.cpu().numpy()
-                        pred_conf = obb.conf.cpu().numpy()
-                    except Exception as e:
-                        self.log_signal.emit(
-                            f"[LossInspection] obb extract: {e}")
-
-                pred_count = (len(pred_xyxy)
-                              if pred_xyxy is not None else 0)
-
-                if pred_count == 0:
-                    # Диагностика — только первые 5 случаев, чтобы не спамить
-                    if zero_pred_logged < 5:
-                        masks = getattr(r, 'masks', None)
-                        self.log_signal.emit(
-                            f"[LossInspection] "
-                            f"{os.path.basename(img_path)}: "
-                            f"0 предсказаний — "
-                            f"boxes={len(boxes) if boxes is not None else None}, "
-                            f"obb={len(obb) if obb is not None else None}, "
-                            f"masks={len(masks) if masks is not None else None}, "
-                            f"conf_thr={self.conf_threshold}, "
-                            f"imgsz={self.imgsz}, task={task}")
-                        zero_pred_logged += 1
-                    if gt_anns:
-                        suspicious.append({
-                            'img_path': img_path,
-                            'lbl_path': lbl_path,
-                            'reason':
-                                'Модель не нашла объектов, '
-                                'а GT не пуст',
-                            'pred_count': 0,
-                            'gt_count': len(gt_anns),
-                            'mean_iou': 0.0,
-                            'min_iou': 0.0,
-                            'min_conf': 0.0,
-                        })
-                    _safe_progress(
-                        self.progress.emit, i, total, step=10)
-                    continue
-
-                # --- Размеры изображения ---
-                h, w = (r.orig_shape
-                        if hasattr(r, 'orig_shape') else (0, 0))
-                if h == 0 or w == 0:
-                    with Image.open(img_path) as im:
-                        w, h = im.size
-
-                # --- GT → xyxy для detect / segment / obb ---
-                gt_xyxy = []
-                for ann in gt_anns:
-                    if not ann:
-                        continue
-                    typ = ann[0]
-                    if typ == 'detect':
-                        _, cls, cx, cy, bw, bh = ann
-                        gt_xyxy.append([
-                            (cx - bw / 2) * w,
-                            (cy - bh / 2) * h,
-                            (cx + bw / 2) * w,
-                            (cy + bh / 2) * h,
-                        ])
-                    elif typ in ('segment', 'obb'):
-                        pts = ann[2]
-                        if not pts or len(pts) < 6:
-                            continue
-                        xs = [float(pts[k]) * w
-                              for k in range(0, len(pts), 2)]
-                        ys = [float(pts[k]) * h
-                              for k in range(1, len(pts), 2)]
-                        gt_xyxy.append([min(xs), min(ys),
-                                        max(xs), max(ys)])
-
-                if not gt_xyxy:
-                    _safe_progress(
-                        self.progress.emit, i, total, step=10)
-                    continue
-
-                # --- IoU ---
-                ious = []
-                for g in gt_xyxy:
-                    best = max(
-                        (self._iou_xyxy(g, p) for p in pred_xyxy),
-                        default=0.0)
-                    ious.append(best)
-
-                mean_iou = float(np.mean(ious))
-                min_iou = float(np.min(ious))
-
-                if mean_iou < self.iou_threshold or min_iou < 0.05:
-                    suspicious.append({
-                        'img_path': img_path,
-                        'lbl_path': lbl_path,
-                        'reason': (f'mean IoU={mean_iou:.3f} '
-                                   f'(min={min_iou:.3f})'),
-                        'pred_count': pred_count,
-                        'gt_count': len(gt_xyxy),
-                        'mean_iou': mean_iou,
-                        'min_iou': min_iou,
-                        'min_conf': (float(pred_conf.min())
-                                     if pred_conf is not None
-                                     and len(pred_conf) else 0.0),
-                    })
-            except Exception as e:
-                errors += 1
-                self.log_signal.emit(
-                    f"[LossInspection] ошибка {img_path}: {e}")
-
-            _safe_progress(self.progress.emit, i, total, step=10)
-
-        self.log_signal.emit(
-            f"[LossInspection] готово: processed={processed}/{total}, "
-            f"errors={errors}, подозрительных={len(suspicious)}")
-        self.finished_signal.emit({
-            'error': None,
-            'suspicious': suspicious,
-            'processed': processed,
-            'total': total,
-            'errors': errors,
-        })
+        try:
+            data = self._extract_metrics(metrics)
+            self.finished_signal.emit({'error': None, 'metrics': data})
+        except Exception as e:
+            tb = traceback.format_exc()
+            self.log_signal.emit(f"[VAL][ERROR] extract: {e}")
+            self.log_signal.emit(tb)
+            self.finished_signal.emit({'error': str(e), 'metrics': None})
 
 
 
