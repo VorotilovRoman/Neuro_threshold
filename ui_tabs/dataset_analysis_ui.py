@@ -1,5 +1,7 @@
 # dataset_analysis_ui.py
 from import_libs_internal import *
+from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtGui import QPixmap
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar,
@@ -7,11 +9,46 @@ from matplotlib.backends.backend_qt5agg import (
 from matplotlib.figure import Figure
 
 
+class TrainingImageLabel(QLabel):
+    """QLabel, который масштабирует QPixmap под свой размер
+    с сохранением пропорций и перерисовывает при resize."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumSize(100, 100)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setStyleSheet("background-color: white;")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self._pixmap = None
+        self.setText("(нет данных)")
+
+    def set_image(self, pixmap):
+        self._pixmap = pixmap
+        if pixmap is None or pixmap.isNull():
+            self.setText("(нет данных)")
+            self.setPixmap(QPixmap())
+        else:
+            self.setText("")
+            self._update_pixmap()
+
+    def _update_pixmap(self):
+        if self._pixmap is None or self._pixmap.isNull():
+            return
+        scaled = self._pixmap.scaled(
+            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_pixmap()
+
+    def sizeHint(self):
+        # базовая высота для каждого изображения в списке
+        return QSize(800, 400)
+
+
 def _make_page(toolbox, title, description, content, buttons,
                min_height=240, content_stretch=1):
-    """Страница вкладки toolbox.
-    Заголовок НЕ дублируется внутри — QToolBox сам показывает title в шапке.
-    Описание — фиксированное сверху, контент тянется, кнопки — снизу."""
     page = QWidget()
     layout = QVBoxLayout(page)
     layout.setContentsMargins(6, 6, 6, 6)
@@ -19,7 +56,6 @@ def _make_page(toolbox, title, description, content, buttons,
     if description:
         d = QLabel(description)
         d.setWordWrap(True)
-        # +2 pt к прежнему 11px → 13px
         d.setStyleSheet("color: #555; font-size: 13px;")
         d.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         layout.addWidget(d)
@@ -136,7 +172,6 @@ def setup_dataset_analysis_ui(parent):
     parent.color_stats_label.setStyleSheet("font-weight: bold; color: #333;")
     ll.addWidget(parent.color_stats_label)
 
-    # Легенда классов
     parent.class_legend_label = QLabel("<b>Легенда классов:</b>")
     parent.class_legend_label.setVisible(False)
     ll.addWidget(parent.class_legend_label)
@@ -193,7 +228,6 @@ def setup_dataset_analysis_ui(parent):
     parent.canvas.setMinimumHeight(260)
     mc.addWidget(parent.canvas, 2)
 
-    # --- Круговая + столбчатая диаграммы распределения по классам ---
     parent.class_chart_figure = Figure(figsize=(6, 2.8))
     parent.class_chart_canvas = FigureCanvas(parent.class_chart_figure)
     parent.ax_pie = parent.class_chart_figure.add_subplot(121)
@@ -201,7 +235,6 @@ def setup_dataset_analysis_ui(parent):
     parent.class_chart_canvas.setMinimumHeight(220)
     mc.addWidget(parent.class_chart_canvas, 1)
 
-    # --- Дисбаланс классов ---
     imb_header = QLabel("<b>Дисбаланс классов</b>")
     mc.addWidget(imb_header)
 
@@ -228,11 +261,9 @@ def setup_dataset_analysis_ui(parent):
         "**Таблица классов** — число объектов каждого класса и доля. "
         "**Площади** — bbox: w·h, segment/OBB: shoelace. "
         "Слева — общая гистограмма, справа — по топ-10 классам. "
-        "**Круговая/столбчатая диаграммы** — распределение по классам "
-        "(круговая: топ-9 + «Прочие» при >10 классов). "
-        "**Дисбаланс:** ratio = max/min (≥3:1 умеренный, ≥10:1 сильный, "
-        "≥100:1 критический); Gini (0 — равномерно); Entropy (выше — "
-        "равномернее). Наведите на строки таблицы дисбаланса — тултипы.",
+        "**Круговая/столбчатая диаграммы** — распределение по классам. "
+        "**Дисбаланс:** ratio = max/min; Gini (0 — равномерно); "
+        "Entropy (выше — равномернее). Тултипы на строках таблицы.",
         metrics_content, buttons=[],
         min_height=650, content_stretch=1,
     )
@@ -263,7 +294,6 @@ def setup_dataset_analysis_ui(parent):
     parent.filter_min_objs.setRange(0, 10000)
     parent.filter_min_objs.setToolTip(
         "Минимальное число объектов (после учёта включённых классов).\n"
-        "Изображения с меньшим числом — отбрасываются.\n"
         "0 = допускаются пустые (если включена галочка ниже).")
 
     parent.filter_max_objs = QSpinBox()
@@ -271,7 +301,7 @@ def setup_dataset_analysis_ui(parent):
     parent.filter_max_objs.setSpecialValueText("Без ограничений")
     parent.filter_max_objs.setToolTip(
         "Максимальное число объектов.\n"
-        "0 = без ограничения (не ограничивать сверху).")
+        "0 = без ограничения сверху.")
 
     parent.filter_min_area = QSpinBox()
     parent.filter_min_area.setRange(0, 1000000)
@@ -322,8 +352,7 @@ def setup_dataset_analysis_ui(parent):
     parent.chk_exclude_classes_from_files.setChecked(False)
     parent.chk_exclude_classes_from_files.setToolTip(
         "При экспорте в .txt оставить только строки с классами, "
-        "включёнными в таблице (Include). Строки с исключёнными "
-        "классами будут удалены из выходных .txt.")
+        "включёнными в таблице (Include).")
     fl.addWidget(parent.chk_exclude_classes_from_files)
 
     parent.btn_apply_filters = QPushButton("Обновить метрики (с учётом фильтров)")
@@ -332,6 +361,10 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_export_filtered = QPushButton("Создать новый датасет")
     parent.btn_export_filtered.setStyleSheet(
         "background-color: #2196F3; color: white; font-weight: bold;")
+    parent.btn_open_last_export = QPushButton("📂 Открыть папку датасета")
+    parent.btn_open_last_export.setToolTip(
+        "Открыть папку последнего экспортированного датасета")
+    parent.btn_open_last_export.setEnabled(False)
 
     parent.progress_bar = QProgressBar()
     parent.progress_bar.setVisible(False)
@@ -341,13 +374,12 @@ def setup_dataset_analysis_ui(parent):
         parent.toolbox, "2. Фильтрация",
         "Пороги для отбора пар. **0 = без ограничения.** "
         "Площади работают для bbox, segment и OBB. "
-        "Исключение класса (uncheck Include) убирает его объекты из "
-        "фильтрованного набора; при экспорте можно также вычистить их из .txt. "
         "Отброшенные пары выделяются в списке **серым** и уходят в конец. "
         "**Пустые аннотации** попадают в результат только при включённой "
         "галочке и «Мин. кол-во объектов» = 0.",
         filter_content,
-        buttons=[parent.btn_apply_filters, parent.btn_export_filtered],
+        buttons=[parent.btn_apply_filters, parent.btn_export_filtered,
+                 parent.btn_open_last_export],
         min_height=600, content_stretch=1,
     )
 
@@ -377,9 +409,8 @@ def setup_dataset_analysis_ui(parent):
 
     _make_page(
         parent.toolbox, "3. Качество изображений",
-        "**imgsz** — рекомендуемый размер для обучения (медиана max(W,H); "
-        "округлить до кратного 32). **Яркость:** тёмные < 40, "
-        "пересвеченные > 215 — кандидаты на пересъёмку. "
+        "**imgsz** — рекомендуемый размер для обучения. "
+        "**Яркость:** тёмные < 40, пересвеченные > 215. "
         "**Aspect** W/H — соотношение сторон. "
         "**Работает по filtered_pairs.**",
         quality_content,
@@ -404,8 +435,6 @@ def setup_dataset_analysis_ui(parent):
         ["Группа", "N", "Сплиты", "Файлы", "Утечка"])
     parent.dup_table.horizontalHeader().setSectionResizeMode(
         QHeaderView.Stretch)
-    parent.dup_table.horizontalHeader().setSectionResizeMode(
-        3, QHeaderView.Stretch)
     parent.dup_table.setEditTriggers(
         QAbstractItemView.NoEditTriggers)
     parent.dup_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -424,14 +453,10 @@ def setup_dataset_analysis_ui(parent):
 
     _make_page(
         parent.toolbox, "4. Дубликаты и утечка",
-        "**Точные** — MD5 (побайтовые копии). "
-        "**Почти** — pHash Hamming ≤ 8 (визуально похожие: кропы, augment-копии). "
-        "**Утечка** — группа попала в ≥2 сплита (train/val/test), метрики "
-        "валидации будут завышены. **Работает по filtered_pairs.** "
-        "Найденные пары подсвечиваются в списке пар: "
-        "🔴 точный дубликат, 🟠 похожее, 🌕 утечка. "
-        "**Выбор строки в таблице** — выделяет все пары этой группы в "
-        "списке слева.",
+        "**Точные** — MD5. **Почти** — pHash Hamming ≤ 8. "
+        "**Утечка** — группа в ≥2 сплитах. "
+        "Подсветка в списке: 🔴 точный, 🟠 похожее, 🌕 утечка. "
+        "**Выбор строки** — выделяет пары группы в списке слева.",
         dup_content,
         buttons=[parent.btn_run_duplicates, parent.btn_stop_duplicates],
         min_height=320, content_stretch=1,
@@ -455,7 +480,6 @@ def setup_dataset_analysis_ui(parent):
     parent.heatmap_grid_spin.setValue(16)
     parent.heatmap_grid_spin.setSingleStep(8)
     parent.heatmap_grid_spin.setToolTip(
-        "Чем больше сетка, тем детальнее (но и «шумнее»). "
         "16×16 — обзорно; 64–128 — детальный анализ.")
     grid_row.addWidget(parent.heatmap_grid_spin)
     grid_row.addStretch()
@@ -473,13 +497,10 @@ def setup_dataset_analysis_ui(parent):
 
     _make_page(
         parent.toolbox, "5. Тепловая карта объектов",
-        "Центры bbox/полигонов наносятся на сетку N×N.\n"
-        "**Оси X/Y** — проценты от ширины/высоты изображения "
-        "(0 = левый/верхний край, 100 = правый/нижний).\n"
-        "**Цвет/колорбар** — число центров объектов в ячейке "
-        "(тёмный = мало, ярко-жёлтый/белый = максимум).\n"
-        "**Размер сетки** 8…128: больше — детальнее, но «шумнее».\n"
-        "**Работает по filtered_pairs.**",
+        "Центры bbox/полигонов на сетке N×N.\n"
+        "**Оси X/Y** — % от ширины/высоты. **Цвет/колорбар** — "
+        "число центров объектов в ячейке.\n"
+        "**Размер сетки** 8…128. **Работает по filtered_pairs.**",
         heat_content,
         buttons=[parent.btn_run_heatmap, parent.btn_stop_heatmap],
         min_height=420, content_stretch=1,
@@ -492,7 +513,6 @@ def setup_dataset_analysis_ui(parent):
     ac = QVBoxLayout(audit_content)
     ac.setContentsMargins(0, 0, 0, 0)
 
-    # --- модель для аудита ---
     model_row = QHBoxLayout()
     parent.audit_model_edit = QLineEdit()
     parent.audit_model_edit.setReadOnly(True)
@@ -518,16 +538,14 @@ def setup_dataset_analysis_ui(parent):
     parent.audit_conf_spin.setSingleStep(0.05)
     parent.audit_conf_spin.setDecimals(2)
     parent.audit_conf_spin.setToolTip(
-        "Confidence-порог модели. Более высокий — меньше "
-        "ложных срабатываний, ниже — строже к разметке.")
+        "Confidence-порог модели при аудите.")
     parent.audit_imgsz_spin = QSpinBox()
     parent.audit_imgsz_spin.setRange(64, 4096)
     parent.audit_imgsz_spin.setValue(640)
     parent.audit_imgsz_spin.setSingleStep(32)
     parent.audit_imgsz_spin.setToolTip(
-        "Размер входного изображения для модели при аудите\n"
-        "(imgsz, по умолчанию 640).\n"
-        "Увеличивайте для мелких объектов; уменьшайте для скорости.")
+        "Размер входного изображения для модели при аудите "
+        "(imgsz, по умолчанию 640).")
 
     params_row.addWidget(QLabel("Порог IoU:"))
     params_row.addWidget(parent.audit_iou_spin)
@@ -538,7 +556,8 @@ def setup_dataset_analysis_ui(parent):
     params_row.addStretch()
     ac.addLayout(params_row)
 
-    parent.audit_summary_label = QLabel("Загрузите модель и запустите аудит.")
+    parent.audit_summary_label = QLabel(
+        "Загрузите модель и запустите аудит.")
     parent.audit_summary_label.setWordWrap(True)
     ac.addWidget(parent.audit_summary_label)
 
@@ -552,11 +571,9 @@ def setup_dataset_analysis_ui(parent):
         QAbstractItemView.NoEditTriggers)
     parent.audit_table.setMinimumHeight(200)
     parent.audit_table.setToolTip(
-        "Двойной клик по строке — открыть двойное окно сравнения "
-        "(слева GT, справа предсказание модели).")
+        "Двойной клик по строке — открыть двойное окно сравнения.")
     ac.addWidget(parent.audit_table, 1)
 
-    # --- NEW: валидация модели на тестовом датасете ---
     val_sep = QLabel(
         "<hr><b>Валидация модели на тестовом датасете (YOLO val)</b>")
     ac.addWidget(val_sep)
@@ -564,7 +581,7 @@ def setup_dataset_analysis_ui(parent):
     val_row = QHBoxLayout()
     parent.val_data_edit = QLineEdit()
     parent.val_data_edit.setPlaceholderText(
-        "Путь к data.yaml или к папке датасета (в папке ищется data.yaml)")
+        "Путь к data.yaml или к папке датасета")
     parent.btn_browse_val_data = QPushButton("Обзор…")
     val_row.addWidget(QLabel("Test data:"))
     val_row.addWidget(parent.val_data_edit, 1)
@@ -575,14 +592,14 @@ def setup_dataset_analysis_ui(parent):
     parent.val_split_combo = QComboBox()
     parent.val_split_combo.addItems(['val', 'test', 'train'])
     parent.val_split_combo.setToolTip(
-        "Сплит из YAML для валидации. Обычно 'test' или 'val'.")
+        "Сплит из YAML для валидации.")
 
     parent.val_imgsz_spin = QSpinBox()
     parent.val_imgsz_spin.setRange(64, 4096)
     parent.val_imgsz_spin.setValue(640)
     parent.val_imgsz_spin.setSingleStep(32)
     parent.val_imgsz_spin.setToolTip(
-        "Размер изображений для валидации (по умолчанию 640).")
+        "Размер изображений для валидации.")
 
     parent.val_conf_spin = QDoubleSpinBox()
     parent.val_conf_spin.setRange(0.001, 1.0)
@@ -590,8 +607,7 @@ def setup_dataset_analysis_ui(parent):
     parent.val_conf_spin.setDecimals(3)
     parent.val_conf_spin.setSingleStep(0.01)
     parent.val_conf_spin.setToolTip(
-        "Confidence для валидации. Обычно 0.001 — чтобы получить "
-        "максимально полную кривую PR и корректный mAP.")
+        "Confidence для валидации. Обычно 0.001.")
 
     parent.val_iou_spin = QDoubleSpinBox()
     parent.val_iou_spin.setRange(0.1, 0.99)
@@ -599,7 +615,7 @@ def setup_dataset_analysis_ui(parent):
     parent.val_iou_spin.setDecimals(2)
     parent.val_iou_spin.setSingleStep(0.05)
     parent.val_iou_spin.setToolTip(
-        "IoU-порог для NMS при валидации (по умолчанию 0.6).")
+        "IoU-порог для NMS при валидации.")
 
     val_params_row.addWidget(QLabel("Split:"))
     val_params_row.addWidget(parent.val_split_combo)
@@ -646,16 +662,11 @@ def setup_dataset_analysis_ui(parent):
     _make_page(
         parent.toolbox, "6. Аудит модели (Loss Inspection) и валидация YOLO",
         "**Loss Inspection:** модель прогоняется по каждой GT-разметке. "
-        "Если IoU ниже порога — кандидат на ошибку разметки или редкий "
-        "пример. Порог 0.3 — компромисс; ниже = больше кандидатов. "
-        "**imgsz** задаёт размер входа модели при аудите и в двойном окне "
-        "сравнения (по умолчанию 640). "
-        "**Двойной клик по строке** — открыть двойное окно: слева GT "
-        "(зелёные боксы), справа предсказания модели (красные боксы).\n"
+        "**Двойной клик по строке** — двойное окно сравнения (GT ↔ Pred). "
         "**Валидация (YOLO val):** укажите путь к `data.yaml` тестового "
-        "датасета (или папке, где он лежит), выберите сплит и запустите. "
-        "Метрики Precision / Recall / F1 / mAP50 / mAP50-95 по каждому "
-        "классу выдаёт сама Ultralytics. **Работает по filtered_pairs.**",
+        "датасета (или папке), выберите сплит, запустите. "
+        "Метрики P/R/F1/mAP50/mAP50-95 по каждому классу выдаёт "
+        "Ultralytics.",
         audit_content,
         buttons=[parent.btn_run_audit, parent.btn_stop_audit],
         min_height=700, content_stretch=1,
@@ -682,9 +693,7 @@ def setup_dataset_analysis_ui(parent):
     parent.cluster_click_radius_spin.setSingleStep(0.1)
     parent.cluster_click_radius_spin.setDecimals(2)
     parent.cluster_click_radius_spin.setToolTip(
-        "Радиус захвата клика в UMAP-пространстве. "
-        "Большие значения — легче попасть в точку (но можно промахнуться "
-        "на соседнюю), малые — точнее, но сложнее кликнуть.")
+        "Радиус захвата клика в UMAP-пространстве.")
     cluster_radius_row.addWidget(parent.cluster_click_radius_spin)
     cluster_radius_row.addStretch()
     cc.addLayout(cluster_radius_row)
@@ -695,7 +704,8 @@ def setup_dataset_analysis_ui(parent):
     parent.cluster_canvas.setMinimumHeight(320)
     cc.addWidget(parent.cluster_canvas, 1)
 
-    parent.cluster_toolbar = NavigationToolbar(parent.cluster_canvas, parent)
+    parent.cluster_toolbar = NavigationToolbar(
+        parent.cluster_canvas, parent)
     cc.addWidget(parent.cluster_toolbar)
 
     parent.btn_run_cluster = QPushButton("Кластеризовать эмбеддинги")
@@ -705,18 +715,71 @@ def setup_dataset_analysis_ui(parent):
     _make_page(
         parent.toolbox, "7. Кластеризация эмбеддингов",
         "CLIP → UMAP (2D) → HDBSCAN.\n"
-        "**Панель инструментов над графиком:** 🔍 зум (прямоугольник), "
-        "✋ pan (перемещение), 🏠 сброс вида, 💾 сохранить PNG.\n"
-        "**Клик по точке** (в обычном режиме, не в зуме) — открыть пару.\n"
-        "«Шум» — выбросы (аномалии или нерелевантные снимки). "
-        "Работает по filtered_pairs.",
+        "**Панель инструментов над графиком:** 🔍 зум, ✋ pan, "
+        "🏠 сброс, 💾 сохранить PNG.\n"
+        "**Клик по точке** (не в зуме) — открыть пару. "
+        "«Шум» — выбросы.",
         cluster_content,
         buttons=[parent.btn_run_cluster, parent.btn_stop_cluster],
         min_height=420, content_stretch=1,
     )
 
     # ============================================================
-    # 8. Общий отчёт
+    # 8. Результаты обучения модели
+    # ============================================================
+    tr_content = QWidget()
+    tcl = QVBoxLayout(tr_content)
+    tcl.setContentsMargins(0, 0, 0, 0)
+    tcl.setSpacing(8)
+
+    tr_row = QHBoxLayout()
+    parent.training_results_edit = QLineEdit()
+    parent.training_results_edit.setReadOnly(True)
+    parent.training_results_edit.setPlaceholderText(
+        "Папка run/ с результатами обучения не выбрана")
+    parent.btn_browse_training_results = QPushButton("Обзор…")
+    parent.btn_load_training_results = QPushButton("Загрузить")
+    tr_row.addWidget(QLabel("Папка run/:"))
+    tr_row.addWidget(parent.training_results_edit, 1)
+    tr_row.addWidget(parent.btn_browse_training_results)
+    tr_row.addWidget(parent.btn_load_training_results)
+    tcl.addLayout(tr_row)
+
+    parent.training_results_summary_label = QLabel(
+        "Укажите папку, где лежат results.png, labels.jpg, "
+        "confusion_matrix_normalized.png, weights/.")
+    parent.training_results_summary_label.setWordWrap(True)
+    tcl.addWidget(parent.training_results_summary_label)
+
+    for key, title in (
+        ('results', "results.png — кривые обучения"),
+        ('labels', "labels.jpg — распределение bbox"),
+        ('confusion', "confusion_matrix_normalized.png"),
+    ):
+        lbl_title = QLabel(f"<b>{title}</b>")
+        tcl.addWidget(lbl_title)
+        img_lbl = TrainingImageLabel()
+        setattr(parent, f"training_img_{key}", img_lbl)
+        tcl.addWidget(img_lbl)
+
+    _make_page(
+        parent.toolbox, "8. Результаты обучения модели",
+        "Укажите папку run/ (где лежат результаты обучения YOLO). "
+        "**В окне** отображаются: `results.png`, `labels.jpg`, "
+        "`confusion_matrix_normalized.png`.\n"
+        "**Остальные файлы** (`Box*/Mask*_curve.png`, "
+        "`confusion_matrix.png`, `results.csv`, `args.yaml`, "
+        "`train_batch*`, `val_batch*`, `weights/*`) попадают в "
+        "Markdown-отчёт.\n"
+        "**При сохранении отчёта** в `dataset_report_assets/` "
+        "копируются `best.pt` и `best_meta.json` (если есть).",
+        tr_content,
+        buttons=[],
+        min_height=650, content_stretch=1,
+    )
+
+    # ============================================================
+    # 9. Общий отчёт
     # ============================================================
     report_content = QWidget()
     rc = QVBoxLayout(report_content)
@@ -726,7 +789,8 @@ def setup_dataset_analysis_ui(parent):
         "Собирает все результаты текущей сессии в один Markdown-файл "
         "(в фоновом потоке — UI не блокируется).\n"
         "Рядом с .md создаётся папка <name>_assets/ с PNG "
-        "(areas, classes, quality, heatmap, cluster).")
+        "(areas, classes, quality, heatmap, cluster) и, если загружены "
+        "результаты обучения — `best.pt`, `best_meta.json`.")
     parent.report_info_label.setWordWrap(True)
     rc.addWidget(parent.report_info_label)
 
@@ -738,11 +802,19 @@ def setup_dataset_analysis_ui(parent):
         "Включить тепловую карту")
     parent.chk_report_include_audit = QCheckBox(
         "Включить Loss Inspection")
+    parent.chk_report_include_validation = QCheckBox(
+        "Включить валидацию YOLO")
     parent.chk_report_include_cluster = QCheckBox(
         "Включить кластеризацию")
-    for cb in (parent.chk_report_include_quality, parent.chk_report_include_dup,
-               parent.chk_report_include_heatmap, parent.chk_report_include_audit,
-               parent.chk_report_include_cluster):
+    parent.chk_report_include_training_results = QCheckBox(
+        "Включить результаты обучения модели")
+    for cb in (parent.chk_report_include_quality,
+               parent.chk_report_include_dup,
+               parent.chk_report_include_heatmap,
+               parent.chk_report_include_audit,
+               parent.chk_report_include_validation,
+               parent.chk_report_include_cluster,
+               parent.chk_report_include_training_results):
         cb.setChecked(True)
         rc.addWidget(cb)
 
@@ -750,12 +822,17 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_generate_report = QPushButton("💾 Сгенерировать .md отчёт")
     parent.btn_generate_report.setStyleSheet(
         "background-color: #673AB7; color: white; font-weight: bold;")
+    parent.btn_open_report_folder = QPushButton("📂 Открыть папку отчёта")
+    parent.btn_open_report_folder.setToolTip(
+        "Открыть папку с последним отчётом (.md) и assets")
+    parent.btn_open_report_folder.setEnabled(False)
 
     _make_page(
-        parent.toolbox, "8. Общий отчёт",
+        parent.toolbox, "9. Общий отчёт",
         "Собирает результаты всех запущенных анализов в один файл.",
-        report_content, buttons=[parent.btn_generate_report],
-        min_height=300, content_stretch=0,
+        report_content, buttons=[parent.btn_generate_report,
+                                 parent.btn_open_report_folder],
+        min_height=340, content_stretch=0,
     )
 
     # ============================================================

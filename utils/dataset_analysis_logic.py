@@ -7,6 +7,7 @@
   • дисбаланс классов (ratio, Gini, Entropy);
   • разрешение изображений (W/H/aspect);
   • яркость (mean, тёмные/пересвеченные);
+  • сканирование папки run/ с результатами обучения YOLO;
   • экспорт подмножества с ремапом классов в .txt и data.yaml.
 
 Продвинутые проверки (дубликаты, утечка, тепловая карта,
@@ -17,6 +18,7 @@ from import_libs_internal import *
 from PIL import Image
 import cv2
 import numpy as np
+import os
 
 
 # ============================================================
@@ -182,8 +184,6 @@ class DatasetAnalyzer:
                     total_objects += 1
                     object_areas.append(area)
 
-            # Пустые аннотации: num_objs == 0 и min_objs == 0
-            # (нет смысла включать пустые, если явно запрошено «мин. 1 объект»).
             is_empty_image = (num_objs == 0)
             include_this = False
             if valid_objs_in_img > 0:
@@ -191,8 +191,6 @@ class DatasetAnalyzer:
             elif include_empty and is_empty_image and min_objs == 0:
                 include_this = True
                 empty_images += 1
-                # Пустые изображения также попадают в file_list как «прошли»
-                # но НЕ считаются как объекты в metrics.
 
             if include_this:
                 valid_pairs.append(pair)
@@ -268,11 +266,6 @@ class DatasetAnalyzer:
 
     # ==================================================================
     # Отрисовка метрик
-    #   • 2 гистограммы площадей (общая + по классам);
-    #   • таблица классов;
-    #   • опционально: круговая + столбчатая диаграммы классов
-    #     (передаются через ax_pie/ax_bar; если не переданы —
-    #     старое поведение полностью сохраняется).
     # ==================================================================
     @staticmethod
     def render_metrics(metrics_summary_label, class_stats_table,
@@ -287,7 +280,6 @@ class DatasetAnalyzer:
             f"<b>Уникальных классов:</b> {len(class_counts)}"
         )
 
-        # ---- Таблица классов ----
         class_stats_table.setRowCount(0)
         sorted_classes = sorted(class_counts.items(),
                                 key=lambda x: x[1], reverse=True)
@@ -306,7 +298,6 @@ class DatasetAnalyzer:
             class_stats_table.setItem(row, 1, item1)
             class_stats_table.setItem(row, 2, item2)
 
-        # ---- Гистограммы площадей ----
         ax_all.clear()
         if object_areas:
             ax_all.hist(object_areas, bins=50, color='skyblue',
@@ -341,7 +332,6 @@ class DatasetAnalyzer:
 
         canvas.draw()
 
-        # ---- Круговая + столбчатая диаграммы распределения по классам ----
         if ax_pie is None or ax_bar is None:
             return
 
@@ -349,11 +339,9 @@ class DatasetAnalyzer:
         ax_bar.clear()
 
         if not class_counts:
-            ax_pie.text(0.5, 0.5, "Нет данных",
-                        ha='center', va='center')
+            ax_pie.text(0.5, 0.5, "Нет данных", ha='center', va='center')
             ax_pie.set_title("Распределение по классам", fontsize=9)
-            ax_bar.text(0.5, 0.5, "Нет данных",
-                        ha='center', va='center')
+            ax_bar.text(0.5, 0.5, "Нет данных", ha='center', va='center')
             ax_bar.set_title("Кол-во по классам", fontsize=9)
             try:
                 ax_pie.figure.tight_layout()
@@ -362,7 +350,6 @@ class DatasetAnalyzer:
                 pass
             return
 
-        # Круговая: топ-9 + «Прочие» для читаемости
         if len(sorted_classes) > 10:
             top_pie = sorted_classes[:9]
             other_count = sum(c for _, c in sorted_classes[9:])
@@ -402,7 +389,6 @@ class DatasetAnalyzer:
                         ha='center', va='center')
             ax_pie.set_title("Распределение по классам", fontsize=9)
 
-        # Столбчатая (горизонтальная — удобнее длинные имена)
         try:
             names_bar = [
                 f"{cid}: {name_by_orig.get(cid, cid)}"
@@ -458,9 +444,6 @@ class DatasetAnalyzer:
             shutil.copy(img_path, os.path.join(
                 out_dir, 'images', 'train', os.path.basename(img_path)))
 
-            # Пустые аннотации (нет файла метки или он пуст) — просто
-            # копируем изображение; .txt создаём пустым, чтобы YOLO
-            # корректно распознавал «background image».
             if not lbl_path or not os.path.exists(lbl_path):
                 empty_pairs += 1
                 if lbl_path:
@@ -670,3 +653,130 @@ class BrightnessAnalyzer:
             'mean_brightness': float(arr.mean()),
             'cancelled': cancelled,
         }
+
+
+# ============================================================
+# Сканер результатов обучения YOLO
+# ============================================================
+class TrainingResultsLoader:
+    """Сканирует папку run/ с результатами обучения Ultralytics YOLO.
+
+    Ожидаемые файлы (номера батчей могут быть любыми):
+        results.png, labels.jpg, confusion_matrix_normalized.png,
+        confusion_matrix.png, Box*/Mask*_curve.png,
+        results.csv, args.yaml,
+        train_batch*.jpg, val_batch*_labels.jpg, val_batch*_pred.jpg,
+        weights/best.pt, weights/best_meta.json, weights/best.onnx,
+        weights/last.pt, weights/last_meta.json, weights/best_onnx_meta.json.
+
+    Категоризация:
+        main     — 3 ключевых файла для предпросмотра в UI;
+        curves   — остальные *_curve.png и confusion_matrix.png;
+        batches  — train_batch* и val_batch*;
+        metrics  — results.csv и args.yaml;
+        weights  — содержимое подпапки weights/;
+        best_model, best_model_meta — пути к weights/best.pt и
+        weights/best_meta.json (если есть).
+    """
+
+    MAIN_FILES = (
+        'results.png',
+        'labels.jpg',
+        'confusion_matrix_normalized.png',
+    )
+
+    @staticmethod
+    def scan(folder):
+        result = {
+            'folder': folder,
+            'main': {},
+            'curves': {},
+            'batches': [],   # list[(name, path)]
+            'metrics': {},
+            'weights': {},
+            'best_model': None,
+            'best_model_meta': None,
+            'error': None,
+        }
+        if not folder or not os.path.isdir(folder):
+            result['error'] = f"Папка не найдена: {folder}"
+            return result
+
+        try:
+            entries = sorted(os.listdir(folder))
+        except Exception as e:
+            result['error'] = f"Не удалось прочитать папку: {e}"
+            return result
+
+        main_set = set(TrainingResultsLoader.MAIN_FILES)
+
+        for name in entries:
+            path = os.path.join(folder, name)
+            if not os.path.isfile(path):
+                continue
+
+            if name in main_set:
+                result['main'][name] = path
+                continue
+
+            lower = name.lower()
+            if name == 'confusion_matrix.png' or lower.endswith('_curve.png'):
+                result['curves'][name] = path
+            elif name in ('results.csv', 'args.yaml'):
+                result['metrics'][name] = path
+            elif name.startswith('train_batch') and lower.endswith('.jpg'):
+                result['batches'].append((name, path))
+            elif name.startswith('val_batch') and lower.endswith('.jpg'):
+                result['batches'].append((name, path))
+            # остальные файлы в корне игнорируются
+
+        wdir = os.path.join(folder, 'weights')
+        if os.path.isdir(wdir):
+            try:
+                for name in sorted(os.listdir(wdir)):
+                    path = os.path.join(wdir, name)
+                    if os.path.isfile(path):
+                        result['weights'][name] = path
+            except Exception:
+                pass
+
+        result['best_model'] = result['weights'].get('best.pt')
+        result['best_model_meta'] = result['weights'].get('best_meta.json')
+        return result
+
+    @staticmethod
+    def summary_text(data):
+        """Текстовое описание содержимого."""
+        if not data:
+            return "Нет данных."
+        if data.get('error'):
+            return f"❌ {data['error']}"
+
+        lines = [f"Папка: {data['folder']}"]
+        if data['main']:
+            lines.append(
+                f"Основные: {sorted(data['main'].keys())}")
+        else:
+            lines.append(
+                "Основные: не найдено "
+                "(results.png / labels.jpg / "
+                "confusion_matrix_normalized.png)")
+        if data['curves']:
+            lines.append(f"Кривые: {len(data['curves'])} файлов")
+        if data['batches']:
+            lines.append(f"Батчи: {len(data['batches'])} файлов")
+        if data['metrics']:
+            lines.append(
+                f"Метрики/args: {sorted(data['metrics'].keys())}")
+        if data['weights']:
+            lines.append(
+                f"Weights: {sorted(data['weights'].keys())}")
+        if data['best_model']:
+            lines.append(
+                f"Best model: {os.path.basename(data['best_model'])}")
+        else:
+            lines.append("Best model: не найден (weights/best.pt)")
+        if data['best_model_meta']:
+            lines.append(
+                "Best meta: best_meta.json")
+        return "\n".join(lines)

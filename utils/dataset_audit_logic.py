@@ -56,7 +56,7 @@ except ImportError:
 
 
 # ============================================================
-# Утилиты (локальные — анализ не зависит от audit, audit не зависит от анализа)
+# Утилиты
 # ============================================================
 def _safe_progress(progress_cb, i, total, step=25):
     if progress_cb and ((i + 1) % step == 0 or i == total - 1):
@@ -70,7 +70,7 @@ def _check_cancel(cancel_check):
         return False
 
 
-def _detect_device():
+def detect_device():
     """Автоопределение устройства: 'cuda:0', если доступно, иначе 'cpu'."""
     try:
         import torch
@@ -292,7 +292,7 @@ class LossInspectionThread(QThread):
         self.iou_threshold = iou_threshold
         self.conf_threshold = conf_threshold
         self.imgsz = imgsz
-        self.device = device or _detect_device()
+        self.device = device or detect_device()
         self.input_format = input_format
         self._cancel = False
 
@@ -323,7 +323,6 @@ class LossInspectionThread(QThread):
 
         try:
             model = YOLO(self.model_path)
-            # Пытаемся перевести на GPU, иначе остаёмся на CPU
             if self.device.startswith('cuda'):
                 try:
                     model.to(self.device)
@@ -331,6 +330,10 @@ class LossInspectionThread(QThread):
                     self.log_signal.emit(
                         f"[LossInspection] Не удалось на {self.device} "
                         f"({e}), fallback на cpu")
+                    try:
+                        model.to('cpu')
+                    except Exception:
+                        pass
                     self.device = 'cpu'
             self.log_signal.emit(
                 f"[LossInspection] модель загружена "
@@ -468,7 +471,7 @@ class EmbeddingClusterThread(QThread):
         super().__init__(parent)
         self.pairs = list(pairs)
         self.batch_size = batch_size
-        self.device = device or _detect_device()
+        self.device = device or detect_device()
         self._cancel = False
 
     def cancel(self):
@@ -495,15 +498,18 @@ class EmbeddingClusterThread(QThread):
                 processor = CLIPProcessor.from_pretrained(
                     "openai/clip-vit-base-patch32")
 
-            # Пытаемся перевести на GPU, иначе fallback на CPU
             try:
                 model = model.to(self.device).eval()
             except Exception as e:
                 self.log_signal.emit(
                     f"[Cluster] Не удалось на {self.device} ({e}), "
                     f"fallback на cpu")
+                try:
+                    model = model.to('cpu')
+                except Exception:
+                    pass
                 self.device = 'cpu'
-                model = model.to(self.device).eval()
+                model = model.eval()
 
             self.log_signal.emit(
                 f"[Cluster] CLIP загружен (device: {self.device})")
@@ -779,9 +785,46 @@ class ReportThread(QThread):
                                      f"{r[3]:.3f} |")
                     L.append("")
 
-            # 9. Кластеризация
+            # 9. Валидация модели (YOLO val)
+            if s.get('validation'):
+                L.append("## 9. Валидация модели (YOLO val)\n")
+                v = d.get('validation')
+                if not v:
+                    L.append("_Не выполнялось._\n")
+                else:
+                    sm = v.get('summary', {})
+
+                    def _fmt(x):
+                        try:
+                            return f"{float(x):.4f}"
+                        except (TypeError, ValueError):
+                            return "—"
+
+                    L.append(f"- **Precision:** "
+                             f"{_fmt(sm.get('Precision'))}")
+                    L.append(f"- **Recall:** {_fmt(sm.get('Recall'))}")
+                    L.append(f"- **F1:** {_fmt(sm.get('F1'))}")
+                    L.append(f"- **mAP50:** {_fmt(sm.get('mAP50'))}")
+                    L.append(f"- **mAP50-95:** "
+                             f"{_fmt(sm.get('mAP50-95'))}")
+                    L.append("")
+                    per_class = v.get('per_class', [])
+                    if per_class:
+                        L.append("| Класс | P | R | F1 | mAP50 | "
+                                 "mAP50-95 |")
+                        L.append("|---|---:|---:|---:|---:|---:|")
+                        for r in per_class:
+                            L.append(
+                                f"| {r.get('class', '')} | "
+                                f"{r.get('p', '')} | {r.get('r', '')} | "
+                                f"{r.get('f1', '')} | "
+                                f"{r.get('ap50', '')} | "
+                                f"{r.get('ap', '')} |")
+                        L.append("")
+
+            # 10. Кластеризация
             if s.get('cluster'):
-                L.append("## 9. Кластеризация\n")
+                L.append("## 10. Кластеризация\n")
                 c = d.get('cluster')
                 if not c:
                     L.append("_Не выполнялось._\n")
@@ -799,6 +842,156 @@ class ReportThread(QThread):
                     if imgs.get('cluster'):
                         L.append(f"![Кластеры]"
                                  f"({imgs['cluster']})\n")
+
+            # 11. Результаты обучения модели
+            if s.get('training_results'):
+                L.append("## 11. Результаты обучения модели\n")
+                tr = d.get('training_results')
+                if not tr or tr.get('error'):
+                    err = tr.get('error') if tr else '—'
+                    L.append(f"_Не выполнялось или ошибка: {err}_\n")
+                else:
+                    L.append(f"- **Folder:** `{tr['folder']}`")
+                    bm = tr.get('best_model')
+                    bmm = tr.get('best_model_meta')
+                    L.append(
+                        f"- **Best model:** "
+                        f"`{os.path.basename(bm) if bm else '—'}`")
+                    L.append(
+                        f"- **Best meta:** "
+                        f"`{os.path.basename(bmm) if bmm else '—'}`")
+                    L.append("")
+
+                    if imgs.get('training_results_png'):
+                        L.append(
+                            f"### results.png\n"
+                            f"![results.png]"
+                            f"({imgs['training_results_png']})\n")
+                    if imgs.get('training_labels'):
+                        L.append(
+                            f"### labels.jpg\n"
+                            f"![labels.jpg]"
+                            f"({imgs['training_labels']})\n")
+                    if imgs.get('training_confusion'):
+                        L.append(
+                            f"### confusion_matrix_normalized.png\n"
+                            f"![confusion_matrix_normalized.png]"
+                            f"({imgs['training_confusion']})\n")
+
+                    if tr.get('curves'):
+                        L.append("### Дополнительные графики\n")
+                        for name in sorted(tr['curves'].keys()):
+                            rel = imgs.get(f"train_curve_{name}")
+                            if rel:
+                                L.append(f"![{name}]({rel})\n")
+                            else:
+                                L.append(f"- `{name}`\n")
+                        L.append("")
+
+                    if tr.get('batches'):
+                        L.append("### Батчи обучения / валидации\n")
+                        L.append("| Файл |")
+                        L.append("|---|")
+                        for name, _ in tr['batches'][:50]:
+                            L.append(f"| {name} |")
+                        if len(tr['batches']) > 50:
+                            L.append(
+                                f"| … ещё "
+                                f"{len(tr['batches']) - 50} |")
+                        L.append("")
+
+                    if tr.get('metrics'):
+                        L.append("### Метрики и аргументы\n")
+
+                        # results.csv — полное содержимое в <details>
+                        csv_path = tr['metrics'].get('results.csv')
+                        if csv_path and os.path.isfile(csv_path):
+                            try:
+                                with open(csv_path, 'r',
+                                          encoding='utf-8') as f:
+                                    csv_content = f.read()
+                                L.append(
+                                    "<details>\n"
+                                    "<summary>📊 results.csv "
+                                    "(полное содержимое)</summary>\n")
+                                L.append("")
+                                L.append("```csv")
+                                L.append(csv_content.rstrip())
+                                L.append("```")
+                                L.append("")
+                                L.append("</details>\n")
+                            except Exception as e:
+                                L.append(
+                                    f"- `results.csv` "
+                                    f"(не удалось прочитать: {e})")
+                        else:
+                            L.append("- `results.csv` (не найден)")
+
+                        # args.yaml — параметры обучения в <details>
+                        yaml_path = tr['metrics'].get('args.yaml')
+                        if yaml_path and os.path.isfile(yaml_path):
+                            try:
+                                with open(yaml_path, 'r',
+                                          encoding='utf-8') as f:
+                                    yaml_content = f.read()
+                                L.append(
+                                    "<details>\n"
+                                    "<summary>⚙️ args.yaml "
+                                    "(параметры обучения)</summary>\n")
+                                L.append("")
+                                L.append("```yaml")
+                                L.append(yaml_content.rstrip())
+                                L.append("```")
+                                L.append("")
+                                L.append("</details>\n")
+                            except Exception as e:
+                                L.append(
+                                    f"- `args.yaml` "
+                                    f"(не удалось прочитать: {e})")
+                        else:
+                            L.append("- `args.yaml` (не найден)")
+
+                        L.append("")
+
+                    if tr.get('weights'):
+                        L.append("### Веса\n")
+                        for name in sorted(tr['weights'].keys()):
+                            L.append(f"- `weights/{name}`")
+                        L.append("")
+
+                    # best_meta.json — полное содержимое в <details>
+                    meta_path = tr.get('best_model_meta')
+                    if meta_path and os.path.isfile(meta_path):
+                        try:
+                            with open(meta_path, 'r',
+                                      encoding='utf-8') as f:
+                                meta_content = f.read()
+                            L.append(
+                                "<details>\n"
+                                "<summary>🧠 best_meta.json "
+                                "(метаданные модели)</summary>\n")
+                            L.append("")
+                            L.append("```json")
+                            L.append(meta_content.rstrip())
+                            L.append("```")
+                            L.append("")
+                            L.append("</details>\n")
+                        except Exception as e:
+                            L.append(
+                                f"- `best_meta.json` "
+                                f"(не удалось прочитать: {e})")
+                    elif tr.get('best_model_meta'):
+                        L.append("- `best_meta.json` (не найден)")
+
+                    if imgs.get('best_model'):
+                        L.append(
+                            f"- **Скопирован best.pt:** "
+                            f"`{imgs['best_model']}`")
+                    if imgs.get('best_model_meta'):
+                        L.append(
+                            f"- **Скопирован best_meta.json:** "
+                            f"`{imgs['best_model_meta']}`")
+                    L.append("")
 
             L.append("---\n")
             L.append("_Отчёт сформирован автоматически вкладкой "
