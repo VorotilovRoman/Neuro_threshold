@@ -345,9 +345,11 @@ class LossInspectionThread(QThread):
             return
 
         suspicious = []
+        all_results = []
         total = len(self.pairs)
         processed = 0
         errors = 0
+        zero_pred_logged = 0
 
         for i, pair in enumerate(self.pairs):
             if self._cancel:
@@ -362,49 +364,75 @@ class LossInspectionThread(QThread):
                 continue
 
             try:
-                results = model(img_path,
-                                conf=self.conf_threshold,
-                                imgsz=self.imgsz,
-                                device=self.device,
-                                verbose=False)
+                results = model(
+                    img_path,
+                    conf=self.conf_threshold,
+                    imgsz=self.imgsz,
+                    device=self.device,
+                    verbose=False)
                 if not results:
                     _safe_progress(self.progress.emit, i, total, step=10)
                     continue
 
                 r = results[0]
-                gt_anns = load_annotations(lbl_path, 1, 1,
-                                            format_hint=self.input_format)
+                gt_anns = load_annotations(
+                    lbl_path, 1, 1, format_hint=self.input_format)
                 processed += 1
 
+                # --- Предсказания: boxes → obb fallback ---
                 boxes = getattr(r, 'boxes', None)
-                if boxes is None or len(boxes) == 0:
-                    if gt_anns:
-                        suspicious.append({
-                            'img_path': img_path,
-                            'lbl_path': lbl_path,
-                            'reason':
-                                'Модель не нашла объектов, а GT не пуст',
-                            'pred_count': 0,
-                            'gt_count': len(gt_anns),
-                            'mean_iou': 0.0,
-                            'min_iou': 0.0,
-                            'min_conf': 0.0,
-                        })
-                    _safe_progress(self.progress.emit, i, total, step=10)
-                    continue
+                obb = getattr(r, 'obb', None)
 
-                pred_xyxy = boxes.xyxy.cpu().numpy()
-                pred_conf = boxes.conf.cpu().numpy()
+                pred_xyxy = None
+                pred_conf = None
 
+                if boxes is not None and len(boxes) > 0:
+                    try:
+                        pred_xyxy = boxes.xyxy.cpu().numpy()
+                        pred_conf = boxes.conf.cpu().numpy()
+                    except Exception as e:
+                        self.log_signal.emit(
+                            f"[LossInspection] boxes extract: {e}")
+
+                if ((pred_xyxy is None or len(pred_xyxy) == 0)
+                        and obb is not None and len(obb) > 0):
+                    try:
+                        pred_xyxy = obb.xyxy.cpu().numpy()
+                        pred_conf = obb.conf.cpu().numpy()
+                    except Exception as e:
+                        self.log_signal.emit(
+                            f"[LossInspection] obb extract: {e}")
+
+                pred_count = (len(pred_xyxy)
+                              if pred_xyxy is not None else 0)
+
+                if pred_count == 0 and zero_pred_logged < 5:
+                    masks = getattr(r, 'masks', None)
+                    self.log_signal.emit(
+                        f"[LossInspection] "
+                        f"{os.path.basename(img_path)}: "
+                        f"0 предсказаний — "
+                        f"boxes={len(boxes) if boxes is not None else None}, "
+                        f"obb={len(obb) if obb is not None else None}, "
+                        f"masks={len(masks) if masks is not None else None}, "
+                        f"conf_thr={self.conf_threshold}, "
+                        f"imgsz={self.imgsz}")
+                    zero_pred_logged += 1
+
+                # --- Размеры изображения ---
                 h, w = (r.orig_shape
                         if hasattr(r, 'orig_shape') else (0, 0))
                 if h == 0 or w == 0:
                     with Image.open(img_path) as im:
                         w, h = im.size
 
+                # --- GT → xyxy (detect / segment / obb) ---
                 gt_xyxy = []
                 for ann in gt_anns:
-                    if ann[0] == 'detect':
+                    if not ann:
+                        continue
+                    typ = ann[0]
+                    if typ == 'detect':
                         _, cls, cx, cy, bw, bh = ann
                         gt_xyxy.append([
                             (cx - bw / 2) * w,
@@ -412,34 +440,74 @@ class LossInspectionThread(QThread):
                             (cx + bw / 2) * w,
                             (cy + bh / 2) * h,
                         ])
+                    elif typ in ('segment', 'obb'):
+                        pts = ann[2]
+                        if not pts or len(pts) < 6:
+                            continue
+                        xs = [float(pts[k]) * w
+                              for k in range(0, len(pts), 2)]
+                        ys = [float(pts[k]) * h
+                              for k in range(1, len(pts), 2)]
+                        gt_xyxy.append([min(xs), min(ys),
+                                        max(xs), max(ys)])
 
-                if not gt_xyxy:
-                    _safe_progress(self.progress.emit, i, total, step=10)
+                gt_count = len(gt_xyxy)
+
+                # --- Обе стороны пусты — нечего аудировать ---
+                if gt_count == 0 and pred_count == 0:
+                    _safe_progress(
+                        self.progress.emit, i, total, step=10)
                     continue
 
-                ious = []
-                for g in gt_xyxy:
-                    best = max(
-                        (self._iou_xyxy(g, p) for p in pred_xyxy),
-                        default=0.0)
-                    ious.append(best)
+                # --- IoU (если обе стороны непусты) ---
+                if gt_count > 0 and pred_count > 0:
+                    ious = []
+                    for g in gt_xyxy:
+                        best = max(
+                            (self._iou_xyxy(g, p) for p in pred_xyxy),
+                            default=0.0)
+                        ious.append(best)
+                    mean_iou = float(np.mean(ious))
+                    min_iou = float(np.min(ious))
+                else:
+                    mean_iou = 0.0
+                    min_iou = 0.0
 
-                mean_iou = float(np.mean(ious))
-                min_iou = float(np.min(ious))
+                # --- Классификация ---
+                if pred_count == 0:
+                    reason = ('Модель не нашла объектов, '
+                              'а GT не пуст')
+                    is_suspicious = True
+                elif gt_count == 0:
+                    reason = 'Модель нашла объекты, а GT пуст'
+                    is_suspicious = True
+                elif (mean_iou < self.iou_threshold
+                      or min_iou < 0.05):
+                    reason = (f'mean IoU={mean_iou:.3f} '
+                              f'(min={min_iou:.3f})')
+                    is_suspicious = True
+                else:
+                    reason = (f'mean IoU={mean_iou:.3f} '
+                              f'(min={min_iou:.3f}) — OK')
+                    is_suspicious = False
 
-                if mean_iou < self.iou_threshold or min_iou < 0.05:
-                    suspicious.append({
-                        'img_path': img_path,
-                        'lbl_path': lbl_path,
-                        'reason': (f'mean IoU={mean_iou:.3f} '
-                                   f'(min={min_iou:.3f})'),
-                        'pred_count': len(pred_xyxy),
-                        'gt_count': len(gt_xyxy),
-                        'mean_iou': mean_iou,
-                        'min_iou': min_iou,
-                        'min_conf': (float(pred_conf.min())
-                                     if len(pred_conf) else 0.0),
-                    })
+                item = {
+                    'img_path': img_path,
+                    'lbl_path': lbl_path,
+                    'reason': reason,
+                    'pred_count': pred_count,
+                    'gt_count': gt_count,
+                    'mean_iou': mean_iou,
+                    'min_iou': min_iou,
+                    'min_conf': (float(pred_conf.min())
+                                 if pred_conf is not None
+                                 and len(pred_conf) else 0.0),
+                    'is_suspicious': is_suspicious,
+                }
+                all_results.append(item)
+                if is_suspicious:
+                    suspicious.append(item)
+
             except Exception as e:
                 errors += 1
                 self.log_signal.emit(
@@ -449,14 +517,17 @@ class LossInspectionThread(QThread):
 
         self.log_signal.emit(
             f"[LossInspection] готово: processed={processed}/{total}, "
-            f"errors={errors}, подозрительных={len(suspicious)}")
+            f"errors={errors}, аудировано={len(all_results)}, "
+            f"подозрительных={len(suspicious)}")
         self.finished_signal.emit({
             'error': None,
             'suspicious': suspicious,
+            'all_results': all_results,
             'processed': processed,
             'total': total,
             'errors': errors,
         })
+
 
 
 # ============================================================

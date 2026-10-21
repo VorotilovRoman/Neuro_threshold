@@ -143,6 +143,7 @@ def setup_dataset_analysis_ui(parent):
     parent.file_list.setToolTip(
         "Ctrl+C — скопировать выделенные строки.\n"
         "Двойной клик — открыть снимок валидации.\n"
+        "Правый клик — контекстное меню (показать в проводнике / удалить пару).\n"
         "Серый — отброшенные фильтром; цвет класса — прошедшие.\n"
         "Розовый/оранжевый фон — дубликаты (pHash/MD5), "
         "красный — утечка между сплитами.")
@@ -563,6 +564,24 @@ def setup_dataset_analysis_ui(parent):
         "Загрузите модель и запустите аудит.")
     parent.audit_summary_label.setWordWrap(True)
     ac.addWidget(parent.audit_summary_label)
+
+    # --- NEW: фильтр отображения аудита ---
+    audit_filter_row = QHBoxLayout()
+    audit_filter_row.addWidget(QLabel("Показывать:"))
+    parent.audit_filter_combo = QComboBox()
+    parent.audit_filter_combo.addItem(
+        "Только подозрительные", "suspicious")
+    parent.audit_filter_combo.addItem(
+        "Все аудированные пары", "all")
+    parent.audit_filter_combo.setToolTip(
+        "«Только подозрительные» — пары с низким IoU, "
+        "пропущенными объектами (GT без Pred) "
+        "или ложными срабатываниями (Pred без GT).\n"
+        "«Все аудированные» — каждая пара, для которой "
+        "удалось сравнить GT и Pred.")
+    audit_filter_row.addWidget(parent.audit_filter_combo)
+    audit_filter_row.addStretch()
+    ac.addLayout(audit_filter_row)
 
     parent.audit_table = QTableWidget()
     parent.audit_table.setColumnCount(4)

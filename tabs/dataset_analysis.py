@@ -128,135 +128,214 @@ class YoloValThread(QThread):
 
         return {'summary': summary, 'per_class': per_class}
 
-
     def run(self):
+        self.log_signal.emit(
+            f"[LossInspection] старт (device: {self.device})")
         try:
             from ultralytics import YOLO
-            from ultralytics.utils import LOGGER
         except ImportError:
             self.finished_signal.emit({
-                'error': 'ultralytics не установлен',
-                'metrics': None})
+                'error': 'ultralytics не установлен', 'suspicious': []})
             return
 
-        import logging
-
-        class _QtLoggerHandler(logging.Handler):
-            """Пересылает записи Ultralytics-LOGGER в Qt-сигнал."""
-            def __init__(self, emit_fn):
-                super().__init__()
-                self._emit = emit_fn
-            def emit(self, record):
-                try:
-                    msg = self.format(record).strip()
-                    if msg:
-                        self._emit(msg)
-                except Exception:
-                    pass
-
-        handler = _QtLoggerHandler(
-            lambda s: self.log_signal.emit(f"[VAL] {s}"))
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        handler.setLevel(logging.INFO)
-        LOGGER.addHandler(handler)
-
         try:
-            self.log_signal.emit(
-                f"[VAL] Загрузка модели: {self.model_path}")
             model = YOLO(self.model_path)
-
-            if not os.path.exists(self.data_path):
-                raise FileNotFoundError(
-                    f"data.yaml не найден: {self.data_path}")
-
-            self.log_signal.emit(
-                f"[VAL] Модель загружена. Старт валидации: "
-                f"data={self.data_path}, split={self.split}, "
-                f"imgsz={self.imgsz}, conf={self.conf}, iou={self.iou}, "
-                f"device={self.device}")
-
-            # Callback отмены — срабатывает между батчами
-            try:
-                def _stop_cb(*args, **kwargs):
-                    if self._stop:
-                        raise SystemExit("__VAL_CANCEL__")
-                model.add_callback("on_val_batch_end", _stop_cb)
-            except Exception as e:
-                self.log_signal.emit(
-                    f"[VAL] Не удалось добавить callback отмены: {e}")
-
-            try:
-                metrics = model.val(
-                    data=self.data_path,
-                    split=self.split,
-                    imgsz=self.imgsz,
-                    conf=self.conf,
-                    iou=self.iou,
-                    device=self.device,
-                    verbose=True,
-                )
-            except Exception as e:
-                # Один автоматический fallback на CPU при сбое GPU
-                msg = str(e).lower()
-                if (self.device != 'cpu'
-                        and any(k in msg for k in
-                                ('cuda', 'out of memory',
-                                 'device', 'cublas', 'cudnn'))):
+            task = getattr(model, 'task', '?')
+            if self.device.startswith('cuda'):
+                try:
+                    model.to(self.device)
+                except Exception as e:
                     self.log_signal.emit(
-                        f"[VAL] Ошибка на {self.device} ({e}), "
-                        f"повтор на cpu")
+                        f"[LossInspection] Не удалось на {self.device} "
+                        f"({e}), fallback на cpu")
                     try:
                         model.to('cpu')
                     except Exception:
                         pass
                     self.device = 'cpu'
-                    metrics = model.val(
-                        data=self.data_path,
-                        split=self.split,
-                        imgsz=self.imgsz,
-                        conf=self.conf,
-                        iou=self.iou,
-                        device='cpu',
-                        verbose=True,
-                    )
-                else:
-                    raise
-        except SystemExit as e:
-            if str(e) == "__VAL_CANCEL__":
-                self.finished_signal.emit({
-                    'error': 'Валидация отменена пользователем',
-                    'metrics': None})
-            else:
-                self.finished_signal.emit({
-                    'error': f'Валидация прервана: {e}',
-                    'metrics': None})
-            return
+            self.log_signal.emit(
+                f"[LossInspection] модель загружена "
+                f"(task={task}, device={self.device}, "
+                f"conf={self.conf_threshold}, imgsz={self.imgsz})")
         except Exception as e:
-            tb = traceback.format_exc()
-            self.log_signal.emit(f"[VAL][ERROR] {e}")
-            self.log_signal.emit(tb)
-            self.finished_signal.emit({'error': str(e), 'metrics': None})
-            return
-        finally:
-            try:
-                LOGGER.removeHandler(handler)
-            except Exception:
-                pass
-
-        if self._stop:
             self.finished_signal.emit({
-                'error': 'Валидация отменена пользователем',
-                'metrics': None})
+                'error': f'Не удалось загрузить модель: {e}',
+                'suspicious': []})
             return
 
-        try:
-            data = self._extract_metrics(metrics)
-            self.finished_signal.emit({'error': None, 'metrics': data})
-        except Exception as e:
-            tb = traceback.format_exc()
-            self.log_signal.emit(f"[VAL][ERROR] extract: {e}")
-            self.log_signal.emit(tb)
-            self.finished_signal.emit({'error': str(e), 'metrics': None})
+        suspicious = []
+        total = len(self.pairs)
+        processed = 0
+        errors = 0
+        zero_pred_logged = 0
+
+        for i, pair in enumerate(self.pairs):
+            if self._cancel:
+                self.log_signal.emit("[LossInspection] отменено")
+                break
+
+            img_path = pair[0]
+            lbl_path = pair[1] if len(pair) > 1 else None
+
+            if not lbl_path or not os.path.exists(lbl_path):
+                _safe_progress(self.progress.emit, i, total, step=10)
+                continue
+
+            try:
+                results = model(
+                    img_path,
+                    conf=self.conf_threshold,
+                    imgsz=self.imgsz,
+                    device=self.device,
+                    verbose=False)
+                if not results:
+                    _safe_progress(self.progress.emit, i, total, step=10)
+                    continue
+
+                r = results[0]
+                gt_anns = load_annotations(
+                    lbl_path, 1, 1, format_hint=self.input_format)
+                processed += 1
+
+                # --- Предсказания: .boxes, при пустоте — .obb ---
+                boxes = getattr(r, 'boxes', None)
+                obb = getattr(r, 'obb', None)
+
+                pred_xyxy = None
+                pred_conf = None
+
+                if boxes is not None and len(boxes) > 0:
+                    try:
+                        pred_xyxy = boxes.xyxy.cpu().numpy()
+                        pred_conf = boxes.conf.cpu().numpy()
+                    except Exception as e:
+                        self.log_signal.emit(
+                            f"[LossInspection] boxes extract: {e}")
+
+                if ((pred_xyxy is None or len(pred_xyxy) == 0)
+                        and obb is not None and len(obb) > 0):
+                    try:
+                        pred_xyxy = obb.xyxy.cpu().numpy()
+                        pred_conf = obb.conf.cpu().numpy()
+                    except Exception as e:
+                        self.log_signal.emit(
+                            f"[LossInspection] obb extract: {e}")
+
+                pred_count = (len(pred_xyxy)
+                              if pred_xyxy is not None else 0)
+
+                if pred_count == 0:
+                    # Диагностика — только первые 5 случаев, чтобы не спамить
+                    if zero_pred_logged < 5:
+                        masks = getattr(r, 'masks', None)
+                        self.log_signal.emit(
+                            f"[LossInspection] "
+                            f"{os.path.basename(img_path)}: "
+                            f"0 предсказаний — "
+                            f"boxes={len(boxes) if boxes is not None else None}, "
+                            f"obb={len(obb) if obb is not None else None}, "
+                            f"masks={len(masks) if masks is not None else None}, "
+                            f"conf_thr={self.conf_threshold}, "
+                            f"imgsz={self.imgsz}, task={task}")
+                        zero_pred_logged += 1
+                    if gt_anns:
+                        suspicious.append({
+                            'img_path': img_path,
+                            'lbl_path': lbl_path,
+                            'reason':
+                                'Модель не нашла объектов, '
+                                'а GT не пуст',
+                            'pred_count': 0,
+                            'gt_count': len(gt_anns),
+                            'mean_iou': 0.0,
+                            'min_iou': 0.0,
+                            'min_conf': 0.0,
+                        })
+                    _safe_progress(
+                        self.progress.emit, i, total, step=10)
+                    continue
+
+                # --- Размеры изображения ---
+                h, w = (r.orig_shape
+                        if hasattr(r, 'orig_shape') else (0, 0))
+                if h == 0 or w == 0:
+                    with Image.open(img_path) as im:
+                        w, h = im.size
+
+                # --- GT → xyxy для detect / segment / obb ---
+                gt_xyxy = []
+                for ann in gt_anns:
+                    if not ann:
+                        continue
+                    typ = ann[0]
+                    if typ == 'detect':
+                        _, cls, cx, cy, bw, bh = ann
+                        gt_xyxy.append([
+                            (cx - bw / 2) * w,
+                            (cy - bh / 2) * h,
+                            (cx + bw / 2) * w,
+                            (cy + bh / 2) * h,
+                        ])
+                    elif typ in ('segment', 'obb'):
+                        pts = ann[2]
+                        if not pts or len(pts) < 6:
+                            continue
+                        xs = [float(pts[k]) * w
+                              for k in range(0, len(pts), 2)]
+                        ys = [float(pts[k]) * h
+                              for k in range(1, len(pts), 2)]
+                        gt_xyxy.append([min(xs), min(ys),
+                                        max(xs), max(ys)])
+
+                if not gt_xyxy:
+                    _safe_progress(
+                        self.progress.emit, i, total, step=10)
+                    continue
+
+                # --- IoU ---
+                ious = []
+                for g in gt_xyxy:
+                    best = max(
+                        (self._iou_xyxy(g, p) for p in pred_xyxy),
+                        default=0.0)
+                    ious.append(best)
+
+                mean_iou = float(np.mean(ious))
+                min_iou = float(np.min(ious))
+
+                if mean_iou < self.iou_threshold or min_iou < 0.05:
+                    suspicious.append({
+                        'img_path': img_path,
+                        'lbl_path': lbl_path,
+                        'reason': (f'mean IoU={mean_iou:.3f} '
+                                   f'(min={min_iou:.3f})'),
+                        'pred_count': pred_count,
+                        'gt_count': len(gt_xyxy),
+                        'mean_iou': mean_iou,
+                        'min_iou': min_iou,
+                        'min_conf': (float(pred_conf.min())
+                                     if pred_conf is not None
+                                     and len(pred_conf) else 0.0),
+                    })
+            except Exception as e:
+                errors += 1
+                self.log_signal.emit(
+                    f"[LossInspection] ошибка {img_path}: {e}")
+
+            _safe_progress(self.progress.emit, i, total, step=10)
+
+        self.log_signal.emit(
+            f"[LossInspection] готово: processed={processed}/{total}, "
+            f"errors={errors}, подозрительных={len(suspicious)}")
+        self.finished_signal.emit({
+            'error': None,
+            'suspicious': suspicious,
+            'processed': processed,
+            'total': total,
+            'errors': errors,
+        })
+
+
 
 
 
@@ -331,6 +410,9 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._last_imbalance = None
         self._last_heatmap = None
         self._last_audit_results = []
+        self._last_audit_results = []
+        self._last_audit_all_results = []
+        self._last_audit_display = []
         self._last_audit_meta = None
         self._last_cluster = None
         self._last_cluster_data = None
@@ -362,6 +444,10 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             self._on_include_empty_toggled)
         self.file_list.itemDoubleClicked.connect(
             self._on_file_list_double_clicked)
+
+        self.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.file_list.customContextMenuRequested.connect(
+            self._on_file_list_context_menu)
 
         self._copy_shortcut = QShortcut(QKeySequence.Copy, self.file_list)
         self._copy_shortcut.setContext(Qt.WidgetShortcut)
@@ -401,7 +487,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             self.open_report_folder)
 
         self.audit_table.cellDoubleClicked.connect(self._open_audit_row)
-
+        self.audit_filter_combo.currentIndexChanged.connect(
+            self._rebuild_audit_table)
         self.dup_table.itemSelectionChanged.connect(
             self._on_dup_row_selected)
         self.dup_table.cellDoubleClicked.connect(
@@ -820,6 +907,212 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             self.file_list.blockSignals(False)
 
     # ==================================================================
+    # Контекстное меню списка пар и удаление
+    # ==================================================================
+    def _on_file_list_context_menu(self, pos):
+        """Правый клик по элементу списка пар."""
+        item = self.file_list.itemAt(pos)
+        if item is None:
+            return
+        pair = item.data(Qt.UserRole + 1)
+        if not pair:
+            return
+
+        menu = QMenu(self)
+        act_show = menu.addAction("📂 Показать в проводнике")
+        menu.addSeparator()
+        act_delete = menu.addAction(
+            "🗑 Удалить файлы (изображение + разметка)")
+
+        global_pos = self.file_list.viewport().mapToGlobal(pos)
+        chosen = menu.exec_(global_pos)
+
+        if chosen == act_show:
+            self._show_pair_in_explorer(pair)
+        elif chosen == act_delete:
+            self._delete_pair_files(pair)
+
+    def _show_pair_in_explorer(self, pair):
+        """Открывает папку с изображением пары в проводнике и выделяет файл."""
+        img_path = (pair[0] if isinstance(pair, (tuple, list)) and pair
+                    else None)
+        if not img_path:
+            return
+        if not os.path.exists(img_path):
+            QMessageBox.warning(self, "Файл не найден", img_path)
+            return
+
+        try:
+            # Приводим путь к абсолютному и нормализуем слэши под Windows
+            norm_path = os.path.normpath(os.path.abspath(img_path))
+
+            if _sys.platform.startswith('win'):
+                # Ключевой момент: путь — отдельный аргумент, а не часть "/select,..."
+                subprocess.Popen(['explorer.exe', '/select,', norm_path])
+            elif _sys.platform == 'darwin':
+                subprocess.Popen(['open', '-R', norm_path])
+            else:
+                subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
+
+            self._audit_log(f"Открываю в проводнике: {norm_path}",
+                            tag="FS", level='OK')
+        except Exception as e:
+            self._audit_log(f"Не удалось открыть {img_path}: {e}",
+                            tag="FS", level='ERROR')
+            QMessageBox.warning(self, "Не удалось открыть", f"{img_path}\n{e}")
+
+
+
+    def _delete_pair_files(self, pair, refresh_metrics=True):
+        """Удаляет файлы пары (изображение + разметка/маска).
+
+        Возвращает True, если хотя бы один файл был удалён.
+        """
+        img_path = (pair[0] if isinstance(pair, (tuple, list)) and pair
+                    else None)
+        lbl_path = (pair[1] if isinstance(pair, (tuple, list)) and len(pair) > 1
+                    else None)
+
+        if not img_path:
+            return False
+
+        paths_to_delete = []
+        if os.path.exists(img_path):
+            paths_to_delete.append(img_path)
+        if lbl_path and os.path.exists(lbl_path):
+            paths_to_delete.append(lbl_path)
+
+        if not paths_to_delete:
+            QMessageBox.warning(self, "Нечего удалять",
+                                "Файлы уже удалены или не существуют.")
+            return False
+
+        files_list = "\n".join(paths_to_delete)
+        reply = QMessageBox.question(
+            self, "Удалить файлы?",
+            f"Удалить без возможности восстановления:\n\n{files_list}",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return False
+
+        errors = []
+        deleted_any = False
+        for p in paths_to_delete:
+            try:
+                os.remove(p)
+                deleted_any = True
+                self._audit_log(f"Удалён: {p}", tag="FS", level='OK')
+            except Exception as e:
+                errors.append(f"{p}: {e}")
+                self._audit_log(f"Ошибка удаления {p}: {e}",
+                                tag="FS", level='ERROR')
+
+        if not deleted_any:
+            QMessageBox.warning(
+                self, "Ошибка удаления",
+                "Не удалось удалить ни один файл:\n" + "\n".join(errors))
+            return False
+
+        # Удаляем из состояния
+        self.pairs = [p for p in self.pairs if p[0] != img_path]
+        self.filtered_pairs = [p for p in self.filtered_pairs
+                               if p[0] != img_path]
+        self._pair_class_cache.pop((img_path, lbl_path), None)
+
+        # Удаляем из списка пар
+        for i in range(self.file_list.count() - 1, -1, -1):
+            it = self.file_list.item(i)
+            if it is None:
+                continue
+            p = it.data(Qt.UserRole + 1)
+            if p and p[0] == img_path:
+                self.file_list.takeItem(i)
+
+        # Обновляем сохранённые результаты дубликатов
+        self._on_pair_deleted_from_state(img_path)
+
+        if refresh_metrics:
+            try:
+                self.apply_filters_and_update_metrics()
+            except Exception as e:
+                self._audit_log(f"Ошибка обновления метрик: {e}",
+                                tag="ANALYSIS", level='WARN')
+
+        if errors:
+            QMessageBox.warning(self, "Частичные ошибки",
+                                "\n".join(errors))
+        return True
+
+    def _on_pair_deleted_from_state(self, img_path):
+        """Убирает путь из сохранённых результатов анализа дубликатов."""
+        if not self._last_dup:
+            return
+        for key in ('exact', 'near'):
+            groups = self._last_dup.get(key, [])
+            new_groups = []
+            for g in groups:
+                new_g = [p for p in g if p != img_path]
+                if len(new_g) > 1:
+                    new_groups.append(new_g)
+            self._last_dup[key] = new_groups
+        try:
+            from utils.dataset_audit_logic import LeakageChecker
+            self._last_dup['leak'] = LeakageChecker.check(
+                self._last_dup['exact'] + self._last_dup['near'],
+                self.pairs)
+        except Exception:
+            pass
+        try:
+            self._rebuild_dup_table()
+        except Exception as e:
+            self._audit_log(f"Ошибка перестройки таблицы дубликатов: {e}",
+                            tag="DUP", level='WARN')
+
+    def _rebuild_dup_table(self):
+        """Перестраивает dup_table из self._last_dup."""
+        if not self._last_dup:
+            self.dup_table.setRowCount(0)
+            self._dup_groups_by_row = []
+            return
+
+        from utils.dataset_audit_logic import LeakageChecker
+        exact = self._last_dup.get('exact', [])
+        near = self._last_dup.get('near', [])
+
+        rows = []
+        self._dup_groups_by_row = []
+        for kind, groups in (('MD5', exact), ('pHash', near)):
+            for g_idx, group in enumerate(groups, 1):
+                if not group:
+                    continue
+                splits = Counter(LeakageChecker._infer_split(p) for p in group)
+                leak = len({s for s in splits if s != 'unknown'}) >= 2
+                files_short = ", ".join(os.path.basename(p) for p in group[:3])
+                if len(group) > 3:
+                    files_short += f" … (+{len(group) - 3})"
+                rows.append((
+                    f"{kind} #{g_idx}", str(len(group)),
+                    ", ".join(f"{k}:{v}" for k, v in splits.items()),
+                    files_short, "⚠️" if leak else "✅", leak,
+                ))
+                self._dup_groups_by_row.append(list(group))
+
+        self.dup_table.setRowCount(len(rows))
+        for r, (kind, n, splits_str, files, leak_mark, leak) in enumerate(rows):
+            for c, txt in enumerate((kind, n, splits_str, files, leak_mark)):
+                it = QTableWidgetItem(txt)
+                it.setToolTip(
+                    f"{kind}\n"
+                    f"Изображений: {n}\n"
+                    f"Сплиты: {splits_str}\n"
+                    f"Файлы: {files}\n"
+                    f"Утечка: {'ДА' if leak else 'нет'}\n"
+                    f"Клик — выделить пары; двойной клик — открыть.")
+                if leak:
+                    it.setBackground(QColor(255, 220, 220))
+                self.dup_table.setItem(r, c, it)
+
+    # ==================================================================
     # Экспорт
     # ==================================================================
     def export_filtered_dataset(self):
@@ -1043,43 +1336,9 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._clear_duplicate_highlights()
         self._highlight_duplicates_in_file_list(dups, leak_report)
 
-        rows = []
-        self._dup_groups_by_row = []
-        for kind, groups in (('MD5', exact), ('pHash', near)):
-            for g_idx, group in enumerate(groups, 1):
-                splits = Counter(
-                    LeakageChecker._infer_split(p) for p in group)
-                leak = len({s for s in splits
-                            if s != 'unknown'}) >= 2
-                files_short = ", ".join(
-                    os.path.basename(p) for p in group[:3])
-                if len(group) > 3:
-                    files_short += f" … (+{len(group) - 3})"
-                rows.append((
-                    f"{kind} #{g_idx}",
-                    str(len(group)),
-                    ", ".join(f"{k}:{v}" for k, v in splits.items()),
-                    files_short,
-                    "⚠️" if leak else "✅",
-                    leak,
-                ))
-                self._dup_groups_by_row.append(list(group))
-
-        self.dup_table.setRowCount(len(rows))
-        for r, (kind, n, splits_str, files, leak_mark, leak) in enumerate(rows):
-            for c, txt in enumerate(
-                    (kind, n, splits_str, files, leak_mark)):
-                it = QTableWidgetItem(txt)
-                it.setToolTip(
-                    f"{kind}\n"
-                    f"Изображений: {n}\n"
-                    f"Сплиты: {splits_str}\n"
-                    f"Файлы: {files}\n"
-                    f"Утечка: {'ДА' if leak else 'нет'}\n"
-                    f"Клик — выделить пары; двойной клик — открыть.")
-                if leak:
-                    it.setBackground(QColor(255, 220, 220))
-                self.dup_table.setItem(r, c, it)
+        # Построение таблицы делегировано общему методу —
+        # используется также при удалении пар из контекстного меню.
+        self._rebuild_dup_table()
 
         lines = [f"Точных групп: {len(exact)}, "
                  f"почти-групп: {len(near)}."]
@@ -1100,6 +1359,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                   for p in rg['paths'][:3])
                 self._audit_log(
                     f"  утечка {rg['splits']}: {names}", tag="DUP")
+
+
 
     def stop_duplicate_analysis(self):
         self._stop_requested = True
@@ -1237,6 +1498,13 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 tag="DUP", level='WARN')
             return
         self._open_dup_group_validation(pairs_to_open, row + 1)
+
+
+    def _on_delete_pair_from_dup(self, card_widget, img_path, lbl_path):
+        """Удаление пары прямо из окна просмотра группы дубликатов."""
+        pair = (img_path, lbl_path) if lbl_path else (img_path,)
+        if self._delete_pair_files(pair):
+            card_widget.setVisible(False)
 
     def _open_dup_group_validation(self, pairs, group_num):
         """Одно окно с прокруткой, показывающее все пары группы
@@ -1438,6 +1706,21 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                     img_lbl.setAlignment(Qt.AlignCenter)
                     card_lay.addWidget(img_lbl)
 
+            # --- Кнопка удаления пары ---
+            del_row = QHBoxLayout()
+            del_row.addStretch()
+            btn_del = QPushButton("🗑 Удалить пару")
+            btn_del.setStyleSheet(
+                "background-color: #d32f2f; color: white; "
+                "font-weight: bold; padding: 4px 14px;")
+            btn_del.setToolTip(
+                "Удалить изображение и файл разметки/маски с диска.")
+            btn_del.clicked.connect(
+                lambda _checked=False, c=card, ip=img_path, lp=lbl_path:
+                    self._on_delete_pair_from_dup(c, ip, lp))
+            del_row.addWidget(btn_del)
+            card_lay.addLayout(del_row)
+
             lay.addWidget(card)
 
         lay.addStretch()
@@ -1632,22 +1915,13 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             return
 
         suspicious = result.get('suspicious', [])
+        all_results = result.get('all_results', suspicious)
         processed = result.get('processed', 0)
         total = result.get('total', 0)
         errors = result.get('errors', 0)
 
-        self.audit_table.setRowCount(len(suspicious))
-        for row, item in enumerate(suspicious):
-            self.audit_table.setItem(row, 0, QTableWidgetItem(
-                os.path.basename(item['img_path'])))
-            self.audit_table.setItem(row, 1, QTableWidgetItem(
-                str(item['gt_count'])))
-            self.audit_table.setItem(row, 2, QTableWidgetItem(
-                str(item['pred_count'])))
-            self.audit_table.setItem(row, 3, QTableWidgetItem(
-                f"{item['mean_iou']:.3f}"))
-
         self._last_audit_results = suspicious
+        self._last_audit_all_results = all_results
         self._last_audit_meta = {
             'model': self._audit_model_path,
             'iou_thr': float(self.audit_iou_spin.value()),
@@ -1655,16 +1929,15 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             'imgsz': int(self.audit_imgsz_spin.value()),
             'processed': processed, 'total': total,
             'errors': errors, 'suspicious_count': len(suspicious),
+            'audited_count': len(all_results),
         }
 
-        self.audit_summary_label.setText(
-            f"Обработано: {processed}/{total}. "
-            f"Подозрительных: {len(suspicious)}. Ошибок: {errors}. "
-            f"Двойной клик — открыть двойное окно сравнения "
-            f"(GT ↔ Pred).")
+        self._rebuild_audit_table()
+
         self._audit_log(
             f"Аудит завершён: processed={processed}/{total}, "
-            f"errors={errors}, подозрительных={len(suspicious)}",
+            f"errors={errors}, аудировано={len(all_results)}, "
+            f"подозрительных={len(suspicious)}",
             tag="AUDIT", level='OK')
 
         for item in suspicious[:5]:
@@ -1673,12 +1946,73 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 f"gt={item['gt_count']}, pred={item['pred_count']}, "
                 f"iou={item['mean_iou']:.3f}", tag="AUDIT")
 
-    def _open_audit_row(self, row, col):
-        if row < 0 or row >= len(self._last_audit_results):
-            return
-        item = self._last_audit_results[row]
-        self._open_audit_comparison(item)
 
+
+    def _open_audit_row(self, row, col):
+        items = getattr(self, '_last_audit_display', None) or []
+        if row < 0 or row >= len(items):
+            return
+        self._open_audit_comparison(items[row])
+
+    def _rebuild_audit_table(self):
+        """Перестраивает таблицу аудита согласно выбранному фильтру."""
+        mode = 'suspicious'
+        try:
+            mode = self.audit_filter_combo.currentData() or 'suspicious'
+        except Exception:
+            pass
+
+        if mode == 'all':
+            items = self._last_audit_all_results or []
+        else:
+            items = self._last_audit_results or []
+
+        self._last_audit_display = list(items)
+
+        self.audit_table.setRowCount(len(items))
+        for row, item in enumerate(items):
+            is_susp = bool(item.get('is_suspicious', True))
+            name = os.path.basename(item.get('img_path', ''))
+            gt = item.get('gt_count', 0)
+            pred = item.get('pred_count', 0)
+            miou = item.get('mean_iou', 0.0)
+            min_iou = item.get('min_iou', 0.0)
+            reason = item.get('reason', '—')
+
+            tooltip = (
+                f"{name}\n"
+                f"Причина: {reason}\n"
+                f"GT: {gt}, Pred: {pred}\n"
+                f"Mean IoU: {miou:.3f}, Min IoU: {min_iou:.3f}\n"
+                f"Подозрительная: {'ДА' if is_susp else 'нет'}"
+            )
+
+            cells = (name, str(gt), str(pred), f"{miou:.3f}")
+            for c, txt in enumerate(cells):
+                it = QTableWidgetItem(txt)
+                it.setToolTip(tooltip)
+                if is_susp:
+                    it.setBackground(QColor(255, 220, 220))
+                self.audit_table.setItem(row, c, it)
+
+        # Обновляем summary с информацией о фильтре
+        meta = self._last_audit_meta or {}
+        if meta:
+            processed = meta.get('processed', 0)
+            total = meta.get('total', 0)
+            errors = meta.get('errors', 0)
+            audited = len(self._last_audit_all_results or [])
+            susp = len(self._last_audit_results or [])
+            filter_label = ('все аудированные'
+                            if mode == 'all' else 'только подозрительные')
+            self.audit_summary_label.setText(
+                f"Обработано: {processed}/{total}. "
+                f"Аудировано: {audited}. "
+                f"Подозрительных: {susp}. Ошибок: {errors}. "
+                f"Показано: {len(items)} "
+                f"(фильтр: {filter_label}). "
+                f"Двойной клик — открыть двойное окно сравнения "
+                f"(GT ↔ Pred).")
 
     def _get_audit_model(self):
         path = self._audit_model_path
@@ -1751,8 +2085,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._open_folder_in_explorer(self._last_report_dir)
 
     def _open_audit_comparison(self, item):
-        import cv2
-        import numpy as np
 
         img_path = item['img_path']
         lbl_path = item.get('lbl_path')
@@ -1846,22 +2178,36 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                 img_pred, 1.0, overlay, 0.35, 0)
                     except Exception:
                         pass
-                if (getattr(r, 'boxes', None) is not None
-                        and len(r.boxes)):
-                    for box in r.boxes:
+
+                # boxes → obb fallback
+                boxes_obj = getattr(r, 'boxes', None)
+                obb_obj = getattr(r, 'obb', None)
+
+                draw_boxes = None
+                if boxes_obj is not None and len(boxes_obj):
+                    draw_boxes = boxes_obj
+                elif obb_obj is not None and len(obb_obj):
+                    draw_boxes = obb_obj
+
+                if draw_boxes is not None:
+                    for box in draw_boxes:
                         cls = int(box.cls[0])
                         conf = float(box.conf[0])
                         x1, y1, x2, y2 = map(int,
                                              box.xyxy[0].tolist())
                         cv2.rectangle(img_pred, (x1, y1), (x2, y2),
                                       (0, 0, 220), 2)
-                        cv2.putText(img_pred, f"c{cls} {conf:.2f}",
+                        cv2.putText(img_pred,
+                                    f"c{cls} {conf:.2f}",
                                     (x1, max(y1 - 5, 12)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                                     (0, 0, 220), 1)
         except Exception as e:
             self._audit_log(f"[AUDIT] Ошибка отрисовки Pred: {e}",
                             tag="AUDIT")
+
+
+
 
         _, buf_gt = cv2.imencode('.png', img_gt)
         _, buf_pr = cv2.imencode('.png', img_pred)
