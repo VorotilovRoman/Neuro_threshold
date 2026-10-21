@@ -13,96 +13,22 @@ from contextlib import redirect_stdout
 
 try:
     from sahi.slicing import slice_coco
+
     SAHI_AVAILABLE = True
 except ImportError:
     SAHI_AVAILABLE = False
 
 
 # ==================================================================
-# Автодетект датасета в папке
-# ==================================================================
-def detect_dataset(folder: str):
-    """Ищет COCO JSON и папку с изображениями.
-
-    Возвращает (coco_json_path, images_dir) или (None, None).
-    """
-    coco_path = None
-    images_dir = None
-
-    # 1. COCO JSON (рекурсивно)
-    for root, dirs, files in os.walk(folder):
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        for f in files:
-            if not f.lower().endswith('.json'):
-                continue
-            p = os.path.join(root, f)
-            try:
-                with open(p, 'r', encoding='utf-8') as fp:
-                    data = json.load(fp)
-                if (isinstance(data, dict)
-                        and 'images' in data
-                        and 'annotations' in data
-                        and 'categories' in data):
-                    coco_path = p
-                    break
-            except Exception:
-                continue
-        if coco_path:
-            break
-
-    if not coco_path:
-        return None, None
-
-    # 2. Папка с изображениями
-    coco_dir = os.path.dirname(coco_path)
-    img_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff')
-
-    for candidate in [
-        os.path.join(coco_dir, 'images'),
-        os.path.join(folder, 'images'),
-        coco_dir,
-    ]:
-        if not os.path.isdir(candidate):
-            continue
-        try:
-            for entry in os.listdir(candidate):
-                if entry.lower().endswith(img_exts):
-                    images_dir = candidate
-                    break
-        except Exception:
-            pass
-        if images_dir:
-            break
-
-    # 3. Fallback через file_name в COCO
-    if not images_dir:
-        try:
-            with open(coco_path, 'r', encoding='utf-8') as fp:
-                data = json.load(fp)
-            if data.get('images'):
-                fname = data['images'][0].get('file_name', '')
-                if fname:
-                    for base in [coco_dir, folder]:
-                        candidate = os.path.join(base, fname)
-                        if os.path.exists(candidate):
-                            images_dir = os.path.dirname(candidate)
-                            break
-        except Exception:
-            pass
-
-    return coco_path, images_dir
-
-
-# ==================================================================
 # Нарезка
 # ==================================================================
 def slice_dataset(
-    coco_json_path: str,
-    image_dir: str,
-    output_dir: str,
-    slice_size: int = 640,
-    overlap: float = 0.2,
-    min_area_ratio: float = 0.3,
+        coco_json_path: str,
+        image_dir: str,
+        output_dir: str,
+        slice_size: int = 640,
+        overlap: float = 0.2,
+        min_area_ratio: float = 0.3,
 ):
     if not SAHI_AVAILABLE:
         raise RuntimeError(
@@ -136,11 +62,11 @@ def slice_dataset(
 # Субдискретизация фоновых тайлов
 # ==================================================================
 def subsample_negative_tiles(
-    coco_dict: dict,
-    coco_json_path: str,
-    image_dir: str,
-    keep_ratio: float = 0.1,
-    seed: int = 42,
+        coco_dict: dict,
+        coco_json_path: str,
+        image_dir: str,
+        keep_ratio: float = 0.1,
+        seed: int = 42,
 ) -> dict:
     if not (0 < keep_ratio <= 1):
         return coco_dict
@@ -195,11 +121,11 @@ def subsample_negative_tiles(
 # Train / val split
 # ==================================================================
 def split_train_val(
-    coco_dict: dict,
-    coco_json_path: str,
-    image_dir: str,
-    train_ratio: float = 0.8,
-    seed: int = 42,
+        coco_dict: dict,
+        coco_json_path: str,
+        image_dir: str,
+        train_ratio: float = 0.8,
+        seed: int = 42,
 ):
     if not (0 < train_ratio < 1):
         return (coco_dict,
@@ -265,11 +191,11 @@ def split_train_val(
 # COCO → YOLO
 # ==================================================================
 def coco_to_yolo(
-    coco_json_path: str,
-    image_dir: str,
-    labels_dir: str,
-    class_names: list = None,
-    verbose: bool = True,
+        coco_json_path: str,
+        image_dir: str,
+        labels_dir: str,
+        class_names: list = None,
+        verbose: bool = True,
 ):
     os.makedirs(labels_dir, exist_ok=True)
 
@@ -335,9 +261,9 @@ def coco_to_yolo(
 # data.yaml
 # ==================================================================
 def write_yolo_yaml(
-    output_dir: str,
-    class_names: list,
-    channels: int = 3,
+        output_dir: str,
+        class_names: list,
+        channels: int = 3,
 ):
     yaml_path = os.path.join(output_dir, "data.yaml")
     with open(yaml_path, "w", encoding="utf-8") as f:
@@ -356,9 +282,9 @@ def write_yolo_yaml(
 # Визуализация
 # ==================================================================
 def visualize_samples(
-    coco_json_path: str,
-    image_dir: str,
-    n: int = 3,
+        coco_json_path: str,
+        image_dir: str,
+        n: int = 3,
 ):
     try:
         import cv2
@@ -575,39 +501,47 @@ class SahiSlicerWindow(QMainWindow):
             "Скрыть лог" if checked else "Показать лог")
 
     # ------------------------------------------------------------------
-    # Выбор папок
+    # Загрузка датасета (Новая логика)
     # ------------------------------------------------------------------
-    def browse_dataset(self):
+    def load_coco_json(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл COCO JSON", "", "JSON (*.json)")
+        if not path:
+            return
+
+        self.coco_path = path
+        self.coco_label.setText(path)
+        self.coco_label.setStyleSheet("color: #2e7d32;")
+        self.log(f"✅ COCO JSON: {path}")
+
+        # Автоопределение папки с изображениями
+        if not self.images_path:
+            folder = os.path.dirname(path)
+            for candidate in [os.path.join(folder, 'images'), folder]:
+                if os.path.isdir(candidate):
+                    try:
+                        # Проверяем, есть ли там картинки
+                        if any(f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff'))
+                               for f in os.listdir(candidate)):
+                            self.images_path = candidate
+                            self.images_label.setText(candidate)
+                            self.images_label.setStyleSheet("color: #2e7d32;")
+                            self.log(f"✅ Images (авто): {candidate}")
+                            break
+                    except Exception:
+                        pass
+        self._update_generate_state()
+
+    def load_images_folder(self):
         folder = QFileDialog.getExistingDirectory(
-            self, "Выберите папку с датасетом (COCO JSON + images)")
+            self, "Выберите папку с изображениями")
         if not folder:
             return
-        self.dataset_edit.setText(folder)
-        coco, images = detect_dataset(folder)
-        self.coco_path = coco
-        self.images_path = images
 
-        if coco and images:
-            self.coco_label.setText(coco)
-            self.images_label.setText(images)
-            self.coco_label.setStyleSheet("color: #2e7d32;")
-            self.images_label.setStyleSheet("color: #2e7d32;")
-            self.log(f"✅ COCO JSON: {coco}")
-            self.log(f"✅ Images:    {images}")
-        else:
-            self.coco_label.setText(
-                coco or "❌ COCO JSON не найден")
-            self.images_label.setText(
-                images or "❌ папка с изображениями не найдена")
-            self.coco_label.setStyleSheet(
-                "color: #2e7d32;" if coco else "color: #c62828;")
-            self.images_label.setStyleSheet(
-                "color: #2e7d32;" if images else "color: #c62828;")
-            if not coco:
-                self.log("⚠️ COCO JSON не найден в выбранной папке.")
-            if not images:
-                self.log("⚠️ Папка с изображениями не найдена.")
-
+        self.images_path = folder
+        self.images_label.setText(folder)
+        self.images_label.setStyleSheet("color: #2e7d32;")
+        self.log(f"✅ Images: {folder}")
         self._update_generate_state()
 
     def browse_output(self):

@@ -3,8 +3,7 @@ from import_libs_internal import *
 
 
 def setup_sahi_slicer_ui(parent):
-    """Создаёт все виджеты для SahiSlicerWindow.
-    Все виджеты сохраняются как parent.xxx."""
+    """Создаёт все виджеты для SahiSlicerWindow."""
     central = QWidget()
     parent.setCentralWidget(central)
     main_layout = QVBoxLayout(central)
@@ -12,15 +11,26 @@ def setup_sahi_slicer_ui(parent):
     main_layout.setSpacing(8)
 
     # ============================================================
-    # ВЕРХНЯЯ ПАНЕЛЬ — toggle лога
+    # ВЕРХНЯЯ ПАНЕЛЬ — загрузка и toggle лога
     # ============================================================
     top_layout = QHBoxLayout()
+
+    # Кнопки загрузки, как на вкладке анализа
+    parent.btn_load_coco = QPushButton("Load COCO JSON")
+    parent.btn_load_coco.setStyleSheet("font-weight: bold;")
+    parent.btn_load_images = QPushButton("Load Images")
+    parent.btn_load_images.setStyleSheet("font-weight: bold;")
+
+    top_layout.addWidget(parent.btn_load_coco)
+    top_layout.addWidget(parent.btn_load_images)
     top_layout.addStretch()
+
     parent.btn_toggle_log = QPushButton("Показать лог")
     parent.btn_toggle_log.setCheckable(True)
     parent.btn_toggle_log.setChecked(False)
     parent.btn_toggle_log.setToolTip("Показать/скрыть лог операций")
     top_layout.addWidget(parent.btn_toggle_log)
+
     main_layout.addLayout(top_layout)
 
     # ============================================================
@@ -28,15 +38,6 @@ def setup_sahi_slicer_ui(parent):
     # ============================================================
     ds_group = QGroupBox("Исходный датасет")
     ds_layout = QFormLayout(ds_group)
-
-    parent.dataset_edit = QLineEdit()
-    parent.dataset_edit.setReadOnly(True)
-    parent.dataset_edit.setPlaceholderText("Папка не выбрана")
-    parent.btn_browse_dataset = QPushButton("Выбрать...")
-    ds_row = QHBoxLayout()
-    ds_row.addWidget(parent.dataset_edit, 1)
-    ds_row.addWidget(parent.btn_browse_dataset)
-    ds_layout.addRow("Папка:", ds_row)
 
     parent.coco_label = QLabel("—")
     parent.coco_label.setWordWrap(True)
@@ -65,8 +66,8 @@ def setup_sahi_slicer_ui(parent):
     parent.btn_open_output = QPushButton("Открыть")
     parent.btn_open_output.setMaximumWidth(90)
     parent.btn_open_output.setEnabled(False)
-    parent.btn_open_output.setToolTip(
-        "Открыть папку последнего созданного датасета")
+    parent.btn_open_output.setToolTip("Открыть папку последнего созданного датасета")
+
     out_row = QHBoxLayout()
     out_row.addWidget(parent.output_edit, 1)
     out_row.addWidget(parent.btn_browse_output)
@@ -140,15 +141,13 @@ def setup_sahi_slicer_ui(parent):
     parent.channels_combo.addItem("1 (Grayscale)", 1)
     parent.channels_combo.addItem("3 (RGB)", 3)
     parent.channels_combo.setCurrentIndex(1)
-    parent.channels_combo.setToolTip(
-        "Поле channels в data.yaml (для YOLO).")
+    parent.channels_combo.setToolTip("Поле channels в data.yaml (для YOLO).")
     par_layout.addRow("channels:", parent.channels_combo)
 
     parent.seed_spin = QSpinBox()
     parent.seed_spin.setRange(0, 99999)
     parent.seed_spin.setValue(42)
-    parent.seed_spin.setToolTip(
-        "Seed для воспроизводимости (split + субдискретизация фона).")
+    parent.seed_spin.setToolTip("Seed для воспроизводимости (split + субдискретизация фона).")
     par_layout.addRow("Seed:", parent.seed_spin)
 
     parent.visualize_spin = QSpinBox()
@@ -204,7 +203,8 @@ def setup_sahi_slicer_ui(parent):
     # ============================================================
     # ПОДКЛЮЧЕНИЯ
     # ============================================================
-    parent.btn_browse_dataset.clicked.connect(parent.browse_dataset)
+    parent.btn_load_coco.clicked.connect(parent.load_coco_json)
+    parent.btn_load_images.clicked.connect(parent.load_images_folder)
     parent.btn_browse_output.clicked.connect(parent.browse_output)
     parent.btn_open_output.clicked.connect(parent.open_output_folder)
     parent.btn_generate.clicked.connect(parent.on_generate)

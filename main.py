@@ -151,6 +151,10 @@ class ImagePlayer(QMainWindow):
                 from tabs.dataset_analysis import DatasetAnalysisWindow
                 self._add_tab(DatasetAnalysisWindow(), tab_title)
 
+            elif tab_id == "sahi":
+                from tabs.slice_dataset_sahi import SahiSlicerWindow
+                self._add_tab(SahiSlicerWindow(), tab_title)
+
             elif tab_id == "yolo_train":
                 from tabs.deep_learning_training import YoloTrainWindow
                 self._add_tab(YoloTrainWindow(), tab_title)
