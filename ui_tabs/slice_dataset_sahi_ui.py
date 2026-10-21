@@ -15,14 +15,13 @@ def setup_sahi_slicer_ui(parent):
     # ============================================================
     top_layout = QHBoxLayout()
 
-    # Кнопки загрузки, как на вкладке анализа
-    parent.btn_load_coco = QPushButton("Load COCO JSON")
+    parent.btn_load_coco = QPushButton("Load COCO")
     parent.btn_load_coco.setStyleSheet("font-weight: bold;")
-    parent.btn_load_images = QPushButton("Load Images")
-    parent.btn_load_images.setStyleSheet("font-weight: bold;")
+    parent.btn_add_coco = QPushButton("+ Add COCO")
+    parent.btn_add_coco.setStyleSheet("font-weight: bold;")
 
     top_layout.addWidget(parent.btn_load_coco)
-    top_layout.addWidget(parent.btn_load_images)
+    top_layout.addWidget(parent.btn_add_coco)
     top_layout.addStretch()
 
     parent.btn_toggle_log = QPushButton("Показать лог")
@@ -36,7 +35,7 @@ def setup_sahi_slicer_ui(parent):
     # ============================================================
     # ИСХОДНЫЙ ДАТАСЕТ
     # ============================================================
-    ds_group = QGroupBox("Исходный датасет")
+    ds_group = QGroupBox("Исходный датасет (Валидация)")
     ds_layout = QFormLayout(ds_group)
 
     parent.coco_label = QLabel("—")
@@ -51,12 +50,28 @@ def setup_sahi_slicer_ui(parent):
     parent.images_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     ds_layout.addRow("Изображения:", parent.images_label)
 
+    parent.validation_summary_label = QLabel("")
+    parent.validation_summary_label.setWordWrap(True)
+    parent.validation_summary_label.setTextInteractionFlags(
+        Qt.TextSelectableByMouse)
+    parent.validation_summary_label.setStyleSheet(
+        "font-weight: bold; color: #333;")
+    ds_layout.addRow(parent.validation_summary_label)
+
+    parent.color_stats_label = QLabel("")
+    parent.color_stats_label.setWordWrap(True)
+    parent.color_stats_label.setTextInteractionFlags(
+        Qt.TextSelectableByMouse)
+    parent.color_stats_label.setStyleSheet(
+        "font-weight: bold; color: #333;")
+    ds_layout.addRow(parent.color_stats_label)
+
     main_layout.addWidget(ds_group)
 
     # ============================================================
     # НОВЫЙ ДАТАСЕТ
     # ============================================================
-    out_group = QGroupBox("Новый датасет")
+    out_group = QGroupBox("Новый датасет (Результат нарезки)")
     out_layout = QFormLayout(out_group)
 
     parent.output_edit = QLineEdit()
@@ -66,7 +81,8 @@ def setup_sahi_slicer_ui(parent):
     parent.btn_open_output = QPushButton("Открыть")
     parent.btn_open_output.setMaximumWidth(90)
     parent.btn_open_output.setEnabled(False)
-    parent.btn_open_output.setToolTip("Открыть папку последнего созданного датасета")
+    parent.btn_open_output.setToolTip(
+        "Открыть папку последнего созданного датасета")
 
     out_row = QHBoxLayout()
     out_row.addWidget(parent.output_edit, 1)
@@ -128,7 +144,7 @@ def setup_sahi_slicer_ui(parent):
     parent.split_ratio.setDecimals(2)
     parent.split_ratio.setValue(0.80)
     parent.split_ratio.setToolTip(
-        "Доля train. 0.8 = 80/20; 0 = без разделения (всё в одну папку).")
+        "Доля train. 0.8 = 80/20; 1.0 = всё в train (val и test будут пустыми).")
     par_layout.addRow("Доля train:", parent.split_ratio)
 
     parent.format_combo = QComboBox()
@@ -136,6 +152,27 @@ def setup_sahi_slicer_ui(parent):
     parent.format_combo.addItem("coco", "coco")
     parent.format_combo.addItem("yolo", "yolo")
     par_layout.addRow("Формат выхода:", parent.format_combo)
+
+    parent.annotation_format_combo = QComboBox()
+    parent.annotation_format_combo.addItem("auto (по содержимому)", "auto")
+    parent.annotation_format_combo.addItem("bbox (HBB)", "bbox")
+    parent.annotation_format_combo.addItem(
+        "segmentation (полигон)", "segmentation")
+    parent.annotation_format_combo.setCurrentIndex(0)
+    parent.annotation_format_combo.setToolTip(
+        "Какой тип меток сохранять в YOLO .txt:\n"
+        "  • auto — segmentation, если в аннотациях он есть; иначе bbox;\n"
+        "  • bbox — class cx cy w h (YOLO HBB);\n"
+        "  • segmentation — class x1 y1 x2 y2 ... xn yn (YOLO seg).\n\n"
+        "Каждая аннотация пишется в выбранном формате, если поле есть,\n"
+        "иначе используется второе доступное поле.\n\n"
+        "Для OBB-датасета, где исходные объекты были 4-точечными\n"
+        "полигонами: segmentation даёт строку из 8 координат — это\n"
+        "формат YOLO OBB. Однако, если SAHI обрезал объект границей\n"
+        "тайла, сегмент может стать 5+ точечным — такие объекты\n"
+        "YOLO-OBB уже не примет (для них нужен YOLO-seg).")
+    par_layout.addRow("Формат разметки YOLO:",
+                      parent.annotation_format_combo)
 
     parent.channels_combo = QComboBox()
     parent.channels_combo.addItem("1 (Grayscale)", 1)
@@ -147,14 +184,15 @@ def setup_sahi_slicer_ui(parent):
     parent.seed_spin = QSpinBox()
     parent.seed_spin.setRange(0, 99999)
     parent.seed_spin.setValue(42)
-    parent.seed_spin.setToolTip("Seed для воспроизводимости (split + субдискретизация фона).")
+    parent.seed_spin.setToolTip(
+        "Seed для воспроизводимости (split + субдискретизация фона).")
     par_layout.addRow("Seed:", parent.seed_spin)
 
     parent.visualize_spin = QSpinBox()
     parent.visualize_spin.setRange(0, 50)
     parent.visualize_spin.setValue(0)
     parent.visualize_spin.setToolTip(
-        "Сколько случайных тайлов визуализировать с bbox для проверки.\n"
+        "Сколько случайных тайлов визуализировать с bbox/полигоном.\n"
         "0 = не визуализировать.")
     par_layout.addRow("Визуализировать тайлов:", parent.visualize_spin)
 
@@ -203,8 +241,8 @@ def setup_sahi_slicer_ui(parent):
     # ============================================================
     # ПОДКЛЮЧЕНИЯ
     # ============================================================
-    parent.btn_load_coco.clicked.connect(parent.load_coco_json)
-    parent.btn_load_images.clicked.connect(parent.load_images_folder)
+    parent.btn_load_coco.clicked.connect(parent.load_coco)
+    parent.btn_add_coco.clicked.connect(parent.add_coco)
     parent.btn_browse_output.clicked.connect(parent.browse_output)
     parent.btn_open_output.clicked.connect(parent.open_output_folder)
     parent.btn_generate.clicked.connect(parent.on_generate)
