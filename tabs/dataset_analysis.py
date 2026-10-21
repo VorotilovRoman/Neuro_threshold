@@ -1,6 +1,16 @@
 # dataset_analysis.py
 from import_libs_internal import *
 from import_libs_methods_ui import setup_dataset_analysis_ui
+
+try:
+    from dataset_analysis_ui import TrainingImageLabel
+except ImportError:
+    try:
+        from import_libs_methods_ui import TrainingImageLabel
+    except ImportError:
+        TrainingImageLabel = None
+
+
 from utils.dataset_analysis_logic import (
     DatasetAnalyzer, FilterParams,
     ClassImbalanceAnalyzer, ResolutionAnalyzer, BrightnessAnalyzer,
@@ -1210,17 +1220,240 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             tag="DUP")
 
     def _on_dup_row_double_clicked(self, row, col):
+        """Двойной клик по строке таблицы дубликатов →
+        открывает ОДНО окно со всеми парами группы."""
         groups = getattr(self, '_dup_groups_by_row', [])
         if row < 0 or row >= len(groups):
             return
-        paths = groups[row]
+        paths = list(groups[row])
         if not paths:
             return
-        target = paths[0]
-        for p in self.pairs:
-            if p[0] == target:
-                self._open_pair_validation(p)
+        by_path = {p[0]: p for p in self.pairs}
+        pairs_to_open = [by_path[path] for path in paths
+                         if path in by_path]
+        if not pairs_to_open:
+            self._audit_log(
+                f"[DUP] Группа #{row + 1}: пары не найдены в self.pairs",
+                tag="DUP", level='WARN')
+            return
+        self._open_dup_group_validation(pairs_to_open, row + 1)
+
+    def _open_dup_group_validation(self, pairs, group_num):
+        """Одно окно с прокруткой, показывающее все пары группы
+        (изображение + наложенная GT-разметка)."""
+        import cv2
+        import numpy as np
+
+        n = len(pairs)
+        if n == 0:
+            return
+
+        if n > 100:
+            reply = QMessageBox.question(
+                self, "Большая группа",
+                f"В группе {n} пар — рендер может занять время "
+                f"и память.\nПродолжить?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No)
+            if reply != QMessageBox.Yes:
                 return
+
+        self._audit_log(
+            f"[DUP] Открытие окна группы #{group_num} ({n} пар)",
+            tag="DUP")
+
+        prog = QProgressDialog(
+            f"Подготовка {n} изображений…", "Отмена", 0, n, self)
+        prog.setWindowTitle("Группа дубликатов")
+        prog.setWindowModality(Qt.WindowModal)
+        prog.setMinimumDuration(300)
+        prog.setValue(0)
+
+        rendered = []  # (idx, img_path, lbl_path, pixmap|None, err|None)
+        cancelled = False
+
+        for idx, pair in enumerate(pairs, 1):
+            if prog.wasCanceled():
+                cancelled = True
+                break
+            prog.setValue(idx - 1)
+            prog.setLabelText(
+                f"Подготовка {idx}/{n}: {os.path.basename(pair[0])}")
+            QApplication.processEvents()
+
+            img_path = pair[0]
+            lbl_path = pair[1] if len(pair) > 1 else None
+
+            if not os.path.exists(img_path):
+                rendered.append((idx, img_path, lbl_path, None,
+                                 "файл не найден"))
+                continue
+
+            try:
+                base = cv2.imread(img_path)
+            except Exception as e:
+                rendered.append((idx, img_path, lbl_path, None,
+                                 f"ошибка чтения: {e}"))
+                continue
+
+            if base is None:
+                rendered.append((idx, img_path, lbl_path, None,
+                                 "не удалось прочитать"))
+                continue
+
+            h, w = base.shape[:2]
+            img = base.copy()
+
+            try:
+                if (self.dataset_type == 0
+                        and lbl_path and os.path.exists(lbl_path)):
+                    anns = load_annotations(
+                        lbl_path, 1, 1, format_hint=self.input_format)
+                    for ann in anns:
+                        if not ann:
+                            continue
+                        if ann[0] == 'detect':
+                            _, cls, cx, cy, bw, bh = ann
+                            x1 = int((cx - bw / 2) * w)
+                            y1 = int((cy - bh / 2) * h)
+                            x2 = int((cx + bw / 2) * w)
+                            y2 = int((cy + bh / 2) * h)
+                            cv2.rectangle(img, (x1, y1), (x2, y2),
+                                          (0, 200, 0), 2)
+                            cv2.putText(img, f"c{cls}",
+                                        (x1, max(y1 - 5, 12)),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.5, (0, 200, 0), 1)
+                        elif ann[0] in ('segment', 'obb'):
+                            pts = ann[2]
+                            if not pts or len(pts) < 6:
+                                continue
+                            arr = np.array(
+                                [[int(pts[i] * w),
+                                  int(pts[i + 1] * h)]
+                                 for i in range(0, len(pts), 2)],
+                                dtype=np.int32)
+                            cv2.polylines(img, [arr], True,
+                                          (0, 200, 0), 2)
+                elif (self.dataset_type == 1
+                        and lbl_path and os.path.exists(lbl_path)):
+                    mask = cv2.imread(lbl_path, cv2.IMREAD_UNCHANGED)
+                    if mask is not None and mask.ndim == 2:
+                        overlay = np.zeros_like(img)
+                        overlay[mask > 0] = (0, 200, 0)
+                        img = cv2.addWeighted(
+                            img, 1.0, overlay, 0.35, 0)
+                        contours, _ = cv2.findContours(
+                            (mask > 0).astype(np.uint8),
+                            cv2.RETR_EXTERNAL,
+                            cv2.CHAIN_APPROX_SIMPLE)
+                        cv2.drawContours(img, contours, -1,
+                                         (0, 200, 0), 2)
+            except Exception as e:
+                self._audit_log(
+                    f"[DUP] Ошибка отрисовки GT {img_path}: {e}",
+                    tag="DUP", level='WARN')
+
+            try:
+                _, buf = cv2.imencode('.png', img)
+                pix = QPixmap()
+                pix.loadFromData(buf.tobytes(), 'PNG')
+                rendered.append((idx, img_path, lbl_path, pix, None))
+            except Exception as e:
+                rendered.append((idx, img_path, lbl_path, None,
+                                 f"кодирование: {e}"))
+
+        prog.setValue(n)
+
+        if not rendered:
+            if cancelled:
+                self._audit_log(
+                    "[DUP] Рендеринг отменён пользователем",
+                    tag="DUP", level='WARN')
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(
+            f"Группа дубликатов #{group_num} — {len(rendered)} пар")
+        dlg.resize(1400, 900)
+        v = QVBoxLayout(dlg)
+
+        header = QLabel(
+            f"<b>Группа дубликатов #{group_num}</b> | "
+            f"Пар: <b>{len(rendered)}</b>. "
+            f"Прокручивайте вниз, чтобы увидеть все.")
+        header.setWordWrap(True)
+        v.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        container = QWidget()
+        lay = QVBoxLayout(container)
+        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setSpacing(14)
+
+        for idx, img_path, lbl_path, pix, err in rendered:
+            card = QWidget()
+            card.setObjectName("pair_card")
+            card.setStyleSheet(
+                "QWidget#pair_card {"
+                " background-color: #fafafa;"
+                " border: 1px solid #ddd;"
+                " border-radius: 4px; }")
+            card_lay = QVBoxLayout(card)
+            card_lay.setContentsMargins(8, 8, 8, 8)
+            card_lay.setSpacing(6)
+
+            name = os.path.basename(img_path)
+            lbl_name = (os.path.basename(lbl_path)
+                        if lbl_path else '—')
+            info = QLabel(
+                f"<b>#{idx}</b> — <code>{name}</code><br>"
+                f"<span style='color:#666;font-size:11px'>"
+                f"Метка: {lbl_name} | Путь: {img_path}</span>")
+            info.setWordWrap(True)
+            info.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            card_lay.addWidget(info)
+
+            if err:
+                err_lbl = QLabel(f"❌ {err}")
+                err_lbl.setStyleSheet(
+                    "color: #b00000; font-weight: bold; padding: 8px;")
+                err_lbl.setWordWrap(True)
+                card_lay.addWidget(err_lbl)
+            elif pix is not None and not pix.isNull():
+                if TrainingImageLabel is not None:
+                    img_lbl = TrainingImageLabel()
+                    img_lbl.set_image(pix)
+                    img_lbl.setMinimumHeight(360)
+                    card_lay.addWidget(img_lbl)
+                else:
+                    img_lbl = QLabel()
+                    scaled = pix.scaled(
+                        1100, 500, Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation)
+                    img_lbl.setPixmap(scaled)
+                    img_lbl.setAlignment(Qt.AlignCenter)
+                    card_lay.addWidget(img_lbl)
+
+            lay.addWidget(card)
+
+        lay.addStretch()
+        scroll.setWidget(container)
+        v.addWidget(scroll, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_close = QPushButton("Закрыть")
+        btn_close.clicked.connect(dlg.accept)
+        btn_row.addWidget(btn_close)
+        v.addLayout(btn_row)
+
+        dlg.exec_()
+
+
 
     # ==================================================================
     # Тепловая карта
