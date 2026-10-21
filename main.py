@@ -55,6 +55,10 @@ class ImagePlayer(QMainWindow):
     def _add_tab(self, widget, title):
         """Добавляет вкладку, извлекает centralWidget если widget — QMainWindow.
            Возвращает индекс добавленной вкладки."""
+        if not hasattr(self, '_tab_widgets'):
+            self._tab_widgets = []
+        self._tab_widgets.append(widget)
+
         if isinstance(widget, QMainWindow):
             content = widget.centralWidget()
             if content is None:
@@ -142,6 +146,10 @@ class ImagePlayer(QMainWindow):
             elif tab_id == "dataset":
                 from tabs.preparing_dataset_yaml import DatasetPreparationWindow
                 self._add_tab(DatasetPreparationWindow(), tab_title)
+
+            elif tab_id == "dataset_analysis":
+                from tabs.dataset_analysis import DatasetAnalysisWindow
+                self._add_tab(DatasetAnalysisWindow(), tab_title)
 
             elif tab_id == "yolo_train":
                 from tabs.deep_learning_training import YoloTrainWindow

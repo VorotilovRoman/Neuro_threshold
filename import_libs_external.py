@@ -77,11 +77,15 @@ from PyQt5.QtWidgets import (
     QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QProgressDialog,
     QMenu, QAction, QGraphicsView, QSplashScreen, QProgressBar, QDoubleSpinBox,
     QDialogButtonBox, QScrollArea, QFormLayout, QGraphicsScene, QGraphicsPixmapItem,
-    QFrame, QLineEdit, QButtonGroup, QShortcut
+    QFrame, QLineEdit, QButtonGroup, QShortcut, QToolBox
 )
 
 # ========== Matplotlib ==========
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import (
+    FigureCanvasQTAgg as FigureCanvas,
+    NavigationToolbar2QT as NavigationToolbar,
+)
+
 from matplotlib.figure import Figure
 
 # ========== Печать версий ==========

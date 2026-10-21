@@ -19,19 +19,6 @@ from utils.image_io import (
 from utils.yaml_io import (
     load_yolo_yaml, load_unet_yaml_pairs, find_mask_for_image,
 )
-from utils.dataset_validation import (
-    ImageStats,
-    PairValidator,
-    PairValidationDialog,
-    scan_detection_pairs,
-    scan_segmentation_pairs,
-    scan_image_only_pairs,
-    select_pairs_for_conversion,
-    convert_pairs_color,
-    select_pairs_for_8bit_png,
-    convert_pairs_to_8bit_png,
-    build_pair_display,
-)
 
 # ========== НОВЫЕ модули (генерация датасетов) ==========
 from utils.annotation_converter import (
@@ -149,4 +136,20 @@ from ui.DL_predict_settings import (
     SegFormerInferenceSettings,
     SAMInferenceSettings,
     CustomONNXInferenceSettings,
+)
+
+
+from utils.dataset_validation import (
+    ImageStats,
+    PairValidator,
+    PairValidationDialog,
+    scan_detection_pairs,
+    scan_segmentation_pairs,
+    scan_image_only_pairs,
+    select_pairs_for_conversion,
+    convert_pairs_color,
+    select_pairs_for_8bit_png,
+    convert_pairs_to_8bit_png,
+    build_pair_display,
+    DatasetLoaderMixin,
 )
