@@ -1,8 +1,9 @@
 # utils/dataset_analysis_logic.py
 """
 Быстрая логика анализа датасета (без ML, без длительных операций):
-  • фильтрация пар по площади / объектам / размеру (с учётом пустых аннотаций);
-  • распределение площадей (общее и по классам);
+  • фильтрация пар по размеру / яркости / aspect / объектам /
+    площади (px² и % от изображения);
+  • распределение площадей (общее — в px² и %, и по классам);
   • распределение по классам (таблица + круговая + столбчатая диаграммы);
   • дисбаланс классов (ratio, Gini, Entropy);
   • разрешение изображений (W/H/aspect);
@@ -19,6 +20,47 @@ from PIL import Image
 import cv2
 import numpy as np
 import os
+
+
+# ============================================================
+# Кэш яркости (модульный)
+# ============================================================
+# Ключ: путь к файлу. Значение: (mtime, mean_brightness).
+# Позволяет не перечитывать изображение при каждом «Обновить метрики»
+# и при повторном запуске «Качество изображений».
+_brightness_cache = {}
+
+
+def get_image_brightness(path):
+    """Средняя яркость изображения (grayscale mean, 0..255).
+
+    Кэшируется по (path, mtime), чтобы повторные вызовы (например,
+    при переключении фильтров или запуске анализа качества после
+    фильтрации) не читали файл повторно.
+
+    Возвращает None, если файл не открывается.
+    """
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    cached = _brightness_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return None
+        mean = float(img.mean())
+    except Exception:
+        return None
+    _brightness_cache[path] = (mtime, mean)
+    return mean
+
+
+def clear_brightness_cache():
+    """Сброс кэша яркости (например, после удаления файлов)."""
+    _brightness_cache.clear()
 
 
 # ============================================================
@@ -40,17 +82,52 @@ def _check_cancel(cancel_check):
 # DTO фильтрации
 # ============================================================
 class FilterParams:
-    __slots__ = ('min_w', 'min_h', 'min_objs', 'max_objs',
-                 'min_area', 'max_area')
+    """Параметры фильтрации.
 
-    def __init__(self, min_w=0, min_h=0, min_objs=0, max_objs=0,
-                 min_area=0, max_area=0):
+    Соглашения о «не задано»:
+      • min_w=0, min_h=0, min_objs=0, min_area=0,
+        min_area_pct=0.0, min_aspect=0.0 — без ограничения;
+      • max_w=0, max_h=0, max_objs=0, max_area=0,
+        max_area_pct=0.0, max_aspect=0.0 — без ограничения сверху;
+      • min_brightness=-1, max_brightness=-1 — без ограничения
+        (0 — валидное значение яркости, поэтому sentinel = -1).
+    """
+    __slots__ = (
+        'min_w', 'max_w', 'min_h', 'max_h',
+        'min_brightness', 'max_brightness',
+        'min_objs', 'max_objs',
+        'min_area', 'max_area',
+        'min_area_pct', 'max_area_pct',
+        'min_aspect', 'max_aspect',
+    )
+
+    def __init__(self,
+                 min_w=0, max_w=0, min_h=0, max_h=0,
+                 min_brightness=-1, max_brightness=-1,
+                 min_objs=0, max_objs=0,
+                 min_area=0, max_area=0,
+                 min_area_pct=0.0, max_area_pct=0.0,
+                 min_aspect=0.0, max_aspect=0.0):
+        # 1–2. размеры
         self.min_w = min_w
+        self.max_w = max_w
         self.min_h = min_h
+        self.max_h = max_h
+        # 3. яркость
+        self.min_brightness = min_brightness
+        self.max_brightness = max_brightness
+        # 4. объекты
         self.min_objs = min_objs
         self.max_objs = max_objs
+        # 5. площадь px²
         self.min_area = min_area
         self.max_area = max_area
+        # 6. площадь % от изображения
+        self.min_area_pct = min_area_pct
+        self.max_area_pct = max_area_pct
+        # 7. соотношение сторон W/H
+        self.min_aspect = min_aspect
+        self.max_aspect = max_aspect
 
 
 # ============================================================
@@ -115,7 +192,7 @@ class DatasetAnalyzer:
     # ==================================================================
     def filter_pairs(self, pairs, included_class_ids, total_classes, params,
                      progress_cb=None, include_empty=False):
-        """Фильтрует пары по площади / объектам / размеру.
+        """Фильтрует пары по 7 критериям.
 
         include_empty — включать в результат изображения с пустой
         (0 объектов) разметкой. Они попадают в filtered_pairs и в
@@ -124,7 +201,8 @@ class DatasetAnalyzer:
         """
         empty = {
             'filtered_pairs': [], 'class_counts': {}, 'class_areas': {},
-            'total_objects': 0, 'object_areas': [], 'empty_images': 0,
+            'total_objects': 0, 'object_areas': [],
+            'object_areas_pct': [], 'empty_images': 0,
             'error': None,
         }
         if not pairs:
@@ -134,22 +212,47 @@ class DatasetAnalyzer:
             return empty
 
         class_filter_active = (0 < len(included_class_ids) < total_classes)
+
+        # ---- Разбор параметров в эффективные границы ----
+        min_w = params.min_w
+        max_w = params.max_w if params.max_w > 0 else float('inf')
+        min_h = params.min_h
+        max_h = params.max_h if params.max_h > 0 else float('inf')
+
+        min_br_active = params.min_brightness >= 0
+        max_br_active = params.max_brightness >= 0
+        min_br = float(params.min_brightness) if min_br_active else 0.0
+        max_br = (float(params.max_brightness) if max_br_active
+                  else float('inf'))
+        check_brightness = min_br_active or max_br_active
+
         min_objs = params.min_objs
         max_objs = params.max_objs if params.max_objs > 0 else float('inf')
+
         min_area = params.min_area
         max_area = params.max_area if params.max_area > 0 else float('inf')
+        min_area_pct = float(params.min_area_pct)
+        max_area_pct = (float(params.max_area_pct)
+                        if params.max_area_pct > 0 else float('inf'))
+
+        min_aspect = float(params.min_aspect)
+        max_aspect = (float(params.max_aspect)
+                      if params.max_aspect > 0 else float('inf'))
 
         valid_pairs = []
         class_counts = {}
         class_areas = {}
         total_objects = 0
         object_areas = []
+        object_areas_pct = []
         empty_images = 0
         total = len(pairs)
 
         for i, pair in enumerate(pairs):
             img_path = pair[0]
             lbl_path = pair[1] if len(pair) > 1 else None
+
+            # 0. Размеры изображения
             try:
                 with Image.open(img_path) as img:
                     w, h = img.size
@@ -157,19 +260,43 @@ class DatasetAnalyzer:
                 if progress_cb:
                     progress_cb(i + 1, total)
                 continue
-            if w < params.min_w or h < params.min_h:
+
+            # 1–2. Мин/макс ширина и высота
+            if w < min_w or w > max_w or h < min_h or h > max_h:
                 if progress_cb:
                     progress_cb(i + 1, total)
                 continue
 
+            # 3. Соотношение сторон W/H
+            if h > 0:
+                aspect = float(w) / float(h)
+                if aspect < min_aspect or aspect > max_aspect:
+                    if progress_cb:
+                        progress_cb(i + 1, total)
+                    continue
+
+            # 4. Средняя яркость (только если фильтр задан)
+            if check_brightness:
+                bright = get_image_brightness(img_path)
+                if bright is not None:
+                    if bright < min_br or bright > max_br:
+                        if progress_cb:
+                            progress_cb(i + 1, total)
+                        continue
+
+            # 5. Аннотации и количество объектов
             anns = self._load_annotations_for_pair(
-                lbl_path, included_class_ids if class_filter_active else None)
+                lbl_path,
+                included_class_ids if class_filter_active else None)
             num_objs = len(anns)
             if num_objs < min_objs or num_objs > max_objs:
                 if progress_cb:
                     progress_cb(i + 1, total)
                 continue
 
+            img_area = float(w) * float(h) if (w > 0 and h > 0) else 0.0
+
+            # 6–7. Площадь объектов: px² и %
             valid_objs_in_img = 0
             for ann in anns:
                 try:
@@ -177,12 +304,15 @@ class DatasetAnalyzer:
                 except (ValueError, TypeError, IndexError):
                     continue
                 area = self._annotation_area(ann, w, h)
-                if min_area <= area <= max_area:
+                area_pct = (area / img_area * 100.0) if img_area > 0 else 0.0
+                if (min_area <= area <= max_area
+                        and min_area_pct <= area_pct <= max_area_pct):
                     valid_objs_in_img += 1
                     class_counts[cls_id] = class_counts.get(cls_id, 0) + 1
                     class_areas.setdefault(cls_id, []).append(area)
                     total_objects += 1
                     object_areas.append(area)
+                    object_areas_pct.append(area_pct)
 
             is_empty_image = (num_objs == 0)
             include_this = False
@@ -204,6 +334,7 @@ class DatasetAnalyzer:
             'class_areas': class_areas,
             'total_objects': total_objects,
             'object_areas': object_areas,
+            'object_areas_pct': object_areas_pct,
             'empty_images': empty_images,
             'error': None,
         }
@@ -272,7 +403,8 @@ class DatasetAnalyzer:
                        ax_all, ax_classes, canvas,
                        filtered_pairs, all_pairs, class_counts, total_objects,
                        object_areas, class_areas, name_by_orig,
-                       ax_pie=None, ax_bar=None):
+                       ax_pie=None, ax_bar=None,
+                       ax_area_pct=None, object_areas_pct=None):
         metrics_summary_label.setText(
             f"<b>Снимков после фильтрации:</b> "
             f"{len(filtered_pairs)} из {len(all_pairs)}<br>"
@@ -298,17 +430,34 @@ class DatasetAnalyzer:
             class_stats_table.setItem(row, 1, item1)
             class_stats_table.setItem(row, 2, item2)
 
+        # --- Гистограмма площадей в px² ---
         ax_all.clear()
         if object_areas:
             ax_all.hist(object_areas, bins=50, color='skyblue',
                         edgecolor='black', log=True)
-            ax_all.set_title("Площади: все объекты")
+            ax_all.set_title("Площади: все объекты (px²)")
             ax_all.set_xlabel("Площадь (px²)")
             ax_all.set_ylabel("Кол-во (Log)")
         else:
             ax_all.text(0.5, 0.5, "Нет данных", ha='center', va='center')
-            ax_all.set_title("Площади: все объекты")
+            ax_all.set_title("Площади: все объекты (px²)")
 
+        # --- Гистограмма площадей в % от площади изображения ---
+        if ax_area_pct is not None:
+            ax_area_pct.clear()
+            if object_areas_pct:
+                ax_area_pct.hist(object_areas_pct, bins=50,
+                                 color='lightcoral',
+                                 edgecolor='black', log=True)
+                ax_area_pct.set_title("Площади: все объекты (%)")
+                ax_area_pct.set_xlabel("Площадь (% от изображения)")
+                ax_area_pct.set_ylabel("Кол-во (Log)")
+            else:
+                ax_area_pct.text(0.5, 0.5, "Нет данных",
+                                 ha='center', va='center')
+                ax_area_pct.set_title("Площади: все объекты (%)")
+
+        # --- Гистограмма площадей по классам (px²) ---
         ax_classes.clear()
         if class_areas:
             top = sorted(class_areas.items(),
@@ -322,14 +471,18 @@ class DatasetAnalyzer:
                                 edgecolor='black', log=True,
                                 label=f"{cls_id}: {name} (n={len(areas)})")
             ax_classes.legend(fontsize=6, loc='upper right')
-            ax_classes.set_title("Площади по классам (топ-10)")
+            ax_classes.set_title("Площади по классам (топ-10, px²)")
             ax_classes.set_xlabel("Площадь (px²)")
             ax_classes.set_ylabel("Log")
         else:
             ax_classes.text(0.5, 0.5, "Нет данных",
                             ha='center', va='center')
-            ax_classes.set_title("Площади по классам")
+            ax_classes.set_title("Площади по классам (px²)")
 
+        try:
+            ax_all.figure.tight_layout()
+        except Exception:
+            pass
         canvas.draw()
 
         if ax_pie is None or ax_bar is None:
@@ -617,7 +770,7 @@ class ResolutionAnalyzer:
 
 
 # ============================================================
-# Яркость
+# Яркость (использует общий кэш get_image_brightness)
 # ============================================================
 class BrightnessAnalyzer:
     DARK_BOUND = 40.0
@@ -633,12 +786,9 @@ class BrightnessAnalyzer:
             if _check_cancel(cancel_check):
                 cancelled = True
                 break
-            try:
-                img = cv2.imread(pair[0], cv2.IMREAD_GRAYSCALE)
-                if img is not None:
-                    means.append(float(img.mean()))
-            except Exception:
-                pass
+            b = get_image_brightness(pair[0])
+            if b is not None:
+                means.append(b)
             _safe_progress(progress_cb, i, total)
 
         if not means:

@@ -43,7 +43,6 @@ class TrainingImageLabel(QLabel):
         self._update_pixmap()
 
     def sizeHint(self):
-        # базовая высота для каждого изображения в списке
         return QSize(800, 400)
 
 
@@ -79,6 +78,54 @@ def _make_page(toolbox, title, description, content, buttons,
     scroll.setFrameShape(QFrame.NoFrame)
     toolbox.addItem(scroll, title)
     return scroll
+
+
+def _mk_min_spin(rng, suffix="", special="Не задано", tooltip=""):
+    w = QSpinBox()
+    w.setRange(*rng)
+    if suffix:
+        w.setSuffix(suffix)
+    w.setSpecialValueText(special)
+    if tooltip:
+        w.setToolTip(tooltip)
+    return w
+
+
+def _mk_max_spin(rng, suffix="", special="Без ограничений", tooltip=""):
+    w = QSpinBox()
+    w.setRange(*rng)
+    if suffix:
+        w.setSuffix(suffix)
+    w.setSpecialValueText(special)
+    if tooltip:
+        w.setToolTip(tooltip)
+    return w
+
+
+def _mk_min_dspin(rng, decimals=2, suffix="", special="Не задано",
+                  tooltip=""):
+    w = QDoubleSpinBox()
+    w.setRange(*rng)
+    w.setDecimals(decimals)
+    if suffix:
+        w.setSuffix(suffix)
+    w.setSpecialValueText(special)
+    if tooltip:
+        w.setToolTip(tooltip)
+    return w
+
+
+def _mk_max_dspin(rng, decimals=2, suffix="", special="Без ограничений",
+                  tooltip=""):
+    w = QDoubleSpinBox()
+    w.setRange(*rng)
+    w.setDecimals(decimals)
+    if suffix:
+        w.setSuffix(suffix)
+    w.setSpecialValueText(special)
+    if tooltip:
+        w.setToolTip(tooltip)
+    return w
 
 
 def setup_dataset_analysis_ui(parent):
@@ -132,11 +179,16 @@ def setup_dataset_analysis_ui(parent):
     h_splitter = QSplitter(Qt.Horizontal)
     parent.main_v_splitter.addWidget(h_splitter)
 
-    # ---- Левая панель ----
-    left = QWidget()
-    ll = QVBoxLayout(left)
-    ll.setContentsMargins(0, 0, 5, 0)
-    ll.addWidget(QLabel("Найденные пары (двойной клик — снимок валидации):"))
+    # ============================================================
+    # ЛЕВАЯ ПАНЕЛЬ
+    # ============================================================
+    left_splitter = QSplitter(Qt.Vertical)
+
+    # ---------- ВЕРХ: список пар + служебные метки + легенда ----------
+    top_left = QWidget()
+    tl = QVBoxLayout(top_left)
+    tl.setContentsMargins(0, 0, 5, 0)
+    tl.addWidget(QLabel("Найденные пары (двойной клик — снимок валидации):"))
 
     parent.file_list = QListWidget()
     parent.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -147,35 +199,35 @@ def setup_dataset_analysis_ui(parent):
         "Серый — отброшенные фильтром; цвет класса — прошедшие.\n"
         "Розовый/оранжевый фон — дубликаты (pHash/MD5), "
         "красный — утечка между сплитами.")
-    ll.addWidget(parent.file_list, 1)
+    tl.addWidget(parent.file_list, 1)
 
     parent.pair_count_label = QLabel("Всего пар: 0")
     parent.pair_count_label.setWordWrap(True)
     parent.pair_count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    ll.addWidget(parent.pair_count_label)
+    tl.addWidget(parent.pair_count_label)
 
     parent.validation_progress_label = QLabel("")
     parent.validation_progress_label.setWordWrap(True)
     parent.validation_progress_label.setStyleSheet(
         "color: #0055aa; font-weight: bold;")
     parent.validation_progress_label.setVisible(False)
-    ll.addWidget(parent.validation_progress_label)
+    tl.addWidget(parent.validation_progress_label)
 
     parent.validation_warning_label = QLabel("")
     parent.validation_warning_label.setWordWrap(True)
     parent.validation_warning_label.setStyleSheet("color: #b00000;")
     parent.validation_warning_label.setVisible(False)
-    ll.addWidget(parent.validation_warning_label)
+    tl.addWidget(parent.validation_warning_label)
 
     parent.color_stats_label = QLabel("")
     parent.color_stats_label.setWordWrap(True)
     parent.color_stats_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     parent.color_stats_label.setStyleSheet("font-weight: bold; color: #333;")
-    ll.addWidget(parent.color_stats_label)
+    tl.addWidget(parent.color_stats_label)
 
     parent.class_legend_label = QLabel("<b>Легенда классов:</b>")
     parent.class_legend_label.setVisible(False)
-    ll.addWidget(parent.class_legend_label)
+    tl.addWidget(parent.class_legend_label)
 
     parent.class_legend_scroll = QScrollArea()
     parent.class_legend_scroll.setWidgetResizable(True)
@@ -188,14 +240,218 @@ def setup_dataset_analysis_ui(parent):
     parent.class_legend_layout.setContentsMargins(0, 0, 0, 0)
     parent.class_legend_layout.setSpacing(2)
     parent.class_legend_scroll.setWidget(parent.class_legend_container)
-    ll.addWidget(parent.class_legend_scroll)
+    tl.addWidget(parent.class_legend_scroll)
 
-    h_splitter.addWidget(left)
+    top_left.setMinimumHeight(300)
 
-    # ---- Правая панель ----
+    # ---------- НИЗ: фильтры + кнопки экспорта ----------
+    bottom_left = QWidget()
+    bl = QVBoxLayout(bottom_left)
+    bl.setContentsMargins(0, 5, 5, 0)
+    bl.setSpacing(6)
+
+    filter_header = QLabel(
+        "<b>Фильтры</b> "
+        "<span style='color:#888;font-size:11px'>"
+        "(влияют на все виды анализа и на экспорт нового датасета)"
+        "</span>")
+    filter_header.setWordWrap(True)
+    bl.addWidget(filter_header)
+
+    filter_scroll = QScrollArea()
+    filter_scroll.setWidgetResizable(True)
+    filter_scroll.setFrameShape(QFrame.NoFrame)
+
+    filter_container = QWidget()
+    fl = QVBoxLayout(filter_container)
+    fl.setContentsMargins(0, 0, 0, 0)
+
+    # =========================================================
+    # ФОРМА ФИЛЬТРОВ: 3 колонки — Параметр | Мин | Макс
+    # =========================================================
+    form = QGridLayout()
+    form.setHorizontalSpacing(8)
+    form.setVerticalSpacing(4)
+    form.setColumnStretch(0, 3)
+    form.setColumnStretch(1, 1)
+    form.setColumnStretch(2, 1)
+
+    form.addWidget(QLabel("<b>Параметр</b>"), 0, 0)
+    form.addWidget(QLabel("<b>Мин</b>"), 0, 1)
+    form.addWidget(QLabel("<b>Макс</b>"), 0, 2)
+
+    # 1. Ширина изображения (px)
+    parent.filter_min_w = _mk_min_spin(
+        (0, 100000),
+        tooltip="Минимальная ширина изображения (px).\n"
+                "0 = без ограничения.")
+    parent.filter_max_w = _mk_max_spin(
+        (0, 100000),
+        tooltip="Максимальная ширина изображения (px).\n"
+                "0 = без ограничения сверху.")
+    form.addWidget(QLabel("Ширина изобр. (px):"), 1, 0)
+    form.addWidget(parent.filter_min_w, 1, 1)
+    form.addWidget(parent.filter_max_w, 1, 2)
+
+    # 2. Высота изображения (px)
+    parent.filter_min_h = _mk_min_spin(
+        (0, 100000),
+        tooltip="Минимальная высота изображения (px).\n"
+                "0 = без ограничения.")
+    parent.filter_max_h = _mk_max_spin(
+        (0, 100000),
+        tooltip="Максимальная высота изображения (px).\n"
+                "0 = без ограничения сверху.")
+    form.addWidget(QLabel("Высота изобр. (px):"), 2, 0)
+    form.addWidget(parent.filter_min_h, 2, 1)
+    form.addWidget(parent.filter_max_h, 2, 2)
+
+    # 3. Средняя яркость изображения (0..255)
+    parent.filter_min_brightness = _mk_min_spin(
+        (-1, 255),
+        tooltip="Минимальная средняя яркость изображения (0..255).\n"
+                "Считается так же, как на странице «Качество изображений».\n"
+                "-1 = без ограничения (значение 0 — валидное: очень тёмные).")
+    parent.filter_min_brightness.setValue(-1)
+    parent.filter_max_brightness = _mk_max_spin(
+        (-1, 255),
+        tooltip="Максимальная средняя яркость изображения (0..255).\n"
+                "-1 = без ограничения (значение 0 — валидное).")
+    parent.filter_max_brightness.setValue(-1)
+    form.addWidget(QLabel("Яркость изобр. (0–255):"), 3, 0)
+    form.addWidget(parent.filter_min_brightness, 3, 1)
+    form.addWidget(parent.filter_max_brightness, 3, 2)
+
+    # 4. Количество объектов на снимке
+    parent.filter_min_objs = _mk_min_spin(
+        (0, 10000),
+        tooltip="Минимальное число объектов в изображении "
+                "(после учёта включённых классов).\n"
+                "0 = допускаются пустые (если включена галочка ниже).")
+    parent.filter_max_objs = _mk_max_spin(
+        (0, 10000),
+        tooltip="Максимальное число объектов в изображении.\n"
+                "0 = без ограничения сверху.")
+    form.addWidget(QLabel("Кол-во объектов:"), 4, 0)
+    form.addWidget(parent.filter_min_objs, 4, 1)
+    form.addWidget(parent.filter_max_objs, 4, 2)
+
+    # 5. Площадь объекта (px²)
+    parent.filter_min_area = _mk_min_spin(
+        (0, 1000000),
+        suffix=" px²",
+        tooltip="Минимальная площадь объекта (px²).\n"
+                "bbox = w·h; segment/OBB = площадь по формуле шнурков.")
+    parent.filter_max_area = _mk_max_spin(
+        (0, 10000000),
+        suffix=" px²",
+        tooltip="Максимальная площадь объекта (px²).\n"
+                "0 = без ограничения сверху.")
+    form.addWidget(QLabel("Площадь объекта (px²):"), 5, 0)
+    form.addWidget(parent.filter_min_area, 5, 1)
+    form.addWidget(parent.filter_max_area, 5, 2)
+
+    # 6. Площадь объекта в % от площади изображения
+    parent.filter_min_area_pct = _mk_min_dspin(
+        (0.0, 100.0), decimals=2, suffix=" %",
+        tooltip="Минимальная площадь объекта в % от площади изображения.\n"
+                "0.00 = без ограничения.")
+    parent.filter_max_area_pct = _mk_max_dspin(
+        (0.0, 100.0), decimals=2, suffix=" %",
+        tooltip="Максимальная площадь объекта в % от площади изображения.\n"
+                "0.00 = без ограничения сверху.")
+    form.addWidget(QLabel("Площадь объекта (%):"), 6, 0)
+    form.addWidget(parent.filter_min_area_pct, 6, 1)
+    form.addWidget(parent.filter_max_area_pct, 6, 2)
+
+    # 7. Соотношение сторон W/H
+    parent.filter_min_aspect = _mk_min_dspin(
+        (0.0, 100.0), decimals=2,
+        tooltip="Минимальное соотношение сторон W/H.\n"
+                "0.00 = без ограничения.")
+    parent.filter_max_aspect = _mk_max_dspin(
+        (0.0, 100.0), decimals=2,
+        tooltip="Максимальное соотношение сторон W/H.\n"
+                "0.00 = без ограничения сверху.")
+    form.addWidget(QLabel("Соотношение сторон W/H:"), 7, 0)
+    form.addWidget(parent.filter_min_aspect, 7, 1)
+    form.addWidget(parent.filter_max_aspect, 7, 2)
+
+    fl.addLayout(form)
+
+    # --- Таблица классов ---
+    parent.class_table = QTableWidget()
+    parent.class_table.setColumnCount(5)
+    parent.class_table.setHorizontalHeaderLabels(
+        ["New ID", "Original ID", "Name", "Mask pixel", "Include"])
+    parent.class_table.horizontalHeader().setSectionResizeMode(
+        QHeaderView.Stretch)
+    parent.class_table.setColumnHidden(3, True)
+    parent.class_table.setEditTriggers(
+        QAbstractItemView.NoEditTriggers)
+    parent.class_table.setMinimumHeight(150)
+    fl.addWidget(parent.class_table, 1)
+
+    parent.include_empty_annotations = QCheckBox(
+        "Include images with empty annotations")
+    parent.include_empty_annotations.setToolTip(
+        "Включать в результат изображения, у которых после фильтрации "
+        "по классам не осталось ни одного объекта.\n"
+        "Работает только если «Мин. кол-во объектов» = 0.")
+    fl.addWidget(parent.include_empty_annotations)
+
+    parent.chk_exclude_classes_from_files = QCheckBox(
+        "Исключать аннотации исключённых классов из .txt при экспорте")
+    parent.chk_exclude_classes_from_files.setChecked(False)
+    parent.chk_exclude_classes_from_files.setToolTip(
+        "При экспорте в .txt оставить только строки с классами, "
+        "включёнными в таблице (Include).")
+    fl.addWidget(parent.chk_exclude_classes_from_files)
+
+    parent.progress_bar = QProgressBar()
+    parent.progress_bar.setVisible(False)
+    fl.addWidget(parent.progress_bar)
+
+    filter_scroll.setWidget(filter_container)
+    bl.addWidget(filter_scroll, 1)
+
+    # --- Кнопки (фиксированы внизу левой панели) ---
+    parent.btn_apply_filters = QPushButton(
+        "Обновить метрики (с учётом фильтров)")
+    parent.btn_apply_filters.setStyleSheet(
+        "background-color: #4CAF50; color: white; font-weight: bold;")
+
+    parent.btn_export_filtered = QPushButton("Создать новый датасет")
+    parent.btn_export_filtered.setStyleSheet(
+        "background-color: #2196F3; color: white; font-weight: bold;")
+    parent.btn_export_filtered.setToolTip(
+        "Экспортирует все пары, прошедшие фильтрацию "
+        "(включая пустые снимки, если включена соответствующая галочка).")
+
+    parent.btn_open_last_export = QPushButton("📂 Открыть папку датасета")
+    parent.btn_open_last_export.setToolTip(
+        "Открыть папку последнего экспортированного датасета")
+    parent.btn_open_last_export.setEnabled(False)
+
+    btn_row = QHBoxLayout()
+    btn_row.addWidget(parent.btn_apply_filters)
+    btn_row.addWidget(parent.btn_export_filtered)
+    btn_row.addWidget(parent.btn_open_last_export)
+    bl.addLayout(btn_row)
+
+    bottom_left.setMinimumHeight(280)
+
+    left_splitter.addWidget(top_left)
+    left_splitter.addWidget(bottom_left)
+    left_splitter.setSizes([460, 360])
+    h_splitter.addWidget(left_splitter)
+
+    # ============================================================
+    # ПРАВАЯ ПАНЕЛЬ — TOOLBOX
+    # ============================================================
     parent.toolbox = QToolBox()
     h_splitter.addWidget(parent.toolbox)
-    h_splitter.setSizes([400, 800])
+    h_splitter.setSizes([520, 680])
 
     # ============================================================
     # 1. Классы, объекты и площади
@@ -222,11 +478,13 @@ def setup_dataset_analysis_ui(parent):
     parent.class_stats_table.setMinimumHeight(120)
     mc.addWidget(parent.class_stats_table, 1)
 
-    parent.figure = Figure(figsize=(6, 3.5))
+    # --- Фигура площадей: 3 подграфика (px², %, классы) ---
+    parent.figure = Figure(figsize=(8, 3.5))
     parent.canvas = FigureCanvas(parent.figure)
-    parent.ax = parent.figure.add_subplot(121)
-    parent.ax_classes = parent.figure.add_subplot(122)
-    parent.canvas.setMinimumHeight(260)
+    parent.ax = parent.figure.add_subplot(131)          # площадь px²
+    parent.ax_area_pct = parent.figure.add_subplot(132)  # площадь %
+    parent.ax_classes = parent.figure.add_subplot(133)   # по классам
+    parent.canvas.setMinimumHeight(280)
     mc.addWidget(parent.canvas, 2)
 
     parent.class_chart_figure = Figure(figsize=(6, 2.8))
@@ -261,7 +519,8 @@ def setup_dataset_analysis_ui(parent):
         parent.toolbox, "1. Классы, объекты и площади",
         "**Таблица классов** — число объектов каждого класса и доля. "
         "**Площади** — bbox: w·h, segment/OBB: shoelace. "
-        "Слева — общая гистограмма, справа — по топ-10 классам. "
+        "Слева — гистограмма площадей в пикселях, в центре — "
+        "в % от площади изображения, справа — распределение по классам. "
         "**Круговая/столбчатая диаграммы** — распределение по классам. "
         "**Дисбаланс:** ratio = max/min; Gini (0 — равномерно); "
         "Entropy (выше — равномернее). Тултипы на строках таблицы.",
@@ -270,122 +529,7 @@ def setup_dataset_analysis_ui(parent):
     )
 
     # ============================================================
-    # 2. Фильтрация
-    # ============================================================
-    filter_content = QWidget()
-    fl = QVBoxLayout(filter_content)
-    fl.setContentsMargins(0, 0, 0, 0)
-
-    form = QFormLayout()
-    parent.filter_min_w = QSpinBox()
-    parent.filter_min_w.setRange(0, 100000)
-    parent.filter_min_w.setSpecialValueText("Не задано")
-    parent.filter_min_w.setToolTip(
-        "Минимальная ширина изображения (px).\n"
-        "Изображения уже — отбрасываются. 0 = без ограничения.")
-
-    parent.filter_min_h = QSpinBox()
-    parent.filter_min_h.setRange(0, 100000)
-    parent.filter_min_h.setSpecialValueText("Не задано")
-    parent.filter_min_h.setToolTip(
-        "Минимальная высота изображения (px).\n"
-        "0 = без ограничения.")
-
-    parent.filter_min_objs = QSpinBox()
-    parent.filter_min_objs.setRange(0, 10000)
-    parent.filter_min_objs.setToolTip(
-        "Минимальное число объектов (после учёта включённых классов).\n"
-        "0 = допускаются пустые (если включена галочка ниже).")
-
-    parent.filter_max_objs = QSpinBox()
-    parent.filter_max_objs.setRange(0, 10000)
-    parent.filter_max_objs.setSpecialValueText("Без ограничений")
-    parent.filter_max_objs.setToolTip(
-        "Максимальное число объектов.\n"
-        "0 = без ограничения сверху.")
-
-    parent.filter_min_area = QSpinBox()
-    parent.filter_min_area.setRange(0, 1000000)
-    parent.filter_min_area.setSuffix(" px²")
-    parent.filter_min_area.setSpecialValueText("Не задано")
-    parent.filter_min_area.setToolTip(
-        "Минимальная площадь объекта (px²).\n"
-        "Для bbox = w·h, для segment/OBB = площадь по формуле шнурков.")
-
-    parent.filter_max_area = QSpinBox()
-    parent.filter_max_area.setRange(0, 10000000)
-    parent.filter_max_area.setSuffix(" px²")
-    parent.filter_max_area.setSpecialValueText("Без ограничений")
-    parent.filter_max_area.setToolTip(
-        "Максимальная площадь объекта (px²).\n"
-        "0 = без ограничения сверху.")
-
-    form.addRow("Мин. ширина изобр.:", parent.filter_min_w)
-    form.addRow("Мин. высота изобр.:", parent.filter_min_h)
-    form.addRow("Мин. кол-во объектов:", parent.filter_min_objs)
-    form.addRow("Макс. кол-во объектов:", parent.filter_max_objs)
-    form.addRow("Мин. площадь объекта:", parent.filter_min_area)
-    form.addRow("Макс. площадь объекта:", parent.filter_max_area)
-    fl.addLayout(form)
-
-    parent.class_table = QTableWidget()
-    parent.class_table.setColumnCount(5)
-    parent.class_table.setHorizontalHeaderLabels(
-        ["New ID", "Original ID", "Name", "Mask pixel", "Include"])
-    parent.class_table.horizontalHeader().setSectionResizeMode(
-        QHeaderView.Stretch)
-    parent.class_table.setColumnHidden(3, True)
-    parent.class_table.setEditTriggers(
-        QAbstractItemView.NoEditTriggers)
-    parent.class_table.setMinimumHeight(150)
-    fl.addWidget(parent.class_table, 1)
-
-    parent.include_empty_annotations = QCheckBox(
-        "Include images with empty annotations")
-    parent.include_empty_annotations.setToolTip(
-        "Включать в результат изображения, у которых после фильтрации "
-        "по классам не осталось ни одного объекта.\n"
-        "Работает только если «Мин. кол-во объектов» = 0.")
-    fl.addWidget(parent.include_empty_annotations)
-
-    parent.chk_exclude_classes_from_files = QCheckBox(
-        "Исключать аннотации исключённых классов из .txt при экспорте")
-    parent.chk_exclude_classes_from_files.setChecked(False)
-    parent.chk_exclude_classes_from_files.setToolTip(
-        "При экспорте в .txt оставить только строки с классами, "
-        "включёнными в таблице (Include).")
-    fl.addWidget(parent.chk_exclude_classes_from_files)
-
-    parent.btn_apply_filters = QPushButton("Обновить метрики (с учётом фильтров)")
-    parent.btn_apply_filters.setStyleSheet(
-        "background-color: #4CAF50; color: white; font-weight: bold;")
-    parent.btn_export_filtered = QPushButton("Создать новый датасет")
-    parent.btn_export_filtered.setStyleSheet(
-        "background-color: #2196F3; color: white; font-weight: bold;")
-    parent.btn_open_last_export = QPushButton("📂 Открыть папку датасета")
-    parent.btn_open_last_export.setToolTip(
-        "Открыть папку последнего экспортированного датасета")
-    parent.btn_open_last_export.setEnabled(False)
-
-    parent.progress_bar = QProgressBar()
-    parent.progress_bar.setVisible(False)
-    fl.addWidget(parent.progress_bar)
-
-    _make_page(
-        parent.toolbox, "2. Фильтрация",
-        "Пороги для отбора пар. **0 = без ограничения.** "
-        "Площади работают для bbox, segment и OBB. "
-        "Отброшенные пары выделяются в списке **серым** и уходят в конец. "
-        "**Пустые аннотации** попадают в результат только при включённой "
-        "галочке и «Мин. кол-во объектов» = 0.",
-        filter_content,
-        buttons=[parent.btn_apply_filters, parent.btn_export_filtered,
-                 parent.btn_open_last_export],
-        min_height=600, content_stretch=1,
-    )
-
-    # ============================================================
-    # 3. Качество изображений
+    # 2. Качество изображений
     # ============================================================
     quality_content = QWidget()
     qc = QVBoxLayout(quality_content)
@@ -409,18 +553,19 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_stop_quality.setEnabled(False)
 
     _make_page(
-        parent.toolbox, "3. Качество изображений",
+        parent.toolbox, "2. Качество изображений",
         "**imgsz** — рекомендуемый размер для обучения. "
         "**Яркость:** тёмные < 40, пересвеченные > 215. "
         "**Aspect** W/H — соотношение сторон. "
-        "**Работает по filtered_pairs.**",
+        "**Работает по filtered_pairs** (то есть с учётом фильтров "
+        "из левой панели).",
         quality_content,
         buttons=[parent.btn_run_quality, parent.btn_stop_quality],
         min_height=400, content_stretch=1,
     )
 
     # ============================================================
-    # 4. Дубликаты и утечка
+    # 3. Дубликаты и утечка
     # ============================================================
     dup_content = QWidget()
     dc = QVBoxLayout(dup_content)
@@ -454,20 +599,20 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_stop_duplicates.setEnabled(False)
 
     _make_page(
-        parent.toolbox, "4. Дубликаты и утечка",
+        parent.toolbox, "3. Дубликаты и утечка",
         "**Точные** — MD5. **Почти** — pHash Hamming ≤ 8. "
         "**Утечка** — группа в ≥2 сплитах. "
         "Подсветка в списке: 🔴 точный, 🟠 похожее, 🌕 утечка. "
         "**Выбор строки** — выделяет пары группы в списке слева. "
         "**Двойной клик** — открывает валидацию всех пар группы "
-        "последовательно.",
+        "последовательно. **Работает по filtered_pairs.**",
         dup_content,
         buttons=[parent.btn_run_duplicates, parent.btn_stop_duplicates],
         min_height=320, content_stretch=1,
     )
 
     # ============================================================
-    # 5. Тепловая карта объектов
+    # 4. Тепловая карта объектов
     # ============================================================
     heat_content = QWidget()
     hc = QVBoxLayout(heat_content)
@@ -500,7 +645,7 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_stop_heatmap.setEnabled(False)
 
     _make_page(
-        parent.toolbox, "5. Тепловая карта объектов",
+        parent.toolbox, "4. Тепловая карта объектов",
         "Центры bbox/полигонов на сетке N×N.\n"
         "**Оси X/Y** — % от ширины/высоты. **Цвет/колорбар** — "
         "число центров объектов в ячейке.\n"
@@ -511,7 +656,7 @@ def setup_dataset_analysis_ui(parent):
     )
 
     # ============================================================
-    # 6. Аудит модели (Loss Inspection) + валидация YOLO
+    # 5. Аудит модели (Loss Inspection) + валидация YOLO
     # ============================================================
     audit_content = QWidget()
     ac = QVBoxLayout(audit_content)
@@ -565,7 +710,6 @@ def setup_dataset_analysis_ui(parent):
     parent.audit_summary_label.setWordWrap(True)
     ac.addWidget(parent.audit_summary_label)
 
-    # --- NEW: фильтр отображения аудита ---
     audit_filter_row = QHBoxLayout()
     audit_filter_row.addWidget(QLabel("Показывать:"))
     parent.audit_filter_combo = QComboBox()
@@ -682,20 +826,20 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_stop_audit.setEnabled(False)
 
     _make_page(
-        parent.toolbox, "6. Аудит модели (Loss Inspection) и валидация YOLO",
+        parent.toolbox, "5. Аудит модели (Loss Inspection) и валидация YOLO",
         "**Loss Inspection:** модель прогоняется по каждой GT-разметке. "
         "**Двойной клик по строке** — двойное окно сравнения (GT ↔ Pred). "
         "**Валидация (YOLO val):** укажите путь к `data.yaml` тестового "
         "датасета (или папке), выберите сплит, запустите. "
         "Метрики P/R/F1/mAP50/mAP50-95 по каждому классу выдаёт "
-        "Ultralytics.",
+        "Ultralytics. **Работает по filtered_pairs.**",
         audit_content,
         buttons=[parent.btn_run_audit, parent.btn_stop_audit],
         min_height=700, content_stretch=1,
     )
 
     # ============================================================
-    # 7. Кластеризация эмбеддингов
+    # 6. Кластеризация эмбеддингов
     # ============================================================
     cluster_content = QWidget()
     cc = QVBoxLayout(cluster_content)
@@ -735,19 +879,19 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_stop_cluster.setEnabled(False)
 
     _make_page(
-        parent.toolbox, "7. Кластеризация эмбеддингов",
+        parent.toolbox, "6. Кластеризация эмбеддингов",
         "CLIP → UMAP (2D) → HDBSCAN.\n"
         "**Панель инструментов над графиком:** 🔍 зум, ✋ pan, "
         "🏠 сброс, 💾 сохранить PNG.\n"
         "**Клик по точке** (не в зуме) — открыть пару. "
-        "«Шум» — выбросы.",
+        "«Шум» — выбросы. **Работает по filtered_pairs.**",
         cluster_content,
         buttons=[parent.btn_run_cluster, parent.btn_stop_cluster],
         min_height=420, content_stretch=1,
     )
 
     # ============================================================
-    # 8. Результаты обучения модели
+    # 7. Результаты обучения модели
     # ============================================================
     tr_content = QWidget()
     tcl = QVBoxLayout(tr_content)
@@ -785,7 +929,7 @@ def setup_dataset_analysis_ui(parent):
         tcl.addWidget(img_lbl)
 
     _make_page(
-        parent.toolbox, "8. Результаты обучения модели",
+        parent.toolbox, "7. Результаты обучения модели",
         "Укажите папку run/ (где лежат результаты обучения YOLO). "
         "**В окне** отображаются: `results.png`, `labels.jpg`, "
         "`confusion_matrix_normalized.png`.\n"
@@ -801,7 +945,7 @@ def setup_dataset_analysis_ui(parent):
     )
 
     # ============================================================
-    # 9. Общий отчёт
+    # 8. Общий отчёт
     # ============================================================
     report_content = QWidget()
     rc = QVBoxLayout(report_content)
@@ -850,7 +994,7 @@ def setup_dataset_analysis_ui(parent):
     parent.btn_open_report_folder.setEnabled(False)
 
     _make_page(
-        parent.toolbox, "9. Общий отчёт",
+        parent.toolbox, "8. Общий отчёт",
         "Собирает результаты всех запущенных анализов в один файл.",
         report_content, buttons=[parent.btn_generate_report,
                                  parent.btn_open_report_folder],

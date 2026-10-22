@@ -720,18 +720,44 @@ class ReportThread(QThread):
                 L.append(f"- **{k}:** {v}")
             L.append("")
 
-            # 2. Параметры фильтрации
+            # 2. Параметры фильтрации (все 14 полей)
             fp = d.get('filter_params')
             if fp:
                 L.append("## 2. Параметры фильтрации\n")
-                L.append(f"- **min_w:** {fp.get('min_w')} px")
-                L.append(f"- **min_h:** {fp.get('min_h')} px")
-                L.append(f"- **min_objs:** {fp.get('min_objs')}")
-                L.append(f"- **max_objs:** {fp.get('max_objs')} "
-                         f"(0 = без ограничений)")
-                L.append(f"- **min_area:** {fp.get('min_area')} px²")
-                L.append(f"- **max_area:** {fp.get('max_area')} px² "
-                         f"(0 = без ограничений)")
+                L.append("| Параметр | Мин | Макс |")
+                L.append("|---|---:|---:|")
+                L.append(f"| Ширина изобр. (px) | "
+                         f"{fp.get('min_w', 0)} | "
+                         f"{fp.get('max_w', 0)} |")
+                L.append(f"| Высота изобр. (px) | "
+                         f"{fp.get('min_h', 0)} | "
+                         f"{fp.get('max_h', 0)} |")
+
+                min_b = fp.get('min_brightness', -1)
+                max_b = fp.get('max_brightness', -1)
+                min_b_str = '—' if min_b is None or min_b < 0 else str(min_b)
+                max_b_str = '—' if max_b is None or max_b < 0 else str(max_b)
+                L.append(f"| Яркость изобр. (0–255) | "
+                         f"{min_b_str} | {max_b_str} |")
+
+                L.append(f"| Кол-во объектов | "
+                         f"{fp.get('min_objs', 0)} | "
+                         f"{fp.get('max_objs', 0)} |")
+                L.append(f"| Площадь объекта (px²) | "
+                         f"{fp.get('min_area', 0)} | "
+                         f"{fp.get('max_area', 0)} |")
+                L.append(f"| Площадь объекта (%) | "
+                         f"{fp.get('min_area_pct', 0.0):.2f} | "
+                         f"{fp.get('max_area_pct', 0.0):.2f} |")
+                L.append(f"| Соотношение сторон W/H | "
+                         f"{fp.get('min_aspect', 0.0):.2f} | "
+                         f"{fp.get('max_aspect', 0.0):.2f} |")
+                L.append("")
+                L.append("_0 в полях «мин/макс» = без ограничения. "
+                         "Яркость −1 = «не задано» "
+                         "(0 — валидное значение: очень тёмные)._")
+                L.append("")
+
                 L.append(f"- **include_empty_annotations:** "
                          f"{fp.get('include_empty')}")
                 L.append(f"- **exclude_classes_from_files:** "
@@ -743,8 +769,21 @@ class ReportThread(QThread):
                 L.append(f"- **Excluded class IDs:** "
                          f"{fp.get('excluded_class_ids')}")
                 L.append("")
+            fs = d.get('filter_stats')
+            if fs:
+                L.append("### Итог фильтрации\n")
+                L.append(f"- **Пар прошло фильтр:** "
+                         f"{fs['filtered_pairs']}")
+                if fs.get('empty_images'):
+                    L.append(f"- **Из них пустых снимков:** "
+                             f"{fs['empty_images']}")
+                L.append(f"- **Объектов в наборе:** "
+                         f"{fs['total_objects']}")
+                L.append(f"- **Классов с объектами:** "
+                         f"{fs['classes_with_objects']}")
+                L.append("")
 
-            # 3. Классы и площади
+            # 3. Классы и распределение площадей
             cs = d.get('class_stats', [])
             if cs:
                 L.append("## 3. Классы и распределение площадей\n")
@@ -754,9 +793,16 @@ class ReportThread(QThread):
                     L.append(f"| {row[0]} | {row[1]} | {row[2]} |")
                 L.append("")
             if imgs.get('areas'):
-                L.append(f"![Распределение площадей]({imgs['areas']})\n")
+                L.append(
+                    "**Распределение площадей:** слева — в px², "
+                    "в центре — в % от площади изображения, "
+                    "справа — по классам (топ-10).\n")
+                L.append(
+                    f"![Площади: px² / % от изображения / по классам]"
+                    f"({imgs['areas']})\n")
             if imgs.get('classes'):
-                L.append(f"![Распределение по классам]({imgs['classes']})\n")
+                L.append(
+                    f"![Распределение по классам]({imgs['classes']})\n")
 
             # 4. Дисбаланс
             imb = d.get('imbalance')
@@ -974,7 +1020,6 @@ class ReportThread(QThread):
                     if tr.get('metrics'):
                         L.append("### Метрики и аргументы\n")
 
-                        # results.csv — полное содержимое в <details>
                         csv_path = tr['metrics'].get('results.csv')
                         if csv_path and os.path.isfile(csv_path):
                             try:
@@ -998,7 +1043,6 @@ class ReportThread(QThread):
                         else:
                             L.append("- `results.csv` (не найден)")
 
-                        # args.yaml — параметры обучения в <details>
                         yaml_path = tr['metrics'].get('args.yaml')
                         if yaml_path and os.path.isfile(yaml_path):
                             try:
@@ -1030,7 +1074,6 @@ class ReportThread(QThread):
                             L.append(f"- `weights/{name}`")
                         L.append("")
 
-                    # best_meta.json — полное содержимое в <details>
                     meta_path = tr.get('best_model_meta')
                     if meta_path and os.path.isfile(meta_path):
                         try:

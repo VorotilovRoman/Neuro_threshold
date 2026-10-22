@@ -2,6 +2,7 @@
 from import_libs_internal import *
 from import_libs_methods_ui import setup_dataset_analysis_ui
 
+
 try:
     from dataset_analysis_ui import TrainingImageLabel
 except ImportError:
@@ -9,14 +10,6 @@ except ImportError:
         from import_libs_methods_ui import TrainingImageLabel
     except ImportError:
         TrainingImageLabel = None
-
-
-from utils.dataset_analysis_logic import (
-    DatasetAnalyzer, FilterParams,
-    ClassImbalanceAnalyzer, ResolutionAnalyzer, BrightnessAnalyzer,
-    TrainingResultsLoader,
-)
-from utils.dataset_audit_logic import detect_device
 
 from collections import Counter
 import traceback
@@ -28,10 +21,6 @@ import sys as _sys
 import numpy as np
 
 
-
-# ============================================================
-# Валидация YOLO в отдельном потоке
-# ============================================================
 # ============================================================
 # Валидация YOLO в отдельном потоке
 # ============================================================
@@ -261,11 +250,6 @@ class YoloValThread(QThread):
             self.finished_signal.emit({'error': str(e), 'metrics': None})
 
 
-
-
-
-
-
 class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     def __init__(self):
         super().__init__()
@@ -345,6 +329,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._last_training_results = None
         self._last_export_dir = None
         self._last_report_dir = None
+        self._last_filter_stats = None
         self._pair_class_cache = {}
 
         self._audit_model_cache = None
@@ -620,20 +605,37 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         included_class_ids = DatasetAnalyzer.get_included_class_ids(
             self.class_table)
         total_classes = self.class_table.rowCount()
+
+        # ---- Читаем ВСЕ поля фильтра ----
         params = FilterParams(
             min_w=self.filter_min_w.value(),
+            max_w=self.filter_max_w.value(),
             min_h=self.filter_min_h.value(),
+            max_h=self.filter_max_h.value(),
+            min_brightness=self.filter_min_brightness.value(),   # -1 = нет
+            max_brightness=self.filter_max_brightness.value(),   # -1 = нет
             min_objs=self.filter_min_objs.value(),
             max_objs=self.filter_max_objs.value(),
             min_area=self.filter_min_area.value(),
             max_area=self.filter_max_area.value(),
+            min_area_pct=self.filter_min_area_pct.value(),
+            max_area_pct=self.filter_max_area_pct.value(),
+            min_aspect=self.filter_min_aspect.value(),
+            max_aspect=self.filter_max_aspect.value(),
         )
         include_empty = bool(self.include_empty_annotations.isChecked())
 
         self._audit_log(
             f"Старт фильтрации: pairs={len(self.pairs)}, "
             f"classes={len(included_class_ids)}/{total_classes}, "
-            f"include_empty={include_empty}",
+            f"include_empty={include_empty}, "
+            f"size=[{params.min_w}..{params.max_w}]×"
+            f"[{params.min_h}..{params.max_h}], "
+            f"brightness=[{params.min_brightness}..{params.max_brightness}], "
+            f"objs=[{params.min_objs}..{params.max_objs}], "
+            f"area=[{params.min_area}..{params.max_area}]px², "
+            f"area%=[{params.min_area_pct:.2f}..{params.max_area_pct:.2f}], "
+            f"aspect=[{params.min_aspect:.2f}..{params.max_aspect:.2f}]",
             tag="ANALYSIS")
 
         self.progress_bar.setVisible(True)
@@ -662,6 +664,14 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
 
         self.filtered_pairs = result['filtered_pairs']
         empty_imgs = result.get('empty_images', 0)
+
+        # --- сохраняем итоги для отчёта ---
+        self._last_filter_stats = {
+            'filtered_pairs': len(self.filtered_pairs),
+            'empty_images': empty_imgs,
+            'total_objects': result['total_objects'],
+            'classes_with_objects': len(result['class_counts']),
+        }
         self._audit_log(
             f"Фильтрация: {len(self.pairs)} → "
             f"{len(self.filtered_pairs)} пар, "
@@ -677,10 +687,13 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         label += self._build_extra_info()
         self.pair_count_label.setText(label)
 
-        self._render_metrics(result['class_counts'],
-                             result['total_objects'],
-                             result['object_areas'],
-                             result['class_areas'])
+        self._render_metrics(
+            result['class_counts'],
+            result['total_objects'],
+            result['object_areas'],
+            result['class_areas'],
+            object_areas_pct=result.get('object_areas_pct', []),
+        )
         self._update_imbalance_table(result['class_counts'])
         self._update_class_legend(result['class_counts'])
         self._restyle_and_sort_file_list()
@@ -734,7 +747,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             tag="IMBALANCE", level='OK')
 
     def _render_metrics(self, class_counts, total_objects,
-                        object_areas, class_areas=None):
+                        object_areas, class_areas=None,
+                        object_areas_pct=None):
         if class_areas is None:
             class_areas = {}
         name_by_orig = DatasetAnalyzer.get_class_names_by_orig_id(
@@ -746,7 +760,10 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             class_counts, total_objects, object_areas, class_areas,
             name_by_orig,
             ax_pie=getattr(self, 'ax_pie', None),
-            ax_bar=getattr(self, 'ax_bar', None))
+            ax_bar=getattr(self, 'ax_bar', None),
+            ax_area_pct=getattr(self, 'ax_area_pct', None),
+            object_areas_pct=object_areas_pct or [],
+        )
 
     # ==================================================================
     # Перекраска + сортировка file_list
@@ -868,11 +885,9 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             return
 
         try:
-            # Приводим путь к абсолютному и нормализуем слэши под Windows
             norm_path = os.path.normpath(os.path.abspath(img_path))
 
             if _sys.platform.startswith('win'):
-                # Ключевой момент: путь — отдельный аргумент, а не часть "/select,..."
                 subprocess.Popen(['explorer.exe', '/select,', norm_path])
             elif _sys.platform == 'darwin':
                 subprocess.Popen(['open', '-R', norm_path])
@@ -885,8 +900,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             self._audit_log(f"Не удалось открыть {img_path}: {e}",
                             tag="FS", level='ERROR')
             QMessageBox.warning(self, "Не удалось открыть", f"{img_path}\n{e}")
-
-
 
     def _delete_pair_files(self, pair, refresh_metrics=True):
         """Удаляет файлы пары (изображение + разметка/маска).
@@ -937,6 +950,13 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 self, "Ошибка удаления",
                 "Не удалось удалить ни один файл:\n" + "\n".join(errors))
             return False
+
+        # Инвалидируем кэш яркости для удалённых файлов,
+        # чтобы они не участвовали в следующих фильтрациях.
+        try:
+            clear_brightness_cache()
+        except Exception:
+            pass
 
         # Удаляем из состояния
         self.pairs = [p for p in self.pairs if p[0] != img_path]
@@ -1261,8 +1281,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._clear_duplicate_highlights()
         self._highlight_duplicates_in_file_list(dups, leak_report)
 
-        # Построение таблицы делегировано общему методу —
-        # используется также при удалении пар из контекстного меню.
         self._rebuild_dup_table()
 
         lines = [f"Точных групп: {len(exact)}, "
@@ -1284,8 +1302,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                   for p in rg['paths'][:3])
                 self._audit_log(
                     f"  утечка {rg['splits']}: {names}", tag="DUP")
-
-
 
     def stop_duplicate_analysis(self):
         self._stop_requested = True
@@ -1366,7 +1382,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             return
 
         if not rows:
-            # Пустое выделение → снимаем в file_list
             self.file_list.blockSignals(True)
             try:
                 self.file_list.clearSelection()
@@ -1424,7 +1439,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             return
         self._open_dup_group_validation(pairs_to_open, row + 1)
 
-
     def _on_delete_pair_from_dup(self, card_widget, img_path, lbl_path):
         """Удаление пары прямо из окна просмотра группы дубликатов."""
         pair = (img_path, lbl_path) if lbl_path else (img_path,)
@@ -1462,7 +1476,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         prog.setMinimumDuration(300)
         prog.setValue(0)
 
-        rendered = []  # (idx, img_path, lbl_path, pixmap|None, err|None)
+        rendered = []
         cancelled = False
 
         for idx, pair in enumerate(pairs, 1):
@@ -1631,7 +1645,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                     img_lbl.setAlignment(Qt.AlignCenter)
                     card_lay.addWidget(img_lbl)
 
-            # --- Кнопка удаления пары ---
             del_row = QHBoxLayout()
             del_row.addStretch()
             btn_del = QPushButton("🗑 Удалить пару")
@@ -1660,8 +1673,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         v.addLayout(btn_row)
 
         dlg.exec_()
-
-
 
     # ==================================================================
     # Тепловая карта
@@ -1871,8 +1882,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 f"gt={item['gt_count']}, pred={item['pred_count']}, "
                 f"iou={item['mean_iou']:.3f}", tag="AUDIT")
 
-
-
     def _open_audit_row(self, row, col):
         items = getattr(self, '_last_audit_display', None) or []
         if row < 0 or row >= len(items):
@@ -1920,7 +1929,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                     it.setBackground(QColor(255, 220, 220))
                 self.audit_table.setItem(row, c, it)
 
-        # Обновляем summary с информацией о фильтре
         meta = self._last_audit_meta or {}
         if meta:
             processed = meta.get('processed', 0)
@@ -1974,7 +1982,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 tag="AUDIT", level='ERROR')
             return None
 
-
     # ==================================================================
     # Открытие папок в проводнике
     # ==================================================================
@@ -2010,7 +2017,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._open_folder_in_explorer(self._last_report_dir)
 
     def _open_audit_comparison(self, item):
-
         img_path = item['img_path']
         lbl_path = item.get('lbl_path')
         if not os.path.exists(img_path):
@@ -2104,7 +2110,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                     except Exception:
                         pass
 
-                # boxes → obb fallback
                 boxes_obj = getattr(r, 'boxes', None)
                 obb_obj = getattr(r, 'obb', None)
 
@@ -2130,9 +2135,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         except Exception as e:
             self._audit_log(f"[AUDIT] Ошибка отрисовки Pred: {e}",
                             tag="AUDIT")
-
-
-
 
         _, buf_gt = cv2.imencode('.png', img_gt)
         _, buf_pr = cv2.imencode('.png', img_pred)
@@ -2504,7 +2506,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     def load_training_results(self):
         folder = self.training_results_edit.text().strip()
         if not folder or not os.path.isdir(folder):
-            # Сразу открываем диалог выбора папки
             folder = QFileDialog.getExistingDirectory(
                 self, "Папка run/ с результатами обучения")
             if not folder:
@@ -2522,7 +2523,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self.training_results_summary_label.setText(
             TrainingResultsLoader.summary_text(data).replace("\n", "<br>"))
 
-        # Отображение 3-х ключевых файлов
         keys_map = {
             'results': 'results.png',
             'labels': 'labels.jpg',
@@ -2577,7 +2577,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                     f"Не удалось скопировать {name}: {e}",
                     tag="REPORT", level='WARN')
 
-        # Стандартные фигуры
         if self.class_stats_table.rowCount() > 0:
             p = _save_fig(self.figure, 'areas.png')
             if p:
@@ -2604,7 +2603,6 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             if p:
                 rel['cluster'] = p
 
-        # Результаты обучения
         tr = self._last_training_results
         if tr and not tr.get('error'):
             for src_name, key in (
@@ -2731,11 +2729,19 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
 
         data['filter_params'] = {
             'min_w': self.filter_min_w.value(),
+            'max_w': self.filter_max_w.value(),
             'min_h': self.filter_min_h.value(),
+            'max_h': self.filter_max_h.value(),
+            'min_brightness': self.filter_min_brightness.value(),
+            'max_brightness': self.filter_max_brightness.value(),
             'min_objs': self.filter_min_objs.value(),
             'max_objs': self.filter_max_objs.value(),
             'min_area': self.filter_min_area.value(),
             'max_area': self.filter_max_area.value(),
+            'min_area_pct': self.filter_min_area_pct.value(),
+            'max_area_pct': self.filter_max_area_pct.value(),
+            'min_aspect': self.filter_min_aspect.value(),
+            'max_aspect': self.filter_max_aspect.value(),
             'include_empty': self.include_empty_annotations.isChecked(),
             'exclude_classes_from_files':
                 self.chk_exclude_classes_from_files.isChecked(),
@@ -2743,6 +2749,10 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             'included_class_ids': included_ids,
             'excluded_class_ids': excluded_ids,
         }
+
+        data['filter_stats'] = (
+            dict(self._last_filter_stats)
+            if self._last_filter_stats else None)
 
         cs = []
         for r in range(self.class_stats_table.rowCount()):
