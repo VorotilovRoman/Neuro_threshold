@@ -287,7 +287,7 @@ class YOLOTrainWidget(BaseTrainWidget):
 
     def _add_yolo_specific(self):
         self.imgsz = QSpinBox()
-        self.imgsz.setRange(32, 1280)
+        self.imgsz.setRange(32, 2560)
         self.imgsz.setValue(640)
         self.imgsz.setSingleStep(32)
         self.form_layout.addRow("Размер входа (imgsz):", self.imgsz)
