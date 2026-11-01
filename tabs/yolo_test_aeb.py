@@ -18,13 +18,20 @@
 Изображения загружаются лениво: в памяти держится окно вокруг текущего
 индекса, остальное подгружается/выгружается через LazyImageCache.
 
-Вся «тяжёлая» логика (модели AE/VAE, препроцессинг, работа с масками,
-кроп/доворот, ленивый кэш) вынесена в utils_aeb/yolo_aeb_utils.py.
+Геометрия, морфология, смещения, кроп и повороты объектов вынесены в
+utils_new/annotation_processing.py. Только модели AE/VAE и их препроцессинг
+пока импортируются из utils_aeb/yolo_aeb_utils.py.
 """
 from import_libs_internal import *
 from import_libs_methods_ui import setup_yolo_ae_vae_ui
 
-
+from utils_new.annotation_processing import (
+    detection_to_unified, detections_to_unified, yolo_result_to_detections,
+    render_unified_annotations, aeb_transform_image, render_ae_error_map,
+    longest_edge_angle_deg, apply_object_morphology,
+    crop_to_detection, rotate_with_optional_crop,
+    cls_suffix_from_detection,
+)
 from utils_aeb.yolo_aeb_utils import (
     # модели AE/VAE — старые conv+BN
     ConvEncoder, ConvDecoder, ConvAutoencoder, ConvVAE,
@@ -34,12 +41,6 @@ from utils_aeb.yolo_aeb_utils import (
     UNetEncoder, UNetDecoder, UNetAE, UNetVAE,
     # фабрика и препроцессинг
     detect_arch, build_ae_model_from_cfg, preprocess_image_for_ae,
-    # геометрия
-    longest_edge_angle_deg,
-    # работа с детекциями
-    build_detection_mask, morph_image_in_mask, apply_object_morphology,
-    fill_outside_object, crop_to_detection, rotate_with_optional_crop,
-    cls_suffix_from_detection, limit_image_size
 )
 
 # Защитный лимит для QPixmap/QImage и GDI на Windows.
@@ -176,6 +177,7 @@ class YoloInspectWindow(QMainWindow):
 
         # --- Текущее изображение ---
         self.original_image = None
+        self._last_yolo_pixmap_source = None
         self.displayed_image = None
         self.display_mode = "original"
         self.current_detections = []
@@ -184,6 +186,13 @@ class YoloInspectWindow(QMainWindow):
 
         # --- UI ---
         setup_yolo_ae_vae_ui(self)
+        # YOLO result display now uses the same vector Qt engine and palette
+        # as the dataset editor/viewer (without modifying old utils.smart_view).
+        self.yolo_view.set_callbacks(on_selection_changed=self._on_yolo_view_selection)
+        self.yolo_view.set_display_style(label_mode='all')
+        self.yolo_view.set_class_name_provider(self._name_for_yolo_class)
+        self._last_yolo_pixmap_source = None
+        self._syncing_yolo_selection = False
 
         # --- Таймеры ---
         self._yolo_reinfer_timer = QTimer()
@@ -426,6 +435,7 @@ class YoloInspectWindow(QMainWindow):
         self.image_paths = all_files
         self.current_index = 0
         self.original_image = None
+        self._last_yolo_pixmap_source = None
         self.displayed_image = None
         self.current_detections = []
         self._manual_ops = []
@@ -466,6 +476,7 @@ class YoloInspectWindow(QMainWindow):
         self.image_paths = []
         self.current_index = 0
         self.original_image = None
+        self._last_yolo_pixmap_source = None
         self.displayed_image = None
         self.current_detections = []
         self._manual_ops = []
@@ -593,88 +604,18 @@ class YoloInspectWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка инференса", str(e))
             return
 
+        if not results:
+            self.current_detections = []
+            self._update_objects_list()
+            self._rebuild_yolo_view()
+            self._rebuild_displayed()
+            return
         r = results[0]
-        names = self.model.names
-
-        self.current_detections = []
-        kind = "detect"
-
-        obb = getattr(r, "obb", None)
-        if obb is not None and getattr(obb, "xyxyxyxy", None) is not None and len(obb) > 0:
-            kind = "obb"
-            corners_all = obb.xyxyxyxy.cpu().numpy()
-            cls_all = obb.cls.cpu().numpy().astype(int)
-            conf_all = obb.conf.cpu().numpy()
-            for i in range(len(cls_all)):
-                corners = corners_all[i].tolist()
-                xs = [c[0] for c in corners]
-                ys = [c[1] for c in corners]
-                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-                cx = sum(xs) / 4.0
-                cy = sum(ys) / 4.0
-                cls_id = int(cls_all[i])
-                cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
-                self.current_detections.append({
-                    "kind": "obb", "cls_id": cls_id, "cls_name": cls_name,
-                    "conf": float(conf_all[i]),
-                    "xyxy": [float(x1), float(y1), float(x2), float(y2)],
-                    "corners": corners,
-                    "angle_deg": longest_edge_angle_deg(corners),
-                    "center": (float(cx), float(cy)),
-                })
-        elif getattr(r, "masks", None) is not None and getattr(r.masks, "xy", None) is not None \
-                and len(r.masks.xy) > 0:
-            kind = "seg"
-            boxes = r.boxes
-            xyxy_all = boxes.xyxy.cpu().numpy()
-            cls_all = boxes.cls.cpu().numpy().astype(int)
-            conf_all = boxes.conf.cpu().numpy()
-            for i, poly in enumerate(r.masks.xy):
-                if poly is None or len(poly) < 3:
-                    continue
-                pts = poly.astype(np.float32).reshape(-1, 1, 2)
-                rect = cv2.minAreaRect(pts)
-                box_pts = cv2.boxPoints(rect).tolist()
-                angle_deg = longest_edge_angle_deg(box_pts)
-                cx, cy = float(rect[0][0]), float(rect[0][1])
-                cls_id = int(cls_all[i])
-                cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
-                xyxy = [float(v) for v in xyxy_all[i].tolist()]
-                self.current_detections.append({
-                    "kind": "seg", "cls_id": cls_id, "cls_name": cls_name,
-                    "conf": float(conf_all[i]), "xyxy": xyxy,
-                    "corners": box_pts,
-                    "mask_xy": poly.tolist(),
-                    "angle_deg": angle_deg,
-                    "center": (cx, cy),
-                })
-        else:
-            kind = "detect"
-            boxes = getattr(r, "boxes", None)
-            if boxes is not None and len(boxes) > 0:
-                xyxy_all = boxes.xyxy.cpu().numpy()
-                cls_all = boxes.cls.cpu().numpy().astype(int)
-                conf_all = boxes.conf.cpu().numpy()
-                for i in range(len(cls_all)):
-                    x1, y1, x2, y2 = [float(v) for v in xyxy_all[i].tolist()]
-                    w = x2 - x1
-                    h = y2 - y1
-                    angle_deg = 0.0 if w >= h else 90.0
-                    corners = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-                    cls_id = int(cls_all[i])
-                    cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
-                    self.current_detections.append({
-                        "kind": "detect", "cls_id": cls_id, "cls_name": cls_name,
-                        "conf": float(conf_all[i]),
-                        "xyxy": [x1, y1, x2, y2], "corners": corners,
-                        "angle_deg": angle_deg,
-                        "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
-                    })
-
-        self.current_detections.sort(key=lambda d: -d["conf"])
-
-        self._rebuild_yolo_view()
+        self.current_detections = yolo_result_to_detections(
+            r, self.model.names, angle_fn=longest_edge_angle_deg)
+        kind = self.current_detections[0]['kind'] if self.current_detections else 'detect'
         self._update_objects_list()
+        self._rebuild_yolo_view()
         self._rebuild_displayed()
 
         self.log_text.clear()
@@ -732,6 +673,13 @@ class YoloInspectWindow(QMainWindow):
     def on_object_selection_changed(self, _row):
         if self._updating_objects_list:
             return
+        self._syncing_yolo_selection = True
+        try:
+            selected = self.objects_list.currentRow()
+            self.yolo_view.set_selected_index(
+                selected if self.chk_show_boxes.isChecked() else -1)
+        finally:
+            self._syncing_yolo_selection = False
         if self.original_image is None:
             return
         self._update_suggested_names()
@@ -741,9 +689,41 @@ class YoloInspectWindow(QMainWindow):
             or self.erosion_slider.value() > 1
             or self.dilation_slider.value() > 1
         )
-        if not need_update:
+        if need_update:
+            self.schedule_update()
+
+    def _name_for_yolo_class(self, cls_id):
+        names = getattr(self.model, 'names', {}) if self.model else {}
+        try:
+            return str(names.get(cls_id, cls_id) if isinstance(names, dict)
+                       else names[cls_id])
+        except (IndexError, KeyError, TypeError):
+            return str(cls_id)
+
+    def _on_yolo_view_selection(self, idx):
+        if self._syncing_yolo_selection:
             return
-        self.schedule_update()
+        if 0 <= idx < self.objects_list.count():
+            self.objects_list.setCurrentRow(idx)
+
+    def _render_for_detection(self, det):
+        """Shared processing pipeline for preview and export (new utility)."""
+        return aeb_transform_image(
+            self.original_image, det,
+            erode=int(self.erosion_slider.value()),
+            dilate=int(self.dilation_slider.value()),
+            shape_name=self.kernel_shape_combo.currentText(),
+            contour_only=self.chk_contour_only.isChecked(),
+            auto_crop=self.chk_auto_crop.isChecked(),
+            auto_rotate=self.chk_auto_rotate.isChecked(),
+            padding=int(self.crop_padding_spin.value()),
+            off_x=int(self.crop_offset_x_spin.value()),
+            off_y=int(self.crop_offset_y_spin.value()),
+            fine_angle=float(self.crop_rotation_spin.value()),
+            fill_mode=self._get_fill_mode(),
+            manual_ops=self._manual_ops,
+            invert=self.invert_image_checkbox.isChecked(),
+        )
 
     # --------------------------------------------------------
     # Имена файлов для сохранения
@@ -766,78 +746,50 @@ class YoloInspectWindow(QMainWindow):
     # 2-й снимок: YOLO-вид
     # --------------------------------------------------------
     def _detections_to_unified(self, img_w, img_h):
-        unified = []
-        for d in self.current_detections:
-            kind = d["kind"]
-            cls_name = d["cls_name"]
-            if kind == "detect":
-                x1, y1, x2, y2 = d["xyxy"]
-                cx = ((x1 + x2) / 2.0) / img_w
-                cy = ((y1 + y2) / 2.0) / img_h
-                w = (x2 - x1) / img_w
-                h = (y2 - y1) / img_h
-                unified.append(("detect", cls_name, cx, cy, w, h))
-            elif kind == "obb":
-                pts = []
-                for (x, y) in d["corners"]:
-                    pts.append(float(x) / img_w)
-                    pts.append(float(y) / img_h)
-                unified.append(("obb", cls_name, pts))
-            elif kind == "seg":
-                mask_xy = d.get("mask_xy") or []
-                pts = []
-                for p in mask_xy:
-                    pts.append(float(p[0]) / img_w)
-                    pts.append(float(p[1]) / img_h)
-                if pts:
-                    unified.append(("segment", cls_name, pts))
-        return unified
+        """Translate YOLO dictionaries to class-ID-based shared annotations."""
+        return detections_to_unified(self.current_detections, img_w, img_h)
 
     def _draw_detections_on_image(self, img):
-        if not self.current_detections:
+        """Compatibility method for callers exporting a raster result.
+
+        Interactive display is Qt-vector based and never uses this method.
+        """
+        if img is None or not self.current_detections:
             return img
-
-        H, W = img.shape[:2]
-        unified = self._detections_to_unified(W, H)
-        if not unified:
-            return img
-
-        by_mode = {}
-        for i, d in enumerate(self.current_detections):
-            if d["kind"] == "obb":
-                mode = "OBB (Oriented Box)"
-            elif d["kind"] == "seg":
-                mode = "Segmentation (Polygon)"
-            else:
-                mode = "Bounding Box (Detect)"
-            by_mode.setdefault(mode, []).append(i)
-
-        out = img
-        try:
-            thickness, font_scale, font_thickness, _ = get_display_params(out.shape)
-            color_rect = settings.get_color("annotation")
-            color_label = settings.get_color("label_text")
-            for mode, idxs in by_mode.items():
-                if not idxs:
-                    continue
-                out = draw_selected_objects(
-                    out, unified, idxs, mode, False,
-                    color_rect, color_label,
-                    thickness, font_scale, font_thickness,
-                )
-        except Exception as e:
-            self.log(f"[YOLO draw] не удалось нарисовать объекты: {e}")
-        return out
+        h, w = img.shape[:2]
+        anns = self._detections_to_unified(w, h)
+        return render_unified_annotations(
+            img, anns, settings.get_dataset_class_color,
+            selected_index=self.objects_list.currentRow(),
+            selected_color=settings.get_color('selected'),
+            text_color=settings.get_color('label_text'),
+            thickness=settings.current.get('line_thickness_px', 1),
+        )
 
     def _rebuild_yolo_view(self):
+        """No rasterized boxes: source pixels + vector annotation overlay."""
         if self.original_image is None:
+            self.yolo_view.set_annotations([], 0, 0)
             self.yolo_view.set_pixmap(numpy_to_qpixmap(None))
+            self._last_yolo_pixmap_source = None
             return
-        if not self.chk_show_boxes.isChecked() or not self.current_detections:
+        height, width = self.original_image.shape[:2]
+        annotations = self._detections_to_unified(width, height)
+        if not self.chk_show_boxes.isChecked():
+            annotations = []
+        # Scene geometry must be established BEFORE fitting a new QPixmap.
+        self.yolo_view.set_annotations(annotations, width, height)
+        if self._last_yolo_pixmap_source is not self.original_image:
             self.yolo_view.set_pixmap(numpy_to_qpixmap(self.original_image))
-            return
-        annotated = self._draw_detections_on_image(self.original_image.copy())
-        self.yolo_view.set_pixmap(numpy_to_qpixmap(annotated))
+            self._last_yolo_pixmap_source = self.original_image
+        self._syncing_yolo_selection = True
+        try:
+            selected = self.objects_list.currentRow()
+            valid = (0 <= selected < len(annotations)
+                     and annotations[selected] is not None)
+            self.yolo_view.set_selected_index(selected if valid else -1)
+        finally:
+            self._syncing_yolo_selection = False
 
     # --------------------------------------------------------
     # 3-й снимок: итоговое изображение без боксов
@@ -845,19 +797,8 @@ class YoloInspectWindow(QMainWindow):
     def _rebuild_displayed(self):
         if self.original_image is None:
             return
-
-        img = self.original_image.copy()
-        mode = "original"
-
-        det = self._get_selected_detection()
-        img, morph_info = apply_object_morphology(
-            img,
-            det,
-            int(self.erosion_slider.value()),
-            int(self.dilation_slider.value()),
-            shape_name=self.kernel_shape_combo.currentText(),
-            contour_only=self.chk_contour_only.isChecked(),
-        )
+        img, mode, morph_info = self._render_for_detection(
+            self._get_selected_detection())
         if morph_info:
             self.log(
                 f"[Морфология] kind={morph_info['kind']} "
@@ -865,73 +806,7 @@ class YoloInspectWindow(QMainWindow):
                 f"mode={morph_info['contour_mode']} "
                 f"erosion={morph_info['erosion']}px "
                 f"dilation={morph_info['dilation']}px "
-                f"mask_px={morph_info['mask_px']}"
-            )
-
-        do_rotate = self.chk_auto_rotate.isChecked()
-        do_crop = self.chk_auto_crop.isChecked()
-        fill_mode = self._get_fill_mode()
-
-        if (do_rotate or do_crop) and det is not None:
-            padding = int(self.crop_padding_spin.value())
-            off_x = int(self.crop_offset_x_spin.value())
-            off_y = int(self.crop_offset_y_spin.value())
-            if do_rotate and det.get("angle_deg") is not None:
-                img = rotate_with_optional_crop(
-                    img, det, auto_crop=do_crop,
-                    padding=padding, off_x=off_x, off_y=off_y,
-                    fill_mode=fill_mode,
-                )
-                mode = "rotated"
-            elif do_crop:
-                img = crop_to_detection(
-                    img, det, padding=padding,
-                    off_x=off_x, off_y=off_y, fill_mode=fill_mode,
-                )
-                mode = "cropped"
-
-        fine_angle = float(self.crop_rotation_spin.value())
-        if abs(fine_angle) > 1e-6:
-            h, w = img.shape[:2]
-            center = (w / 2.0, h / 2.0)
-            M = cv2.getRotationMatrix2D(center, fine_angle, 1.0)
-            if fill_mode == "white":
-                img = cv2.warpAffine(
-                    img, M, (w, h),
-                    flags=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_CONSTANT,
-                    borderValue=(255, 255, 255),
-                )
-            elif fill_mode == "black":
-                img = cv2.warpAffine(
-                    img, M, (w, h),
-                    flags=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_CONSTANT,
-                    borderValue=(0, 0, 0),
-                )
-            else:
-                img = cv2.warpAffine(
-                    img, M, (w, h),
-                    flags=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_REPLICATE,
-                )
-            if mode == "original":
-                mode = "fine_rotated"
-
-        for op in self._manual_ops:
-            if op == "rot_cw":
-                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-            elif op == "rot_ccw":
-                img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            elif op == "flip_v":
-                img = cv2.flip(img, 0)
-            elif op == "flip_h":
-                img = cv2.flip(img, 1)
-            mode = "manual"
-
-        if self.invert_image_checkbox.isChecked():
-            img = cv2.bitwise_not(img)
-
+                f"mask_px={morph_info['mask_px']}")
         self.displayed_image = img
         self.display_mode = mode
         self.transformed_view.set_pixmap(numpy_to_qpixmap(img))
@@ -943,80 +818,10 @@ class YoloInspectWindow(QMainWindow):
         return "none"
 
     def _build_transformed_for_detection(self, det):
-        """Полный пайплайн обработки original_image для заданного детекта.
-
-        Повторяет логику _rebuild_displayed (морфология → авто-кроп/доворот
-        → точный доворот → ручные трансформации → инверсия), но
-        не трогает UI и не пишет в лог.
-        """
+        """Save-all and preview run the identical common processing pipeline."""
         if self.original_image is None:
             return None
-
-        img = self.original_image.copy()
-
-        img, _ = apply_object_morphology(
-            img,
-            det,
-            int(self.erosion_slider.value()),
-            int(self.dilation_slider.value()),
-            shape_name=self.kernel_shape_combo.currentText(),
-            contour_only=self.chk_contour_only.isChecked(),
-        )
-
-        do_rotate = self.chk_auto_rotate.isChecked()
-        do_crop = self.chk_auto_crop.isChecked()
-        fill_mode = self._get_fill_mode()
-        padding = int(self.crop_padding_spin.value())
-        off_x = int(self.crop_offset_x_spin.value())
-        off_y = int(self.crop_offset_y_spin.value())
-
-        if (do_rotate or do_crop) and det is not None:
-            if do_rotate and det.get("angle_deg") is not None:
-                img = rotate_with_optional_crop(
-                    img, det, auto_crop=do_crop,
-                    padding=padding, off_x=off_x, off_y=off_y,
-                    fill_mode=fill_mode,
-                )
-            elif do_crop:
-                img = crop_to_detection(
-                    img, det, padding=padding,
-                    off_x=off_x, off_y=off_y, fill_mode=fill_mode,
-                )
-
-        fine_angle = float(self.crop_rotation_spin.value())
-        if abs(fine_angle) > 1e-6:
-            h, w = img.shape[:2]
-            center = (w / 2.0, h / 2.0)
-            M = cv2.getRotationMatrix2D(center, fine_angle, 1.0)
-            if fill_mode == "white":
-                img = cv2.warpAffine(
-                    img, M, (w, h), flags=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255),
-                )
-            elif fill_mode == "black":
-                img = cv2.warpAffine(
-                    img, M, (w, h), flags=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0),
-                )
-            else:
-                img = cv2.warpAffine(
-                    img, M, (w, h), flags=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_REPLICATE,
-                )
-
-        for op in self._manual_ops:
-            if op == "rot_cw":
-                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-            elif op == "rot_ccw":
-                img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            elif op == "flip_v":
-                img = cv2.flip(img, 0)
-            elif op == "flip_h":
-                img = cv2.flip(img, 1)
-
-        if self.invert_image_checkbox.isChecked():
-            img = cv2.bitwise_not(img)
-
+        img, _, _ = self._render_for_detection(det)
         return img
 
     # --------------------------------------------------------
@@ -1507,44 +1312,16 @@ class YoloInspectWindow(QMainWindow):
     def _render_ae_view(self):
         if self._ae_err_hw is None or self._ae_base_bgr is None:
             return
-
-        err = self._ae_err_hw
-        base = self._ae_base_bgr
-        H, W = base.shape[:2]
-
-        if self._ae_valid_region is not None:
-            x1, y1, x2, y2 = self._ae_valid_region
-            err_crop = err[y1:y2, x1:x2]
-            if err_crop.size == 0:
-                err_crop = err
-        else:
-            err_crop = err
-
-        err_full = cv2.resize(err_crop, (W, H), interpolation=cv2.INTER_LINEAR)
-
-        lo = float(np.percentile(err_full, 1))
-        hi = float(np.percentile(err_full, 99))
-        if hi - lo < 1e-8:
-            hi = lo + 1e-8
-        norm = np.clip((err_full - lo) / (hi - lo), 0.0, 1.0)
-        norm_u8 = (norm * 255.0).astype(np.uint8)
-        heat = cv2.applyColorMap(norm_u8, cv2.COLORMAP_JET)
-
-        if self.chk_ae_overlay.isChecked():
-            alpha_heat = float(self.ae_alpha_slider.value()) / 100.0
-            err_img = cv2.addWeighted(base, 1.0 - alpha_heat, heat, alpha_heat, 0.0)
-        else:
-            err_img = heat
-
-        if self.chk_ae_show_mask.isChecked() and np.isfinite(self._ae_threshold):
-            mask_small = (err_crop > self._ae_threshold).astype(np.uint8)
-            mask_full = cv2.resize(mask_small, (W, H), interpolation=cv2.INTER_NEAREST)
-            contours, _ = cv2.findContours(mask_full, cv2.RETR_EXTERNAL,
-                                           cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(err_img, contours, -1, (255, 255, 255), 2)
-
-        self._error_bgr = err_img
-        self.error_view.set_pixmap(numpy_to_qpixmap(err_img))
+        self._error_bgr = render_ae_error_map(
+            self._ae_err_hw, self._ae_base_bgr,
+            valid_region=self._ae_valid_region,
+            overlay=self.chk_ae_overlay.isChecked(),
+            alpha=float(self.ae_alpha_slider.value()) / 100.0,
+            show_mask=self.chk_ae_show_mask.isChecked(),
+            threshold=self._ae_threshold,
+        )
+        if self._error_bgr is not None:
+            self.error_view.set_pixmap(numpy_to_qpixmap(self._error_bgr))
 
     # --------------------------------------------------------
     # Пресеты

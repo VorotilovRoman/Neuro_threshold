@@ -67,6 +67,8 @@ from utils.smart_view import SmartGraphicsView
 # Новая ветка компонента разметки. Остальные вкладки остаются на старом SmartGraphicsView.
 from utils_new.smart_view_new import SmartGraphicsViewNew
 
+from utils_new.dataset_review_view import DatasetReviewGraphicsView
+
 # ========== Градиентные методы ==========
 from utils_ops.gradient_ops import apply_gradient_method
 from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog

@@ -12,6 +12,7 @@ UI-слой вкладки YOLO + AE/VAE.
   • лог с кнопкой переключения — в правой половине, под настройками.
 """
 from import_libs_internal import *
+from utils_new.dataset_review_view import DatasetReviewGraphicsView
 
 
 def setup_yolo_ae_vae_ui(parent):
@@ -76,19 +77,19 @@ def setup_yolo_ae_vae_ui(parent):
     grid.setSpacing(10)
 
     # Верх: YOLO-результат — на всю ширину.
-    parent.yolo_view = SmartGraphicsView()
+    parent.yolo_view = DatasetReviewGraphicsView()
     parent.yolo_view.setMinimumSize(400, 300)
     parent.yolo_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.yolo_view, 0, 0, 1, 2)
 
     # Низ слева: обработанный снимок.
-    parent.transformed_view = SmartGraphicsView()
+    parent.transformed_view = DatasetReviewGraphicsView()
     parent.transformed_view.setMinimumSize(400, 300)
     parent.transformed_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.transformed_view, 1, 0)
 
     # Низ справа: карта ошибок AE/VAE.
-    parent.error_view = SmartGraphicsView()
+    parent.error_view = DatasetReviewGraphicsView()
     parent.error_view.setMinimumSize(400, 300)
     parent.error_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.error_view, 1, 1)

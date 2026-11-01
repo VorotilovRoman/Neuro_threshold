@@ -2,7 +2,16 @@
 from collections import OrderedDict
 
 from import_libs_internal import *
+
 from import_libs_methods_ui import setup_viewing_dataset_ui
+
+from PyQt5.QtGui import QKeySequence, QPalette
+from PyQt5.QtWidgets import QShortcut
+from utils_new.annotation_processing import (
+    normalized_annotation, class_id_for_annotation,
+    crop_for_annotation, annotation_in_crop,
+    apply_class_mask_overlay, find_strong_overlaps, prepare_annotation_preview,
+)
 
 
 # ============================================================
@@ -153,14 +162,29 @@ class ViewingDataset(QMainWindow):
         self._mask_cache = OrderedDict()
         self._mask_cache_max = 16
 
+        # Цвета масок берутся из единой редактируемой dataset_class_palette.
+        # Для обычных индексных масок: 0=фон, 1=класс 0, 2=класс 1.
         self.class_colors = {}
         self.mask_opacity = 0.5
+        self._mask_pixel_offset = 1
+        self._mask_background_value = 0
+        self._overlap_warnings = {}
+        self._source_image_index = None
+        self._source_image_for_crop = None
+        self._syncing_selection = False
 
         # --- Валидация аннотаций ---
         self._validation_per_image = {}
         self._validation_thread = None
 
         setup_viewing_dataset_ui(self)
+        # Оба окна только просматривают, без инструментов редактирования.
+        self.viewer.set_callbacks(
+            on_selection_changed=self.on_view_selection_changed,
+            on_annotation_right_clicked=self.on_annotation_right_clicked,
+        )
+        self.viewer.set_display_style(label_mode="all")
+        self.crop_view.set_display_style(label_mode="all")
 
         # --- Сигналы ---
         self.nav_widget.load_folder.connect(self.load_folder)
@@ -170,11 +194,25 @@ class ViewingDataset(QMainWindow):
         self.nav_widget.resize_toggled.connect(self.on_resize_mode_changed)
         self.nav_widget.goto_page.connect(self.goto_image)
         self.btn_save.clicked.connect(self.save_current_annotations)
+        self.btn_save_all.clicked.connect(self.save_all_annotations)
         self.btn_delete.clicked.connect(self.delete_selected_object)
         self.btn_load_labels.clicked.connect(self.load_labels_folder)
         self.btn_load_masks.clicked.connect(self.load_masks_folder)
         self.btn_convert_all_to_obb.clicked.connect(self.convert_all_detect_to_obb)
         self.opacity_slider.valueChanged.connect(self.on_opacity_changed)
+        self.view_mode_combo.currentIndexChanged.connect(self.on_view_mode_changed)
+        self.crop_padding_spin.valueChanged.connect(self._update_crop_view)
+        self.btn_hide_frames.toggled.connect(self._apply_visibility_controls)
+        self.btn_hide_labels.toggled.connect(self._apply_visibility_controls)
+        self.btn_fill_objects.toggled.connect(self._apply_visibility_controls)
+        # Явная привязка шорткатов действует также при фокусе в QListWidget.
+        self._class_shortcuts = []
+        for cls_id in range(10):
+            shortcut = QShortcut(QKeySequence(f"Ctrl+{cls_id}"), self)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(
+                lambda cls=cls_id: self._set_class_of_selected(cls))
+            self._class_shortcuts.append(shortcut)
         self.coord_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.coord_list.customContextMenuRequested.connect(self.show_object_context_menu)
         self.coord_list.currentItemChanged.connect(self.on_object_selection_changed)
@@ -186,6 +224,8 @@ class ViewingDataset(QMainWindow):
         self.toggle_log_btn.clicked.connect(self.toggle_log)
 
         self.update_navigation_state()
+        self._apply_visibility_controls()
+        self.on_view_mode_changed()
         self.log_widget.setVisible(False)
         self.toggle_log_btn.setChecked(False)
         self.toggle_log_btn.setText("Показать лог")
@@ -212,13 +252,151 @@ class ViewingDataset(QMainWindow):
             pass
 
     def on_settings_changed(self, new_settings):
+        """Все окна Qt обновляют палитру сами, маску перекрашиваем отдельно."""
         if self.image_paths:
-            self.show_current_image()
+            self._refresh_main_pixmap()
+            self._update_crop_view()
+            self._apply_validation_colors_to_list()
+
+    def _apply_visibility_controls(self, *_):
+        """Переключатели применяются сразу к обоим Qt-окнам."""
+        visible = dict(
+            show_frames=not self.btn_hide_frames.isChecked(),
+            show_labels=not self.btn_hide_labels.isChecked(),
+            fill_white=self.btn_fill_objects.isChecked(),
+        )
+        self.viewer.set_annotation_visibility(**visible)
+        self.crop_view.set_annotation_visibility(**visible)
+
+    def on_view_mode_changed(self, *_):
+        mode = int(self.view_mode_combo.currentData() or 1)
+        self.full_image_panel.setVisible(mode in (1, 2))
+        self.crop_panel.setVisible(mode in (2, 3))
+        self.crop_padding_spin.setEnabled(mode in (2, 3))
+        if mode in (2, 3) and self.current_annotations:
+            if not (0 <= self.selected_index < len(self.current_annotations)):
+                self._select_annotation(0)
+            self._update_crop_view()
+        else:
+            self.crop_detail_label.setText("Выберите объект в списке")
+
+    def _select_annotation(self, idx):
+        """Синхронно выделяем индекс в списке и на снимке (без рекурсии)."""
+        if idx < 0 or idx >= len(self.current_annotations):
+            idx = -1
+        self.selected_index = idx
+        self._syncing_selection = True
+        try:
+            self.coord_list.blockSignals(True)
+            self.coord_list.setCurrentRow(idx)
+            self.coord_list.blockSignals(False)
+            self.viewer.set_selected_index(idx)
+        finally:
+            self._syncing_selection = False
+        self._update_crop_view()
+
+    def on_view_selection_changed(self, idx):
+        """Клик по аннотации на снимке выделяет строку и обновляет кроп."""
+        if not self._syncing_selection:
+            self._select_annotation(idx)
+
+    def on_annotation_right_clicked(self, idx, global_pos):
+        self._select_annotation(idx)
+        self._show_object_context_menu_for_index(idx, global_pos)
+
+    def _refresh_main_pixmap(self):
+        """Обновляет пиксели только при новом снимке/маске/смене палитры."""
+        if self._lazy_cache is None or not self.image_paths:
+            return
+        item = self._lazy_cache.get(self.current_idx)
+        if item is None:
+            return
+        image = item['image']
+        if image.ndim == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        mask = self._get_mask(self.current_idx)
+        if mask is not None:
+            image = self.apply_mask_overlay(image, mask)
+        # Контуры НЕ внедряются в пиксели — их рисует Qt.
+        self.viewer.set_pixmap(numpy_to_qpixmap(image))
+        self.viewer.refresh_annotations()
+
+    def _get_source_image_for_crop(self):
+        """При включённом resize извлекает кроп из полноразмерного файла.
+
+        В режиме без resize используется уже загруженный numpy-массив.
+        Кэшируем ровно один снимок для перемещения по списку аннотаций.
+        """
+        if not self.image_paths or self._lazy_cache is None:
+            return None
+        if (self._source_image_index == self.current_idx
+                and self._source_image_for_crop is not None):
+            return self._source_image_for_crop
+        item = self._lazy_cache.get(self.current_idx)
+        if item is None:
+            return None
+        image = item['image']
+        if self.nav_widget._resize_cb.isChecked():
+            raw = read_image_with_fallback(self.image_paths[self.current_idx])
+            if raw is not None:
+                image = normalize_to_uint8(raw)
+                if image.ndim == 2:
+                    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+                elif image.ndim == 3 and image.shape[2] == 4:
+                    image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+                elif image.ndim == 3 and image.shape[2] != 3:
+                    image = image[:, :, :3]
+            else:
+                self.log("[Просмотр объекта] Не удалось прочитать исходное разрешение; "
+                         "используется изображение из текущего кэша.")
+        self._source_image_for_crop = image
+        self._source_image_index = self.current_idx
+        return image
+
+    def _update_crop_view(self, *_):
+        mode = int(self.view_mode_combo.currentData() or 1)
+        if mode == 1:
+            return
+        idx = self.selected_index
+        if idx < 0 or idx >= len(self.current_annotations):
+            self.crop_view.set_annotations([], 0, 0)
+            self.crop_view.set_pixmap(numpy_to_qpixmap(None))
+            self.crop_detail_label.setText("Выберите объект в списке")
+            return
+        image = self._get_source_image_for_crop()
+        if image is None:
+            self.crop_detail_label.setText("Не удалось загрузить исходный снимок")
+            return
+        ann = self.current_annotations[idx]
+        h, w = image.shape[:2]
+        mask = self._get_mask(self.current_idx)
+        crop, crop_ann, bounds = prepare_annotation_preview(
+            image, ann, padding=self.crop_padding_spin.value(),
+            mask=mask, opacity=self.mask_opacity,
+            color_for_class=settings.get_dataset_class_color,
+            pixel_offset=self._mask_pixel_offset,
+            background_value=self._mask_background_value,
+        )
+        if crop is None:
+            self.crop_view.set_annotations([], 0, 0)
+            self.crop_view.set_pixmap(numpy_to_qpixmap(None))
+            self.crop_detail_label.setText("Некорректная геометрия аннотации")
+            return
+        ch, cw = crop.shape[:2]
+        self.crop_view.set_annotations([crop_ann] if crop_ann else [], cw, ch)
+        # QPixmap не перерисовывается из исходного изображения и не проходит
+        # через cv2.resize. Qt делает только экранный zoom/fitInView.
+        self.crop_view.set_pixmap(
+            numpy_to_qpixmap(crop, max_side=max(cw, ch)), preserve_view=False)
+        cls = class_id_for_annotation(ann)
+        self.crop_detail_label.setText(
+            f"Объект #{idx + 1} · класс {cls} · {cw}×{ch} px")
 
     def update_navigation_state(self):
         has_images = len(self.image_paths) > 0
         self.nav_widget.set_navigation_enabled(has_images)
         self.btn_save.setEnabled(has_images)
+        self.btn_save_all.setEnabled(has_images)
         self.btn_delete.setEnabled(has_images and len(self.current_annotations) > 0)
         self.btn_convert_all_to_obb.setEnabled(has_images)
 
@@ -236,13 +414,15 @@ class ViewingDataset(QMainWindow):
             except Exception:
                 pass
             self._validation_thread = None
+        self._source_image_for_crop = None
         super().closeEvent(event)
 
     # ------------------------------------------------------------------
     # Ленивая загрузка изображений (единая точка входа)
     # ------------------------------------------------------------------
     def _load_images(self, source, label_map=None, mask_map=None,
-                     label_folder=None, mask_folder=None):
+                     label_folder=None, mask_folder=None,
+                     mask_pixel_offset=1):
         if isinstance(source, str) and os.path.isdir(source):
             exts = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
             all_files = sorted(
@@ -295,7 +475,13 @@ class ViewingDataset(QMainWindow):
         self._label_folder = label_folder
         self.mask_folder = mask_folder
         self._mask_cache = OrderedDict()
+        self._mask_pixel_offset = int(mask_pixel_offset)
+        # В U-Net offset=0 означает pixel 0 == class 0 (не фон).
+        self._mask_background_value = (None if self._mask_pixel_offset == 0 else 0)
         self.class_colors = {}
+        self._source_image_index = None
+        self._source_image_for_crop = None
+        self._overlap_warnings = {}
 
         first = self._lazy_cache.get(0)
         if first is None:
@@ -316,8 +502,15 @@ class ViewingDataset(QMainWindow):
         self._start_annotation_validation()
 
     def _clear_view(self):
+        self._source_image_index = None
+        self._source_image_for_crop = None
+        self._overlap_warnings = {}
+        self.viewer.set_annotations([], 0, 0)
         self.viewer.set_pixmap(numpy_to_qpixmap(None))
+        self.crop_view.set_annotations([], 0, 0)
+        self.crop_view.set_pixmap(numpy_to_qpixmap(None))
         self.coord_list.clear()
+        self.crop_detail_label.setText("Выберите объект в списке")
         self.info_label.setText("No images")
         self.nav_widget.set_current_index(0, 0)
         self.update_navigation_state()
@@ -370,6 +563,7 @@ class ViewingDataset(QMainWindow):
 
         while len(self.annotations) <= idx:
             self.annotations.append(None)
+        ann = [normalized_annotation(a) for a in ann]
         self.annotations[idx] = ann
         return ann
 
@@ -406,16 +600,6 @@ class ViewingDataset(QMainWindow):
                     mask = mask[:, :, 0]
             except Exception as e:
                 self.log(f"Warning: could not load mask {mask_path}: {e}")
-
-        if mask is not None:
-            for cls in np.unique(mask):
-                c = int(cls)
-                if c == 0 or c in self.class_colors:
-                    continue
-                hue = (c * 37) % 180
-                color = cv2.cvtColor(np.uint8([[[hue, 255, 255]]]),
-                                     cv2.COLOR_HSV2BGR)[0][0]
-                self.class_colors[c] = (int(color[0]), int(color[1]), int(color[2]))
 
         self._mask_cache[idx] = mask
         while len(self._mask_cache) > self._mask_cache_max:
@@ -458,6 +642,7 @@ class ViewingDataset(QMainWindow):
             return
         self.mask_folder = folder
         self._yaml_mask_map = {}
+        self._mask_pixel_offset = 1  # обычная ручная маска: 0=фон, 1=класс 0
         self._mask_cache = OrderedDict()
         self.class_colors = {}
         self.log(f"Masks folder set: {folder} (маски грузятся по мере просмотра).")
@@ -466,14 +651,18 @@ class ViewingDataset(QMainWindow):
     def on_opacity_changed(self, value):
         self.mask_opacity = value / 100.0
         self.opacity_label.setText(f"{value}%")
-        self.show_current_image()
+        self._refresh_main_pixmap()
+        self._update_crop_view()
 
     def apply_mask_overlay(self, img, mask):
-        overlay = img.copy()
-        for cls, color in self.class_colors.items():
-            overlay[mask == cls] = color
-        return cv2.addWeighted(img, 1 - self.mask_opacity,
-                               overlay, self.mask_opacity, 0)
+        """Цвет пикселя маски соответствует цвету КЛАССА в общей палитре."""
+        return apply_class_mask_overlay(
+            img, mask, self.mask_opacity,
+            settings.get_dataset_class_color,
+            pixel_offset=self._mask_pixel_offset,
+            background_value=self._mask_background_value,
+            annotations=self.current_annotations,
+        )
 
     def update_info_label(self):
         total = len(self.image_paths)
@@ -489,7 +678,8 @@ class ViewingDataset(QMainWindow):
         list_widget.blockSignals(True)
         try:
             list_widget.clear()
-            for idx, ann in enumerate(annotations):
+            for idx, original_ann in enumerate(annotations):
+                ann = normalized_annotation(original_ann)
                 if ann[0] == 'detect':
                     _, cls, cx, cy, w, h = ann
                     x = int((cx - w / 2) * img_w)
@@ -512,115 +702,38 @@ class ViewingDataset(QMainWindow):
         finally:
             list_widget.blockSignals(False)
 
-    def draw_annotations_with_selection(self, img, annotations, selected_idx):
-        if not annotations:
-            return img
-        img_copy = img.copy()
-        thickness, font_scale, font_thickness, _ = get_display_params(img.shape)
-        h, w = self.current_img_h, self.current_img_w
-
-        color_selected = settings.get_color('selected')
-
-        for i, ann in enumerate(annotations):
-            # Класс — ann[1]; на случай битых данных приводим к int
-            try:
-                cls_id = int(ann[1])
-            except (TypeError, ValueError):
-                cls_id = 0
-
-            class_color = get_class_color(cls_id)
-            # У выделенного — цвет выделения, у остальных — цвет класса
-            color = color_selected if i == selected_idx else class_color
-            label_text = f"{cls_id}"
-
-            if ann[0] == 'detect':
-                _, _, cx, cy, bw, bh = ann
-                x = int((cx - bw / 2) * w)
-                y = int((cy - bh / 2) * h)
-                x2 = x + int(bw * w)
-                y2 = y + int(bh * h)
-                cv2.rectangle(img_copy, (x, y), (x2, y2), color, thickness)
-                draw_class_label(
-                    img_copy, label_text, x, y, x2 - x, y2 - y,
-                    font_scale, font_thickness, class_color,
-                )
-            elif ann[0] in ('obb', 'segment'):
-                _, _, points = ann
-                pts = []
-                for j in range(0, len(points), 2):
-                    px = int(points[j] * w)
-                    py = int(points[j + 1] * h)
-                    pts.append([px, py])
-                if len(pts) >= 2:
-                    pts_np = np.array(pts, dtype=np.int32)
-                    cv2.polylines(img_copy, [pts_np], isClosed=True,
-                                  color=color, thickness=thickness)
-
-                    # Подпись — над AABB полигона
-                    xs = pts_np[:, 0]
-                    ys = pts_np[:, 1]
-                    bx = int(xs.min())
-                    by = int(ys.min())
-                    bw_box = int(xs.max() - bx)
-                    bh_box = int(ys.max() - by)
-                    draw_class_label(
-                        img_copy, label_text, bx, by, bw_box, bh_box,
-                        font_scale, font_thickness, class_color,
-                    )
-        return img_copy
-
     # ------------------------------------------------------------------
     # Отображение текущего изображения
     # ------------------------------------------------------------------
     def show_current_image(self):
+        """Новый снимок/изменение данных; Qt-слои разметки отдельно от QPixmap."""
         if self._lazy_cache is None or not self.image_paths:
             return
-
         idx = self.current_idx
         total = len(self._lazy_cache)
-
         item = self._lazy_cache.get(idx)
         if item is None:
             self.log(f"Failed to load image {self.image_paths[idx]}")
             return
-
-        img = item["image"].copy()
-        if img.ndim == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-
-        self.current_img_w = img.shape[1]
-        self.current_img_h = img.shape[0]
-
-        self.current_annotations = self._get_annotations(idx)
-
-        mask = self._get_mask(idx)
-        if mask is not None:
-            if mask.shape[:2] != (self.current_img_h, self.current_img_w):
-                mask = cv2.resize(mask, (self.current_img_w, self.current_img_h),
-                                  interpolation=cv2.INTER_NEAREST)
-            img = self.apply_mask_overlay(img, mask)
-
-        annotated = self.draw_annotations_with_selection(
-            img, self.current_annotations, self.selected_index
-        )
-        pixmap = numpy_to_qpixmap(annotated)
-        if pixmap.isNull():
-            self.log("Failed to convert image to QPixmap")
-        else:
-            self.viewer.set_pixmap(pixmap)
-
+        image = item['image']
+        self.current_img_h, self.current_img_w = image.shape[:2]
+        self.current_annotations = list(self._get_annotations(idx))
+        self._overlap_warnings = find_strong_overlaps(
+            self.current_annotations, self.current_img_w, self.current_img_h,
+            threshold=0.70)
+        self.viewer.set_annotations(self.current_annotations,
+                                    self.current_img_w, self.current_img_h)
+        self._refresh_main_pixmap()
         self.update_annotation_list(self.coord_list, self.current_annotations,
                                     self.current_img_w, self.current_img_h)
-        # Восстанавливаем выделение в списке после пересборки.
-        if 0 <= self.selected_index < self.coord_list.count():
-            self.coord_list.blockSignals(True)
-            self.coord_list.setCurrentRow(self.selected_index)
-            self.coord_list.blockSignals(False)
         self._apply_validation_colors_to_list()
+        if not (0 <= self.selected_index < len(self.current_annotations)):
+            mode = int(self.view_mode_combo.currentData() or 1)
+            self.selected_index = 0 if mode in (2, 3) and self.current_annotations else -1
+        self._select_annotation(self.selected_index)
         self.update_info_label()
         self.update_navigation_state()
         self.nav_widget.set_current_index(idx, total)
-
         ahead = self._lazy_cache.prefetch_ahead
         self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
         self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
@@ -686,25 +799,33 @@ class ViewingDataset(QMainWindow):
         self.validation_status_label.setVisible(True)
 
     def _apply_validation_colors_to_list(self):
-        if not hasattr(self, 'coord_list'):
-            return
+        """Красный: ошибка валидации или перекрытие >= 70% меньшего объекта."""
         per_file = self._validation_per_image.get(self.current_idx, [])
+        normal = self.coord_list.palette().color(QPalette.Text)
+        red = QColor(220, 40, 40)
         for row in range(self.coord_list.count()):
             item = self.coord_list.item(row)
             if item is None:
                 continue
-            item.setForeground(QColor(0, 0, 0))
-            item.setToolTip("")
-            base_text = item.text()
-            if "[INVALID:" in base_text:
-                base_text = base_text.split("  [INVALID:")[0]
-                item.setText(base_text)
+            text = item.text().split("  [INVALID:")[0].split("  [OVERLAP:")[0]
+            if text.startswith("⚠ "):
+                text = text[2:]
+            notes = []
             if row < len(per_file):
-                ok, err = per_file[row]
-                if not ok:
-                    item.setForeground(QColor(220, 0, 0))
-                    item.setText(base_text + f"  [INVALID: {err}]")
-                    item.setToolTip(f"❌ {err}")
+                valid, error = per_file[row]
+                if not valid:
+                    notes.append(f"Ошибка разметки: {error}")
+                    text += f"  [INVALID: {error}]"
+            overlaps = self._overlap_warnings.get(row, [])
+            if overlaps:
+                neighbors = ", ".join(
+                    f"#{other + 1} ({score * 100:.1f}%)"
+                    for other, score in overlaps)
+                notes.append("Сильное пересечение с " + neighbors)
+                text += "  [OVERLAP: ≥70%]"
+            item.setText("⚠ " + text if notes else text)
+            item.setForeground(red if notes else normal)
+            item.setToolTip("\n".join(notes))
 
     def _revalidate_current(self):
         self._validation_per_image[self.current_idx] = [
@@ -722,8 +843,11 @@ class ViewingDataset(QMainWindow):
             return
         img_path = self.image_paths[self.current_idx]
         txt_path = os.path.splitext(img_path)[0] + ".txt"
-        success = save_annotations(self.current_annotations, txt_path,
-                                   self.current_img_w, self.current_img_h)
+        success = save_annotations(
+            self.current_annotations, txt_path,
+            self.current_img_w, self.current_img_h,
+            obb_as_xywhr=self.chk_obb_xywhr.isChecked(),
+        )
         if success:
             self._sync_current_annotations()
             self.log(f"Saved {len(self.current_annotations)} annotations to {txt_path}")
@@ -731,6 +855,62 @@ class ViewingDataset(QMainWindow):
         else:
             self.log(f"Error saving annotations to {txt_path}")
             QMessageBox.critical(self, "Error", f"Failed to save to {txt_path}")
+
+    def _resolve_save_path_for_img(self, img_path):
+        """Как в разметчике: YAML map → загруженная папка labels → рядом со снимком."""
+        if self._yaml_label_map:
+            target = self._yaml_label_map.get(img_path)
+            if target:
+                return target
+        if self._label_folder:
+            base = os.path.splitext(os.path.basename(img_path))[0]
+            return os.path.join(self._label_folder, base + '.txt')
+        return os.path.splitext(img_path)[0] + '.txt'
+
+    def save_all_annotations(self):
+        """Save All по образцу вкладки разметки; ленивые None не трогаем."""
+        if not self.image_paths:
+            QMessageBox.warning(self, "No Image", "No images loaded.")
+            return
+        loaded = [(idx, anns) for idx, anns in enumerate(self.annotations)
+                  if idx < len(self.image_paths) and anns is not None]
+        if not loaded:
+            QMessageBox.information(
+                self, "Save All", "Нет загруженных аннотаций для сохранения.\n"
+                "Просмотрите хотя бы один снимок.")
+            return
+        as_xywhr = self.chk_obb_xywhr.isChecked()
+        fmt = "xywhr" if as_xywhr else "corners"
+        answer = QMessageBox.question(
+            self, "Save All",
+            f"Сохранить аннотации для {len(loaded)} изображений?\n\n"
+            f"Формат OBB: {fmt}.\n"
+            "Существующие .txt будут перезаписаны.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer != QMessageBox.Yes:
+            return
+        success_count = error_count = 0
+        for idx, anns in loaded:
+            path = self._resolve_save_path_for_img(self.image_paths[idx])
+            try:
+                success = save_annotations(
+                    anns, path, 1, 1, obb_as_xywhr=as_xywhr)
+                # У нас нормализованные YOLO координаты; аргументы W/H
+                # save_annotations не использует. Передаём 1/1 намеренно:
+                # размеры других кадров могут отличаться от текущего.
+                if success:
+                    success_count += 1
+                else:
+                    error_count += 1
+                    self.log(f"[Save All] ошибка записи: {path}")
+            except Exception as exc:
+                error_count += 1
+                self.log(f"[Save All] исключение для {path}: {exc}")
+        self.log(f"[Save All] сохранено: {success_count}, ошибок: {error_count} "
+                 f"(формат OBB: {fmt})")
+        QMessageBox.information(
+            self, "Save All", f"Сохранено изображений: {success_count}\n"
+            f"Ошибок: {error_count}")
 
     # ------------------------------------------------------------------
     # Навигация
@@ -778,6 +958,7 @@ class ViewingDataset(QMainWindow):
                 mask_map=self._yaml_mask_map if self._yaml_mask_map else None,
                 label_folder=self._label_folder,
                 mask_folder=self.mask_folder,
+                mask_pixel_offset=self._mask_pixel_offset,
             )
         else:
             if self._lazy_cache is not None:
@@ -793,7 +974,12 @@ class ViewingDataset(QMainWindow):
             self._validation_per_image = {}
             self.validation_status_label.setVisible(False)
             self.validation_status_label.setText("")
+            self._source_image_index = None
+            self._source_image_for_crop = None
+            self.viewer.set_annotations([], 0, 0)
             self.viewer.set_pixmap(numpy_to_qpixmap(None))
+            self.crop_view.set_annotations([], 0, 0)
+            self.crop_view.set_pixmap(numpy_to_qpixmap(None))
             self.coord_list.clear()
             self.nav_widget.set_current_index(0, 0)
             self.update_navigation_state()
@@ -804,16 +990,13 @@ class ViewingDataset(QMainWindow):
     # Работа со списком объектов
     # ------------------------------------------------------------------
     def on_object_selection_changed(self, current, previous):
-        """Смена выделенного объекта в списке: клик, стрелки клавиатуры.
-        previous не используется — всегда работаем с current."""
-        idx = current.data(Qt.UserRole) if current is not None else -1
-        if idx == self.selected_index:
-            # Ничего не поменялось — не перерисовываем зря.
+        if self._syncing_selection:
             return
-        self.selected_index = idx
-        self.show_current_image()
-        if idx >= 0 and idx < len(self.current_annotations):
-            self.log(f"Selected object {idx + 1}")
+        idx = current.data(Qt.UserRole) if current is not None else -1
+        if idx != self.selected_index:
+            self._select_annotation(idx)
+            if idx >= 0:
+                self.log(f"Selected object {idx + 1}")
 
     def show_object_context_menu(self, pos):
         item = self.coord_list.itemAt(pos)
@@ -823,6 +1006,13 @@ class ViewingDataset(QMainWindow):
         if idx is None or not (0 <= idx < len(self.current_annotations)):
             return
 
+        self._select_annotation(idx)
+        self._show_object_context_menu_for_index(
+            idx, self.coord_list.mapToGlobal(pos))
+
+    def _show_object_context_menu_for_index(self, idx, global_pos):
+        if idx < 0 or idx >= len(self.current_annotations):
+            return
         ann = self.current_annotations[idx]
         menu = QMenu(self)
 
@@ -847,7 +1037,7 @@ class ViewingDataset(QMainWindow):
             lambda: self.delete_annotation_by_index(idx))
         menu.addAction(delete_action)
 
-        menu.exec_(self.coord_list.mapToGlobal(pos))
+        menu.exec_(global_pos)
 
     def _convert_object_to_obb(self, idx):
         """Перевести конкретную detect-аннотацию в OBB (по индексу)."""
@@ -1375,6 +1565,7 @@ class ViewingDataset(QMainWindow):
             mask_map=mask_map,
             label_folder=None,
             mask_folder=None,
+            mask_pixel_offset=mask_offset,
         )
 
         self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")

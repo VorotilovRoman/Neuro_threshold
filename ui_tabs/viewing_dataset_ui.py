@@ -1,5 +1,6 @@
 from import_libs_internal import *
 
+
 def setup_viewing_dataset_ui(parent):
     """Создаёт UI для просмотра датасета с поддержкой аннотаций, масок и YAML."""
     central = QWidget()
@@ -36,6 +37,14 @@ def setup_viewing_dataset_ui(parent):
         "Оригинальные маски остаются для отображения."
     )
     parent.btn_save = QPushButton("Save Labels")
+    parent.btn_save_all = QPushButton("Save All")
+    parent.btn_save_all.setToolTip(
+        "Сохранить аннотации всех уже просмотренных или изменённых изображений. "
+        "Неоткрытые изображения не перезаписываются.")
+    parent.chk_obb_xywhr = QCheckBox("OBB → xywhr")
+    parent.chk_obb_xywhr.setChecked(False)
+    parent.chk_obb_xywhr.setToolTip(
+        "Формат сохранения OBB: 4 угла (выключено) или cx cy w h angle (включено).")
 
     parent.btn_convert_all_to_obb = QPushButton("All Box → OBB")
     parent.btn_convert_all_to_obb.setToolTip(
@@ -49,7 +58,9 @@ def setup_viewing_dataset_ui(parent):
     top_layout.addWidget(parent.btn_load_yaml)
     top_layout.addWidget(parent.btn_load_coco)
     top_layout.addWidget(parent.btn_load_unet)
+    top_layout.addWidget(parent.chk_obb_xywhr)
     top_layout.addWidget(parent.btn_save)
+    top_layout.addWidget(parent.btn_save_all)
     top_layout.addWidget(parent.btn_convert_all_to_obb)
 
     top_layout.addStretch()
@@ -86,17 +97,34 @@ def setup_viewing_dataset_ui(parent):
     # ----- Основной сплиттер (изображение слева, список и лог справа) -----
     main_splitter = QSplitter(Qt.Horizontal)
 
-    # Левая часть: изображение
-    left_widget = QWidget()
-    left_layout = QVBoxLayout(left_widget)
-    left_layout.setContentsMargins(0, 0, 0, 0)
+    # Левая часть: горизонтальный splitter с двумя независимыми view.
+    # QSplitter сохраняет пользовательское соотношение размеров окон.
+    parent.image_panels_splitter = QSplitter(Qt.Horizontal)
 
-    parent.viewer = SmartGraphicsView()
-    parent.viewer.setMinimumSize(600, 500)
+    parent.full_image_panel = QWidget()
+    full_layout = QVBoxLayout(parent.full_image_panel)
+    full_layout.setContentsMargins(0, 0, 0, 0)
+    full_layout.addWidget(QLabel("Исходный снимок"))
+    parent.viewer = DatasetReviewGraphicsView()
+    parent.viewer.setMinimumSize(180, 260)
     parent.viewer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    left_layout.addWidget(parent.viewer)
+    full_layout.addWidget(parent.viewer, 1)
+    parent.image_panels_splitter.addWidget(parent.full_image_panel)
 
-    main_splitter.addWidget(left_widget)
+    parent.crop_panel = QWidget()
+    crop_layout = QVBoxLayout(parent.crop_panel)
+    crop_layout.setContentsMargins(0, 0, 0, 0)
+    crop_layout.addWidget(QLabel("Выбранная аннотация · исходное разрешение"))
+    parent.crop_view = DatasetReviewGraphicsView()
+    parent.crop_view.selection_enabled = False
+    parent.crop_view.setMinimumSize(180, 260)
+    parent.crop_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    crop_layout.addWidget(parent.crop_view, 1)
+    parent.image_panels_splitter.addWidget(parent.crop_panel)
+    parent.image_panels_splitter.setSizes([600, 600])
+    parent.crop_panel.setVisible(False)  # режим 1 при запуске
+
+    main_splitter.addWidget(parent.image_panels_splitter)
 
     # Правая часть: список объектов + лог
     right_widget = QWidget()
@@ -105,9 +133,57 @@ def setup_viewing_dataset_ui(parent):
     # Группа "Bounding boxes"
     objects_group = QGroupBox("Bounding boxes")
     objects_layout = QVBoxLayout()
+    # Три режима показа (одна общая панель со списком справа).
+    mode_row = QHBoxLayout()
+    objects_layout.addWidget(QLabel("Режим просмотра:"))
+    parent.view_mode_combo = QComboBox()
+    parent.view_mode_combo.addItem("1 · Снимок и список объектов", 1)
+    parent.view_mode_combo.addItem("2 · Снимок + выбранный объект + список", 2)
+    parent.view_mode_combo.addItem("3 · Выбранный объект и список", 3)
+    parent.view_mode_combo.setToolTip(
+        "Выбранный в списке объект показывается во втором окне "
+        "с отступом, без поворота и без изменения исходных пикселей.")
+    objects_layout.addWidget(parent.view_mode_combo)
+    # Кнопка выбора режима и отступ в одном компактном блоке справа.
+    mode_row.addWidget(QLabel("Отступ (px):"))
+    parent.crop_padding_spin = QSpinBox()
+    parent.crop_padding_spin.setRange(0, 1000)
+    parent.crop_padding_spin.setValue(10)
+    parent.crop_padding_spin.setToolTip("Отступ от границ аннотации в пикселях исходного снимка.")
+    mode_row.addWidget(parent.crop_padding_spin)
+    parent.crop_detail_label = QLabel("Выберите объект в списке")
+    parent.crop_detail_label.setWordWrap(True)
+    # Статус выбранного объекта отдельной строкой, чтобы правая панель не расширялась.
+    mode_row.addStretch()
+    objects_layout.addLayout(mode_row)
+    objects_layout.addWidget(parent.crop_detail_label)
+
+    # Те же независимые визуальные переключатели, что на вкладке разметки.
+    visibility_row = QHBoxLayout()
+    parent.btn_hide_frames = QPushButton("Скрыть рамки")
+    parent.btn_hide_labels = QPushButton("Скрыть метки")
+    parent.btn_fill_objects = QPushButton("Закрасить объекты")
+    for btn in (parent.btn_hide_frames, parent.btn_hide_labels,
+                parent.btn_fill_objects):
+        btn.setCheckable(True)
+    visibility_row.addWidget(parent.btn_hide_frames)
+    visibility_row.addWidget(parent.btn_hide_labels)
+    parent.btn_hide_frames.setToolTip("Скрыть постоянные контуры, оставив подписи и выделение.")
+    parent.btn_hide_labels.setToolTip("Скрыть только подписи классов.")
+    parent.btn_fill_objects.setToolTip("Белая заливка областей, исходные пиксели не изменяются.")
+    visibility_row.addStretch()
+    objects_layout.addLayout(visibility_row)
+    objects_layout.addWidget(parent.btn_fill_objects)
+
+    objects_layout.addSpacing(8)
     parent.coord_list = QListWidget()
     parent.coord_list.setSelectionMode(QAbstractItemView.SingleSelection)
     objects_layout.addWidget(parent.coord_list)
+    hint = QLabel("Ctrl+0…9 — присвоить класс выбранному объекту.  "
+                  "Красный объект в списке — некорректная разметка "
+                  "или пересечение ≥70% площади меньшего объекта.")
+    hint.setWordWrap(True)
+    objects_layout.addWidget(hint)
 
     # Горизонтальный ряд кнопок
     button_row = QHBoxLayout()
