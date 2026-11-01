@@ -33,9 +33,66 @@
         ]
     },
     "font_size_mode": "auto",
-    "line_thickness_mode": "small",
+    "line_thickness_mode": "auto",
     "navigation_shortcuts": {
         "prev": "Left",
         "next": "Right"
-    }
+    },
+    "annotation_view": {
+        "use_class_colors": true
+    },
+    "font_size_px": 27,
+    "line_thickness_px": 4,
+    "dataset_class_palette": [
+        [
+            0,
+            0,
+            200
+        ],
+        [
+            0,
+            130,
+            220
+        ],
+        [
+            0,
+            150,
+            150
+        ],
+        [
+            0,
+            140,
+            0
+        ],
+        [
+            170,
+            110,
+            0
+        ],
+        [
+            200,
+            0,
+            0
+        ],
+        [
+            180,
+            0,
+            180
+        ],
+        [
+            110,
+            0,
+            110
+        ],
+        [
+            19,
+            69,
+            139
+        ],
+        [
+            100,
+            100,
+            0
+        ]
+    ]
 }

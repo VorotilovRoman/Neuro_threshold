@@ -2,6 +2,7 @@
 from import_libs_internal import *
 
 
+
 def setup_layout_dataset_ui(parent):
     central = QWidget()
     parent.setCentralWidget(central)
@@ -117,7 +118,9 @@ def setup_layout_dataset_ui(parent):
     left_layout = QVBoxLayout(left_widget)
     left_layout.setContentsMargins(0, 0, 0, 0)
 
-    parent.image_view = SmartGraphicsView()
+    parent.image_view = SmartGraphicsViewNew()
+    # Используем прежнюю палитру классов, не дублируя её в новом модуле.
+    parent.image_view.set_class_color_provider(get_class_color)
     parent.image_view.setMinimumSize(600, 500)
     parent.image_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     left_layout.addWidget(parent.image_view)

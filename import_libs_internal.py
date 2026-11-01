@@ -64,6 +64,8 @@ from utils.prepare import (
 from utils.metrics_core import DEFAULT_IOU_THRESHOLDS, yolo_to_xyxy, xyxy_to_yolo, iou_xyxy
 
 from utils.smart_view import SmartGraphicsView
+# Новая ветка компонента разметки. Остальные вкладки остаются на старом SmartGraphicsView.
+from utils_new.smart_view_new import SmartGraphicsViewNew
 
 # ========== Градиентные методы ==========
 from utils_ops.gradient_ops import apply_gradient_method
