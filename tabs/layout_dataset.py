@@ -157,6 +157,13 @@ class Labeler(QMainWindow):
         # Модель авторазметки
         self.auto_model = None
 
+        # NEW: флаги управления отображением разметки.
+        # Инициализируем ДО setup_layout_dataset_ui, чтобы
+        # update_image_display() мог безопасно их читать.
+        self._hide_frames = False
+        self._hide_labels = False
+        self._fill_objects = False
+
         # UI
         setup_layout_dataset_ui(self)
 
@@ -201,6 +208,11 @@ class Labeler(QMainWindow):
             lambda: self.run_auto_label(all_images=False))
         self.btn_auto_all.clicked.connect(
             lambda: self.run_auto_label(all_images=True))
+
+        # NEW: управление отображением разметки
+        self.btn_hide_frames.toggled.connect(self._on_view_flags_changed)
+        self.btn_hide_labels.toggled.connect(self._on_view_flags_changed)
+        self.btn_fill_objects.toggled.connect(self._on_view_flags_changed)
 
         # --- Список объектов ---
         self.delete_button.clicked.connect(self.delete_selected_object)
@@ -324,6 +336,18 @@ class Labeler(QMainWindow):
         fmt = "xywhr (cx cy w h angle_rad)" if checked else \
               "corners (x1 y1 x2 y2 x3 y3 x4 y4)"
         self.log(f"Формат сохранения OBB: {fmt}")
+
+    # ----------------------------------------------------------------------
+    #  NEW: переключение флагов отображения разметки
+    # ----------------------------------------------------------------------
+    def _on_view_flags_changed(self, _checked=None):
+        """Единый слот для трёх кнопок управления отображением.
+        Читает состояние всех чекбоксов и перерисовывает текущий снимок."""
+        self._hide_frames = self.btn_hide_frames.isChecked()
+        self._hide_labels = self.btn_hide_labels.isChecked()
+        self._fill_objects = self.btn_fill_objects.isChecked()
+        if self.image_paths:
+            self.update_image_display()
 
     # ----------------------------------------------------------------------
     #  Ленивая загрузка изображений
@@ -806,53 +830,117 @@ class Labeler(QMainWindow):
         color_selected = settings.get_color('selected')
         selected_idx = self.object_list.currentRow()
 
-        for i, ann in enumerate(self.current_annotations):
-            typ = ann[0]
-            try:
-                cls_id = int(ann[1])
-            except (TypeError, ValueError):
-                cls_id = 0
+        # ------------------------------------------------------------------
+        # NEW: проход 1 — заливка объектов белым (под рамками и метками)
+        # ------------------------------------------------------------------
+        if self._fill_objects:
+            for ann in self.current_annotations:
+                typ = ann[0]
+                if typ == 'detect':
+                    _, _, cx, cy, bw, bh = ann
+                    x1 = int((cx - bw / 2) * self.img_w)
+                    y1 = int((cy - bh / 2) * self.img_h)
+                    x2 = int((cx + bw / 2) * self.img_w)
+                    y2 = int((cy + bh / 2) * self.img_h)
+                    x1 = max(0, min(x1, self.img_w - 1))
+                    y1 = max(0, min(y1, self.img_h - 1))
+                    x2 = max(0, min(x2, self.img_w - 1))
+                    y2 = max(0, min(y2, self.img_h - 1))
+                    if x2 > x1 and y2 > y1:
+                        cv2.rectangle(img, (x1, y1), (x2, y2),
+                                      (255, 255, 255), -1)
+                elif typ in ('obb', 'segment'):
+                    _, _, points = ann
+                    pts = []
+                    for j in range(0, len(points), 2):
+                        px = int(points[j] * self.img_w)
+                        py = int(points[j + 1] * self.img_h)
+                        pts.append([px, py])
+                    if len(pts) >= 3:
+                        pts_np = np.array(pts, dtype=np.int32)
+                        cv2.fillPoly(img, [pts_np], (255, 255, 255))
 
-            class_color = get_class_color(cls_id)
-            line_color = color_selected if i == selected_idx else class_color
-            label_text = f"{cls_id}"
+        # ------------------------------------------------------------------
+        # NEW: проход 2 — рамки (пропускается, если _hide_frames)
+        # ------------------------------------------------------------------
+        if not self._hide_frames:
+            for i, ann in enumerate(self.current_annotations):
+                typ = ann[0]
+                try:
+                    cls_id = int(ann[1])
+                except (TypeError, ValueError):
+                    cls_id = 0
 
-            if typ == 'detect':
-                _, _, cx, cy, bw, bh = ann
-                x = int((cx - bw / 2) * self.img_w)
-                y = int((cy - bh / 2) * self.img_h)
-                x2 = x + int(bw * self.img_w)
-                y2 = y + int(bh * self.img_h)
+                class_color = get_class_color(cls_id)
+                line_color = color_selected if i == selected_idx else class_color
 
-                cv2.rectangle(img, (x, y), (x2, y2), line_color, thickness)
-                draw_class_label(
-                    img, label_text, x, y, x2 - x, y2 - y,
-                    font_scale, font_thickness, class_color,
-                )
+                if typ == 'detect':
+                    _, _, cx, cy, bw, bh = ann
+                    x = int((cx - bw / 2) * self.img_w)
+                    y = int((cy - bh / 2) * self.img_h)
+                    x2 = x + int(bw * self.img_w)
+                    y2 = y + int(bh * self.img_h)
 
-            elif typ in ('obb', 'segment'):
-                _, _, points = ann
-                pts = []
-                for j in range(0, len(points), 2):
-                    px = int(points[j] * self.img_w)
-                    py = int(points[j + 1] * self.img_h)
-                    pts.append([px, py])
-                if len(pts) >= 2:
-                    pts_np = np.array(pts, dtype=np.int32)
-                    cv2.polylines(img, [pts_np], isClosed=True,
-                                  color=line_color, thickness=thickness)
+                    cv2.rectangle(img, (x, y), (x2, y2), line_color, thickness)
 
-                    xs = pts_np[:, 0]
-                    ys = pts_np[:, 1]
-                    bx = int(xs.min())
-                    by = int(ys.min())
-                    bw_box = int(xs.max() - bx)
-                    bh_box = int(ys.max() - by)
+                elif typ in ('obb', 'segment'):
+                    _, _, points = ann
+                    pts = []
+                    for j in range(0, len(points), 2):
+                        px = int(points[j] * self.img_w)
+                        py = int(points[j + 1] * self.img_h)
+                        pts.append([px, py])
+                    if len(pts) >= 2:
+                        pts_np = np.array(pts, dtype=np.int32)
+                        cv2.polylines(img, [pts_np], isClosed=True,
+                                      color=line_color, thickness=thickness)
+
+        # ------------------------------------------------------------------
+        # NEW: проход 3 — метки классов (пропускается, если _hide_labels)
+        # ------------------------------------------------------------------
+        if not self._hide_labels:
+            for i, ann in enumerate(self.current_annotations):
+                typ = ann[0]
+                try:
+                    cls_id = int(ann[1])
+                except (TypeError, ValueError):
+                    cls_id = 0
+
+                class_color = get_class_color(cls_id)
+                label_text = f"{cls_id}"
+
+                if typ == 'detect':
+                    _, _, cx, cy, bw, bh = ann
+                    x = int((cx - bw / 2) * self.img_w)
+                    y = int((cy - bh / 2) * self.img_h)
+                    x2 = x + int(bw * self.img_w)
+                    y2 = y + int(bh * self.img_h)
 
                     draw_class_label(
-                        img, label_text, bx, by, bw_box, bh_box,
+                        img, label_text, x, y, x2 - x, y2 - y,
                         font_scale, font_thickness, class_color,
                     )
+
+                elif typ in ('obb', 'segment'):
+                    _, _, points = ann
+                    pts = []
+                    for j in range(0, len(points), 2):
+                        px = int(points[j] * self.img_w)
+                        py = int(points[j + 1] * self.img_h)
+                        pts.append([px, py])
+                    if len(pts) >= 2:
+                        pts_np = np.array(pts, dtype=np.int32)
+                        xs = pts_np[:, 0]
+                        ys = pts_np[:, 1]
+                        bx = int(xs.min())
+                        by = int(ys.min())
+                        bw_box = int(xs.max() - bx)
+                        bh_box = int(ys.max() - by)
+
+                        draw_class_label(
+                            img, label_text, bx, by, bw_box, bh_box,
+                            font_scale, font_thickness, class_color,
+                        )
 
         pixmap = numpy_to_qpixmap(img)
         self.image_view.set_pixmap(pixmap)

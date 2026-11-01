@@ -227,6 +227,35 @@ def setup_layout_dataset_ui(parent):
     auto_btn_row.addWidget(parent.btn_auto_all)
     auto_layout.addLayout(auto_btn_row)
 
+    # NEW: второй ряд — управление отображением разметки
+    view_ctrl_row = QHBoxLayout()
+
+    parent.btn_hide_frames = QPushButton("Скрыть рамки")
+    parent.btn_hide_frames.setCheckable(True)
+    parent.btn_hide_frames.setToolTip(
+        "Скрыть с отображения все рамки объектов.\n"
+        "Метки классов при этом остаются видны."
+    )
+
+    parent.btn_hide_labels = QPushButton("Скрыть метки")
+    parent.btn_hide_labels.setCheckable(True)
+    parent.btn_hide_labels.setToolTip(
+        "Скрыть с отображения метки классов.\n"
+        "Рамки объектов при этом остаются видны."
+    )
+
+    parent.btn_fill_objects = QPushButton("Закрасить объекты")
+    parent.btn_fill_objects.setCheckable(True)
+    parent.btn_fill_objects.setToolTip(
+        "Закрасить белым цветом все области объектов (внутри рамок).\n"
+        "Рамки и метки при этом остаются видны."
+    )
+
+    view_ctrl_row.addWidget(parent.btn_hide_frames)
+    view_ctrl_row.addWidget(parent.btn_hide_labels)
+    view_ctrl_row.addWidget(parent.btn_fill_objects)
+    auto_layout.addLayout(view_ctrl_row)
+
     right_layout.addWidget(parent.auto_group)
 
     # ============================================================
@@ -251,14 +280,17 @@ def setup_layout_dataset_ui(parent):
     objects_layout.addWidget(parent.object_list)
 
     parent.delete_button = QPushButton("Delete Selected")
-    objects_layout.addWidget(parent.delete_button)
-
     parent.delete_all_button = QPushButton("Delete All on Image")
     parent.delete_all_button.setToolTip(
         "Удалить ВСЕ аннотации на текущем снимке.\n"
         "Действие не затрагивает другие изображения."
     )
-    objects_layout.addWidget(parent.delete_all_button)
+
+    # NEW: обе кнопки удаления — в один ряд
+    delete_row = QHBoxLayout()
+    delete_row.addWidget(parent.delete_button)
+    delete_row.addWidget(parent.delete_all_button)
+    objects_layout.addLayout(delete_row)
 
     # Подсказка по горячим клавишам
     hint_label = QLabel("Ctrl+0…9 — сменить класс выделенного объекта")
