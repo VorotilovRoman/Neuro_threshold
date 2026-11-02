@@ -4,25 +4,28 @@
 UI attribute/callback contract stays compatible with the old mixin. Does not
 modify other tabs. All label decoding/conversion is via utils_new.
 """
-import json
 import os
 import tempfile
 import traceback
 
-import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QFileDialog, QLabel,
                              QListWidgetItem, QMessageBox, QTableWidgetItem)
 
-from utils_new.dataset_validation_new import (
-    ImageStats, PairValidator, build_pair_display, load_annotations,
-    read_mask_with_fallback, scan_detection_pairs, scan_segmentation_pairs,
+from utils_new.dataset_image_stats_new import ImageStats
+from utils_new.dataset_pair_validator_new import PairValidator
+from utils_new.dataset_pair_tools_new import (
+    build_pair_display, scan_detection_pairs, scan_segmentation_pairs,
     scan_image_only_pairs,
 )
-from utils_new.dataset_yaml_new import load_yolo_yaml
-from utils_new.dataset_unet_new import load_unet_yaml, is_unet_yaml
-from utils_new.dataset_coco_new import load_coco, write_yolo_txt_for_coco_items
+from utils_new.dataset_catalog_new import (
+    load_yolo_catalog, load_unet_catalog, discover_coco_json,
+    import_coco_catalog, collect_label_classes, collect_mask_classes,
+    resolve_class_name, dense_class_remap, CatalogSourceError,
+)
+from utils_new.dataset_unet_new import is_unet_yaml
+from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
 from ui.pair_validation_dialog_new import PairValidationDialog
 
 class DatasetLoaderMixin:
@@ -182,7 +185,11 @@ class DatasetLoaderMixin:
 
     def _load_yolo_yaml_from_path(self, file_path):
         try:
-            pairs, names, root, splits_info = load_yolo_yaml(file_path, log_cb=self.log)
+            catalog = load_yolo_catalog(file_path, log_cb=self.log)
+            pairs = catalog.pairs
+            names = catalog.class_names
+            root = catalog.root
+            splits_info = catalog.metadata['split_counts']
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать YAML:\n{e}")
             return
@@ -268,20 +275,8 @@ class DatasetLoaderMixin:
         return None
 
     def _find_coco_json_in_folder(self, folder):
-        candidates = []
-        for root, _dirs, files in os.walk(folder):
-            for f in files:
-                if not f.lower().endswith('.json'):
-                    continue
-                p = os.path.join(root, f)
-                try:
-                    with open(p, 'r', encoding='utf-8') as fp:
-                        data = json.load(fp)
-                    if isinstance(data, dict) and 'images' in data and 'annotations' in data:
-                        candidates.append(p)
-                except Exception:
-                    continue
-        return sorted(candidates)
+        return discover_coco_json(folder)
+
 
     def _get_coco_tmp_labels_dir(self, first_json_path=None):
         existing = getattr(self, '_coco_tmp_labels_dir', None)
@@ -297,98 +292,49 @@ class DatasetLoaderMixin:
         if replace:
             self._coco_tmp_labels_dir = None
             self._coco_json_counter = 0
-
-        per_json_data = []
-        for jp in json_paths:
-            try:
-                items, categories, root = load_coco(jp, log_cb=self.log)
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка COCO",
-                                     f"Не удалось загрузить:\n{jp}\n\n{e}")
-                return
-            if not items:
-                self.log(f"⚠️ {os.path.basename(jp)}: нет изображений — пропуск.")
-                continue
-            per_json_data.append((jp, items, categories, root))
-
-        if not per_json_data:
-            QMessageBox.warning(self, "COCO", "Не найдено ни одного изображения.")
-            return
-
-        if replace:
-            name_to_global = {}
-            next_gid = 0
+            existing_names = {}
             base_pairs = []
         else:
-            name_to_global = {}
-            max_gid = -1
+            existing_names = {}
             for row in range(self.class_table.rowCount()):
                 try:
                     gid = int(self.class_table.item(row, 0).text())
                     name_item = self.class_table.item(row, 2)
                     if name_item is None:
                         continue
-                    name = name_item.text().strip() or str(gid)
-                    name_to_global[name] = gid
-                    if gid > max_gid:
-                        max_gid = gid
+                    existing_names[name_item.text().strip() or str(gid)] = gid
                 except (ValueError, TypeError, AttributeError):
                     continue
-            next_gid = max_gid + 1
             base_pairs = list(self.pairs)
-
-        tmp_dir = self._get_coco_tmp_labels_dir(per_json_data[0][0])
+        try:
+            catalog = import_coco_catalog(json_paths, existing_names, log_cb=self.log)
+        except CatalogSourceError as exc:
+            QMessageBox.critical(self, 'Ошибка COCO', f'Не удалось загрузить:\n{exc}')
+            return
+        if not catalog.sources:
+            QMessageBox.warning(self, 'COCO', 'Не найдено ни одного изображения.')
+            return
+        tmp_dir = self._get_coco_tmp_labels_dir(catalog.sources[0].path)
         new_pairs = []
-
-        for idx, (jp, items, categories, _root) in enumerate(per_json_data):
-            local_map = {}
-            for coco_cat_id, name in categories.items():
-                name_str = str(name) if name is not None else str(coco_cat_id)
-                if name_str not in name_to_global:
-                    name_to_global[name_str] = next_gid
-                    next_gid += 1
-                local_map[int(coco_cat_id)] = name_to_global[name_str]
-
-            for it in items:
-                new_anns = []
-                for a in it['annotations']:
-                    coco_cat_id = int(a[1]) + 1
-                    gid = local_map.get(coco_cat_id)
-                    if gid is None:
-                        name_str = str(coco_cat_id)
-                        if name_str not in name_to_global:
-                            name_to_global[name_str] = next_gid
-                            next_gid += 1
-                        gid = name_to_global[name_str]
-                        local_map[coco_cat_id] = gid
-                    new_anns.append((a[0], gid, *a[2:]))
-                it['annotations'] = new_anns
-
-            if not hasattr(self, '_coco_json_counter'):
-                self._coco_json_counter = 0
-            prefix = f"j{self._coco_json_counter:03d}_"
+        for source in catalog.sources:
+            prefix = f'j{self._coco_json_counter:03d}_'
             self._coco_json_counter += 1
-
             try:
-                pairs_i = write_yolo_txt_for_coco_items(
-                    items, tmp_dir, class_remap=None, log_cb=self.log, name_prefix=prefix)
-                new_pairs.extend(pairs_i)
-            except Exception as e:
-                self._log_exception(f"Ошибка записи .txt из {jp}", e)
+                new_pairs.extend(write_yolo_txt_for_coco_items(
+                    source.items, tmp_dir, class_remap=None,
+                    log_cb=self.log, name_prefix=prefix))
+            except Exception as exc:
+                self._log_exception(f'Ошибка записи .txt из {source.path}', exc)
                 return
-
-        class_names = {gid: name for name, gid in name_to_global.items()}
-        self.pairs = (new_pairs if replace else base_pairs + new_pairs)
-
+        class_names = catalog.class_names
+        self.pairs = new_pairs if replace else base_pairs + new_pairs
         self.images_folder = os.path.dirname(json_paths[0])
         self.labels_folder = tmp_dir
         self.masks_folder = None
-
         self.dataset_type = 0
         self.input_format = 'auto'
         self.validator.set_dataset_type(0)
         self.validator.set_input_format('auto')
-
         self.dataset_type_combo.blockSignals(True)
         self.input_format_combo.blockSignals(True)
         try:
@@ -399,26 +345,23 @@ class DatasetLoaderMixin:
         finally:
             self.dataset_type_combo.blockSignals(False)
             self.input_format_combo.blockSignals(False)
-
         self._sync_all_states()
         self.validator.clear_cache()
         valid_count, invalid_count = self._validate_all_pairs()
         self._recompute_color_stats()
         self._fill_class_table_from_dict(class_names, preserve_include=True)
         self._rebuild_file_list_display(pairs=self.pairs)
-
-        action = "Загрузка" if replace else "Добавление"
-        self.log(f"=== {action} COCO ({len(per_json_data)} файлов) ===")
-        for jp, items, _, _ in per_json_data:
-            self.log(f"  • {os.path.basename(jp)}: images={len(items)}")
-        self.log(f"Итого: пар={len(self.pairs)}, классов={len(class_names)}")
-
-        extra = f"  [COCO: {len(per_json_data)} json, {action.lower()}]"
+        action = 'Загрузка' if replace else 'Добавление'
+        self.log(f'=== {action} COCO ({len(catalog.sources)} файлов) ===')
+        for source in catalog.sources:
+            self.log(f'  • {os.path.basename(source.path)}: images={len(source.items)}')
+        self.log(f'Итого: пар={len(self.pairs)}, классов={len(class_names)}')
+        extra = f'  [COCO: {len(catalog.sources)} json, {action.lower()}]'
         if invalid_count > 0:
-            extra += f"  ⚠️ некорректных: {invalid_count}"
+            extra += f'  ⚠️ некорректных: {invalid_count}'
         self._update_pair_count_label(extra, error=invalid_count > 0)
-
         self._after_load_hook()
+
 
     # ---------------- U-Net YAML ----------------
     def load_from_unet_yaml(self):
@@ -430,23 +373,21 @@ class DatasetLoaderMixin:
 
     def _load_unet_from_path(self, yaml_path):
         try:
-            data = load_unet_yaml(yaml_path, log_cb=self.log)
+            catalog = load_unet_catalog(yaml_path, log_cb=self.log)
         except Exception as e:
             QMessageBox.critical(self, "Ошибка U-Net YAML",
                                  f"Не удалось загрузить:\n{e}")
             return
 
-        pairs = data['pairs']
-        yolo_class_names = data['class_names']
-        mask_offset = data['mask_class_offset']
-        root = data['root']
+        pairs = catalog.pairs
+        mask_offset = catalog.metadata['mask_class_offset']
+        root = catalog.root
 
         if not pairs:
             QMessageBox.warning(self, "U-Net", "Не найдено ни одной пары.")
             return
 
-        pixel_class_names = {int(yc) + int(mask_offset): name
-                             for yc, name in yolo_class_names.items()}
+        pixel_class_names = catalog.class_names
         self.images_folder = root
         self.labels_folder = None
         self.masks_folder = root
@@ -463,7 +404,7 @@ class DatasetLoaderMixin:
         )
         self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")
         self.log(f"Root: {root}")
-        self.log(f"Пар: {len(pairs)}, классов: {len(yolo_class_names)}, "
+        self.log(f"Пар: {len(pairs)}, классов: {len(pixel_class_names)}, "
                  f"mask_class_offset: {mask_offset}")
 
     # ---------------- общая инициализация после загрузки ----------------
@@ -839,21 +780,8 @@ class DatasetLoaderMixin:
         self.update_included_classes()
 
     def _get_yaml_name_for_id(self, cid):
-        names = self._yaml_names
-        if not names:
-            return None
-        try:
-            if isinstance(names, dict):
-                if cid in names:
-                    return str(names[cid])
-                if str(cid) in names:
-                    return str(names[str(cid)])
-            elif isinstance(names, (list, tuple)):
-                if 0 <= cid < len(names):
-                    return str(names[cid])
-        except Exception:
-            pass
-        return None
+        return resolve_class_name(self._yaml_names, cid)
+
 
     def collect_classes(self):
         if not self.pairs:
@@ -867,21 +795,7 @@ class DatasetLoaderMixin:
             return
 
         if self.dataset_type == 0:
-            unique_ids = set()
-            for pair in self.pairs:
-                label_path = pair[1] if len(pair) > 1 else None
-                if not label_path:
-                    continue
-                try:
-                    anns = load_annotations(label_path, 1, 1, format_hint=self.input_format)
-                except Exception:
-                    continue
-                for ann in anns:
-                    try:
-                        unique_ids.add(int(ann[1]))
-                    except (ValueError, TypeError, IndexError):
-                        continue
-
+            unique_ids = collect_label_classes(self.pairs, self.input_format)
             self.original_ids = sorted(unique_ids)
             self._updating_class_table = True
             self.class_table.blockSignals(True)
@@ -911,23 +825,8 @@ class DatasetLoaderMixin:
             self.update_included_classes()
 
         elif self.dataset_type == 1:
-            unique_vals = set()
-            valid_pairs_for_classes = []
-            for pair in self.pairs:
-                mask_path = pair[1] if len(pair) > 1 else None
-                if not mask_path:
-                    continue
-                try:
-                    mask = read_mask_with_fallback(str(mask_path))
-                    if mask is None or mask.size == 0:
-                        continue
-                    if mask.dtype not in (np.uint8, np.uint16):
-                        mask = mask.astype(np.uint8)
-                    uniq = np.unique(mask)
-                    unique_vals.update(int(v) for v in uniq)
-                    valid_pairs_for_classes.append((pair[0], mask_path))
-                except Exception as e:
-                    self.log(f"Ошибка маски {mask_path}: {e}")
+            all_vals, valid_pairs_for_classes = collect_mask_classes(
+                self.pairs, log_cb=self.log)
             if not valid_pairs_for_classes:
                 self.original_ids = []
                 self._updating_class_table = True
@@ -939,7 +838,6 @@ class DatasetLoaderMixin:
                     self._updating_class_table = False
                 return
             self.pairs = valid_pairs_for_classes
-            all_vals = sorted(unique_vals)
             self.original_ids = all_vals
             self._updating_class_table = True
             self.class_table.blockSignals(True)
@@ -995,10 +893,10 @@ class DatasetLoaderMixin:
                             continue
 
                 included_rows.sort(key=lambda t: t[1])
-                self.class_remap = {}
+                self.class_remap = dense_class_remap(orig for _row, orig in included_rows)
                 included_set = set()
-                for new_id, (row, orig) in enumerate(included_rows):
-                    self.class_remap[orig] = new_id
+                for row, orig in included_rows:
+                    new_id = self.class_remap[orig]
                     included_set.add(row)
                     item = self.class_table.item(row, 0)
                     if item is not None and item.text() != str(new_id):
@@ -1027,7 +925,7 @@ class DatasetLoaderMixin:
                         except (ValueError, TypeError, AttributeError):
                             continue
                 sorted_included = sorted(self.included_orig_ids)
-                self.mask_class_remap = {old: new for new, old in enumerate(sorted_included)}
+                self.mask_class_remap = dense_class_remap(sorted_included)
                 self.unique_classes = list(range(len(sorted_included)))
                 self.num_classes = len(self.unique_classes)
                 for row in range(self.class_table.rowCount()):
