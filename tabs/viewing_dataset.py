@@ -2,8 +2,8 @@
 from collections import OrderedDict
 
 from import_libs_internal import *
-
 from import_libs_methods_ui import setup_viewing_dataset_ui
+
 
 from PyQt5.QtGui import QKeySequence, QPalette
 from PyQt5.QtWidgets import QShortcut
@@ -596,8 +596,19 @@ class ViewingDataset(QMainWindow):
         if mask_path and os.path.exists(mask_path):
             try:
                 mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-                if mask is not None and len(mask.shape) == 3:
-                    mask = mask[:, :, 0]
+                if mask is not None and mask.ndim == 3:
+                    # An RGB/RGBA mask is not an index map unless the color
+                    # channels are identical. Silently reading only B would
+                    # create false class labels on empty image regions.
+                    if (mask.shape[2] < 3
+                            or not np.array_equal(mask[:, :, 0], mask[:, :, 1])
+                            or not np.array_equal(mask[:, :, 0], mask[:, :, 2])):
+                        self.log(f"⚠️ Маска {mask_path}: цветная RGB/RGBA-кодировка "
+                                 "без карты соответствия цвет→класс; "
+                                 "наложение пропущено, чтобы не искажать классы.")
+                        mask = None
+                    else:
+                        mask = mask[:, :, 0]
             except Exception as e:
                 self.log(f"Warning: could not load mask {mask_path}: {e}")
 
@@ -643,6 +654,7 @@ class ViewingDataset(QMainWindow):
         self.mask_folder = folder
         self._yaml_mask_map = {}
         self._mask_pixel_offset = 1  # обычная ручная маска: 0=фон, 1=класс 0
+        self._mask_background_value = 0  # сброс после U-Net offset=0
         self._mask_cache = OrderedDict()
         self.class_colors = {}
         self.log(f"Masks folder set: {folder} (маски грузятся по мере просмотра).")
@@ -662,6 +674,7 @@ class ViewingDataset(QMainWindow):
             pixel_offset=self._mask_pixel_offset,
             background_value=self._mask_background_value,
             annotations=self.current_annotations,
+            restrict_to_annotations=bool(self.current_annotations),
         )
 
     def update_info_label(self):

@@ -23,6 +23,8 @@ utils_new/annotation_processing.py. Только модели AE/VAE и их п�
 пока импортируются из utils_aeb/yolo_aeb_utils.py.
 """
 from import_libs_internal import *
+
+
 from import_libs_methods_ui import setup_yolo_ae_vae_ui
 
 from utils_new.annotation_processing import (
@@ -77,11 +79,8 @@ class YoloAEBPresetManager(PresetManager):
             "chk_auto_rotate": bool(m.chk_auto_rotate.isChecked()),
             "fill_mode": m.fill_combo.currentData(),
 
-            "kernel_shape": m.kernel_shape_combo.currentText(),
-            "erosion": int(m.erosion_slider.value()),
-            "dilation": int(m.dilation_slider.value()),
+            "morphology": m.morphology_widget.get_settings(),
             "invert_image": bool(m.invert_image_checkbox.isChecked()),
-            "contour_only": bool(m.chk_contour_only.isChecked()),
         }
 
     def apply_preset(self, name):
@@ -127,18 +126,18 @@ class YoloAEBPresetManager(PresetManager):
             if idx >= 0:
                 m.fill_combo.setCurrentIndex(idx)
 
-        if "kernel_shape" in s:
-            idx = m.kernel_shape_combo.findText(str(s["kernel_shape"]))
-            if idx >= 0:
-                m.kernel_shape_combo.setCurrentIndex(idx)
-        if "erosion" in s:
-            m.erosion_slider.setValue(int(s["erosion"]))
-        if "dilation" in s:
-            m.dilation_slider.setValue(int(s["dilation"]))
+        if "morphology" in s:
+            m.morphology_widget.set_settings(s["morphology"])
+        elif any(k in s for k in ("erosion", "dilation", "kernel_shape", "contour_only")):
+            # Старые пресеты задавали только эрозию/дилатацию в px.
+            m.morphology_widget.set_legacy_yolo(
+                erosion=int(s.get("erosion", 1)),
+                dilation=int(s.get("dilation", 1)),
+                shape=str(s.get("kernel_shape", "Rectangle")),
+                contour_only=bool(s.get("contour_only", True)),
+            )
         if "invert_image" in s:
             m.invert_image_checkbox.setChecked(bool(s["invert_image"]))
-        if "contour_only" in s:
-            m.chk_contour_only.setChecked(bool(s["contour_only"]))
 
         yolo_path = s.get("yolo_model_path", "") or ""
         ae_path = s.get("ae_model_path", "") or ""
@@ -252,11 +251,8 @@ class YoloInspectWindow(QMainWindow):
         self.chk_show_boxes.toggled.connect(self.on_show_boxes_changed)
 
         # --- Морфология по контуру объекта + инверсия ---
-        self.kernel_shape_combo.currentIndexChanged.connect(self.schedule_update)
-        self.erosion_slider.valueChanged.connect(self.on_erosion_changed)
-        self.dilation_slider.valueChanged.connect(self.on_dilation_changed)
+        self.morphology_widget.parameters_changed.connect(self.schedule_update)
         self.invert_image_checkbox.toggled.connect(self.schedule_update)
-        self.chk_contour_only.toggled.connect(self.schedule_update)
 
         self.conf_spin.valueChanged.connect(self.on_yolo_params_changed)
         self.iou_spin.valueChanged.connect(self.on_yolo_params_changed)
@@ -301,14 +297,6 @@ class YoloInspectWindow(QMainWindow):
 
     def on_show_boxes_changed(self, *_):
         self._rebuild_yolo_view()
-
-    def on_erosion_changed(self, value):
-        self.erosion_label.setText(str(int(value)))
-        self.schedule_update()
-
-    def on_dilation_changed(self, value):
-        self.dilation_label.setText(str(int(value)))
-        self.schedule_update()
 
     # --------------------------------------------------------
     # Устройства
@@ -686,8 +674,7 @@ class YoloInspectWindow(QMainWindow):
         need_update = (
             self.chk_auto_crop.isChecked()
             or self.chk_auto_rotate.isChecked()
-            or self.erosion_slider.value() > 1
-            or self.dilation_slider.value() > 1
+            or self.morphology_widget.has_active_operations()
         )
         if need_update:
             self.schedule_update()
@@ -710,10 +697,10 @@ class YoloInspectWindow(QMainWindow):
         """Shared processing pipeline for preview and export (new utility)."""
         return aeb_transform_image(
             self.original_image, det,
-            erode=int(self.erosion_slider.value()),
-            dilate=int(self.dilation_slider.value()),
-            shape_name=self.kernel_shape_combo.currentText(),
-            contour_only=self.chk_contour_only.isChecked(),
+            morphology_steps=self.morphology_widget.get_steps(),
+            contour_width_px=self.morphology_widget.contour_width_px(),
+            shape_name=self.morphology_widget.kernel_shape(),
+            contour_only=self.morphology_widget.contour_only(),
             auto_crop=self.chk_auto_crop.isChecked(),
             auto_rotate=self.chk_auto_rotate.isChecked(),
             padding=int(self.crop_padding_spin.value()),
@@ -804,8 +791,7 @@ class YoloInspectWindow(QMainWindow):
                 f"[Морфология] kind={morph_info['kind']} "
                 f"cls={morph_info['cls_name']} "
                 f"mode={morph_info['contour_mode']} "
-                f"erosion={morph_info['erosion']}px "
-                f"dilation={morph_info['dilation']}px "
+                f"operations={morph_info['operations']} "
                 f"mask_px={morph_info['mask_px']}")
         self.displayed_image = img
         self.display_mode = mode

@@ -19,6 +19,11 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from utils_new.morphology import (
+    MorphologyStep,
+    apply_morphology as apply_shared_morphology,
+)
+
 try:  # необязательный ускоренный и точный backend для невыпуклых полигонов
     from shapely.geometry import Polygon as _Polygon
 except ImportError:
@@ -182,7 +187,7 @@ def mask_roi_at_image_scale(mask: np.ndarray, image_w: int, image_h: int,
 def apply_class_mask_overlay(image: np.ndarray, mask: Optional[np.ndarray],
                              opacity: float, color_for_class,
                              *, pixel_offset: int = 1, background_value: int = 0,
-                             annotations=None):
+                             annotations=None, restrict_to_annotations=False):
     """Показывает индексную маску цветами палитры классов (BGR).
 
     Без ``annotations`` действует прежний режим: class_id = value - pixel_offset.
@@ -193,6 +198,12 @@ def apply_class_mask_overlay(image: np.ndarray, mask: Optional[np.ndarray],
 
     Фон (background_value) всегда прозрачен. При перекрытии объектов
     приоритет получает более специфическая форма и меньший объект.
+    При restrict_to_annotations=True маска рисуется ТОЛЬКО внутри
+    геометрии переданных аннотаций. Остальные пиксели не окрашиваются,
+    независимо от их значения в исходном файле маски. Если аннотаций нет,
+    можно сохранить прежнее индексное наложение для mask-only датасетов,
+    передав restrict_to_annotations=False.
+
     Исходные image/mask не изменяются; alpha применяется единожды.
     """
     if image is None or mask is None or image.size == 0:
@@ -246,9 +257,13 @@ def apply_class_mask_overlay(image: np.ndarray, mask: Optional[np.ndarray],
                                + alpha * bgr).round().clip(0, 255).astype(np.uint8)
             covered[y1:y2, x1:x2][region] = True
 
-    # Пиксели, не принадлежащие ни одной аннотации, раскрашиваем по
-    # числовой метке. Это сохраняет поддержку семантических U-Net масок
-    # даже когда соответствующих аннотаций нет в списке.
+    # При просмотре размеченного датасета пиксели вне геометрии аннотаций
+    # должны оставаться исходными, даже если маска ошибочно содержит
+    # ненулевой индекс (например 4/5 -> класс 4).
+    if restrict_to_annotations:
+        return result
+
+    # Legacy indexed/mask-only mode (no geometry to restrict to).
     for pixel_value in np.unique(mask):
         label = int(pixel_value)
         if label == background_value:
@@ -564,6 +579,7 @@ def prepare_annotation_preview(image, annotation, padding=10, *, mask=None,
             crop, mask_roi, opacity, color_for_class,
             pixel_offset=pixel_offset, background_value=background_value,
             annotations=[crop_annotation],
+            restrict_to_annotations=True,
         )
     return crop, crop_annotation, bounds
 
@@ -736,16 +752,26 @@ def morph_image_in_mask(img, mask, erosion_px, dilation_px,
     return img
 
 
-def apply_object_morphology(img, det, erosion_px, dilation_px,
-                            shape_name="Rectangle", contour_only=True):
+def apply_object_morphology(img, det, erosion_px=1, dilation_px=1,
+                            shape_name="Rectangle", contour_only=True,
+                            *, operations=None, contour_width_px=None):
+    """Морфология изображения внутри выбранной YOLO-детекции.
+
+    ``operations`` — список MorphologyStep/dict из общего виджета,
+    порядок списка строго соблюдается. Старые erosion_px/dilation_px
+    сохранены для совместимости API со старыми вызывающими модулями.
+    Ограничение по объекту происходит *до* кропа/доворота, как и ранее.
     """
-    Полный сценарий морфологии по выбранной детекции.
-    Возвращает (img_out, info) где info — словарь с деталями для лога
-    либо None, если операция не применялась.
-    """
-    if erosion_px <= 1 and dilation_px <= 1:
-        return img, None
-    if det is None:
+    if operations is None:
+        steps = [MorphologyStep("erode", int(erosion_px)),
+                 MorphologyStep("dilate", int(dilation_px))]
+    else:
+        steps = list(operations)
+
+    # Выключенные шаги не должны менять исходное изображение.
+    enabled = [x for x in steps if int(x.kernel_px if isinstance(x, MorphologyStep)
+                                      else x["kernel_px"]) > 1]
+    if not enabled or det is None:
         return img, None
 
     H, W = img.shape[:2]
@@ -753,18 +779,31 @@ def apply_object_morphology(img, det, erosion_px, dilation_px,
     if mask is None or not mask.any():
         return img, None
 
-    img = morph_image_in_mask(img, mask, erosion_px, dilation_px,
-                              shape_name=shape_name, contour_only=contour_only)
-
+    output = apply_shared_morphology(
+        img, steps, shape=shape_name, mask=mask,
+        contour_only=bool(contour_only), contour_width_px=contour_width_px,
+    )
     info = {
         "kind": det.get("kind"),
         "cls_name": det.get("cls_name"),
         "contour_mode": "contour" if contour_only else "full",
-        "erosion": int(erosion_px),
-        "dilation": int(dilation_px),
+        "erosion": next((int(x.kernel_px if isinstance(x, MorphologyStep)
+                              else x["kernel_px"]) for x in steps
+                         if (x.operation if isinstance(x, MorphologyStep)
+                             else x["operation"]) == "erode"), 0),
+        "dilation": next((int(x.kernel_px if isinstance(x, MorphologyStep)
+                               else x["kernel_px"]) for x in steps
+                          if (x.operation if isinstance(x, MorphologyStep)
+                              else x["operation"]) == "dilate"), 0),
+        "operations": [
+            f"{x.operation if isinstance(x, MorphologyStep) else x['operation']}="
+            f"{x.kernel_px if isinstance(x, MorphologyStep) else x['kernel_px']}px"
+            for x in steps if int(x.kernel_px if isinstance(x, MorphologyStep)
+                                  else x["kernel_px"]) > 1
+        ],
         "mask_px": int((mask > 0).sum()),
     }
-    return img, info
+    return output, info
 
 
 def fill_outside_object(img, det, fill_mode,
@@ -908,6 +947,7 @@ def limit_image_size(img, max_side):
 
 
 def aeb_transform_image(image, detection, *, erode=1, dilate=1,
+                        morphology_steps=None, contour_width_px=None,
                         shape_name='Rectangle', contour_only=True,
                         auto_crop=False, auto_rotate=False, padding=0,
                         off_x=0, off_y=0, fine_angle=0.0, fill_mode='none',
@@ -921,8 +961,11 @@ def aeb_transform_image(image, detection, *, erode=1, dilate=1,
         return None, 'empty', None
     img = image.copy()
     mode = 'original'
-    img, morph_info = apply_object_morphology(img, detection, erode, dilate,
-                          shape_name=shape_name, contour_only=contour_only)
+    img, morph_info = apply_object_morphology(
+        img, detection, erode, dilate,
+        shape_name=shape_name, contour_only=contour_only,
+        operations=morphology_steps, contour_width_px=contour_width_px,
+    )
     if detection is not None and (auto_rotate or auto_crop):
         if auto_rotate and detection.get('angle_deg') is not None:
             img = rotate_with_optional_crop(img, detection, auto_crop=bool(auto_crop),

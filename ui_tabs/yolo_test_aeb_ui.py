@@ -13,6 +13,7 @@ UI-слой вкладки YOLO + AE/VAE.
 """
 from import_libs_internal import *
 from utils_new.dataset_review_view import DatasetReviewGraphicsView
+from ui.morphology_ui import MorphologyWidget
 
 
 def setup_yolo_ae_vae_ui(parent):
@@ -84,12 +85,14 @@ def setup_yolo_ae_vae_ui(parent):
 
     # Низ слева: обработанный снимок.
     parent.transformed_view = DatasetReviewGraphicsView()
+    parent.transformed_view.selection_enabled = False  # only pan/zoom, not object selection
     parent.transformed_view.setMinimumSize(400, 300)
     parent.transformed_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.transformed_view, 1, 0)
 
     # Низ справа: карта ошибок AE/VAE.
     parent.error_view = DatasetReviewGraphicsView()
+    parent.error_view.selection_enabled = False  # only pan/zoom, not object selection
     parent.error_view.setMinimumSize(400, 300)
     parent.error_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.error_view, 1, 1)
@@ -330,61 +333,16 @@ def setup_yolo_ae_vae_ui(parent):
     parent.btn_reset = QPushButton("Сбросить (показать оригинал)")
     controls_layout.addWidget(parent.btn_reset)
 
-    # --- Морфологические операции (по контуру выбранного объекта) ---
-    morph_label = QLabel("Морфология по контуру выбранного объекта (пикс.):")
-    morph_label.setStyleSheet("QLabel { color: #666; margin-top: 4px; }")
-    controls_layout.addWidget(morph_label)
-
-    kernel_shape_row = QHBoxLayout()
-    kernel_shape_row.addWidget(QLabel("Форма ядра:"))
-    parent.kernel_shape_combo = QComboBox()
-    parent.kernel_shape_combo.addItems(["Rectangle", "Ellipse", "Cross"])
-    kernel_shape_row.addWidget(parent.kernel_shape_combo)
-    kernel_shape_row.addStretch()
-    controls_layout.addLayout(kernel_shape_row)
-
-    erosion_row = QHBoxLayout()
-    erosion_row.addWidget(QLabel("Эрозия:"))
-    parent.erosion_slider = QSlider(Qt.Horizontal)
-    parent.erosion_slider.setRange(1, 100)
-    parent.erosion_slider.setValue(1)
-    parent.erosion_slider.setToolTip(
-        "1 — операция отключена.\n"
-        "2..100 — размер ядра в пикселях (нечётное значение)."
+    # Общая морфология: 4 операции и порядок, применяется ТОЛЬКО к выбранному объекту.
+    parent.morphology_widget = MorphologyWidget(
+        parent, contour_available=True, contour_default=True,
+        initial_order=("erode", "dilate", "close", "open"),
+        title="Морфология внутри выбранного объекта",
     )
-    parent.erosion_label = QLabel("1")
-    parent.erosion_label.setFixedWidth(36)
-    erosion_row.addWidget(parent.erosion_slider, 1)
-    erosion_row.addWidget(parent.erosion_label)
-    controls_layout.addLayout(erosion_row)
-
-    dilation_row = QHBoxLayout()
-    dilation_row.addWidget(QLabel("Расширение:"))
-    parent.dilation_slider = QSlider(Qt.Horizontal)
-    parent.dilation_slider.setRange(1, 100)
-    parent.dilation_slider.setValue(1)
-    parent.dilation_slider.setToolTip(
-        "1 — операция отключена.\n"
-        "2..100 — размер ядра в пикселях (нечётное значение)."
-    )
-    parent.dilation_label = QLabel("1")
-    parent.dilation_label.setFixedWidth(36)
-    dilation_row.addWidget(parent.dilation_slider, 1)
-    dilation_row.addWidget(parent.dilation_label)
-    controls_layout.addLayout(dilation_row)
+    controls_layout.addWidget(parent.morphology_widget)
 
     parent.invert_image_checkbox = QCheckBox("Инвертировать изображение")
     controls_layout.addWidget(parent.invert_image_checkbox)
-
-    # NEW: режим «только по контуру»
-    parent.chk_contour_only = QCheckBox("Только по контуру объекта")
-    parent.chk_contour_only.setChecked(True)
-    parent.chk_contour_only.setToolTip(
-        "Если включено — эрозия/дилатация применяются только по контуру\n"
-        "выбранного объекта (граница маски сегментации или четырёхугольника).\n"
-        "Если выключено — по всей площади внутри объекта."
-    )
-    controls_layout.addWidget(parent.chk_contour_only)
 
     # --- Кнопки сохранения теперь в верхней панели, здесь их нет ---
 

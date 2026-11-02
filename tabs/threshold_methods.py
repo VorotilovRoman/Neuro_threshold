@@ -1,7 +1,160 @@
-# threshold_methods.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_threshold_ui
+# -*- coding: utf-8 -*-
+"""Пороговые методы: вычисления OpenCV, просмотр Qt через utils_new.
+
+Поддерживается legacy API ThresholdWindow для автоподбора и пресетов.
+Графические окна read-only; векторная разметка рисуется поверх базового QPixmap.
+"""
+import json
+import os
+import sys
+
+import cv2
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication, QFileDialog, QInputDialog, QListWidgetItem, QMainWindow,
+    QMessageBox, QLabel, QSlider,
+)
+
 from path_setup import get_project_root
+from utils.image_io import LazyImageCache, load_one_image_item, numpy_to_qpixmap, save_annotations
+from utils.presets import PresetManager
+from utils_new.morphology import apply_morphology as apply_shared_morphology
+from utils.settings import settings
+from utils_ops.segmentation_ops import (
+    apply_threshold_method, normalize_method_name, segment_contours,
+    segment_projections, segment_min_area_rect, format_object_for_list,
+)
+from utils_auto_research.threshold_auto_research import AutoResearch
+from utils_auto_research.threshold_auto_settings_dialog import AutoSettingsDialog
+
+
+from import_libs_methods_ui import setup_threshold_ui
+
+
+class _LegacyMorphologyRatioSlider(QSlider):
+    """Невидимый Qt-совместимый адаптер для старого AutoResearch.
+
+    Перенаправляет setValue в новый виджет и при блокировке сигналов,
+    поскольку некоторые исследовательские сценарии выставляют сразу весь
+    набор параметров с blockSignals(True).
+    """
+    def __init__(self, owner, operation):
+        super().__init__(Qt.Horizontal, owner)
+        self.owner = owner
+        self.operation = operation
+        self._sync_only = False
+        self.setRange(0, 10)
+        self.hide()
+
+    def setValue(self, value):
+        super().setValue(value)
+        if not self._sync_only:
+            self.owner._on_legacy_ratio_change(self.operation, self.value())
+
+
+class ThresholdMorphologyPresetManager(PresetManager):
+    """Сохраняет новую пиксельную морфологию и читает старые Threshold-пресеты.
+
+    Старые close_factor/open_factor зависят от размера снимка: их перевод
+    откладывается до появления изображения, чтобы не терять размер ядра.
+    Общий utils.presets.PresetManager намеренно не изменяется — он нужен
+    другим вкладкам с историческими полями.
+    """
+
+    def get_current_settings(self):
+        m = self.main
+        state = {
+            "method": normalize_method_name(m.method_combo.currentText()),
+            "params": m.get_current_threshold_params(),
+            "invert": m.invert_checkbox.isChecked(),
+            "draw_mode": m.draw_combo.currentText(),
+            "use_hull": m.hull_checkbox.isChecked(),
+        }
+        if m._pending_legacy_morphology is not None:
+            # Ещё не открыт снимок для перевода относительного ядра в px;
+            # сохраняем параметры без потери (старый формат временно допустим).
+            legacy = m._pending_legacy_morphology
+            state.update(close_factor=legacy["close_factor"],
+                         open_factor=legacy["open_factor"],
+                         kernel_shape=legacy["shape"])
+        else:
+            state["morphology"] = m.morphology_widget.get_settings()
+        return state
+
+    def apply_preset(self, name):
+        if name not in self.presets:
+            return False
+        m = self.main
+        preset = self.presets[name]
+        method = normalize_method_name(str(preset.get("method", "Simple Threshold")))
+        # Без автоматического пересчёта по промежуточным значениям ползунков.
+        widgets = [m.method_combo, m.threshold_slider, m.adaptive_win, m.adaptive_c,
+                   m.niblack_win, m.niblack_k, m.sauvola_win, m.sauvola_k,
+                   m.sauvola_r, m.isodata_init, m.bg_excess, m.row_win,
+                   m.row_k, m.draw_combo, m.hull_checkbox, m.invert_checkbox,
+                   m.morphology_widget]
+        previous = [w.blockSignals(True) for w in widgets]
+        try:
+            idx = m.method_combo.findText(method)
+            if idx >= 0:
+                m.method_combo.setCurrentIndex(idx)
+                m.on_method_changed(idx)
+            else:
+                m.log(f"Предупреждение: метод '{method}' отсутствует.")
+
+            params = preset.get("params", {})
+            if method == "Simple Threshold":
+                m.threshold_slider.setValue(int(params.get("threshold", 127)))
+                m.threshold_value_label.setText(str(m.threshold_slider.value()))
+            elif method in ("Adaptive Mean", "Adaptive Gauss"):
+                window = int(params.get("window", 25))
+                m.adaptive_win.setValue(window + (window % 2 == 0))
+                m.adaptive_c.setValue(int(params.get("c", 3)))
+            elif method == "Niblack":
+                m.niblack_win.setValue(int(params.get("window", 25)))
+                m.niblack_k.setValue(round(float(params.get("k", 0.2)) * 100))
+                m.niblack_k_label.setText(f"{m.niblack_k.value() / 100:.2f}")
+            elif method == "Sauvola":
+                m.sauvola_win.setValue(int(params.get("window", 25)))
+                m.sauvola_k.setValue(round(float(params.get("k", 0.2)) * 100))
+                m.sauvola_r.setValue(int(params.get("r", 128)))
+                m.sauvola_k_label.setText(f"{m.sauvola_k.value() / 100:.2f}")
+                m.sauvola_r_label.setText(str(m.sauvola_r.value()))
+            elif method == "ISODATA":
+                m.isodata_init.setValue(int(params.get("init", 128)))
+            elif method == "Background Symmetry":
+                m.bg_excess.setValue(round(float(params.get("excess", 0.2)) * 100))
+                m.bg_excess_label.setText(f"{m.bg_excess.value() / 100:.2f}")
+            elif method == "Row Adaptive":
+                m.row_win.setValue(int(params.get("window", 50)))
+                m.row_k.setValue(round(float(params.get("k", 0.5)) * 100))
+                m.row_k_label.setText(f"{m.row_k.value() / 100:.2f}")
+
+            m.invert_checkbox.setChecked(bool(preset.get("invert", True)))
+            m.draw_combo.setCurrentText(str(preset.get("draw_mode", m.draw_combo.currentText())))
+            m.hull_checkbox.setChecked(bool(preset.get("use_hull", False)))
+            if "morphology" in preset:
+                m._pending_legacy_morphology = None
+                m.morphology_widget.set_settings(preset["morphology"])
+            elif "close_factor" in preset or "open_factor" in preset:
+                legacy = {
+                    "close_factor": float(preset.get("close_factor", 0)),
+                    "open_factor": float(preset.get("open_factor", 0)),
+                    "shape": preset.get("kernel_shape", "Rectangle"),
+                }
+                if m.current_gray is None:
+                    m._pending_legacy_morphology = legacy
+                else:
+                    m._pending_legacy_morphology = None
+                    m.morphology_widget.set_legacy_threshold(
+                        legacy["close_factor"], legacy["open_factor"],
+                        m.current_gray.shape, legacy["shape"])
+        finally:
+            for widget, prev in zip(widgets, previous):
+                widget.blockSignals(prev)
+        if m._lazy_cache is not None:
+            m.display_current_image()
+        return True
 
 
 class ThresholdWindow(QMainWindow):
@@ -11,8 +164,6 @@ class ThresholdWindow(QMainWindow):
 
         # UI создаётся функцией, которая сама устанавливает центральный виджет
         setup_threshold_ui(self)
-        print(hasattr(self.nav_widget, 'load_folder'))
-        print(self.nav_widget.load_folder)
 
         # Данные изображений.
         # Полный список путей хранится всегда; сами картинки — в _lazy_cache.
@@ -46,7 +197,18 @@ class ThresholdWindow(QMainWindow):
         self.update_timer.timeout.connect(self.display_current_image)
 
         # Пресеты
-        self.preset_manager = PresetManager(self)
+        self._pending_legacy_morphology = None
+        # Служебные (невидимые) адаптеры старого API для внешнего AutoResearch.
+        # Новый интерфейс содержит только MorphologyWidget. Старые алгоритмы
+        # автоподбора иногда обращаются к close/open_kernel_slider напрямую.
+        self.close_kernel_slider = _LegacyMorphologyRatioSlider(self, "close")
+        self.open_kernel_slider = _LegacyMorphologyRatioSlider(self, "open")
+        self.kernel_shape_combo = self.morphology_widget.shape_combo
+        self.close_kernel_label = QLabel(self)
+        self.open_kernel_label = QLabel(self)
+        self.close_kernel_label.hide()
+        self.open_kernel_label.hide()
+        self.preset_manager = ThresholdMorphologyPresetManager(self)
         self.update_preset_combo()
         self.preset_combo.activated.connect(self.on_preset_activated)
         self.save_preset_btn.clicked.connect(self.save_as_preset)
@@ -62,8 +224,7 @@ class ThresholdWindow(QMainWindow):
 
         self.threshold_slider.valueChanged.connect(self.on_simple_threshold_changed)
         self.invert_checkbox.stateChanged.connect(self.on_invert_changed)
-        self.close_kernel_slider.valueChanged.connect(self.on_close_kernel_changed)
-        self.open_kernel_slider.valueChanged.connect(self.on_open_kernel_changed)
+        self.morphology_widget.parameters_changed.connect(self.on_morphology_changed)
         self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
         self.adaptive_win.valueChanged.connect(self.on_param_changed)
@@ -76,7 +237,6 @@ class ThresholdWindow(QMainWindow):
         self.isodata_init.valueChanged.connect(self.on_param_changed)
         self.row_win.valueChanged.connect(self.on_param_changed)
         self.row_k.valueChanged.connect(self.on_row_k_changed)
-        self.kernel_shape_combo.currentIndexChanged.connect(self.on_param_changed)
         self.bg_excess.valueChanged.connect(self.on_bg_excess_changed)
 
         self.hull_checkbox.stateChanged.connect(self.on_hull_changed)
@@ -208,14 +368,29 @@ class ThresholdWindow(QMainWindow):
             params["k"] = self.row_k.value() / 100.0
         return params
 
+    # ---------- Отображение через Qt (utils_new) ----------
+    @staticmethod
+    def _show_image_in_view(view, image):
+        """Чистый снимок + корректная система координат пикселей изображения.
+
+        Если numpy_to_qpixmap уменьшит изображение для ограничения памяти,
+        аннотации останутся привязанными к исходным координатам пикселей.
+        """
+        if image is None:
+            view.set_annotations([], 0, 0)
+            view.set_pixmap(numpy_to_qpixmap(None))
+            return
+        h, w = image.shape[:2]
+        view.set_annotations([], w, h)
+        view.set_pixmap(numpy_to_qpixmap(image))
+
     # ---------- Отображение текущего изображения ----------
     def display_current_image(self):
         if self._lazy_cache is None or len(self._lazy_cache) == 0:
             self.update_current_histogram()
-            self.original_view.set_pixmap(numpy_to_qpixmap(None))
-            self.binary_view.set_pixmap(numpy_to_qpixmap(None))
-            self.morph_view.set_pixmap(numpy_to_qpixmap(None))
-            self.annotated_view.set_pixmap(numpy_to_qpixmap(None))
+            for view in (self.original_view, self.binary_view,
+                         self.morph_view, self.annotated_view):
+                self._show_image_in_view(view, None)
             self.info_label.setText("No images loaded")
             self.object_list.clear()
             return
@@ -238,7 +413,19 @@ class ThresholdWindow(QMainWindow):
 
         self.original_image = original
         self.current_gray = gray
-
+        # До первой загрузки изображения невозможно перевести относительные
+        # коэффициенты старого пресета в пиксели. Делаем это один раз здесь.
+        if self._pending_legacy_morphology is not None:
+            legacy = self._pending_legacy_morphology
+            self._pending_legacy_morphology = None
+            blocked = self.morphology_widget.blockSignals(True)
+            try:
+                self.morphology_widget.set_legacy_threshold(
+                    legacy["close_factor"], legacy["open_factor"],
+                    gray.shape, legacy["shape"])
+            finally:
+                self.morphology_widget.blockSignals(blocked)
+        self._sync_legacy_morph_sliders()
         method = self.method_combo.currentText()
         params = self.get_current_threshold_params()
         binary, thresh = apply_threshold_method(gray, method, params)
@@ -255,17 +442,17 @@ class ThresholdWindow(QMainWindow):
         self.annotated_view.set_suggested_save_name(f"thresh_annotated_{base_name}")
 
         self.update_histogram(gray, self.current_threshold)
-        self.original_view.set_pixmap(numpy_to_qpixmap(original))
-        self.binary_view.set_pixmap(numpy_to_qpixmap(binary))
+        self._show_image_in_view(self.original_view, original)
+        self._show_image_in_view(self.binary_view, binary)
 
-        close_factor = self.close_kernel_slider.value() / 100.0
-        open_factor = self.open_kernel_slider.value() / 100.0
-        kernel_shape = self.kernel_shape_combo.currentText()
-        processed = apply_morphology(binary, close_factor, open_factor, kernel_shape, gray.shape)
+        processed = apply_shared_morphology(
+            binary, self.morphology_widget.get_steps(),
+            shape=self.morphology_widget.kernel_shape(),
+        )
         if self.invert_checkbox.isChecked():
             processed = cv2.bitwise_not(processed)
 
-        self.morph_view.set_pixmap(numpy_to_qpixmap(processed))
+        self._show_image_in_view(self.morph_view, processed)
 
         if len(original.shape) == 2 or (len(original.shape) == 3 and original.shape[2] == 1):
             result = original.copy()
@@ -280,8 +467,13 @@ class ThresholdWindow(QMainWindow):
         else:
             display_img = result.copy()
         self.current_base_image = display_img.copy()
-        # Отрисовка объектов: получаем изображение и список унифицированных объектов
-        _, self.current_objects_full = self.draw_objects_on_image(display_img, processed, draw=False)
+        # На 4-м виде базовый снимок устанавливаем один раз.
+        # Далее галочки объектов обновляют только векторный слой, без
+        # повторного преобразования изображения в QPixmap.
+        self._show_image_in_view(self.annotated_view, self.current_base_image)
+        # Геометрию объектов по-прежнему вычисляют пороговые методы проекта.
+        _, self.current_objects_full = self.draw_objects_on_image(
+            display_img, processed, draw=False)
         self.update_object_list()
 
         # --- Префетч следующего окна + вытеснение дальних ---
@@ -313,27 +505,22 @@ class ThresholdWindow(QMainWindow):
         self.update_annotated_view()
 
     def update_annotated_view(self):
+        """Перестраивает только Qt-слой контуров (без изменения пикселей).
+
+        В список видимых объектов попадают только позиции с галочками.
+        Исходные индексы current_objects_full сохраняются для сохранения YOLO.
+        Объекты пороговой обработки всегда относятся к классу 0.
+        """
         if self.current_base_image is None:
             return
-
-        img = self.current_base_image.copy()
-        if not self.current_selected_indices:
-            self.annotated_view.set_pixmap(numpy_to_qpixmap(img))
-            self.update_coordinates_display()
-            return
-
-        thickness, font_scale, font_thickness, _ = get_display_params(img.shape)
-        color_rect = settings.get_color('annotation')
-        color_label = settings.get_color('label_text')
-        draw_mode = self.draw_combo.currentText()
-        use_hull = self.hull_checkbox.isChecked()
-
-        img_annotated = draw_selected_objects(
-            img, self.current_objects_full, self.current_selected_indices,
-            draw_mode, use_hull, color_rect, color_label,
-            thickness, font_scale, font_thickness
-        )
-        self.annotated_view.set_pixmap(numpy_to_qpixmap(img_annotated))
+        height, width = self.current_base_image.shape[:2]
+        visible = [
+            self.current_objects_full[idx]
+            for idx in self.current_selected_indices
+            if 0 <= idx < len(self.current_objects_full)
+        ]
+        self.annotated_view.set_annotations(visible, width, height)
+        self.annotated_view.refresh_annotations()
         self.update_coordinates_display()
 
     def update_coordinates_display(self):
@@ -489,9 +676,10 @@ class ThresholdWindow(QMainWindow):
         self.current_objects_full = []
         self.current_selected_indices = []
         self.current_base_image = None
+        self.current_threshold = None
         for view in (self.original_view, self.binary_view,
                      self.morph_view, self.annotated_view):
-            view.set_pixmap(numpy_to_qpixmap(None))
+            self._show_image_in_view(view, None)
         self.object_list.clear()
 
         # --- Синхронно грузим первый снимок ---
@@ -593,9 +781,10 @@ class ThresholdWindow(QMainWindow):
         self.current_objects_full = []
         self.current_selected_indices = []
         self.current_base_image = None
+        self.current_threshold = None
         for view in (self.original_view, self.binary_view,
                      self.morph_view, self.annotated_view):
-            view.set_pixmap(numpy_to_qpixmap(None))
+            self._show_image_in_view(view, None)
         self.info_label.setText("No images")
         self.object_list.clear()
         self.nav_widget.set_current_index(0, 0)
@@ -660,6 +849,46 @@ class ThresholdWindow(QMainWindow):
     def schedule_update(self):
         self.update_timer.start(50)
 
+    def _sync_legacy_morph_sliders(self):
+        """Отражаем px в старых служебных регуляторах без обратной перезаписи."""
+        if self.current_gray is None:
+            return
+        smallest = max(1, min(self.current_gray.shape[:2]))
+        for op, slider, label in (
+            ("close", self.close_kernel_slider, self.close_kernel_label),
+            ("open", self.open_kernel_slider, self.open_kernel_label),
+        ):
+            px = self.morphology_widget.operation_size(op)
+            ratio = min(10, max(0, round(px * 100 / smallest))) if px > 1 else 0
+            prev = slider.blockSignals(True)
+            slider._sync_only = True
+            try:
+                slider.setValue(ratio)
+            finally:
+                slider._sync_only = False
+                slider.blockSignals(prev)
+            label.setText(f"{ratio / 100:.2f}")
+
+    def _on_legacy_ratio_change(self, operation, value):
+        """Сохраняет внешние вызовы AutoResearch в старом масштабе 0..10%."""
+        if self.current_gray is None:
+            legacy = self._pending_legacy_morphology or {
+                "close_factor": 0.0, "open_factor": 0.0,
+                "shape": self.morphology_widget.kernel_shape(),
+            }
+            legacy[f"{operation}_factor"] = value / 100.0
+            self._pending_legacy_morphology = legacy
+            return
+        size = max(1, min(self.current_gray.shape[:2]))
+        pixels = max(1, int((value / 100.0) * size)) if value > 0 else 0
+        self.morphology_widget.set_operation_size(operation, pixels)
+
+    def on_morphology_changed(self):
+        # При ручной настройке отменяем отложенную конвертацию старого пресета.
+        self._pending_legacy_morphology = None
+        self._sync_legacy_morph_sliders()
+        self.on_param_changed()
+
     def on_param_changed(self):
         if self.original_image is not None:
             self.schedule_update()
@@ -687,14 +916,6 @@ class ThresholdWindow(QMainWindow):
 
     def on_bg_excess_changed(self, value):
         self.bg_excess_label.setText(f"{value/100:.2f}")
-        self.schedule_update()
-
-    def on_close_kernel_changed(self, value):
-        self.close_kernel_label.setText(f"{value/100:.2f}")
-        self.schedule_update()
-
-    def on_open_kernel_changed(self, value):
-        self.open_kernel_label.setText(f"{value/100:.2f}")
         self.schedule_update()
 
     def on_invert_changed(self, state):
@@ -731,36 +952,16 @@ class ThresholdWindow(QMainWindow):
         use_hull = self.hull_checkbox.isChecked()
 
         if mode == "None":
-            if len(img.shape) == 2:
-                img_color = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            else:
-                img_color = img.copy()
-            return img_color, []
+            return img, []
         elif mode == "Segmentation (Polygon)":
-            if draw:
-                return segment_contours(img, binary, use_hull)
-            else:
-                dummy = img.copy()
-                return segment_contours(dummy, binary, use_hull)
+            return segment_contours(img, binary, use_hull, draw=draw)
         elif mode == "Bounding Box (Detect)":
-            if draw:
-                return segment_projections(img, binary)
-            else:
-                dummy = img.copy()
-                return segment_projections(dummy, binary)
+            return segment_projections(img, binary, draw=draw)
         elif mode == "OBB (Oriented Box)":
-            if draw:
-                return segment_min_area_rect(img, binary, use_hull)
-            else:
-                dummy = img.copy()
-                return segment_min_area_rect(dummy, binary, use_hull)
+            return segment_min_area_rect(img, binary, use_hull, draw=draw)
         else:
             # fallback
-            if len(img.shape) == 2:
-                img_color = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            else:
-                img_color = img.copy()
-            return img_color, []
+            return img, []
 
     # ---------- Пресеты ----------
     def update_preset_combo(self):
@@ -818,8 +1019,10 @@ class ThresholdWindow(QMainWindow):
         self.toggle_hist_btn.setText("Скрыть гистограмму" if checked else "Показать гистограмму")
 
     def on_global_settings_changed(self, new_settings=None):
+        # SmartGraphicsViewNew сам подписан на settings_changed. Пиксели
+        # повторно создавать не требуется, только обновить Qt overlay.
         if self.original_image is not None:
-            self.update_annotated_view()
+            self.annotated_view.refresh_annotations()
 
 
 if __name__ == "__main__":
