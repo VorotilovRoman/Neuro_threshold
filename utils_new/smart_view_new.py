@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from utils.settings import settings
 import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
@@ -33,7 +34,6 @@ from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QMenu,
 )
 
-from utils.settings import settings
 
 
 @dataclass(frozen=True)

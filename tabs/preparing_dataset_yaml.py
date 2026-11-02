@@ -1,14 +1,27 @@
-# preparing_dataset_yaml.py
+# -*- coding: utf-8 -*-
+"""Dataset Preparation V17: new generator, canonical validation and loading."""
 from import_libs_internal import *
+import os
+import sys
+import yaml
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor, QKeySequence
+from PyQt5.QtWidgets import (QApplication, QFileDialog, QListWidgetItem,
+                             QMainWindow, QMessageBox, QShortcut, QTableWidgetItem)
+
+
 from import_libs_methods_ui import setup_preparing_dataset_yaml_ui
 
-
-ULTRALYTICS_AVAILABLE = False
-try:
-    version = ultralytics.__version__
-    ULTRALYTICS_AVAILABLE = True
-except (ImportError, AttributeError):
-    pass
+from utils_new.dataset_loader_new import DatasetLoaderMixin
+from utils_new.dataset_validation_new import (
+    ImageStats, PairValidator, select_pairs_for_conversion, convert_pairs_color,
+    select_pairs_for_8bit_png, convert_pairs_to_8bit_png,
+)
+from utils_new.DatasetGenerator_new import DatasetGeneratorThread
+from utils_new.dataset_preparation_bridge import (
+    mask_classes_from_rows, normalize_generation_pairs,
+)
 
 
 class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
@@ -20,10 +33,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
         setup_preparing_dataset_yaml_ui(self)
 
-        if ULTRALYTICS_AVAILABLE:
-            self.log("Ultralytics YOLO установлен")
-        else:
-            self.log("Ultralytics YOLO не установлен. Установите: pip install ultralytics")
+        self.log("DatasetGenerator_new: utils_new/annotations, без зависимости от Ultralytics")
 
         # --- Пути и пары ---
         self.images_folder = None
@@ -124,13 +134,51 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     # Хуки DatasetLoaderMixin
     # ==================================================================
+    def _exclude_mask_background_class(self):
+        """Пиксель 0 в индексных масках — фон, не обучаемый класс.
+
+        Старый DatasetLoaderMixin включает все значения пикселей по умолчанию.
+        Отключаем галочку 0 и пересчитываем плотные ID, не меняя сам mixin.
+        """
+        if self.dataset_type != 1:
+            return
+        for row in range(self.class_table.rowCount()):
+            original = self.class_table.item(row, 1)
+            if original is None or original.text().strip() != '0':
+                continue
+            checkbox = self.class_table.cellWidget(row, 4)
+            if checkbox is not None:
+                checkbox.blockSignals(True)
+                checkbox.setChecked(False)
+                checkbox.setEnabled(False)
+                checkbox.setToolTip('Пиксель 0 является фоном, не классом объекта.')
+                checkbox.blockSignals(False)
+            self.update_included_classes()
+            return
+
+    def _mask_generation_classes(self):
+        """Имена и индексы классов для нового генератора — только объекты."""
+        rows = []
+        for row in range(self.class_table.rowCount()):
+            pixel_item = self.class_table.item(row, 1)
+            name_item = self.class_table.item(row, 2)
+            checkbox = self.class_table.cellWidget(row, 4)
+            if pixel_item is None:
+                continue
+            pixel = int(pixel_item.text())
+            rows.append((pixel, name_item.text() if name_item else str(pixel),
+                         bool(checkbox and checkbox.isChecked())))
+        return mask_classes_from_rows(rows)
+
     def _after_load_hook(self):
-        """После успешной загрузки/сканирования — пересчитать состояние кнопок."""
+        """После загрузки синхронизировать фон и состояние кнопок."""
+        self._exclude_mask_background_class()
         self.update_generate_button_state()
         self.update_split_counts()
 
     def _after_type_change_hook(self, new_type):
         """После смены dataset_type — обновить состояние кнопок."""
+        self._exclude_mask_background_class()
         self.update_generate_button_state()
         self.update_split_counts()
 
@@ -209,23 +257,24 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                 if new_id_item is None:
                     continue
 
-                try:
-                    new_id = int(new_id_item.text())
-                except (ValueError, TypeError):
-                    item = QTableWidgetItem("-")
-                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                    self.class_table.setItem(row, 3, item)
-                    continue
+                # Строка фона сохраняет свой статус даже если New ID = "-".
+                source_item = self.class_table.item(row, 1)
+                source_value = int(source_item.text()) if source_item else -1
+                if input_type == 1 and source_value == 0:
+                    pixel_text = 'Фон (0)'
+                else:
+                    try:
+                        new_id = int(new_id_item.text())
+                    except (ValueError, TypeError):
+                        pixel_text = '-'
+                    else:
+                        if input_type == 1:
+                            pixel_text = (str(self.mask_class_remap[source_value] + 1)
+                                          if source_value in self.mask_class_remap else '-')
+                        else:
+                            pixel_text = str(new_id + max(offset, 1))
 
-                # Выходной пиксель в маске всегда = New ID + offset
-                # (offset ≥ 1, чтобы первый класс не слился с фоном).
-                # Это справедливо и для input=masks, и для input=labels:
-                # _remap_mask_pixels применяет ту же формулу, что и
-                # export_masks_from_annotations.
-                eff_offset = max(offset, 1)
-                pixel = new_id + eff_offset
-
-                item = QTableWidgetItem(str(pixel))
+                item = QTableWidgetItem(pixel_text)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.class_table.setItem(row, 3, item)
         finally:
@@ -424,8 +473,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                                        self.shear.isChecked())))
         self.aug_multiplier_slider.setEnabled(any_aug)
         if not any_aug:
-            self.aug_multiplier_slider.setValue(2)
-            self.aug_multiplier_label.setText("2x")
+            # The slider keeps the user's last choice; without active
+            # augmentations the actual generation multiplier is always 1.
+            self.aug_multiplier_label.setText('—')
         else:
             discrete_count = 0
             if self.flip_horizontal.isChecked():
@@ -450,10 +500,19 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                         self.log(f"⚠️ Множитель {self.aug_multiplier_slider.value()} "
                                  f"может дать дубликаты: максимум уникальных "
                                  f"вариантов — {max_unique}.")
-        self.update_split_counts()
+        self.update_multiplier_label(self.aug_multiplier_slider.value())
 
     def update_multiplier_label(self, value):
-        self.aug_multiplier_label.setText(f"{value}x")
+        active = self.aug_multiplier_slider.isEnabled()
+        self.aug_multiplier_label.setText(f"{value}×" if active else '—')
+        if hasattr(self, 'augmentation_mode_hint'):
+            if not active:
+                message = 'Аугментации отключены. На выходе один экземпляр каждого снимка.'
+            elif int(value) == 1:
+                message = '1× — каждый исходный снимок заменяется одним аугментированным; дополнительных копий нет.'
+            else:
+                message = f'{int(value)}× — исходный снимок и до {int(value)-1} дополнительных аугментированных вариантов.'
+            self.augmentation_mode_hint.setText(message)
         self.update_split_counts()
 
     def update_split(self, value, source):
@@ -676,11 +735,23 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
         selected_channels = self._get_selected_channels()
         class_names = self.get_class_names_from_table()
-        num_classes = len(class_names)
-
+        class_mapping = self.class_remap if input_type == 0 else {}
+        mask_class_remap = {}
         included_orig_ids = None
         if input_type == 1:
-            included_orig_ids = self.included_orig_ids.copy()
+            # UI legacy считает фоновый пиксель 0 потенциальным классом.
+            # Новый генератор использует строгую схему: 0=фон, 1..N=объекты.
+            try:
+                mask_class_remap, class_names = self._mask_generation_classes()
+            except (TypeError, ValueError) as exc:
+                QMessageBox.critical(self, 'Классы маски', str(exc))
+                return
+            included_orig_ids = set(mask_class_remap)
+            if not mask_class_remap and not self.include_empty_annotations.isChecked():
+                QMessageBox.warning(self, 'Классы маски',
+                                    'Не выбран ни один класс объекта (пиксель > 0).')
+                return
+        num_classes = len(class_names)
 
         include_empty_annotations = self.include_empty_annotations.isChecked()
         delete_source_after_success = self.delete_source_after_success.isChecked()
@@ -700,14 +771,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                                   "Все пары некорректны. Генерация невозможна.")
             return
 
-        norm_pairs = []
-        for p in pairs_for_generation:
-            img = p[0]
-            aux = p[1] if len(p) > 1 else None
-            if input_type == 1:
-                norm_pairs.append((img, None, aux))
-            else:
-                norm_pairs.append((img, aux, None))
+        norm_pairs = normalize_generation_pairs(pairs_for_generation, input_type)
 
         self.log("=== Dataset generation started ===")
         self.log(f"Input: type={input_type}, format={input_format}")
@@ -733,12 +797,8 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         bg_color = ((0, 0, 0) if self.bg_color_combo.currentText() == "Black"
                     else (255, 255, 255))
 
-        if input_type == 0:
-            class_mapping = self.class_remap
-        elif input_type == 1:
-            class_mapping = self.mask_class_remap
-        else:
-            class_mapping = {}
+        # class_mapping и mask_class_remap уже сформированы выше на
+        # основании включённых строк таблицы с исключением фона.
 
         labels_path = None
         if input_type == 0:
@@ -758,7 +818,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             input_type,
             self.masks_folder,
             num_classes,
-            self.mask_class_remap,
+            mask_class_remap,
             included_orig_ids=included_orig_ids,
             included_class_ids=None,
             total_orig_classes=len(self.original_ids),
@@ -775,6 +835,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             out_coco=out_coco,
             mask_pixel_offset_in=self.mask_pixel_offset_in,
             min_ann_area_px=min_ann_area_px,
+            split_by_source=self.group_augmentations_by_source.isChecked(),
+            random_seed=(self.random_seed_spin.value()
+                         if self.use_random_seed.isChecked() else None),
         )
 
         self.generator_thread.log_signal.connect(self.log)

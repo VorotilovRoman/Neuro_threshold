@@ -159,7 +159,16 @@ from utils.dataset_validation import (
 )
 
 
+from utils_new.dataset_validation_new import (
+    ImageStats, PairValidator, select_pairs_for_conversion, convert_pairs_color,
+    select_pairs_for_8bit_png, convert_pairs_to_8bit_png,
+)
+from utils_new.DatasetGenerator_new import DatasetGeneratorThread
+from utils_new.dataset_preparation_bridge import (
+    mask_classes_from_rows, normalize_generation_pairs,
+)
 
+from utils_new.dataset_loader_new import DatasetLoaderMixin
 
 from utils.dataset_analysis_logic import (
     DatasetAnalyzer, FilterParams,

@@ -23,17 +23,29 @@ IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp'}
 LABEL_HINTS = {'auto', 'mixed', 'detect', 'obb_corners', 'obb_xywhr', 'segment'}
 
 
-def read_image(path):
-    """Read BGR image, no implicit bit-depth conversion."""
+def _read_with_fallback(path, flags):
+    """Read image/mask with Unicode-path fallback (notably Windows Cyrillic)."""
     path = str(path)
-    image = cv2.imread(path, cv2.IMREAD_COLOR)
+    image = cv2.imread(path, flags)
+    if image is not None:
+        return image
+    try:
+        raw = np.fromfile(path, dtype=np.uint8)
+        return cv2.imdecode(raw, flags) if raw.size else None
+    except (OSError, ValueError, cv2.error):
+        return None
+
+
+def read_image(path):
+    """Read BGR image, keeping existing generator's 3-channel convention."""
+    image = _read_with_fallback(path, cv2.IMREAD_COLOR)
     if image is None:
         raise OSError(f'Cannot read image: {path}')
     return image
 
 
 def read_index_mask(path):
-    mask = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    mask = _read_with_fallback(path, cv2.IMREAD_UNCHANGED)
     if mask is None:
         raise OSError(f'Cannot read mask: {path}')
     if mask.ndim != 2 or not np.issubdtype(mask.dtype, np.integer):
@@ -42,10 +54,19 @@ def read_index_mask(path):
 
 
 def write_image(path, image):
+    """Write image safely also when cv2.imwrite cannot handle the path."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(path), image):
-        raise OSError(f'Failed writing image: {path}')
+    if cv2.imwrite(str(path), image):
+        return
+    try:
+        success, payload = cv2.imencode(path.suffix or '.png', image)
+        if success:
+            payload.tofile(str(path))
+            return
+    except (OSError, ValueError, cv2.error):
+        pass
+    raise OSError(f'Failed writing image: {path}')
 
 
 def _xywhr_points(vals):

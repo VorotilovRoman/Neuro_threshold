@@ -1,13 +1,58 @@
-# preparing_dataset_yaml_ui.py
-from import_libs_internal import *
+# -*- coding: utf-8 -*-
+"""Dataset Preparation V18: compact task-oriented UI, same data-loading strip/log."""
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
+    QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QListWidget, QPushButton, QRadioButton, QSlider, QSpinBox,
+    QSplitter, QTableWidget, QTabWidget, QScrollArea, QFrame, QVBoxLayout, QWidget,
+)
+from ui.control_buttons import ControlButtons
+from ui.log_widget import LogWidget
+
+
+def _section(title, description=None):
+    group = QGroupBox(title)
+    group.setObjectName('preparationSection')
+    layout = QVBoxLayout(group)
+    layout.setContentsMargins(16, 17, 16, 15)
+    layout.setSpacing(12)
+    if description:
+        note = QLabel(description)
+        note.setObjectName('sectionHint')
+        note.setWordWrap(True)
+        layout.addWidget(note)
+    return group, layout
+
+
+def _page():
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    host = QWidget()
+    host.setObjectName('preparationPage')
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(10, 12, 10, 12)
+    layout.setSpacing(13)
+    scroll.setWidget(host)
+    return scroll, layout
+
+
+def _wrap_row(*widgets):
+    row = QHBoxLayout()
+    row.setSpacing(9)
+    for widget in widgets:
+        row.addWidget(widget)
+    row.addStretch()
+    return row
 
 
 def setup_preparing_dataset_yaml_ui(parent):
     central = QWidget()
     parent.setCentralWidget(central)
     main_layout = QVBoxLayout(central)
-    main_layout.setContentsMargins(0, 0, 0, 0)
-
+    main_layout.setContentsMargins(9, 9, 9, 8)
+    main_layout.setSpacing(8)
     # ============================================================
     # ВЕРХНЯЯ ПАНЕЛЬ
     # ============================================================
@@ -90,89 +135,211 @@ def setup_preparing_dataset_yaml_ui(parent):
     top_layout.addWidget(parent.btn_open_output)
     main_layout.addLayout(top_layout)
 
-    # ============================================================
-    # СПЛИТТЕРЫ
-    # ============================================================
+    # Main workspace: file validation at left, configuration tabs at right.
     main_v_splitter = QSplitter(Qt.Vertical)
+    main_v_splitter.setChildrenCollapsible(False)
     main_layout.addWidget(main_v_splitter, 1)
-
     h_splitter = QSplitter(Qt.Horizontal)
+    h_splitter.setChildrenCollapsible(False)
     main_v_splitter.addWidget(h_splitter)
 
-    # ---- Левая панель: список пар ----
     left_widget = QWidget()
     left_layout = QVBoxLayout(left_widget)
-    left_layout.setContentsMargins(0, 0, 5, 0)
-    left_layout.addWidget(QLabel("Найденные пары (двойной клик — снимок валидации):"))
-    parent.file_list = QListWidget()
-    parent.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-    parent.file_list.setToolTip(
-        "Ctrl+C — скопировать выделенные строки.\n"
-        "Двойной клик — открыть снимок валидации этой пары."
-    )
-    left_layout.addWidget(parent.file_list)
-
-    parent.pair_count_label = QLabel("Всего пар: 0")
+    left_layout.setContentsMargins(2, 2, 5, 2)
+    left_layout.setSpacing(8)
+    pair_head = QHBoxLayout()
+    pair_title = QLabel('Исходные данные')
+    pair_title.setObjectName('workspaceTitle')
+    parent.pair_count_label = QLabel('Всего пар: 0')
+    parent.pair_count_label.setObjectName('countChip')
     parent.pair_count_label.setWordWrap(True)
     parent.pair_count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    left_layout.addWidget(parent.pair_count_label)
+    pair_head.addWidget(pair_title)
+    pair_head.addStretch()
+    pair_head.addWidget(parent.pair_count_label)
+    left_layout.addLayout(pair_head)
+    instruction = QLabel('Двойной щелчок — просмотр и проверка пары. Ctrl+C — копировать.')
+    instruction.setObjectName('sectionHint')
+    instruction.setWordWrap(True)
+    left_layout.addWidget(instruction)
+    parent.file_list = QListWidget()
+    parent.file_list.setAlternatingRowColors(True)
+    parent.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+    parent.file_list.setToolTip('Ctrl+C — скопировать выделенные строки; двойной клик — проверить пару.')
+    left_layout.addWidget(parent.file_list, 1)
 
-    parent.validation_progress_label = QLabel("")
+    parent.validation_progress_label = QLabel('')
     parent.validation_progress_label.setWordWrap(True)
-    parent.validation_progress_label.setStyleSheet("color: #0055aa; font-weight: bold;")
+    parent.validation_progress_label.setObjectName('infoLabel')
     parent.validation_progress_label.setVisible(False)
     left_layout.addWidget(parent.validation_progress_label)
-
-    parent.validation_warning_label = QLabel("")
+    parent.validation_warning_label = QLabel('')
     parent.validation_warning_label.setWordWrap(True)
     parent.validation_warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    parent.validation_warning_label.setStyleSheet("color: #b00000;")
+    parent.validation_warning_label.setObjectName('warningLabel')
     parent.validation_warning_label.setVisible(False)
     left_layout.addWidget(parent.validation_warning_label)
-
-    # Статистика
-    parent.color_stats_label = QLabel("")
+    parent.color_stats_label = QLabel('')
     parent.color_stats_label.setWordWrap(True)
     parent.color_stats_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    parent.color_stats_label.setStyleSheet("font-weight: bold; color: #333;")
+    parent.color_stats_label.setObjectName('statsLabel')
     left_layout.addWidget(parent.color_stats_label)
 
-    # Кнопки конвертации
+    convert_group, convert_layout = _section('Конвертация изображений')
     parent.color_convert_buttons_layout = QHBoxLayout()
-    parent.btn_convert_gray = QPushButton("Конвертировать всё в ЧБ")
-    parent.btn_convert_rgb = QPushButton("Конвертировать всё в RGB")
-    parent.btn_convert_8bit_png = QPushButton("Перевести в 8 бит PNG")
-    parent.btn_convert_gray.setEnabled(False)
-    parent.btn_convert_rgb.setEnabled(False)
-    parent.btn_convert_8bit_png.setEnabled(False)
-    parent.btn_convert_gray.setToolTip(
-        "Перезаписать ЦВЕТНЫЕ и ВИЗУАЛЬНО-СЕРЫЕ изображения в реально-ЧБ.\n"
-        "Файлы, уже соответствующие целевому формату, не трогаются."
-    )
-    parent.btn_convert_rgb.setToolTip(
-        "Перезаписать РЕАЛЬНО-ЧБ изображения в 3-канальные (BGR).\n"
-        "Цветные и визуально-серые не трогаются."
-    )
-    parent.btn_convert_8bit_png.setToolTip(
-        "Привести изображения к 8-битному PNG.\n"
-        "Решает ошибку 'Unsupported depth of input image: CV_16U'.\n"
-        "Маски не конвертируются — они хранятся в своём dtype."
-    )
-    parent.color_convert_buttons_layout.addWidget(parent.btn_convert_gray)
-    parent.color_convert_buttons_layout.addWidget(parent.btn_convert_rgb)
-    parent.color_convert_buttons_layout.addWidget(parent.btn_convert_8bit_png)
-    left_layout.addLayout(parent.color_convert_buttons_layout)
-
+    parent.btn_convert_gray = QPushButton('В Ч/Б')
+    parent.btn_convert_rgb = QPushButton('В RGB')
+    parent.btn_convert_8bit_png = QPushButton('В 8-бит PNG')
+    for widget in (parent.btn_convert_gray, parent.btn_convert_rgb, parent.btn_convert_8bit_png):
+        widget.setEnabled(False)
+        parent.color_convert_buttons_layout.addWidget(widget)
+    parent.btn_convert_gray.setToolTip('Перезаписывает цветные и визуально-серые изображения в одноканальные.')
+    parent.btn_convert_rgb.setToolTip('Перезаписывает одноканальные изображения в BGR.')
+    parent.btn_convert_8bit_png.setToolTip('Приводит изображения к 8-бит PNG; маски не меняются.')
+    convert_layout.addLayout(parent.color_convert_buttons_layout)
+    left_layout.addWidget(convert_group)
     h_splitter.addWidget(left_widget)
 
-    # ---- Правая панель ----
     right_widget = QWidget()
     right_layout = QVBoxLayout(right_widget)
     right_layout.setContentsMargins(5, 0, 0, 0)
+    right_layout.setSpacing(8)
+    header_row = QHBoxLayout()
+    heading = QLabel('Настройки датасета')
+    heading.setObjectName('workspaceTitle')
+    header_row.addWidget(heading)
+    header_row.addStretch()
+    parent.total_count_with_multiplier = QLabel('Итоговое количество: 0')
+    parent.total_count_with_multiplier.setObjectName('countChip')
+    header_row.addWidget(parent.total_count_with_multiplier)
+    right_layout.addLayout(header_row)
+    parent.preparation_tabs = QTabWidget()
+    parent.preparation_tabs.setDocumentMode(True)
+    right_layout.addWidget(parent.preparation_tabs, 1)
 
-    # Блок 1: Split
-    split_group = QGroupBox("Train / Validation / Test Split")
-    split_layout = QFormLayout()
+    # TAB 1 — preprocessing
+    page, page_layout = _page()
+    group, group_layout = _section('Размер и каналы', 'Настройка изображения перед записью выходного датасета.')
+    form = QFormLayout()
+    form.setSpacing(12)
+    parent.resize_keep = QRadioButton('Исходный размер')
+    parent.resize_fixed = QRadioButton('Вписать с полями')
+    parent.resize_stretch = QRadioButton('Растянуть')
+    parent.resize_fixed.setChecked(True)
+    parent.resize_size = QSpinBox()
+    parent.resize_size.setRange(32, 4096)
+    parent.resize_size.setSingleStep(32)
+    parent.resize_size.setValue(640)
+    parent.resize_size.setSuffix(' px')
+    form.addRow('Режим:', _wrap_row(parent.resize_keep, parent.resize_fixed, parent.resize_stretch))
+    form.addRow('Размер квадрата:', parent.resize_size)
+    parent.bg_color_combo = QComboBox()
+    parent.bg_color_combo.addItems(['Black', 'White'])
+    form.addRow('Цвет полей:', parent.bg_color_combo)
+    parent.channels_combo = QComboBox()
+    parent.channels_combo.addItems(['3 (RGB — читать всё как цветное)', '1 (Grayscale — читать всё как Ч/Б)'])
+    form.addRow('Каналы YOLO YAML:', parent.channels_combo)
+    group_layout.addLayout(form)
+    page_layout.addWidget(group)
+
+    group, group_layout = _section('Проверка и фильтрация')
+    parent.include_empty_annotations = QCheckBox('Включать снимки с пустой разметкой (негативные примеры)')
+    parent.include_empty_annotations.setChecked(False)
+    parent.include_empty_annotations.setToolTip('Применяется к пустым YOLO TXT и маскам только с фоном.')
+    group_layout.addWidget(parent.include_empty_annotations)
+    form = QFormLayout()
+    parent.min_ann_area_spin = QSpinBox()
+    parent.min_ann_area_spin.setRange(0, 1_000_000)
+    parent.min_ann_area_spin.setValue(0)
+    parent.min_ann_area_spin.setSingleStep(10)
+    parent.min_ann_area_spin.setSuffix(' px²')
+    parent.min_ann_area_spin.setToolTip('0 — отключено. Для Detect: площадь bbox; для OBB/Segment: площадь полигона.')
+    form.addRow('Минимальная площадь:', parent.min_ann_area_spin)
+    group_layout.addLayout(form)
+    page_layout.addWidget(group)
+    group, group_layout = _section('Исходные файлы')
+    parent.delete_source_after_success = QCheckBox('Удалить исходные файлы после успешной генерации')
+    parent.delete_source_after_success.setChecked(False)
+    parent.delete_source_after_success.setToolTip('НЕОБРАТИМО. Удаляются только обработанные исходные снимки/метки/маски после успешной генерации.')
+    group_layout.addWidget(parent.delete_source_after_success)
+    warn = QLabel('Внимание: удаление исходников необратимо. Для первой проверки не включайте этот параметр.')
+    warn.setObjectName('warningLabel')
+    warn.setWordWrap(True)
+    group_layout.addWidget(warn)
+    page_layout.addWidget(group)
+    page_layout.addStretch()
+    parent.preparation_tabs.addTab(page, 'Обработка')
+
+    # TAB 2 — Augmentation and multiplier
+    page, page_layout = _page()
+    group, group_layout = _section('Геометрические аугментации', 'При множителе 1× изменяются существующие снимки без создания дополнительных копий.')
+    grid = QGridLayout()
+    grid.setHorizontalSpacing(25)
+    grid.setVerticalSpacing(12)
+    parent.flip_horizontal = QCheckBox('Горизонтальное отражение')
+    parent.flip_vertical = QCheckBox('Вертикальное отражение')
+    parent.rotate_90 = QCheckBox('Поворот на 90° / 180° / 270°')
+    parent.random_crop = QCheckBox('Случайная обрезка')
+    parent.random_rotate = QCheckBox('Произвольный поворот ±')
+    parent.random_rotate_angle = QDoubleSpinBox()
+    parent.random_rotate_angle.setRange(0, 15)
+    parent.random_rotate_angle.setValue(5)
+    parent.random_rotate_angle.setSuffix('°')
+    parent.shear = QCheckBox('Сдвиг (shear) ±')
+    parent.shear_angle = QDoubleSpinBox()
+    parent.shear_angle.setRange(0, 15)
+    parent.shear_angle.setValue(5)
+    parent.shear_angle.setSuffix('°')
+    grid.addWidget(parent.flip_horizontal, 0, 0)
+    grid.addWidget(parent.flip_vertical, 0, 1)
+    grid.addWidget(parent.rotate_90, 1, 0, 1, 2)
+    grid.addWidget(parent.random_crop, 2, 0, 1, 2)
+    grid.addLayout(_wrap_row(parent.random_rotate, parent.random_rotate_angle), 3, 0)
+    grid.addLayout(_wrap_row(parent.shear, parent.shear_angle), 3, 1)
+    group_layout.addLayout(grid)
+    parent.aug_mask_note = QLabel('Для входных индексных масок используются только Flip и 90° (без потери классов).')
+    parent.aug_mask_note.setObjectName('infoLabel')
+    parent.aug_mask_note.setWordWrap(True)
+    parent.aug_mask_note.setVisible(False)
+    group_layout.addWidget(parent.aug_mask_note)
+    page_layout.addWidget(group)
+
+    group, group_layout = _section('Количество выходных изображений')
+    parent.aug_multiplier_slider = QSlider(Qt.Horizontal)
+    parent.aug_multiplier_slider.setRange(1, 10)
+    parent.aug_multiplier_slider.setValue(2)
+    parent.aug_multiplier_slider.setTickInterval(1)
+    parent.aug_multiplier_slider.setTickPosition(QSlider.TicksBelow)
+    parent.aug_multiplier_slider.setEnabled(False)
+    parent.aug_multiplier_label = QLabel('2×')
+    parent.aug_multiplier_label.setObjectName('multiplierBadge')
+    multiplier_row = QHBoxLayout()
+    multiplier_row.addWidget(QLabel('Множитель'))
+    multiplier_row.addWidget(parent.aug_multiplier_slider, 1)
+    multiplier_row.addWidget(parent.aug_multiplier_label)
+    group_layout.addLayout(multiplier_row)
+    parent.augmentation_mode_hint = QLabel('Включите операции аугментации, чтобы настроить множитель.')
+    parent.augmentation_mode_hint.setObjectName('sectionHint')
+    parent.augmentation_mode_hint.setWordWrap(True)
+    group_layout.addWidget(parent.augmentation_mode_hint)
+    page_layout.addWidget(group)
+
+    group, group_layout = _section('Воспроизводимость')
+    parent.use_random_seed = QCheckBox('Фиксировать seed')
+    parent.random_seed_spin = QSpinBox()
+    parent.random_seed_spin.setRange(0, 2147483647)
+    parent.random_seed_spin.setValue(2026)
+    parent.random_seed_spin.setEnabled(False)
+    parent.use_random_seed.toggled.connect(parent.random_seed_spin.setEnabled)
+    parent.use_random_seed.setToolTip('Воспроизводимые геометрические преобразования и разделение Train/Val/Test.')
+    group_layout.addLayout(_wrap_row(parent.use_random_seed, parent.random_seed_spin))
+    page_layout.addWidget(group)
+    page_layout.addStretch()
+    parent.preparation_tabs.addTab(page, 'Аугментации')
+
+    # TAB 3 — split
+    page, page_layout = _page()
+    group, group_layout = _section('Train / Validation / Test', 'Суммарная доля всегда составляет 100%.')
     parent.train_slider = QSlider(Qt.Horizontal)
     parent.train_slider.setRange(0, 100)
     parent.train_slider.setValue(70)
@@ -183,345 +350,152 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.test_slider = QSlider(Qt.Horizontal)
     parent.test_slider.setRange(0, 100)
     parent.test_slider.setValue(10)
-
-    parent.train_label = QLabel("70%")
-    parent.val_label = QLabel("20%")
-    parent.test_label = QLabel("10%")
-    parent.train_count_label = QLabel("0")
-    parent.val_count_label = QLabel("0")
-    parent.test_count_label = QLabel("0")
-    parent.total_count_label = QLabel("Общее кол-во: 0")
-
+    parent.train_label = QLabel('70%')
+    parent.val_label = QLabel('20%')
+    parent.test_label = QLabel('10%')
+    parent.train_count_label = QLabel('0')
+    parent.val_count_label = QLabel('0')
+    parent.test_count_label = QLabel('0')
+    parent.total_count_label = QLabel('Общее кол-во: 0')
+    form = QFormLayout()
+    form.setSpacing(17)
+    for name, slider, label, count in (
+        ('Train', parent.train_slider, parent.train_label, parent.train_count_label),
+        ('Validation', parent.val_slider, parent.val_label, parent.val_count_label),
+        ('Test', parent.test_slider, parent.test_label, parent.test_count_label),
+    ):
+        row = QHBoxLayout()
+        row.addWidget(slider, 1)
+        row.addWidget(label)
+        row.addWidget(QLabel('('))
+        row.addWidget(count)
+        row.addWidget(QLabel('снимков)'))
+        form.addRow(name, row)
+    group_layout.addLayout(form)
     parent.train_slider.valueChanged.connect(lambda v: parent.update_split(v, 'train'))
     parent.val_slider.valueChanged.connect(lambda v: parent.update_split(v, 'val'))
     parent.test_slider.valueChanged.connect(lambda v: parent.update_split(v, 'test'))
+    page_layout.addWidget(group)
+    group, group_layout = _section('Разделение по исходным изображениям')
+    parent.group_augmentations_by_source = QCheckBox('Копии одного снимка — только в одном split')
+    parent.group_augmentations_by_source.setChecked(True)
+    parent.group_augmentations_by_source.setToolTip('Предотвращает утечку аугментированных копий между Train/Validation/Test.')
+    group_layout.addWidget(parent.group_augmentations_by_source)
+    page_layout.addWidget(group)
+    page_layout.addStretch()
+    parent.preparation_tabs.addTab(page, 'Разделение')
 
-    for name, slider, label, count in (
-            ("Train:", parent.train_slider, parent.train_label, parent.train_count_label),
-            ("Validation:", parent.val_slider, parent.val_label, parent.val_count_label),
-            ("Test:", parent.test_slider, parent.test_label, parent.test_count_label)):
-        row = QHBoxLayout()
-        row.addWidget(slider)
-        row.addWidget(label)
-        row.addWidget(QLabel("("))
-        row.addWidget(count)
-        row.addWidget(QLabel(" снимков)"))
-        split_layout.addRow(name, row)
-
-    split_group.setLayout(split_layout)
-    right_layout.addWidget(split_group)
-
-    # Блок 2: Preprocessing
-    preproc_group = QGroupBox("Preprocessing")
-    preproc_layout = QFormLayout()
-
-    parent.resize_keep = QRadioButton("Keep original size")
-    parent.resize_fixed = QRadioButton("Resize to square (keep ratio, pad)")
-    parent.resize_stretch = QRadioButton("Resize to square (stretch)")
-    parent.resize_fixed.setChecked(True)
-
-    parent.resize_size = QSpinBox()
-    parent.resize_size.setRange(32, 4096)
-    parent.resize_size.setValue(640)
-
-    resize_layout = QHBoxLayout()
-    resize_layout.addWidget(parent.resize_keep)
-    resize_layout.addWidget(parent.resize_fixed)
-    resize_layout.addWidget(parent.resize_stretch)
-    resize_layout.addWidget(parent.resize_size)
-    preproc_layout.addRow("Image size:", resize_layout)
-
-    parent.bg_color_combo = QComboBox()
-    parent.bg_color_combo.addItems(["Black", "White"])
-    parent.bg_color_combo.setCurrentIndex(0)
-    preproc_layout.addRow("Background fill color:", parent.bg_color_combo)
-
-    parent.channels_combo = QComboBox()
-    parent.channels_combo.addItems([
-        "3 (RGB — читать всё как цветное)",
-        "1 (Grayscale — читать всё как Ч/Б)",
-    ])
-    parent.channels_combo.setCurrentIndex(0)
-    parent.channels_combo.setToolTip(
-        "Значение поля channels в data.yaml.\n"
-        "• 3 — любое изображение читается как 3-канальное.\n"
-        "• 1 — всё читается как одноканальное (grayscale)."
-    )
-    preproc_layout.addRow("Channels:", parent.channels_combo)
-
-    parent.include_empty_annotations = QCheckBox("Include images with empty annotations")
-    parent.include_empty_annotations.setChecked(False)
-    parent.include_empty_annotations.setToolTip(
-        "Если включено, снимки с пустыми .txt (или маской только из фона) "
-        "попадут в датасет как негативные примеры."
-    )
-    preproc_layout.addRow("", parent.include_empty_annotations)
-
-    # NEW: минимальная площадь аннотации в пикселях²
-    parent.min_ann_area_spin = QSpinBox()
-    parent.min_ann_area_spin.setRange(0, 1_000_000)
-    parent.min_ann_area_spin.setValue(0)
-    parent.min_ann_area_spin.setSingleStep(10)
-    parent.min_ann_area_spin.setSuffix(" px²")
-    parent.min_ann_area_spin.setToolTip(
-        "Минимальная площадь аннотации в пикселях².\n"
-        "Аннотации меньше этого порога отбрасываются.\n"
-        "• 0 — фильтр выключен (по умолчанию);\n"
-        "• применяется как к базовым парам, так и ко всем\n"
-        "  аугментированным копиям.\n"
-        "• для detect площадь = ширина × высота bbox;\n"
-        "• для OBB/segment — площадь полигона."
-    )
-    min_area_row = QHBoxLayout()
-    min_area_row.addWidget(QLabel("Min annotation area:"))
-    min_area_row.addWidget(parent.min_ann_area_spin)
-    min_area_row.addWidget(QLabel("(0 = off)"))
-    min_area_row.addStretch()
-    preproc_layout.addRow("", min_area_row)
-
-    parent.delete_source_after_success = QCheckBox(
-        "Delete source files after successful generation. Исходные снимки удалятся!"
-    )
-    parent.delete_source_after_success.setChecked(False)
-    parent.delete_source_after_success.setToolTip(
-        "После успешной генерации будут удалены ТОЛЬКО те исходные "
-        "изображения и аннотации/маски, которые реально попали в датасет."
-    )
-    preproc_layout.addRow("", parent.delete_source_after_success)
-
-    preproc_group.setLayout(preproc_layout)
-    right_layout.addWidget(preproc_group)
-
-    # ============================================================
-    # Блок 3: OUTPUT FORMAT
-    # ============================================================
-    output_group = QGroupBox("Output format")
-    output_layout = QFormLayout()
-
-    # YOLO txt
-    parent.out_yolo_txt = QCheckBox("YOLO labels (.txt)")
+    # TAB 4 — output formats
+    page, page_layout = _page()
+    group, group_layout = _section('YOLO', 'Экспорт TXT-разметки и приведение типов аннотаций.')
+    parent.out_yolo_txt = QCheckBox('Создать YOLO labels (.txt)')
     parent.out_yolo_txt.setChecked(True)
-    parent.out_yolo_txt.setToolTip(
-        "Сохранить .txt с аннотациями в labels/{split}.\n"
-        "Нужен для YOLO-det / YOLO-obb / YOLO-seg."
-    )
-    output_layout.addRow("", parent.out_yolo_txt)
-
+    parent.out_yolo_txt.setToolTip('labels/{split} для YOLO detect/OBB/Segment')
+    group_layout.addWidget(parent.out_yolo_txt)
+    form = QFormLayout()
     parent.out_yolo_subtype = QComboBox()
-    parent.out_yolo_subtype.addItem("Keep original type", "keep")
-    parent.out_yolo_subtype.addItem("Convert to detect (bbox)", "detect")
-    parent.out_yolo_subtype.addItem("Convert to OBB", "obb")
-    parent.out_yolo_subtype.addItem("Convert to segment (polygon)", "segment")
-    parent.out_yolo_subtype.setToolTip(
-        "Конвертировать все аннотации в единый subtype.\n"
-        "«Keep» — сохранить типы как есть (detect / obb / segment)."
-    )
+    parent.out_yolo_subtype.addItem('Сохранить тип', 'keep')
+    parent.out_yolo_subtype.addItem('Detect (bbox)', 'detect')
+    parent.out_yolo_subtype.addItem('OBB', 'obb')
+    parent.out_yolo_subtype.addItem('Segment (полигон)', 'segment')
     parent.out_yolo_subtype_row = QHBoxLayout()
-    parent.out_yolo_subtype_row.addWidget(QLabel("YOLO subtype:"))
     parent.out_yolo_subtype_row.addWidget(parent.out_yolo_subtype)
-    parent.out_yolo_subtype_row.addStretch()
-    output_layout.addRow("", parent.out_yolo_subtype_row)
-
+    form.addRow('Выходной тип:', parent.out_yolo_subtype_row)
     parent.out_yolo_obb_format = QComboBox()
-    parent.out_yolo_obb_format.addItem("4 corners (x1..y4)", "corners")
-    parent.out_yolo_obb_format.addItem("xywhr (cx,cy,w,h,angle)", "xywhr")
-    parent.out_yolo_obb_format.setToolTip(
-        "Формат записи OBB в .txt (только если subtype = keep или obb)."
-    )
+    parent.out_yolo_obb_format.addItem('4 угла (x1…y4)', 'corners')
+    parent.out_yolo_obb_format.addItem('xywhr (cx, cy, w, h, angle)', 'xywhr')
     parent.out_yolo_obb_row = QHBoxLayout()
-    parent.out_yolo_obb_row.addWidget(QLabel("OBB format:"))
     parent.out_yolo_obb_row.addWidget(parent.out_yolo_obb_format)
-    parent.out_yolo_obb_row.addStretch()
-    output_layout.addRow("", parent.out_yolo_obb_row)
+    form.addRow('Запись OBB:', parent.out_yolo_obb_row)
+    group_layout.addLayout(form)
+    page_layout.addWidget(group)
 
-    # U-Net masks
-    parent.out_masks = QCheckBox("U-Net masks (.png)")
+    group, group_layout = _section('Индексные маски U-Net')
+    parent.out_masks = QCheckBox('Создать PNG-маски')
     parent.out_masks.setChecked(False)
-    parent.out_masks.setToolTip(
-        "Сохранить одноканальные PNG-маски в masks/{split}.\n"
-        "• input=labels — маски генерируются из .txt (fillPoly).\n"
-        "• input=masks — маски сохраняются как есть (lossless)."
-    )
-    output_layout.addRow("", parent.out_masks)
-
+    group_layout.addWidget(parent.out_masks)
     parent.out_masks_offset = QSpinBox()
-    parent.out_masks_offset.setRange(0, 1)
+    parent.out_masks_offset.setRange(1, 1)
     parent.out_masks_offset.setValue(1)
-    parent.out_masks_offset.setToolTip(
-        "Смещение классов в маске:\n"
-        "• 1 — фон=0, класс i → pixel i+1 (U-Net-стиль, рекомендуется);\n"
-        "• 0 — pixel = class_id напрямую (класс 0 = фон)."
-    )
+    parent.out_masks_offset.setToolTip('Генератор использует 1: фон=0, класс 0 → пиксель 1.')
     parent.out_masks_offset_row = QHBoxLayout()
-    parent.out_masks_offset_row.addWidget(QLabel("Mask class offset:"))
     parent.out_masks_offset_row.addWidget(parent.out_masks_offset)
-    parent.out_masks_offset_row.addStretch()
-    output_layout.addRow("", parent.out_masks_offset_row)
-
-    parent.out_unet_yaml = QCheckBox("U-Net YAML (masks_data.yaml)")
+    label = QLabel('Смещение классов маски:')
+    row = QHBoxLayout()
+    row.addWidget(label)
+    row.addLayout(parent.out_masks_offset_row)
+    row.addStretch()
+    group_layout.addLayout(row)
+    parent.out_unet_yaml = QCheckBox('Создать U-Net YAML (masks_data.yaml)')
     parent.out_unet_yaml.setChecked(False)
-    parent.out_unet_yaml.setToolTip(
-        "Записать masks_data.yaml со структурой U-Net-датасета.\n"
-        "Требует включённого U-Net masks."
-    )
-    output_layout.addRow("", parent.out_unet_yaml)
+    group_layout.addWidget(parent.out_unet_yaml)
+    page_layout.addWidget(group)
 
-    # COCO
-    parent.out_coco = QCheckBox("COCO annotations_{split}.json")
+    group, group_layout = _section('COCO')
+    parent.out_coco = QCheckBox('Создать COCO annotations_{split}.json')
     parent.out_coco.setChecked(False)
-    parent.out_coco.setToolTip(
-        "Записать COCO JSON в корень датасета.\n"
-        "• input=labels — из .txt (lossless).\n"
-        "• input=masks — через findContours (⚠️ lossy)."
-    )
-    output_layout.addRow("", parent.out_coco)
-
-    # Лейбл-предупреждение о lossy
-    parent.lossy_warning_label = QLabel("")
+    group_layout.addWidget(parent.out_coco)
+    parent.lossy_warning_label = QLabel('')
+    parent.lossy_warning_label.setObjectName('warningLabel')
     parent.lossy_warning_label.setWordWrap(True)
-    parent.lossy_warning_label.setStyleSheet("color: #b06000; font-weight: bold;")
     parent.lossy_warning_label.setVisible(False)
-    output_layout.addRow("", parent.lossy_warning_label)
+    group_layout.addWidget(parent.lossy_warning_label)
+    page_layout.addWidget(group)
+    page_layout.addStretch()
+    parent.preparation_tabs.addTab(page, 'Экспорт')
 
-    output_group.setLayout(output_layout)
-    right_layout.addWidget(output_group)
-
-    # ============================================================
-    # Блок 4: AUGMENTATION
-    # ============================================================
-    aug_group = QGroupBox("Augmentation")
-    aug_layout = QGridLayout()
-    parent.flip_horizontal = QCheckBox("Horizontal Flip")
-    parent.flip_vertical = QCheckBox("Vertical Flip")
-    aug_layout.addWidget(parent.flip_horizontal, 0, 0)
-    aug_layout.addWidget(parent.flip_vertical, 0, 1)
-    parent.rotate_90 = QCheckBox("Rotate 90/180/270°")
-    aug_layout.addWidget(parent.rotate_90, 1, 0, 1, 2)
-
-    parent.random_rotate = QCheckBox("Random Rotation (±)")
-    parent.random_rotate_angle = QDoubleSpinBox()
-    parent.random_rotate_angle.setRange(0, 15)
-    parent.random_rotate_angle.setValue(5)
-    parent.random_rotate_angle.setSuffix("°")
-    random_rotate_layout = QHBoxLayout()
-    random_rotate_layout.addWidget(parent.random_rotate)
-    random_rotate_layout.addWidget(QLabel("Max angle:"))
-    random_rotate_layout.addWidget(parent.random_rotate_angle)
-    aug_layout.addLayout(random_rotate_layout, 2, 0, 1, 2)
-
-    parent.shear = QCheckBox("Random Shear (±)")
-    parent.shear_angle = QDoubleSpinBox()
-    parent.shear_angle.setRange(0, 15)
-    parent.shear_angle.setValue(5)
-    parent.shear_angle.setSuffix("°")
-    shear_layout = QHBoxLayout()
-    shear_layout.addWidget(parent.shear)
-    shear_layout.addWidget(QLabel("Max Angle:"))
-    shear_layout.addWidget(parent.shear_angle)
-    aug_layout.addLayout(shear_layout, 3, 0, 1, 2)
-
-    parent.random_crop = QCheckBox("Random Crop")
-    parent.random_crop.setToolTip(
-        "Случайный кроп: вырезает прямоугольную область\n"
-        "(от 70% до 100% кадра) из изображения и аннотаций.\n"
-        "При 'Keep original size' итоговый размер снимка уменьшится.\n"
-        "⚠️ Не применяется при input=masks (только flip и rot90)."
-    )
-    aug_layout.addWidget(parent.random_crop, 4, 0)
-
-    parent.aug_mask_note = QLabel(
-        "⚠️ При input=masks доступны только flip и rotate 90° "
-        "(lossless). Остальные аугментации игнорируются."
-    )
-    parent.aug_mask_note.setWordWrap(True)
-    parent.aug_mask_note.setStyleSheet("color: #666; font-size: 11px;")
-    parent.aug_mask_note.setVisible(False)
-    aug_layout.addWidget(parent.aug_mask_note, 5, 0, 1, 2)
-
-    aug_group.setLayout(aug_layout)
-    right_layout.addWidget(aug_group)
-
-    # ============================================================
-    # Блок 5: MULTIPLIER
-    # ============================================================
-    multiplier_group = QGroupBox("Augmentation multiplier")
-    multiplier_layout = QFormLayout()
-    parent.aug_multiplier_slider = QSlider(Qt.Horizontal)
-    parent.aug_multiplier_slider.setRange(2, 10)
-    parent.aug_multiplier_slider.setValue(2)
-    parent.aug_multiplier_slider.setTickInterval(1)
-    parent.aug_multiplier_slider.setEnabled(False)
-    parent.aug_multiplier_label = QLabel("2x")
-    multiplier_slider_layout = QHBoxLayout()
-    multiplier_slider_layout.addWidget(parent.aug_multiplier_slider)
-    multiplier_slider_layout.addWidget(parent.aug_multiplier_label)
-    multiplier_layout.addRow("Multiply dataset by:", multiplier_slider_layout)
-    parent.total_count_with_multiplier = QLabel("Итоговое кол-во снимков: 0")
-    multiplier_layout.addRow(parent.total_count_with_multiplier)
-    multiplier_group.setLayout(multiplier_layout)
-    right_layout.addWidget(multiplier_group)
-
-    # ============================================================
-    # Блок 6: CLASS LABELS
-    # ============================================================
-    labels_group = QGroupBox("Class Labels")
-    labels_layout = QVBoxLayout()
+    # TAB 5 — classes; uses all remaining vertical space.
+    class_page = QWidget()
+    class_layout = QVBoxLayout(class_page)
+    class_layout.setContentsMargins(12, 12, 12, 12)
+    class_layout.setSpacing(8)
+    title = QLabel('Классы выходного датасета')
+    title.setObjectName('workspaceTitle')
+    class_layout.addWidget(title)
+    note = QLabel('New ID — новая сквозная нумерация · Original ID — исходный класс · Mask pixel — номер пикселя U-Net.')
+    note.setObjectName('sectionHint')
+    note.setWordWrap(True)
+    class_layout.addWidget(note)
+    labels_group = QGroupBox('Таблица классов')
+    labels_layout = QVBoxLayout(labels_group)
     parent.class_table = QTableWidget()
     parent.class_table.setColumnCount(5)
-    parent.class_table.setHorizontalHeaderLabels(
-        ["New ID", "Original ID", "Name", "Mask pixel", "Include"])
+    parent.class_table.setHorizontalHeaderLabels(['New ID', 'Original ID', 'Name', 'Mask pixel', 'Include'])
     parent.class_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-    # Колонка Mask pixel (индекс 3) скрыта по умолчанию,
-    # включается автоматически при input=masks или out_masks=True.
+    parent.class_table.setAlternatingRowColors(True)
     parent.class_table.setColumnHidden(3, True)
-    parent.class_table.setToolTip(
-        "New ID — плотная нумерация 0..N-1 (пересчитывается автоматически).\n"
-        "Original ID — как в исходном датасете (только чтение).\n"
-        "Name — произвольное имя класса.\n"
-        "Include — включить класс в выходной датасет."
-    )
+    parent.class_table.setToolTip('New ID: плотная нумерация 0…N−1; Original ID: исходный; Name: имя класса; Include: выбор класса.')
     labels_layout.addWidget(parent.class_table)
-    labels_group.setLayout(labels_layout)
-    right_layout.addWidget(labels_group)
+    class_layout.addWidget(labels_group, 1)
+    parent.preparation_tabs.addTab(class_page, 'Классы')
 
-    # ============================================================
-    # Кнопки управления + лог
-    # ============================================================
-    parent.control_buttons = ControlButtons(
-        show_generate=True,
-        show_cancel=True,
-        show_save=False
-    )
+    parent.control_buttons = ControlButtons(show_generate=True, show_cancel=True, show_save=False)
     parent.generate_btn = parent.control_buttons._generate_btn
     parent.cancel_btn = parent.control_buttons._cancel_btn
-    parent.generate_btn.setText("Generate Dataset")
-    parent.cancel_btn.setText("Cancel")
+    parent.generate_btn.setText('Создать датасет')
+    parent.cancel_btn.setText('Отмена')
     parent.generate_btn.setEnabled(False)
     parent.cancel_btn.setEnabled(False)
-
     parent.control_buttons.generate.connect(parent.on_generate)
     parent.control_buttons.cancel.connect(parent.on_cancel_generation)
-
-    log_layout = QHBoxLayout()
-    parent.toggle_log_btn = QPushButton("Показать лог")
-    parent.toggle_log_btn.setCheckable(False)
-    log_layout.addWidget(parent.control_buttons)
-    log_layout.addStretch()
-    log_layout.addWidget(parent.toggle_log_btn)
-    right_layout.addLayout(log_layout)
-
+    control_row = QHBoxLayout()
+    control_row.addWidget(parent.control_buttons)
+    control_row.addStretch()
+    parent.toggle_log_btn = QPushButton('Показать лог')
+    parent.toggle_log_btn.setCheckable(True)
+    control_row.addWidget(parent.toggle_log_btn)
+    right_layout.addLayout(control_row)
     h_splitter.addWidget(right_widget)
-    h_splitter.setSizes([500, 500])
+    h_splitter.setSizes([480, 820])
 
+    # Existing log and histogram — unchanged infrastructure.
     parent.log_widget = LogWidget(show_clear_btn=True, show_progress=True)
     parent.log_text = parent.log_widget.text
     parent.progress_bar = parent.log_widget._progress
-    parent.log_widget._progress.setFormat("Готово: %p%")
+    parent.log_widget._progress.setFormat('Готово: %p%')
     parent.log_widget.setVisible(False)
-
     main_v_splitter.addWidget(parent.log_widget)
-    main_v_splitter.setSizes([600, 150])
-
+    main_v_splitter.setSizes([750, 140])
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     parent.hist_canvas = FigureCanvas(Figure(figsize=(5, 2)))
@@ -533,9 +507,6 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.hist_container.setVisible(False)
     main_layout.addWidget(parent.hist_container)
 
-    # ============================================================
-    # ПОДКЛЮЧЕНИЯ
-    # ============================================================
     parent.btn_folder.clicked.connect(parent.select_images_folder)
     parent.btn_labels.clicked.connect(parent.select_labels_folder)
     parent.btn_load_yaml.clicked.connect(parent.load_from_yaml)
@@ -543,6 +514,29 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.btn_add_coco.clicked.connect(parent.add_from_coco)
     parent.btn_load_unet.clicked.connect(parent.load_from_unet_yaml)
     parent.btn_output.clicked.connect(parent.select_output_folder)
+
+    # Style only the redesigned workspace. The input strip and LogWidget keep
+    # their existing Qt controls and behavior.
+    h_splitter.setStyleSheet("""
+    QWidget#preparationPage { background: transparent; }
+    QGroupBox#preparationSection, QGroupBox {
+        border: 1px solid palette(mid); border-radius: 8px;
+        margin-top: 10px; font-weight: 600;
+    }
+    QGroupBox#preparationSection::title, QGroupBox::title {
+        subcontrol-origin: margin; left: 12px; padding: 0 5px;
+    }
+    QLabel#workspaceTitle { font-size: 16px; font-weight: 650; }
+    QLabel#sectionHint { color: palette(mid); font-size: 11px; }
+    QLabel#infoLabel { color: #2276aa; font-size: 11px; }
+    QLabel#warningLabel { color: #aa6500; font-size: 11px; }
+    QLabel#countChip { padding: 5px 9px; border: 1px solid palette(mid); border-radius: 7px; font-weight: 600; }
+    QLabel#multiplierBadge { font-size: 18px; font-weight: 700; min-width: 45px; }
+    QTabWidget::pane { border: 1px solid palette(mid); border-radius: 8px; }
+    QTabBar::tab { padding: 8px 12px; }
+    QPushButton { min-height: 24px; }
+    QScrollArea { border: none; }
+    """)
 
     # ============================================================
     # СИНХРОНИЗАЦИЯ СОСТОЯНИЙ

@@ -22,7 +22,7 @@ import numpy as np
 
 from utils_new.annotations import (
     Annotation, AnnotationSample, ImageSize, MaskEncoding,
-    Resize, transform_sample, build_augmentation_plan, apply_augmentation_plan,
+    Resize, Flip, TransformPlan, AugmentationPlan, transform_sample, build_augmentation_plan, apply_augmentation_plan,
     convert_annotation, polygon_area, remap_mask_indices, mask_to_annotations,
 )
 from utils_new.dataset_io_new import (
@@ -165,8 +165,10 @@ class DatasetGeneratorCoreNew:
             raise ValueError('U-Net YAML requires masks output')
         if self.out_masks_offset > 65535:
             raise ValueError('PNG cannot encode mask class indices > 65535')
-        if self.input_type == INPUT_MASKS and not self.mask_class_remap:
-            raise ValueError('Mask source requires orig_pixel -> class mapping')
+        if self.input_type == INPUT_MASKS and not self.mask_class_remap \
+                and not self.include_empty_annotations:
+            raise ValueError('Mask source requires orig_pixel -> class mapping, '
+                             'unless only empty masks are requested')
         if not self.pairs:
             raise ValueError('No input images/pairs')
 
@@ -181,7 +183,10 @@ class DatasetGeneratorCoreNew:
     def _map_annotations(self, annotations):
         mapping = self._dense_map(self.class_mapping)
         if not mapping:
-            return list(annotations)
+            # No selected classes must not accidentally retain original labels.
+            # An empty map with explicitly supplied class_names means the
+            # canonical input already uses those IDs (headless API case).
+            return [a for a in annotations if a.class_id in self.class_names]
         return [Annotation(a.kind, mapping[a.class_id], a.points_px)
                 for a in annotations if a.class_id in mapping]
 
@@ -230,7 +235,7 @@ class DatasetGeneratorCoreNew:
                                 obb_policy=self.obb_policy, hole_policy=self.hole_policy,
                                 multi_policy='all', fill_color=self.bg_color)
 
-    def _make_variant(self, sample, *, augmented=False):
+    def _make_variant(self, sample, *, augmented=False, require_operation=False):
         if not augmented:
             return self._resize(sample)
         config = dict(self.augmentations)
@@ -238,6 +243,18 @@ class DatasetGeneratorCoreNew:
             config = {k: config.get(k, False) for k in
                       ('horizontal_flip', 'vertical_flip', 'rotate_90')}
         plan = build_augmentation_plan(sample.size, config, rng=self._rng)
+        # In 1x mode the original is REPLACED by an augmented variant.
+        # A sole flip checkbox normally has p=.5 and can produce an empty plan.
+        # Avoid that no-op by selecting an enabled flip deterministically if
+        # the randomized plan contains no operations.
+        if require_operation and not plan.transform.steps:
+            if config.get('horizontal_flip', False):
+                fallback = Flip(horizontal=True)
+            elif config.get('vertical_flip', False):
+                fallback = Flip(vertical=True)
+            else:
+                raise ValueError('1x augmentation: no enabled transformation produced an operation')
+            plan = AugmentationPlan(TransformPlan((fallback,)))
         transformed, report = apply_augmentation_plan(
             sample, plan, obb_policy=self.obb_policy,
             hole_policy=self.hole_policy, multi_policy='all',
@@ -310,13 +327,16 @@ class DatasetGeneratorCoreNew:
         source_key = str(Path(image_path).resolve())
         prior_hashes = set()
         attempts = 1 if not self.has_augmentations else self.aug_multiplier
+        replace_original = bool(self.has_augmentations and self.aug_multiplier == 1)
         for copy_idx in range(attempts):
             self._check_cancelled()
-            max_attempts = 1 if copy_idx == 0 else 10
+            max_attempts = 12 if replace_original else (1 if copy_idx == 0 else 10)
             for attempt in range(max_attempts):
                 if self._is_cancelled:
                     self._check_cancelled()
-                variant = self._make_variant(sample, augmented=(copy_idx > 0))
+                variant = self._make_variant(sample,
+                                             augmented=(copy_idx > 0 or replace_original),
+                                             require_operation=replace_original)
                 if variant.annotations:
                     filtered = self._filter_annotations(variant.annotations)
                     variant = AnnotationSample(variant.image, filtered, variant.mask,
@@ -328,6 +348,22 @@ class DatasetGeneratorCoreNew:
                     if copy_idx == 0:
                         if self.include_empty_annotations:
                             self.log(f'[negative] all objects filtered: {image_path}')
+                        elif replace_original and attempt + 1 < max_attempts:
+                            # Retry a new random transform: 1x must not lose a
+                            # valid source because a crop happened to remove it.
+                            continue
+                        elif replace_original:
+                            # Conservative fallback: retain one valid source
+                            # instead of dropping it; log that no safe random
+                            # variant was found.
+                            variant = self._resize(sample)
+                            kept = self._filter_annotations(variant.annotations)
+                            if not kept:
+                                self.log(f'[skip] original annotations fail area filter: {image_path}')
+                                return
+                            variant = AnnotationSample(variant.image, kept, variant.mask,
+                                                       variant.mask_encoding)
+                            self.log(f'[1x fallback] could not preserve annotations after augmentation: {image_path}')
                         else:
                             self.log(f'[skip] all objects filtered: {image_path}')
                             return
@@ -336,10 +372,22 @@ class DatasetGeneratorCoreNew:
                 # Mask input may become empty after filtering.
                 if self.input_type == INPUT_MASKS and variant.mask is not None and not np.any(variant.mask):
                     if not self.include_empty_annotations:
-                        if copy_idx == 0:
+                        if copy_idx == 0 and replace_original and attempt + 1 < max_attempts:
+                            continue
+                        if copy_idx == 0 and replace_original:
+                            variant = self._resize(sample)
+                            fallback_mask = self._filter_mask(variant.mask)
+                            if not np.any(fallback_mask):
+                                self.log(f'[skip] original mask fails area filter: {image_path}')
+                                return
+                            variant = AnnotationSample(variant.image, variant.annotations,
+                                                       fallback_mask, variant.mask_encoding)
+                            self.log(f'[1x fallback] could not preserve mask after augmentation: {image_path}')
+                        elif copy_idx == 0:
                             self.log(f'[skip] empty mask after area filter: {image_path}')
                             return
-                        continue
+                        else:
+                            continue
                 digest = hashlib.md5(variant.image.tobytes()).hexdigest()
                 if copy_idx and digest in prior_hashes:
                     continue
@@ -495,6 +543,8 @@ class DatasetGeneratorCoreNew:
             destination.mkdir(parents=True, exist_ok=True)
             total = len(self.pairs)*(self.aug_multiplier if self.has_augmentations else 1)
             self.log('[DatasetGenerator_new] start, canonical pixel geometry V14')
+            if self.has_augmentations and self.aug_multiplier == 1:
+                self.log('[augmentation] 1x: each source replaced by one augmented output, no extra copies')
             if self.input_type == INPUT_MASKS and any(self.augmentations.get(k, False)
                             for k in ('random_rotate','shear','random_crop')):
                 self.log('[INFO] Mask input: arbitrary rotate/shear/crop disabled (lossless geometry policy)')
