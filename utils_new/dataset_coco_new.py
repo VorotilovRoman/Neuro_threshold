@@ -76,7 +76,7 @@ def _is_polygon_rectangle(poly_abs, tol=2.0):
     return True
 
 
-def load_coco(json_path, log_cb=None):
+def load_coco(json_path, log_cb=None, *, preserve_category_ids=False):
     """
     Загружает COCO JSON.
 
@@ -154,7 +154,7 @@ def load_coco(json_path, log_cb=None):
         for a in anns_by_image.get(iid, []):
             # category_id 1..N → yolo class 0..N-1
             coco_cat = int(a.get('category_id', 0))
-            yolo_cls = max(0, coco_cat - 1)
+            yolo_cls = (coco_cat if preserve_category_ids else max(0, coco_cat - 1))
 
             bbox = a.get('bbox')
             seg = a.get('segmentation')

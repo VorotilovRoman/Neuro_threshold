@@ -9,6 +9,7 @@ signal contract for optional future tab migration.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import hashlib
 import os
 from pathlib import Path
@@ -78,6 +79,8 @@ class DatasetGeneratorCoreNew:
                  out_coco=False, mask_pixel_offset_in=1, min_ann_area_px=0,
                  *, random_seed=None, split_by_source=False,
                  obb_policy='promote_to_segment', hole_policy='error',
+                 mixed_output_policy='normalize_segment', strict_complete=False,
+                 existing_output_policy='merge',
                  log_cb: Callable[[str], None] | None = None,
                  progress_cb: Callable[[int, int], None] | None = None):
         self.images_folder = images_folder
@@ -118,6 +121,9 @@ class DatasetGeneratorCoreNew:
         self.split_by_source = bool(split_by_source)
         self.obb_policy = obb_policy
         self.hole_policy = hole_policy
+        self.mixed_output_policy = mixed_output_policy
+        self.strict_complete = bool(strict_complete)
+        self.existing_output_policy = existing_output_policy
         self._log_cb = log_cb or (lambda _message: None)
         self._progress_cb = progress_cb or (lambda _cur, _total: None)
         self._is_cancelled = False
@@ -157,6 +163,10 @@ class DatasetGeneratorCoreNew:
             raise ValueError('Invalid OBB geometry policy')
         if self.hole_policy not in ('error', 'drop'):
             raise ValueError('Invalid hole policy')
+        if self.mixed_output_policy not in ('normalize_segment', 'error', 'allow'):
+            raise ValueError('Invalid mixed YOLO output policy')
+        if self.existing_output_policy not in ('merge', 'error', 'replace'):
+            raise ValueError('Invalid existing output policy')
         if any(x < 0 or x > 1 for x in (self.train_pct, self.val_pct, self.test_pct)):
             raise ValueError('Split fractions must be in [0,1]')
         if abs(self.train_pct+self.val_pct+self.test_pct-1) > 0.02:
@@ -271,6 +281,23 @@ class DatasetGeneratorCoreNew:
                                 obb_policy=self.obb_policy, hole_policy=self.hole_policy,
                                 multi_policy='all', fill_color=self.bg_color)
 
+    def _augmentation_impossible(self, size):
+        """Detect configurations with only deterministic no-ops (not randomness)."""
+        c = self.augmentations
+        if any(c.get(k, False) for k in ('horizontal_flip', 'vertical_flip', 'rotate_90')):
+            return False
+        if self.input_type == INPUT_MASKS:
+            return True  # Complex transforms are intentionally disabled for masks.
+        if c.get('random_rotate', False) and abs(float(c.get('random_rotate_angle', 10))) > 1e-12:
+            return False
+        if c.get('shear', False) and abs(float(c.get('shear_angle', 10))) > 1e-12:
+            return False
+        if (c.get('random_crop', False) and
+                max(.1, min(1., float(c.get('random_crop_scale', .7)))) < 1. and
+                (size.width > 16 or size.height > 16)):
+            return False
+        return True
+
     def _make_variant(self, sample, *, augmented=False, require_operation=False):
         if not augmented:
             return self._resize(sample)
@@ -298,6 +325,43 @@ class DatasetGeneratorCoreNew:
         for note in report.notes:
             self.log('[geometry] ' + note)
         return self._resize(transformed)
+
+    @staticmethod
+    def _same_sample(a, b):
+        """Actual equality, not just 'the sampled plan contained an operation'."""
+        if not np.array_equal(a.image, b.image):
+            return False
+        if (a.mask is None) != (b.mask is None):
+            return False
+        if a.mask is not None and not np.array_equal(a.mask, b.mask):
+            return False
+        if len(a.annotations) != len(b.annotations):
+            return False
+        return all(x.kind == y.kind and x.class_id == y.class_id and
+                   np.allclose(x.points_px, y.points_px, rtol=0, atol=1e-8)
+                   for x, y in zip(a.annotations, b.annotations))
+
+    @staticmethod
+    def _variant_digest(sample):
+        """Duplicate identity includes image, labels AND mask, not pixels alone.
+
+        A visually uniform image may stay pixel-identical after a flip while
+        off-center annotations or its semantic mask change significantly.
+        Buffer-protocol hashing avoids allocating ``image.tobytes()`` for a
+        multi-megapixel image.
+        """
+        digest = hashlib.md5()
+        digest.update(f'{sample.image.shape}:{sample.image.dtype}'.encode('ascii'))
+        digest.update(memoryview(np.ascontiguousarray(sample.image)))
+        if sample.mask is None:
+            digest.update(b'no_mask')
+        else:
+            digest.update(f'{sample.mask.shape}:{sample.mask.dtype}'.encode('ascii'))
+            digest.update(memoryview(np.ascontiguousarray(sample.mask)))
+        for ann in sample.annotations:
+            digest.update(f'{ann.kind}:{ann.class_id}:'.encode('ascii'))
+            digest.update(memoryview(np.ascontiguousarray(ann.points_px)))
+        return digest.digest()
 
     def _get_name(self, img_path):
         stem = Path(img_path).stem
@@ -343,6 +407,10 @@ class DatasetGeneratorCoreNew:
         image_path = str(pair[0])
         image = read_image(image_path)
         size = ImageSize(image.shape[1], image.shape[0])
+        if size.width * size.height >= 20_000_000:
+            self.log(f'[large image] {Path(image_path).name}: '
+                     f'{size.width}x{size.height}, '
+                     'high-resolution processing requires substantial RAM and disk space')
         if self.input_type == INPUT_IMAGES:
             return AnnotationSample(image=image), (image_path, None, None), False
         if self.input_type == INPUT_LABELS:
@@ -388,9 +456,15 @@ class DatasetGeneratorCoreNew:
         prior_hashes = set()
         attempts = 1 if not self.has_augmentations else self.aug_multiplier
         replace_original = bool(self.has_augmentations and self.aug_multiplier == 1)
+        # Cached only for 1x: compare FINAL resized output, not a random-plan flag.
+        unchanged_variant = ((sample if self.target_size is None or self.resize_mode == 'keep'
+                              else self._resize(sample)) if replace_original else None)
         for copy_idx in range(attempts):
             self._check_cancelled()
-            max_attempts = 12 if replace_original else (1 if copy_idx == 0 else 10)
+            max_attempts = (1 if replace_original and self._augmentation_impossible(sample.size)
+                            else 12 if replace_original
+                            else 1 if copy_idx == 0 else 10)
+            used_fallback = False
             for attempt in range(max_attempts):
                 if self._is_cancelled:
                     self._check_cancelled()
@@ -414,10 +488,13 @@ class DatasetGeneratorCoreNew:
                         self.log(f'[1x fallback] {Path(image_path).name}: '
                                  f'all augmented variants failed: {exc}; '
                                  'writing one unchanged source')
-                        variant = self._resize(sample)
+                        variant = unchanged_variant.detached()
+                        used_fallback = True
                     elif copy_idx > 0:
+                        if attempt + 1 < max_attempts:
+                            continue
                         self.log(f'[augmentation warning] {Path(image_path).name}: '
-                                 f'augmented copy {copy_idx} excluded: {exc}')
+                                 f'augmented copy {copy_idx} failed after {max_attempts} attempts: {exc}')
                         break
                     else:
                         raise
@@ -440,7 +517,8 @@ class DatasetGeneratorCoreNew:
                             # Conservative fallback: retain one valid source
                             # instead of dropping it; log that no safe random
                             # variant was found.
-                            variant = self._resize(sample)
+                            variant = unchanged_variant.detached()
+                            used_fallback = True
                             kept = self._filter_annotations(variant.annotations)
                             if not kept:
                                 self.log(f'[skip] original annotations fail area filter: {image_path}')
@@ -459,7 +537,8 @@ class DatasetGeneratorCoreNew:
                         if copy_idx == 0 and replace_original and attempt + 1 < max_attempts:
                             continue
                         if copy_idx == 0 and replace_original:
-                            variant = self._resize(sample)
+                            variant = unchanged_variant.detached()
+                            used_fallback = True
                             fallback_mask = self._filter_mask(variant.mask)
                             if not np.any(fallback_mask):
                                 self.log(f'[skip] original mask fails area filter: {image_path}')
@@ -472,10 +551,24 @@ class DatasetGeneratorCoreNew:
                             return
                         else:
                             continue
-                digest = hashlib.md5(variant.image.tobytes()).hexdigest()
-                if copy_idx and digest in prior_hashes:
-                    continue
-                prior_hashes.add(digest)
+                if replace_original and not used_fallback and self._same_sample(variant, unchanged_variant):
+                    if attempt + 1 < max_attempts:
+                        continue
+                    self.log(f'[1x fallback] {Path(image_path).name}: '
+                             f'no transformation changed image, annotation or mask '
+                             f'after {max_attempts} attempts; keeping one original')
+                    variant = unchanged_variant.detached()
+                    used_fallback = True
+                if replace_original:
+                    self.log(f'[1x status] {Path(image_path).name}: '
+                             f"{'fallback (unchanged)' if used_fallback else 'augmented (changed)'}")
+                # 1x needs no duplicate hash. Avoid materializing a second
+                # ~170 MB bytes buffer for high-resolution BGR images.
+                if self.has_augmentations and self.aug_multiplier > 1:
+                    digest = self._variant_digest(variant)
+                    if copy_idx and digest in prior_hashes:
+                        continue
+                    prior_hashes.add(digest)
                 proposed = stem if not copy_idx else f'{stem}_aug{copy_idx}'
                 output_stem = proposed if copy_idx == 0 else self._reserve_stem(proposed)
                 img_file = stage/'all'/'images'/f'{output_stem}{extension}'
@@ -523,6 +616,41 @@ class DatasetGeneratorCoreNew:
             else:
                 self.log(f'[skip] cannot generate unique augmentation: {stem}_aug{copy_idx} ({max_attempts} attempts)')
 
+    def _ensure_consistent_yolo_kinds(self, records):
+        """Keep output training task homogeneous without changing object geometry.
+
+        A clipped or sheared OBB may become a precise Segment. Exporting the
+        original OBB together with it under YOLO 'keep' is unsafe: training
+        software usually expects one task type per dataset. A Segment can
+        represent Detect/OBB corners *exactly*, so make all rows Segments.
+        """
+        if (not self.out_yolo_txt or self.input_type != INPUT_LABELS or
+                self.out_yolo_subtype != 'keep'):
+            return
+        kinds = {ann.kind for rec in records for ann in (rec.annotations or ())}
+        if len(kinds) <= 1:
+            return
+        if self.mixed_output_policy == 'error':
+            raise ValueError(f'Mixed YOLO annotation kinds {sorted(kinds)}; '
+                             'choose output subtype segment/obb/detect or '
+                             'set mixed_output_policy=normalize_segment')
+        if self.mixed_output_policy == 'allow':
+            self.log(f'[YOLO WARNING] Mixed annotation kinds retained: {sorted(kinds)}; '
+                     'dataset may be invalid for single-task YOLO training')
+            return
+        count = 0
+        for rec in records:
+            if rec.annotations is None:
+                continue
+            converted = [convert_annotation(a, 'segment') for a in rec.annotations]
+            count += sum(a.kind != 'segment' for a in rec.annotations)
+            rec.annotations = converted
+            if rec.label is not None:
+                write_yolo_labels(rec.label, converted, rec.size,
+                                  obb_format=self.out_yolo_obb_format)
+        self.log(f'[YOLO normalize] Mixed {sorted(kinds)} -> all Segment; '
+                 f'{count} annotations converted without changing contours')
+
     def _assign_splits(self, records):
         self._rng.shuffle(records)
         if not self.split_by_source:
@@ -549,6 +677,7 @@ class DatasetGeneratorCoreNew:
         return out
 
     def _distribute_and_export(self, stage, records):
+        self._ensure_consistent_yolo_kinds(records)
         splits = self._assign_splits(records)
         for name, collection in splits.items():
             self.log(f'[split] {name}: {len(collection)} images')
@@ -583,20 +712,82 @@ class DatasetGeneratorCoreNew:
                                out_masks_offset=self.out_masks_offset,
                                input_type=self.input_type,
                                dataset_path=self.output_folder)
+        return splits
 
     def _publish(self, stage, destination):
-        # Publishing is postponed until ALL computations, masks and JSON/YAML
-        # have completed. A failed/cancelled build never deletes the source.
-        for item in sorted(stage.rglob('*')):
-            if not item.is_file() or 'all' in item.relative_to(stage).parts:
-                continue
-            self._check_cancelled()
+        """Publish with a reversible file-level transaction on the same volume.
+
+        ``merge`` retains unrelated/stale files for V19 UI compatibility, with
+        an explicit warning; ``error`` rejects existing dataset results; and
+        ``replace`` removes old generated dataset files on successful commit.
+        If a move fails, restore all overwritten/removed previous files.
+        """
+        candidates = sorted(item for item in stage.rglob('*') if item.is_file() and
+                            not ({'all', 'backup'} & set(item.relative_to(stage).parts)))
+        new_items = []
+        for item in candidates:
             relative = item.relative_to(stage)
             if relative.parts[0] == 'masks' and not self.out_masks:
                 continue
-            target = destination/relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(item, target)
+            new_items.append((item, relative))
+        existing_generated = set()
+        for folder_name in ('images', 'labels', 'masks'):
+            folder = destination / folder_name
+            if folder.is_dir():
+                existing_generated.update(p for p in folder.rglob('*') if p.is_file())
+        for filename in ('classes.txt', 'data.yaml', 'masks_data.yaml',
+                         'generation_manifest.json', 'annotations_train.json',
+                         'annotations_val.json', 'annotations_test.json'):
+            p = destination / filename
+            if p.is_file():
+                existing_generated.add(p)
+        if existing_generated and self.existing_output_policy == 'error':
+            raise FileExistsError('Output already contains dataset files; choose a new folder '
+                                  'or explicitly set existing_output_policy=merge/replace')
+        if existing_generated and self.existing_output_policy == 'merge':
+            self.log(f'[publish warning] {len(existing_generated)} existing output files '
+                     'may remain from an earlier run; use a new folder or '
+                     'existing_output_policy=replace for clean output')
+        if self.existing_output_policy == 'replace' and existing_generated:
+            output_root = destination.resolve()
+            for pair in self.pairs:
+                for raw in pair:
+                    if raw and (Path(raw).resolve() == output_root or
+                                output_root in Path(raw).resolve().parents):
+                        raise ValueError('Refusing to replace dataset outputs: '
+                                         'an input file lies inside output folder')
+        targets = {destination / relative for _, relative in new_items}
+        source_paths = {Path(raw).resolve() for pair in self.pairs for raw in pair if raw}
+        if any(target.resolve() in source_paths for target in targets):
+            raise ValueError('Refusing to publish: a generated output would overwrite '
+                             'an input image, label or mask')
+        old_to_backup = set(existing_generated) if self.existing_output_policy == 'replace' else targets & existing_generated
+        # Preserve ANY overlapping file, even if it was not in known dataset paths.
+        old_to_backup |= {t for t in targets if t.exists()}
+        backup_root = stage / 'backup'
+        backed_up = []
+        installed = []
+        try:
+            for old in sorted(old_to_backup):
+                relative = old.relative_to(destination)
+                backup = backup_root / relative
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(old, backup)
+                backed_up.append((old, backup))
+            for item, relative in new_items:
+                self._check_cancelled()
+                target = destination / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(item, target)
+                installed.append(target)
+        except Exception:
+            for path in reversed(installed):
+                if path.exists():
+                    path.unlink()
+            for previous, backup in reversed(backed_up):
+                previous.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(backup, previous)
+            raise
 
     def _delete_processed_sources(self):
         destination = Path(self.output_folder).resolve()
@@ -646,8 +837,10 @@ class DatasetGeneratorCoreNew:
             with tempfile.TemporaryDirectory(prefix='.dataset_gen_new_', dir=destination) as tmp:
                 stage = Path(tmp)
                 records = []
+                successful_sources = 0
                 for pair in self.pairs:
                     self._check_cancelled()
+                    before_count = len(records)
                     try:
                         self._generate_pair(pair, stage, records, total)
                     except _Cancelled:
@@ -655,10 +848,45 @@ class DatasetGeneratorCoreNew:
                     except Exception as exc:
                         self._skipped += 1
                         self.log(f'[skip] {pair[0]}: {type(exc).__name__}: {exc}')
+                    if len(records) > before_count:
+                        successful_sources += 1
+                self._skipped = len(self.pairs) - successful_sources
+                missing = max(0, total - len(records))
+                self.log(f'[completeness] sources={len(self.pairs)}, '
+                         f'successful={successful_sources}, skipped={self._skipped}; '
+                         f'variants_expected={total}, variants_created={len(records)}, '
+                         f'variants_missing={missing}')
+                if self.strict_complete and (self._skipped or missing):
+                    raise ValueError(f'Incomplete dataset: {self._skipped} source(s) skipped, '
+                                     f'{missing} variant(s) missing; strict_complete=True')
                 if not records:
                     raise ValueError('No valid images generated')
                 self._check_cancelled()
-                self._distribute_and_export(stage, records)
+                splits = self._distribute_and_export(stage, records)
+                manifest = {
+                    'generator': 'DatasetGenerator_new',
+                    'manifest_version': 1,
+                    'sources_total': len(self.pairs),
+                    'sources_successful': successful_sources,
+                    'sources_skipped': self._skipped,
+                    'variants_expected': total,
+                    'variants_created': len(records),
+                    'variants_missing': missing,
+                    'split_by_source': self.split_by_source,
+                    'random_seed': self.random_seed,
+                    'output_policy': self.existing_output_policy,
+                    'mixed_output_policy': self.mixed_output_policy,
+                    'mask_class_offset': self.out_masks_offset,
+                    'splits': {name: [
+                        {'image': rec.image.name,
+                         'label': rec.label.name if rec.label else None,
+                         'mask': rec.mask.name if rec.mask and self.out_masks else None,
+                         'annotations': len(rec.annotations) if rec.annotations is not None else None}
+                        for rec in collection]
+                        for name, collection in splits.items()},
+                }
+                (stage/'generation_manifest.json').write_text(
+                    json.dumps(manifest, indent=2, ensure_ascii=False), encoding='utf-8')
                 self._check_cancelled()
                 self._publish(stage, destination)
             if self._mask_files_written:
@@ -672,7 +900,11 @@ class DatasetGeneratorCoreNew:
                 self._delete_processed_sources()
             self.log(f'[DatasetGenerator_new] done: images={self._written}, skipped={self._skipped}, '
                      f'filtered_annotations={self._dropped_ann_count}')
-            return True, f'Датасет создан: {self._written} изображений'
+            result = f'Датасет создан: {self._written} изображений'
+            if self._skipped or self._written < total:
+                result += (f' (предупреждение: пропущено источников={self._skipped}, '
+                           f'недополучено вариантов={max(0, total-self._written)})')
+            return True, result
         except _Cancelled as exc:
             self.log(str(exc))
             return False, str(exc)

@@ -102,7 +102,8 @@ def import_coco_catalog(json_paths, existing_name_to_id=None, *, log_cb=None):
     sources = []
     for json_path in json_paths:
         try:
-            items, categories, root = load_coco(json_path, log_cb=log_cb)
+            items, categories, root = load_coco(json_path, log_cb=log_cb,
+                                               preserve_category_ids=True)
         except Exception as exc:
             raise CatalogSourceError(f'{json_path}: {exc}') from exc
         if not items:
@@ -120,8 +121,8 @@ def import_coco_catalog(json_paths, existing_name_to_id=None, *, log_cb=None):
         for item in items:
             mapped = []
             for ann in item['annotations']:
-                # load_coco() normalizes source IDs to cat_id-1 (legacy).
-                src_category_id = int(ann[1]) + 1
+                # Catalog requests original COCO IDs, including category_id=0.
+                src_category_id = int(ann[1])
                 global_id = local_to_global.get(src_category_id)
                 if global_id is None:
                     name = str(src_category_id)

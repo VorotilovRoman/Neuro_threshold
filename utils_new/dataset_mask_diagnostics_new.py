@@ -69,7 +69,14 @@ def mask_statistics(mask: np.ndarray, *, background_value=0) -> MaskStatistics:
     # Indexed masks are most often uint8/uint16 with a tiny palette. Avoid
     # np.unique sorting millions of pixels on every large training image.
     if (mask.dtype in (np.dtype('uint8'), np.dtype('uint16'))):
-        frequency = np.bincount(mask.reshape(-1))
+        # np.bincount on a 56-megapixel uint16 mask may allocate a 450 MB
+        # temporary int64 array. Work in small chunks and sum exact integer
+        # counts, keeping memory bounded independently of image dimensions.
+        bins = 256 if mask.dtype == np.uint8 else 65536
+        frequency = np.zeros(bins, dtype=np.int64)
+        flat = mask.reshape(-1)
+        for start in range(0, flat.size, 2_000_000):
+            frequency += np.bincount(flat[start:start + 2_000_000], minlength=bins)
         values = np.flatnonzero(frequency)
         counts = frequency[values]
     else:

@@ -94,7 +94,7 @@ def load_unet_yaml(yaml_path, log_cb=None):
     # Если offset=0 → yolo_cls i соответствует pixel i, name — class_names_list[i]
     class_names = {}
     if class_names_list:
-        if mask_class_offset == 1:
+        if mask_class_offset >= 1:
             for i, name in enumerate(class_names_list):
                 if i == 0:
                     continue  # background
@@ -138,3 +138,58 @@ def is_unet_yaml(yaml_path):
     return False
 
 
+
+
+def load_unet_yaml_pairs(yaml_path, log_cb=None):
+    """Compatibility tuple for tabs, delegating all YAML logic to load_unet_yaml."""
+    data = load_unet_yaml(yaml_path, log_cb=log_cb)
+    return (data['pairs'], data['class_names'], int(data['mask_class_offset']),
+            data['root'], int(data['num_classes']))
+
+
+def write_yolo_txt_for_unet_pairs(pairs, output_labels_dir, *,
+                                   class_names, mask_offset=1,
+                                   include_empty=True, log_cb=None):
+    """Convert indexed masks to editable YOLO-Segment labels (lossy contours).
+
+    Keeps each original image paired with its original mask.  Only labels are
+    temporary; mask files are never rewritten.  Uses shared canonical geometry.
+    """
+    from utils_new.dataset_files_new import read_index_mask
+    from utils_new.dataset_yolo_labels_new import write_yolo_labels
+    from utils_new.annotations import ImageSize, MaskEncoding, mask_to_annotations
+    import cv2
+    output = Path(output_labels_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    result = []
+    used = set()
+    allowed = set(map(int, class_names.keys()))
+    for image_path, mask_path in pairs:
+        try:
+            mask = read_index_mask(mask_path)
+            height, width = mask.shape
+            if mask_offset == 0 and log_cb:
+                log_cb('[U-Net] offset=0: pixel 0 considered background and cannot represent class 0 unambiguously')
+            encoding = MaskEncoding(offset=int(mask_offset), background_value=0,
+                                    allow_ambiguous_zero=(int(mask_offset) == 0))
+            anns = mask_to_annotations(mask, encoding=encoding, kind='segment',
+                                       holes='drop')
+            anns = [a for a in anns if a.class_id in allowed]
+            if not anns and not include_empty:
+                continue
+            stem = Path(image_path).stem
+            candidate = stem
+            serial = 2
+            while candidate in used:
+                candidate = f'{stem}__{serial}'
+                serial += 1
+            used.add(candidate)
+            target = output / f'{candidate}.txt'
+            write_yolo_labels(target, anns, ImageSize(width, height))
+            result.append((str(image_path), str(target)))
+            if log_cb:
+                log_cb(f'[U-Net → YOLO] {Path(mask_path).name}: {len(anns)} contours (lossy)')
+        except (OSError, ValueError, TypeError, cv2.error) as exc:
+            if log_cb:
+                log_cb(f'[U-Net] failed mask {mask_path}: {exc}')
+    return result

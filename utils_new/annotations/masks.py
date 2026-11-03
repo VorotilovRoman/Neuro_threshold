@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 from .model import Annotation, ImageSize, MaskEncoding
-from .geometry import canonical_obb_points, rectangle_points, bounds, GeometryError
+from .geometry import canonical_obb_points, rectangle_points, bounds, is_axis_aligned, GeometryError
 
 
 def _dtype_for_values(values):
@@ -14,14 +14,17 @@ def _dtype_for_values(values):
 
 
 def annotation_binary_mask(ann: Annotation, size: ImageSize) -> np.ndarray:
-    """Raster footprint. Detect uses pixel-center inclusion and half-open bounds.
+    """Raster footprint with half-open pixel-center semantics for rectangles.
 
-    For arbitrary polygons OpenCV scan conversion is used; its raster edge
-    convention may differ by one boundary pixel from continuous geometry.
+    A Detect and the identical contour converted to a four-corner Segment or
+    axis-aligned OBB MUST rasterize identically. For irregular/rotated polygons
+    OpenCV fillPoly is retained; its boundary convention can differ by at most
+    a narrow edge band from the continuous polygon area.
     """
     selected = np.zeros((size.height, size.width), dtype=np.uint8)
-    if ann.kind == 'detect':
-        x0, y0, x1, y1 = bounds(ann.points_px)
+    points = ann.points_px
+    if ann.kind == 'detect' or (len(points) == 4 and is_axis_aligned(points)):
+        x0, y0, x1, y1 = bounds(points)
         # A pixel at integer index x has physical center x+.5.
         left = max(0, int(np.ceil(x0 - .5)))
         top = max(0, int(np.ceil(y0 - .5)))
@@ -30,7 +33,7 @@ def annotation_binary_mask(ann: Annotation, size: ImageSize) -> np.ndarray:
         if right > left and bottom > top:
             selected[top:bottom, left:right] = 1
     else:
-        cv2.fillPoly(selected, [np.rint(ann.points_px).astype(np.int32)], 1)
+        cv2.fillPoly(selected, [np.rint(points).astype(np.int32)], 1)
     return selected
 
 

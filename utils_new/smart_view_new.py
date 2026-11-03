@@ -8,7 +8,7 @@
     * базовое изображение не содержит разметку, её рисует drawForeground;
     * косметические QPen сохраняют ширину линии при масштабировании;
     * подписи и маркеры имеют размеры в логических пикселях окна;
-    * скрытие рамок/меток и белая заливка на независимых Qt-слоях;
+    * скрытие рамок/меток и настраиваемая заливка на независимых Qt-слоях;
     * размер QPixmap не обязан совпадать с рабочими размерами изображения;
     * импорты Qt указаны явно, без циклического import_libs_internal.
 
@@ -22,7 +22,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
-from utils.settings import settings
 import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
@@ -34,6 +33,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QMenu,
 )
 
+from utils.settings import settings
 
 
 @dataclass(frozen=True)
@@ -55,15 +55,35 @@ class AnnotationDisplayStyle:
     # Показывать ли контуры и подписи независимо друг от друга.
     show_frames: bool = True
     show_labels: bool = True
-    # Белая непрозрачная заливка всей площади detect / OBB / segment.
-    # Имеет приоритет над старой полупрозрачной заливкой цветом класса.
+    # Совместимое имя переключателя V3/V20: заливка произвольным цветом.
+    # По умолчанию белая, непрозрачная; исходное изображение не меняется.
     fill_white: bool = False
+    fill_color: str = "#FFFFFF"
     # Ранее существовавшая мягкая заливка цветом класса (в отличие от белой).
     fill_annotations: bool = False
     fill_alpha: int = 24
     # Оставлено для обратной совместимости с API V3. Новая вкладка всегда
     # рисует классы по dataset_class_palette (нет класса -> класс 0).
     use_class_colors: bool = True
+
+
+def set_fill_color_button_preview(button, color):
+    """Общий Qt-предпросмотр выбранного цвета без создания новой утилиты.
+
+    Работает и при выключенном переключателе заливки. Отображает цвет
+    самой кнопкой, обеспечивая контраст надписи и рамку у белого фона.
+    """
+    qcolor = QColor(color)
+    if not qcolor.isValid():
+        raise ValueError(f'Некорректный цвет заливки: {color!r}')
+    name = qcolor.name().upper()
+    brightness = (qcolor.red() * 299 + qcolor.green() * 587 + qcolor.blue() * 114) / 1000
+    text_color = '#000000' if brightness >= 145 else '#FFFFFF'
+    button.setText(f'Цвет: {name}')
+    button.setStyleSheet(
+        f'QPushButton {{ background-color: {name}; color: {text_color}; '
+        'border: 1px solid #777777; border-radius: 4px; padding: 3px 6px; }}'
+    )
 
 
 class SmartGraphicsViewNew(QGraphicsView):
@@ -389,7 +409,7 @@ class SmartGraphicsViewNew(QGraphicsView):
         """Читает общие настройки пикселей и палитры классов.
 
         Не затрагивает локальные переключатели скрытия рамок / меток и
-        белой заливки. Изменения применяются по settings_changed.
+        пользовательской заливки. Изменения применяются по settings_changed.
         """
         line_px = float(settings.get_line_thickness_px())
         font_px = int(settings.get_font_size_px())
@@ -403,12 +423,15 @@ class SmartGraphicsViewNew(QGraphicsView):
         )
 
     def set_annotation_visibility(self, *, show_frames=None, show_labels=None,
-                                  fill_white=None):
+                                  fill_white=None, fill_color=None):
         """Независимые параметры отображения (не изменяют данные аннотаций).
 
         show_frames=False: скрыть ВСЕ постоянные рамки/контуры;
         show_labels=False: скрыть подписи независимо от режима label_mode;
-        fill_white=True: непрозрачная белая заливка области каждого объекта.
+        fill_white=True: непрозрачная заливка области каждого объекта цветом
+        fill_color (по умолчанию #FFFFFF). Имя fill_white сохранено для
+        совместимости со старыми вкладками. fill_color можно менять при
+        выключенной заливке: цвет сохранится для последующего включения.
         None оставляет соответствующий параметр прежним.
 
         Временные контуры инструмента и маркеры редактирования не скрываются:
@@ -421,6 +444,12 @@ class SmartGraphicsViewNew(QGraphicsView):
             overrides['show_labels'] = bool(show_labels)
         if fill_white is not None:
             overrides['fill_white'] = bool(fill_white)
+        if fill_color is not None:
+            chosen = QColor(fill_color)
+            if not chosen.isValid():
+                raise ValueError(f'Некорректный цвет заливки: {fill_color!r}')
+            # Заливка непрозрачная; alpha не влияет на исходный QPixmap.
+            overrides['fill_color'] = chosen.name().upper()
         if overrides:
             self.set_display_style(**overrides)
 
@@ -2064,13 +2093,14 @@ class SmartGraphicsViewNew(QGraphicsView):
                 cls_id = 0
             visible.append((ann[0], poly, bounds, cls_id, selected))
 
-        # 1. Заливаем геометрию; белая заливка полностью непрозрачна.
+        # 1. Заливаем геометрию выбранным непрозрачным цветом.
         # Qt-перерисовка не затрагивает QPixmap / оригинальные пиксели.
         if style.fill_white or style.fill_annotations:
             painter.setPen(Qt.NoPen)
             for typ, poly, bounds, cls_id, selected in visible:
                 if style.fill_white:
-                    fill = QColor(255, 255, 255)
+                    fill = QColor(style.fill_color)
+                    fill.setAlpha(255)
                 else:
                     fill = self._annotation_color(cls_id, selected)
                     fill.setAlpha(max(0, min(255, int(style.fill_alpha))))
@@ -2328,3 +2358,34 @@ class SmartGraphicsViewNew(QGraphicsView):
 
 # Совместимый с прежними импортами псевдоним для потребителей новой утилиты.
 SmartGraphicsView = SmartGraphicsViewNew
+
+def numpy_to_qpixmap(img_bgr, max_side=8192):
+    """Display-only conversion. Geometry stays in source-image coordinates."""
+    from PyQt5.QtGui import QImage
+    if img_bgr is None:
+        return QPixmap()
+    img = np.asarray(img_bgr)
+    h, w = img.shape[:2]
+    if max(h, w) > max_side:
+        scale = float(max_side) / max(h, w)
+        img = cv2.resize(img, (max(1, round(w*scale)), max(1, round(h*scale))),
+                         interpolation=cv2.INTER_AREA)
+    if img.dtype != np.uint8:
+        from utils_new.dataset_image_stats_new import ImageStats
+        img = ImageStats.to_uint8(img)
+    img = np.ascontiguousarray(img)
+    h, w = img.shape[:2]
+    if img.ndim == 2:
+        fmt = QImage.Format_Grayscale8
+        stride = w
+    elif img.ndim == 3 and img.shape[2] == 3:
+        fmt = QImage.Format_BGR888
+        stride = 3*w
+    elif img.ndim == 3 and img.shape[2] == 4:
+        fmt = QImage.Format_ARGB32
+        stride = 4*w
+    else:
+        raise ValueError(f'Unsupported display shape: {img.shape}')
+    # Deep-copy QImage: numpy data must not be freed while Qt holds the pixels.
+    qimage = QImage(img.data, w, h, stride, fmt).copy()
+    return QPixmap.fromImage(qimage)

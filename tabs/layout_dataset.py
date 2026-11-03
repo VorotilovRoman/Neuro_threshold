@@ -1,6 +1,30 @@
 # layout_dataset.py
-from import_libs_internal import *
+from import_libs_external import *
+from utils.settings import settings
+from utils_ops.segmentation_ops import update_annotation_list
 from import_libs_methods_ui import setup_layout_dataset_ui
+
+# V20: shared dataset services; legacy utility imports are not required.
+# The UI import above is intentionally left unchanged.
+from utils_new.dataset_files_new import (
+    read_image_with_fallback, read_mask_with_fallback,
+    image_size_from_file, normalize_to_uint8, resize_to_max_side,
+    convert_to_grayscale, load_one_image_item, LazyImageCache,
+)
+from utils_new.dataset_yolo_labels_new import (
+    load_annotations, load_annotations_for_image,
+    save_annotations, save_annotations_for_image, canonicalize_obb_corners,
+)
+from utils_new.dataset_yaml_new import load_yolo_yaml, find_mask_for_image
+from utils_new.dataset_unet_new import (
+    load_unet_yaml_pairs, write_yolo_txt_for_unet_pairs,
+)
+from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
+from utils_new.dataset_catalog_new import import_coco_catalog
+from utils_new.smart_view_new import numpy_to_qpixmap, set_fill_color_button_preview
+from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import QColorDialog
+
 
 
 # ============================================================
@@ -115,7 +139,7 @@ class LabelValidationThread(QThread):
             anns = []
             if label_path:
                 try:
-                    anns = load_annotations(label_path, 1, 1)
+                    anns = load_annotations_for_image(label_path, img_path)
                 except Exception:
                     anns = []
             results[idx] = [_validate_unified_annotation(a) for a in anns]
@@ -159,6 +183,8 @@ class Labeler(QMainWindow):
 
         # UI
         setup_layout_dataset_ui(self)
+        self._fill_color = QColor("#FFFFFF")
+        set_fill_color_button_preview(self.btn_fill_color, self._fill_color)
 
         # Настройка SmartGraphicsView — используем унифицированные аннотации
         self.image_view.set_callbacks(
@@ -214,6 +240,7 @@ class Labeler(QMainWindow):
         self.btn_hide_frames.toggled.connect(self._update_annotation_display_options)
         self.btn_hide_labels.toggled.connect(self._update_annotation_display_options)
         self.btn_fill_objects.toggled.connect(self._update_annotation_display_options)
+        self.btn_fill_color.clicked.connect(self.choose_fill_color)
         self._update_annotation_display_options()
 
         # --- Лог / гистограмма ---
@@ -506,7 +533,7 @@ class Labeler(QMainWindow):
             base = os.path.splitext(os.path.basename(img_path))[0]
             label_path = os.path.join(folder, base + '.txt')
             if os.path.exists(label_path):
-                ann = load_annotations(label_path, 1, 1)
+                ann = load_annotations_for_image(label_path, img_path)
                 self.all_annotations[i] = ann
                 if ann:
                     count += 1
@@ -572,79 +599,29 @@ class Labeler(QMainWindow):
             QMessageBox.critical(self, "Ошибка COCO", str(e))
 
     def _load_coco_into_labeler(self, json_paths):
-        """
-        Загружает один или несколько COCO JSON, пишет .txt во временную папку
-        и передаёт пары (img, txt) в _load_images.
-        """
-        from utils.coco_io import load_coco, write_yolo_txt_for_coco_items
-
+        """Import COCO via the shared catalog and shared YOLO writer."""
         if not json_paths:
             return
-
-        # --- 1. Читаем все JSON ---
-        per_json_data = []
-        for jp in json_paths:
-            items, categories, _root = load_coco(jp, log_cb=self.log)
-            if not items:
-                self.log(f"⚠️ {os.path.basename(jp)}: нет изображений.")
-                continue
-            per_json_data.append((jp, items, categories))
-
-        if not per_json_data:
+        catalog = import_coco_catalog(json_paths, log_cb=self.log)
+        if not catalog.sources:
             QMessageBox.warning(self, "COCO", "Не найдено ни одного изображения.")
             return
-
-        # --- 2. Объединяем категории по имени ---
-        name_to_global = {}
-        for jp, items, categories in per_json_data:
-            local_map = {}
-            for coco_cat_id, name in categories.items():
-                name_str = str(name) if name is not None else str(coco_cat_id)
-                if name_str not in name_to_global:
-                    name_to_global[name_str] = len(name_to_global)
-                local_map[int(coco_cat_id)] = name_to_global[name_str]
-            for it in items:
-                new_anns = []
-                for a in it['annotations']:
-                    coco_cat_id = int(a[1]) + 1
-                    gid = local_map.get(coco_cat_id, 0)
-                    new_anns.append((a[0], gid, *a[2:]))
-                it['annotations'] = new_anns
-
-        # --- 3. Пишем .txt во временную папку ---
-        base_json_dir = os.path.dirname(json_paths[0])
-        tmp_dir = os.path.join(base_json_dir, '_coco_labels_tmp')
+        tmp_dir = os.path.join(os.path.dirname(str(json_paths[0])), '_coco_labels_tmp')
         os.makedirs(tmp_dir, exist_ok=True)
-
         pairs = []
-        for idx, (jp, items, _cats) in enumerate(per_json_data):
-            prefix = f"j{idx:03d}_"
-            pairs_i = write_yolo_txt_for_coco_items(
-                items, tmp_dir,
-                class_remap=None,
-                log_cb=self.log,
-                name_prefix=prefix,
-            )
-            pairs.extend(pairs_i)
-
-        # --- 4. Имена классов ---
-        class_names = {gid: name for name, gid in name_to_global.items()}
-
-        # --- 5. Загружаем в разметчик ---
-        image_paths = [p for p, _ in pairs]
-        label_map = {p: lp for p, lp in pairs}
-
+        for idx, source in enumerate(catalog.sources):
+            pairs.extend(write_yolo_txt_for_coco_items(
+                source.items, tmp_dir, class_remap=None,
+                log_cb=self.log, name_prefix=f'j{idx:03d}_'))
+        image_paths = [img for img, _ in pairs]
+        label_map = {img: label for img, label in pairs}
         self._load_images(image_paths, label_map=label_map)
-
-        self.log(f"=== Загрузка из COCO ({len(per_json_data)} json) ===")
-        self.log(f"Изображений: {len(image_paths)}, классов: {len(class_names)}")
+        self.log(f"=== Загрузка COCO ({len(catalog.sources)} JSON) ===")
+        self.log(f"Изображений: {len(image_paths)}, классов: {len(catalog.class_names)}")
         self.log(f"Временные labels: {tmp_dir}")
         QMessageBox.information(
-            self, "COCO",
-            f"Загружено изображений: {len(image_paths)}\n"
-            f"Классов: {len(class_names)}\n"
-            f"Временные labels: {tmp_dir}"
-        )
+            self, "COCO", f"Загружено изображений: {len(image_paths)}\n"
+            f"Классов: {len(catalog.class_names)}\nВременные labels: {tmp_dir}")
 
 
     def load_unet_yaml(self):
@@ -660,90 +637,32 @@ class Labeler(QMainWindow):
             QMessageBox.critical(self, "Ошибка U-Net YAML", str(e))
 
     def _load_unet_into_labeler(self, yaml_path):
-        """
-        Загружает U-Net YAML, конвертирует маски в segment-аннотации
-        (findContours) и передаёт пары (img, txt) в _load_images.
-        """
+        """Import U-Net via the shared mask-to-annotation service."""
         pairs_raw, class_names, mask_offset, root, _ = load_unet_yaml_pairs(
             yaml_path, log_cb=self.log)
         if not pairs_raw:
             QMessageBox.warning(self, "U-Net", "Не найдено ни одной пары.")
             return
-
-        # --- 1. Пишем .txt из масок ---
         tmp_dir = os.path.join(os.path.dirname(os.path.abspath(yaml_path)),
                                '_unet_labels_tmp')
-        os.makedirs(tmp_dir, exist_ok=True)
-
-        # pixel_value → yolo_cls. U-Net-стиль: пиксель = yolo_cls + offset.
-        pixel_to_cls = {int(cid) + int(mask_offset): int(cid)
-                        for cid in class_names.keys()}
-
-        pairs = []
-        for img_path, mask_path in pairs_raw:
-            try:
-                mask = read_mask_with_fallback(str(mask_path))
-                if mask is None:
-                    continue
-                if mask.ndim != 2:
-                    continue
-                h, w = mask.shape
-                lines = []
-                for pixel_val, cls_id in pixel_to_cls.items():
-                    binary = (mask == pixel_val).astype(np.uint8)
-                    if binary.sum() == 0:
-                        continue
-                    contours, _ = cv2.findContours(
-                        binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    for contour in contours:
-                        if len(contour) < 3:
-                            continue
-                        c = contour.squeeze().astype(np.float32)
-                        if c.ndim != 2:
-                            continue
-                        c[:, 0] /= w
-                        c[:, 1] /= h
-                        flat = c.reshape(-1).tolist()
-                        coord_str = " ".join(f"{x:.6f}" for x in flat)
-                        lines.append(f"{cls_id} {coord_str}")
-
-                if lines:
-                    stem = os.path.splitext(os.path.basename(img_path))[0]
-                    txt_path = os.path.join(tmp_dir, stem + ".txt")
-                    with open(txt_path, "w", encoding="utf-8") as f:
-                        f.write("\n".join(lines))
-                    pairs.append((img_path, txt_path))
-                else:
-                    # Пустая маска — создаём пустой .txt, чтобы пара была
-                    stem = os.path.splitext(os.path.basename(img_path))[0]
-                    txt_path = os.path.join(tmp_dir, stem + ".txt")
-                    with open(txt_path, "w", encoding="utf-8") as f:
-                        f.write("")
-                    pairs.append((img_path, txt_path))
-            except Exception as e:
-                self.log(f"[U-Net] ошибка обработки {mask_path}: {e}")
-
+        pairs = write_yolo_txt_for_unet_pairs(
+            pairs_raw, tmp_dir, class_names=class_names,
+            mask_offset=mask_offset, include_empty=True, log_cb=self.log)
         if not pairs:
-            QMessageBox.warning(self, "U-Net",
-                                "Не удалось сконвертировать ни одной маски.")
+            QMessageBox.warning(self, "U-Net", "Не удалось сконвертировать маски.")
             return
-
-        image_paths = [p for p, _ in pairs]
-        label_map = {p: lp for p, lp in pairs}
-
+        image_paths = [img for img, _ in pairs]
+        label_map = {img: label for img, label in pairs}
         self._load_images(image_paths, label_map=label_map)
-
-        self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")
+        self.log(f"=== Загрузка U-Net YAML: {yaml_path} ===")
         self.log(f"Root: {root}, пар: {len(image_paths)}, "
                  f"classes: {len(class_names)}, offset={mask_offset}")
         self.log(f"Временные labels (из масок): {tmp_dir}")
         QMessageBox.information(
-            self, "U-Net YAML",
-            f"Загружено изображений: {len(image_paths)}\n"
+            self, "U-Net YAML", f"Загружено изображений: {len(image_paths)}\n"
             f"Классов: {len(class_names)}\n"
-            f"Маски сконвертированы в polygon-аннотации.\n"
-            f"Временные labels: {tmp_dir}"
-        )
+            "Маски сконвертированы в polygon-аннотации.\n"
+            f"Временные labels: {tmp_dir}")
 
     # ----------------------------------------------------------------------
     #  Отображение текущего изображения
@@ -770,7 +689,7 @@ class Labeler(QMainWindow):
             label_path = self._yaml_label_map.get(self.image_paths[idx]) \
                 if self._yaml_label_map else None
             if label_path and os.path.exists(label_path):
-                anns = load_annotations(label_path, self.img_w, self.img_h)
+                anns = load_annotations_for_image(label_path, self.image_paths[idx])
             else:
                 anns = list(item.get("annotations", []) or [])
             while len(self.all_annotations) <= idx:
@@ -827,10 +746,19 @@ class Labeler(QMainWindow):
         else:
             self.image_view.refresh_annotations()
 
+    def choose_fill_color(self):
+        """Цвет применится к Qt-слою, а не к исходному изображению."""
+        color = QColorDialog.getColor(self._fill_color, self, 'Цвет заливки объектов')
+        if not color.isValid():
+            return
+        self._fill_color = QColor(color)
+        set_fill_color_button_preview(self.btn_fill_color, self._fill_color)
+        self._update_annotation_display_options()
+
     def _update_annotation_display_options(self, _checked=None):
         """Применить UI-переключатели, не изменяя данные или QPixmap.
 
-        Скрытие рамок и меток независимо; белая заливка может быть включена
+        Скрытие рамок и меток независимо; цветная заливка может быть включена
         одновременно с любым из переключателей. Исходное изображение и
         файлы разметки не изменяются.
         """
@@ -838,6 +766,7 @@ class Labeler(QMainWindow):
             show_frames=not self.btn_hide_frames.isChecked(),
             show_labels=not self.btn_hide_labels.isChecked(),
             fill_white=self.btn_fill_objects.isChecked(),
+            fill_color=self._fill_color.name(),
         )
 
     def update_histogram(self, gray_img):
@@ -1491,7 +1420,7 @@ class Labeler(QMainWindow):
                             self.image_paths[idx])
                         if label_path:
                             try:
-                                existing = load_annotations(label_path, 1, 1)
+                                existing = load_annotations_for_image(label_path, img_path)
                             except Exception:
                                 existing = []
                         else:
@@ -2032,12 +1961,11 @@ class Labeler(QMainWindow):
             QMessageBox.warning(self, "No Image", "No image loaded.")
             return
         img_path = self.image_paths[self.current_index]
-        txt_path = os.path.splitext(img_path)[0] + ".txt"
+        txt_path = self._resolve_save_path_for_img(img_path)
 
         obb_as_xywhr = self.chk_obb_xywhr.isChecked()
-        success = save_annotations(
-            self.current_annotations, txt_path,
-            self.img_w, self.img_h,
+        success = save_annotations_for_image(
+            self.current_annotations, txt_path, img_path,
             obb_as_xywhr=obb_as_xywhr,
         )
         if success:
@@ -2108,8 +2036,8 @@ class Labeler(QMainWindow):
             img_path = self.image_paths[idx]
             txt_path = self._resolve_save_path_for_img(img_path)
             try:
-                success = save_annotations(
-                    anns, txt_path, self.img_w, self.img_h,
+                success = save_annotations_for_image(
+                    anns, txt_path, img_path,
                     obb_as_xywhr=obb_as_xywhr,
                 )
                 if success:

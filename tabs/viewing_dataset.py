@@ -1,11 +1,32 @@
 # viewing_dataset.py
 from collections import OrderedDict
 
-from import_libs_internal import *
+from import_libs_external import *
+from utils.settings import settings
 from import_libs_methods_ui import setup_viewing_dataset_ui
 
-from PyQt5.QtGui import QKeySequence, QPalette
-from PyQt5.QtWidgets import QShortcut
+# V20: shared dataset services; legacy utility imports are not required.
+# The UI import above is intentionally left unchanged.
+from utils_new.dataset_files_new import (
+    read_image_with_fallback, read_mask_with_fallback,
+    image_size_from_file, normalize_to_uint8, resize_to_max_side,
+    convert_to_grayscale, load_one_image_item, LazyImageCache,
+)
+from utils_new.dataset_yolo_labels_new import (
+    load_annotations, load_annotations_for_image,
+    save_annotations, save_annotations_for_image, canonicalize_obb_corners,
+)
+from utils_new.dataset_yaml_new import load_yolo_yaml, find_mask_for_image
+from utils_new.dataset_unet_new import (
+    load_unet_yaml_pairs, write_yolo_txt_for_unet_pairs,
+)
+from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
+from utils_new.dataset_catalog_new import import_coco_catalog
+from utils_new.smart_view_new import numpy_to_qpixmap, set_fill_color_button_preview
+
+
+from PyQt5.QtGui import QColor, QKeySequence, QPalette
+from PyQt5.QtWidgets import QColorDialog, QShortcut
 from utils_new.dataset_files_new import read_index_mask
 from utils_new.dataset_mask_preview_new import blend_index_mask
 from utils_new.annotation_processing import (
@@ -127,7 +148,7 @@ class LabelValidationThread(QThread):
             anns = []
             if label_path:
                 try:
-                    anns = load_annotations(label_path, 1, 1)
+                    anns = load_annotations_for_image(label_path, img_path)
                 except Exception:
                     anns = []
             results[idx] = [_validate_unified_annotation(a) for a in anns]
@@ -179,6 +200,8 @@ class ViewingDataset(QMainWindow):
         self._validation_thread = None
 
         setup_viewing_dataset_ui(self)
+        self._fill_color = QColor("#FFFFFF")
+        set_fill_color_button_preview(self.btn_fill_color, self._fill_color)
         # Оба окна только просматривают, без инструментов редактирования.
         self.viewer.set_callbacks(
             on_selection_changed=self.on_view_selection_changed,
@@ -206,6 +229,7 @@ class ViewingDataset(QMainWindow):
         self.btn_hide_frames.toggled.connect(self._apply_visibility_controls)
         self.btn_hide_labels.toggled.connect(self._apply_visibility_controls)
         self.btn_fill_objects.toggled.connect(self._apply_visibility_controls)
+        self.btn_fill_color.clicked.connect(self.choose_fill_color)
         # Явная привязка шорткатов действует также при фокусе в QListWidget.
         self._class_shortcuts = []
         for cls_id in range(10):
@@ -259,12 +283,22 @@ class ViewingDataset(QMainWindow):
             self._update_crop_view()
             self._apply_validation_colors_to_list()
 
+    def choose_fill_color(self):
+        """Выбрать цвет Qt-слоя заливки, не редактируя пиксели изображения."""
+        color = QColorDialog.getColor(self._fill_color, self, 'Цвет заливки объектов')
+        if not color.isValid():
+            return
+        self._fill_color = QColor(color)
+        set_fill_color_button_preview(self.btn_fill_color, self._fill_color)
+        self._apply_visibility_controls()
+
     def _apply_visibility_controls(self, *_):
-        """Переключатели применяются сразу к обоим Qt-окнам."""
+        """Переключатели и выбранный цвет — сразу в обоих Qt-окнах."""
         visible = dict(
             show_frames=not self.btn_hide_frames.isChecked(),
             show_labels=not self.btn_hide_labels.isChecked(),
             fill_white=self.btn_fill_objects.isChecked(),
+            fill_color=self._fill_color.name(),
         )
         self.viewer.set_annotation_visibility(**visible)
         self.crop_view.set_annotation_visibility(**visible)
@@ -557,12 +591,12 @@ class ViewingDataset(QMainWindow):
         if self._yaml_label_map:
             lp = self._yaml_label_map.get(img_path)
             if lp and os.path.exists(lp):
-                ann = load_annotations(lp, 1, 1)
+                ann = load_annotations_for_image(lp, img_path)
         elif self._label_folder:
             base = os.path.splitext(os.path.basename(img_path))[0]
             lp = os.path.join(self._label_folder, base + '.txt')
             if os.path.exists(lp):
-                ann = load_annotations(lp, 1, 1)
+                ann = load_annotations_for_image(lp, img_path)
         else:
             item = self._lazy_cache.get(idx) if self._lazy_cache else None
             if item:
@@ -861,10 +895,9 @@ class ViewingDataset(QMainWindow):
             QMessageBox.warning(self, "No Image", "No image loaded.")
             return
         img_path = self.image_paths[self.current_idx]
-        txt_path = os.path.splitext(img_path)[0] + ".txt"
-        success = save_annotations(
-            self.current_annotations, txt_path,
-            self.current_img_w, self.current_img_h,
+        txt_path = self._resolve_save_path_for_img(img_path)
+        success = save_annotations_for_image(
+            self.current_annotations, txt_path, img_path,
             obb_as_xywhr=self.chk_obb_xywhr.isChecked(),
         )
         if success:
@@ -912,11 +945,9 @@ class ViewingDataset(QMainWindow):
         for idx, anns in loaded:
             path = self._resolve_save_path_for_img(self.image_paths[idx])
             try:
-                success = save_annotations(
-                    anns, path, 1, 1, obb_as_xywhr=as_xywhr)
-                # У нас нормализованные YOLO координаты; аргументы W/H
-                # save_annotations не использует. Передаём 1/1 намеренно:
-                # размеры других кадров могут отличаться от текущего.
+                success = save_annotations_for_image(
+                    anns, path, self.image_paths[idx], obb_as_xywhr=as_xywhr)
+                # Реальные размеры берутся из соответствующего снимка.
                 if success:
                     success_count += 1
                 else:
@@ -1428,79 +1459,28 @@ class ViewingDataset(QMainWindow):
             QMessageBox.critical(self, "Ошибка COCO", str(e))
 
     def _load_coco_into_viewer(self, json_paths):
-        from utils.coco_io import load_coco, write_yolo_txt_for_coco_items
-
         if not json_paths:
             return
-
-        # --- 1. Читаем все JSON ---
-        per_json_data = []
-        for jp in json_paths:
-            items, categories, _root = load_coco(jp, log_cb=self.log)
-            if not items:
-                self.log(f"⚠️ {os.path.basename(jp)}: нет изображений.")
-                continue
-            per_json_data.append((jp, items, categories))
-
-        if not per_json_data:
-            QMessageBox.warning(self, "COCO",
-                                 "Не найдено ни одного изображения.")
+        catalog = import_coco_catalog(json_paths, log_cb=self.log)
+        if not catalog.sources:
+            QMessageBox.warning(self, "COCO", "Не найдено ни одного изображения.")
             return
-
-        # --- 2. Объединяем категории по имени ---
-        name_to_global = {}
-        for jp, items, categories in per_json_data:
-            local_map = {}
-            for coco_cat_id, name in categories.items():
-                name_str = str(name) if name is not None else str(coco_cat_id)
-                if name_str not in name_to_global:
-                    name_to_global[name_str] = len(name_to_global)
-                local_map[int(coco_cat_id)] = name_to_global[name_str]
-            for it in items:
-                new_anns = []
-                for a in it['annotations']:
-                    coco_cat_id = int(a[1]) + 1
-                    gid = local_map.get(coco_cat_id, 0)
-                    new_anns.append((a[0], gid, *a[2:]))
-                it['annotations'] = new_anns
-
-        # --- 3. Пишем .txt ---
-        base_json_dir = os.path.dirname(json_paths[0])
-        tmp_dir = os.path.join(base_json_dir, '_coco_labels_tmp')
+        tmp_dir = os.path.join(os.path.dirname(str(json_paths[0])), '_coco_labels_tmp')
         os.makedirs(tmp_dir, exist_ok=True)
-
         pairs = []
-        for idx, (jp, items, _cats) in enumerate(per_json_data):
-            prefix = f"j{idx:03d}_"
-            pairs_i = write_yolo_txt_for_coco_items(
-                items, tmp_dir,
-                class_remap=None,
-                log_cb=self.log,
-                name_prefix=prefix,
-            )
-            pairs.extend(pairs_i)
-
-        image_paths = [p for p, _ in pairs]
-        label_map = {p: lp for p, lp in pairs}
-
-        self._load_images(
-            image_paths,
-            label_map=label_map,
-            mask_map=None,
-            label_folder=None,
-            mask_folder=None,
-        )
-
-        self.log(f"=== Загрузка из COCO ({len(per_json_data)} json) ===")
-        self.log(f"Изображений: {len(image_paths)}, "
-                 f"классов: {len(name_to_global)}")
+        for idx, source in enumerate(catalog.sources):
+            pairs.extend(write_yolo_txt_for_coco_items(
+                source.items, tmp_dir, class_remap=None,
+                log_cb=self.log, name_prefix=f'j{idx:03d}_'))
+        image_paths = [img for img, _ in pairs]
+        label_map = {img: label for img, label in pairs}
+        self._load_images(image_paths, label_map=label_map)
+        self.log(f"=== Загрузка COCO ({len(catalog.sources)} JSON) ===")
+        self.log(f"Изображений: {len(image_paths)}, классов: {len(catalog.class_names)}")
         self.log(f"Временные labels: {tmp_dir}")
         QMessageBox.information(
-            self, "COCO",
-            f"Загружено изображений: {len(image_paths)}\n"
-            f"Классов: {len(name_to_global)}\n"
-            f"Временные labels: {tmp_dir}"
-        )
+            self, "COCO", f"Загружено изображений: {len(image_paths)}\n"
+            f"Классов: {len(catalog.class_names)}\nВременные labels: {tmp_dir}")
 
     # ------------------------------------------------------------------
     # U-Net YAML
@@ -1523,81 +1503,29 @@ class ViewingDataset(QMainWindow):
         if not pairs_raw:
             QMessageBox.warning(self, "U-Net", "Не найдено ни одной пары.")
             return
-
-        # --- 1. Конвертируем маски в .txt (findContours) ---
         tmp_dir = os.path.join(os.path.dirname(os.path.abspath(yaml_path)),
                                '_unet_labels_tmp')
-        os.makedirs(tmp_dir, exist_ok=True)
-
-        pixel_to_cls = {int(cid) + int(mask_offset): int(cid)
-                        for cid in class_names.keys()}
-
-        pairs = []
-        mask_map = {}
-        for img_path, mask_path in pairs_raw:
-            try:
-                mask = read_mask_with_fallback(str(mask_path))
-                if mask is None or mask.ndim != 2:
-                    continue
-                h, w = mask.shape
-                lines = []
-                for pixel_val, cls_id in pixel_to_cls.items():
-                    binary = (mask == pixel_val).astype(np.uint8)
-                    if binary.sum() == 0:
-                        continue
-                    contours, _ = cv2.findContours(
-                        binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    for contour in contours:
-                        if len(contour) < 3:
-                            continue
-                        c = contour.squeeze().astype(np.float32)
-                        if c.ndim != 2:
-                            continue
-                        c[:, 0] /= w
-                        c[:, 1] /= h
-                        flat = c.reshape(-1).tolist()
-                        coord_str = " ".join(f"{x:.6f}" for x in flat)
-                        lines.append(f"{cls_id} {coord_str}")
-
-                stem = os.path.splitext(os.path.basename(img_path))[0]
-                txt_path = os.path.join(tmp_dir, stem + ".txt")
-                with open(txt_path, "w", encoding="utf-8") as f:
-                    f.write("\n".join(lines))
-                pairs.append((img_path, txt_path))
-
-                # Оригинальная маска — для отображения поверх
-                mask_map[img_path] = str(mask_path)
-            except Exception as e:
-                self.log(f"[U-Net] ошибка обработки {mask_path}: {e}")
-
+        pairs = write_yolo_txt_for_unet_pairs(
+            pairs_raw, tmp_dir, class_names=class_names,
+            mask_offset=mask_offset, include_empty=True, log_cb=self.log)
         if not pairs:
-            QMessageBox.warning(self, "U-Net",
-                                 "Не удалось сконвертировать ни одной маски.")
+            QMessageBox.warning(self, "U-Net", "Не удалось сконвертировать маски.")
             return
-
-        image_paths = [p for p, _ in pairs]
-        label_map = {p: lp for p, lp in pairs}
-
-        self._load_images(
-            image_paths,
-            label_map=label_map,
-            mask_map=mask_map,
-            label_folder=None,
-            mask_folder=None,
-            mask_pixel_offset=mask_offset,
-        )
-
-        self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")
+        image_paths = [img for img, _ in pairs]
+        label_map = {img: label for img, label in pairs}
+        original_masks = dict(pairs_raw)
+        mask_map = {img: original_masks[img] for img in image_paths}
+        self._load_images(image_paths, label_map=label_map, mask_map=mask_map,
+                          mask_pixel_offset=mask_offset)
+        self.log(f"=== Загрузка U-Net YAML: {yaml_path} ===")
         self.log(f"Root: {root}, пар: {len(image_paths)}, "
                  f"classes: {len(class_names)}, offset={mask_offset}")
-        self.log(f"Оригинальные маски сохранены для отображения.")
+        self.log("Оригинальные маски сохранены для отображения.")
         QMessageBox.information(
-            self, "U-Net YAML",
-            f"Загружено изображений: {len(image_paths)}\n"
-            f"Классов: {len(class_names)}\n"
-            f"Маски сконвертированы в polygon-аннотации.\n"
-            f"Оригинальные маски отображаются как overlay."
-        )
+            self, "U-Net YAML", f"Загружено изображений: {len(image_paths)}\n"
+            f"Классов: {len(class_names)}\nМаски сконвертированы в полигоны.\n"
+            "Оригинальные маски отображаются как overlay.")
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

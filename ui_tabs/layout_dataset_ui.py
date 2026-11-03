@@ -250,13 +250,18 @@ def setup_layout_dataset_ui(parent):
     parent.btn_fill_objects = QPushButton("Закрасить объекты")
     parent.btn_fill_objects.setCheckable(True)
     parent.btn_fill_objects.setToolTip(
-        "Закрасить белым цветом все области объектов (внутри рамок).\n"
+        "Закрасить выбранным цветом все области объектов (внутри рамок).\n"
         "Рамки и метки при этом остаются видны."
     )
 
+    parent.btn_fill_color = QPushButton("Цвет: #FFFFFF")
+    parent.btn_fill_color.setToolTip("Выбрать цвет заливки объектов (по умолчанию белый).")
+    view_ctrl_row.setSpacing(4)
     view_ctrl_row.addWidget(parent.btn_hide_frames)
     view_ctrl_row.addWidget(parent.btn_hide_labels)
     view_ctrl_row.addWidget(parent.btn_fill_objects)
+    view_ctrl_row.addWidget(parent.btn_fill_color)
+    view_ctrl_row.addStretch()
     auto_layout.addLayout(view_ctrl_row)
 
     right_layout.addWidget(parent.auto_group)
