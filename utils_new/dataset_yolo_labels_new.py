@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from utils_new.annotations import Annotation, ImageSize, from_legacy, to_legacy
+from utils_new.annotations.geometry import is_rectangle
 LABEL_HINTS = {'auto','mixed','detect','obb_corners','obb_xywhr','segment'}
 
 def _xywhr_points(vals):
@@ -54,6 +55,30 @@ def read_yolo_labels(path, size: ImageSize, *, format_hint='auto', log=None):
                 raise ValueError(f'{count} tokens incompatible with format_hint={format_hint}')
             if kind == 'obb_xywhr':
                 kind, numbers = 'obb', _xywhr_points(numbers)
+            elif kind == 'obb' and count == 9 and format_hint in ('auto', 'mixed'):
+                # 9 tokens can describe OBB OR a 4-point Segment. The file
+                # format cannot disambiguate them, but a nonrectangular vertex
+                # set cannot be an OBB. Avoid misclassifying that as a rotated
+                # rectangle and later rejecting the entire image on augment.
+                p = np.asarray(numbers, dtype=np.float64).reshape(4, 2)
+                p_px = p * np.array([size.width, size.height], dtype=float)
+                hull = cv2.convexHull(p_px.astype(np.float32)).reshape(-1, 2)
+                if len(hull) == 4 and is_rectangle(hull, tol=2e-3):
+                    # Repair only vertex ORDER, not polygon outline: a set
+                    # of four rectangle corners is unambiguous geometry.
+                    if not is_rectangle(p_px, tol=2e-3):
+                        p = hull.astype(np.float64)
+                        p[:, 0] /= size.width
+                        p[:, 1] /= size.height
+                        numbers = p.flatten().tolist()
+                        if log:
+                            log(f'[labels] {path}:{line_no}: OBB corner order repaired')
+                else:
+                    kind = 'segment'
+                    if log:
+                        log(f'[labels] {path}:{line_no}: 9-token polygon is not '
+                            'rectangular; interpreted as Segment (choose '
+                            'obb_corners/segment explicitly if needed)')
             value = ((kind, cls, *numbers) if kind == 'detect' else (kind, cls, numbers))
             result.append(from_legacy(value, size))
         except (TypeError, ValueError, IndexError) as exc:

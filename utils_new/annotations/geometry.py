@@ -230,3 +230,63 @@ def overlap_area(a: Annotation, b: Annotation):
 def overlap_ratio_of_smaller(a: Annotation, b: Annotation):
     smaller = min(polygon_area(a.points_px), polygon_area(b.points_px))
     return min(1.0, max(0.0, overlap_area(a, b) / smaller)) if smaller > 0 else 0.0
+
+
+def sanitize_annotation_topology(ann: Annotation, *, hole_policy='error'):
+    """Return (valid annotations, diagnostics) before geometric augmentation.
+
+    This boundary operation is intentionally explicit: it preserves the class,
+    repairs only a demonstrably shuffled rectangle losslessly, and uses
+    Shapely ``make_valid`` for an invalid Segment.  A repaired Segment may
+    become several valid polygons (YOLO cannot encode a multipolygon in one
+    row).  Unrecoverable shapes raise GeometryError rather than inventing a
+    rectangular bounding box or discarding geometry silently.
+
+    Run once at dataset ingestion, *not* after each transform, and record all
+    diagnostics in the generation log.
+    """
+    if ann.kind == 'detect':
+        return [ann], []
+
+    points = ann.points_px
+    if ann.kind == 'obb':
+        # Four corners may arrive in a crossed order.  The convex hull is an
+        # unambiguous lossless reconstruction ONLY if all four distinct points
+        # are on the hull and form a rectangle in real PIXEL coordinates.
+        hull = cv2.convexHull(points.astype(np.float32)).reshape(-1, 2)
+        if len(hull) == 4 and is_rectangle(hull, tol=2e-3):
+            if is_rectangle(points, tol=2e-3) and (_Polygon is None or _Polygon(points).is_valid):
+                return [ann], []
+            fixed = Annotation('obb', ann.class_id, canonical_obb_points(hull))
+            return [fixed], ['OBB vertex order corrected using its four rectangular corners']
+        raise GeometryError('OBB corners do not define a rectangle: '
+                            'check YOLO format (9 numbers also represent a 4-point Segment)')
+
+    if _Polygon is None:
+        # If Shapely is absent, the normal clipping path can still handle
+        # convex polygons, but cannot safely repair self-intersections.
+        return [ann], []
+    poly = _Polygon(points)
+    if poly.is_valid:
+        return [ann], []
+    try:
+        from shapely.validation import make_valid
+        repaired = make_valid(poly)
+    except (ImportError, ValueError, TypeError) as exc:
+        raise GeometryError(f'Invalid Segment cannot be repaired: {exc}') from exc
+    polygons = sorted((p for p in _iter_polygons(repaired) if p.area > 1e-9),
+                      key=lambda p: -p.area)
+    if not polygons:
+        raise GeometryError('Invalid Segment has no polygonal area after make_valid')
+    if any(p.interiors for p in polygons) and hole_policy != 'drop':
+        raise GeometryError('Repaired Segment has holes; YOLO Segment cannot encode holes '
+                            '(set hole_policy=drop only if losing holes is acceptable)')
+    output = []
+    for polygon in polygons:
+        vertices = np.asarray(polygon.exterior.coords[:-1], dtype=np.float64)
+        if len(vertices) >= 3 and polygon_area(vertices) > 1e-9:
+            output.append(Annotation('segment', ann.class_id, vertices))
+    if not output:
+        raise GeometryError('Invalid Segment could not be represented in YOLO')
+    return output, [f'Self-intersecting Segment repaired into {len(output)} valid polygon(s)'
+                    + ('; holes dropped' if any(p.interiors for p in polygons) else '')]

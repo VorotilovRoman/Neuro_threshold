@@ -25,6 +25,7 @@ from utils_new.annotations import (
     Resize, Flip, TransformPlan, AugmentationPlan, transform_sample, build_augmentation_plan, apply_augmentation_plan,
     convert_annotation, polygon_area, remap_mask_indices, mask_to_annotations,
 )
+from utils_new.dataset_mask_diagnostics_new import mask_statistics
 from utils_new.dataset_io_new import (
     read_image, read_index_mask, read_yolo_labels, write_image, write_index_mask,
     write_yolo_labels, make_index_mask, write_classes_and_yaml, write_coco_split,
@@ -127,6 +128,9 @@ class DatasetGeneratorCoreNew:
         self._written = 0
         self._skipped = 0
         self._warnings: list[str] = []
+        self._mask_value_totals: dict[int, int] = {}
+        self._mask_files_written = 0
+        self._mask_negative_files = 0
 
     def log(self, message):
         self._log_cb(str(message))
@@ -199,6 +203,38 @@ class DatasetGeneratorCoreNew:
         output_encoding = MaskEncoding(offset=self.out_masks_offset, background_value=0)
         return remap_mask_indices(mask, mapping, source_encoding=source_encoding,
                                   target_encoding=output_encoding)
+
+    def _verify_mask_export(self, mask, mask_path, *, has_objects: bool):
+        """Fail loudly if a nonempty annotation list yields an all-black DATA mask.
+
+        Small indexed values (1,2,3) are intentionally nearly black in a
+        standard viewer. Report the exact pixel histogram so users can tell
+        valid class-index masks apart from empty masks.
+        """
+        from utils_new.dataset_files_new import read_index_mask
+        info = mask_statistics(mask)
+        if has_objects and info.is_empty:
+            raise ValueError(
+                f'Generated mask has ONLY background pixels although annotations '
+                f'are present: {Path(mask_path).name}; check YOLO coordinates, '
+                'annotation format and object sizes')
+        # Check the actual disk representation on the first three masks.
+        # Decode every mask here would be slow on large/high-resolution datasets.
+        if self._mask_files_written < 3:
+            saved = read_index_mask(mask_path)
+            if not np.array_equal(saved, mask):
+                raise OSError(f'Saved PNG mask does not match rasterized pixels: {mask_path}')
+            self.log(f'[mask check] {Path(mask_path).name}: {info.brief()}')
+            if info.foreground_pixels and max(info.counts) <= 10:
+                self.log('[mask info] Индексные значения 1–10 выглядят '
+                         'почти чёрными в обычном просмотрщике PNG; '
+                         'для просмотра используйте цветной предпросмотр')
+        if info.is_empty:
+            self._mask_negative_files += 1
+            self.log(f'[mask warning] {Path(mask_path).name}: only background (negative sample)')
+        self._mask_files_written += 1
+        for value, count in info.counts.items():
+            self._mask_value_totals[value] = self._mask_value_totals.get(value, 0) + count
 
     def _filter_annotations(self, anns):
         if not self.min_ann_area_px:
@@ -282,6 +318,27 @@ class DatasetGeneratorCoreNew:
         self._used_stems.add(candidate)
         return candidate
 
+    def _sanitize_input_annotations(self, annotations, image_path):
+        """Repair documented topology defects and isolate unrecoverable labels."""
+        from utils_new.annotations.geometry import (GeometryError,
+                                                    sanitize_annotation_topology)
+        result = []
+        for index, ann in enumerate(annotations, 1):
+            try:
+                fixed, diagnostics = sanitize_annotation_topology(
+                    ann, hole_policy=self.hole_policy)
+                for detail in diagnostics:
+                    self.log(f'[geometry repair] {Path(image_path).name}: '
+                             f'object {index}, class={ann.class_id}, '
+                             f'{ann.kind}: {detail}')
+                result.extend(fixed)
+            except GeometryError as exc:
+                self.log(f'[geometry warning] {Path(image_path).name}: '
+                         f'object {index}, class={ann.class_id}, '
+                         f'{ann.kind} excluded: {exc}')
+                self._dropped_ann_count += 1
+        return result
+
     def _prepare_sample(self, pair):
         image_path = str(pair[0])
         image = read_image(image_path)
@@ -294,6 +351,9 @@ class DatasetGeneratorCoreNew:
                                            format_hint=self.input_format, log=self.log)
             originally_empty = not annotations
             mapped = self._map_annotations(annotations)
+            # A malformed polygon must not invalidate the entire image.  Validate
+            # each object before transforms; log repairs/individual exclusions.
+            mapped = self._sanitize_input_annotations(mapped, image_path)
             if not mapped and not (originally_empty and self.include_empty_annotations):
                 self.log(f'[skip] no annotations after mapping: {image_path}')
                 return None, None, originally_empty
@@ -334,9 +394,33 @@ class DatasetGeneratorCoreNew:
             for attempt in range(max_attempts):
                 if self._is_cancelled:
                     self._check_cancelled()
-                variant = self._make_variant(sample,
-                                             augmented=(copy_idx > 0 or replace_original),
-                                             require_operation=replace_original)
+                try:
+                    variant = self._make_variant(
+                        sample, augmented=(copy_idx > 0 or replace_original),
+                        require_operation=replace_original)
+                except Exception as exc:
+                    # Do not discard the ORIGINAL source because one randomized
+                    # transform produced invalid geometry. Retry 1x, then fall
+                    # back to one unaugmented sample with an explicit warning.
+                    from utils_new.annotations.geometry import GeometryError
+                    if not isinstance(exc, GeometryError):
+                        raise
+                    if replace_original and attempt + 1 < max_attempts:
+                        if attempt == 0:
+                            self.log(f'[augmentation retry] {Path(image_path).name}: '
+                                     f'{exc}; retrying up to {max_attempts} times')
+                        continue
+                    if replace_original:
+                        self.log(f'[1x fallback] {Path(image_path).name}: '
+                                 f'all augmented variants failed: {exc}; '
+                                 'writing one unchanged source')
+                        variant = self._resize(sample)
+                    elif copy_idx > 0:
+                        self.log(f'[augmentation warning] {Path(image_path).name}: '
+                                 f'augmented copy {copy_idx} excluded: {exc}')
+                        break
+                    else:
+                        raise
                 if variant.annotations:
                     filtered = self._filter_annotations(variant.annotations)
                     variant = AnnotationSample(variant.image, filtered, variant.mask,
@@ -408,11 +492,17 @@ class DatasetGeneratorCoreNew:
                                           obb_format=self.out_yolo_obb_format)
                     if self.out_masks:
                         mask_file = stage/'all'/'masks'/f'{output_stem}.png'
-                        write_index_mask(mask_file, make_index_mask(annotations, variant.size,
-                                                                   offset=self.out_masks_offset))
+                        mask_array = make_index_mask(annotations, variant.size,
+                                                     offset=self.out_masks_offset)
+                        write_index_mask(mask_file, mask_array)
+                        self._verify_mask_export(mask_array, mask_file,
+                                                 has_objects=bool(annotations))
                 elif self.input_type == INPUT_MASKS:
                     mask_file = stage/'all'/'masks'/f'{output_stem}.png'
                     write_index_mask(mask_file, variant.mask)
+                    if self.out_masks:
+                        self._verify_mask_export(variant.mask, mask_file,
+                                                 has_objects=bool(np.any(variant.mask)))
                     if self.out_yolo_txt:
                         raw = mask_to_annotations(variant.mask, encoding=variant.mask_encoding,
                                                   kind='segment', holes='drop')
@@ -534,6 +624,9 @@ class DatasetGeneratorCoreNew:
         self._written = self._skipped = self._dropped_ann_count = 0
         self._processed_source_files.clear()
         self._used_stems.clear()
+        self._mask_value_totals.clear()
+        self._mask_files_written = 0
+        self._mask_negative_files = 0
         self._rng = random.Random(self.random_seed)
         self._is_cancelled = bool(self._is_cancelled)
         try:
@@ -568,6 +661,13 @@ class DatasetGeneratorCoreNew:
                 self._distribute_and_export(stage, records)
                 self._check_cancelled()
                 self._publish(stage, destination)
+            if self._mask_files_written:
+                hist = ', '.join(f'{v}:{n}' for v, n in sorted(self._mask_value_totals.items())[:24])
+                if len(self._mask_value_totals) > 24:
+                    hist += f', ... ({len(self._mask_value_totals)} values total)'
+                self.log(f'[mask summary] files={self._mask_files_written}, '
+                         f'background_only={self._mask_negative_files}, '
+                         f'pixel_counts={{ {hist} }}')
             if self.delete_source_after_success:
                 self._delete_processed_sources()
             self.log(f'[DatasetGenerator_new] done: images={self._written}, skipped={self._skipped}, '

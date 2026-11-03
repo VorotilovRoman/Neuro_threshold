@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMessag
 from utils_new.dataset_io_new import _read_with_fallback
 from utils_new.dataset_validation_new import ImageStats, load_annotations, read_mask_with_fallback
 from utils_new.dataset_review_view import DatasetReviewGraphicsView
-from utils_new.annotations import MaskEncoding, overlay_class_mask
+from utils_new.dataset_mask_preview_new import blend_index_mask
 
 
 def _to_qpixmap(bgr):
@@ -108,6 +108,8 @@ class PairValidationDialog(QDialog):
         display = ImageStats.to_display_bgr(image)
         h, w = display.shape[:2]
         annotations = []
+        mask_status = None
+        mask_short_status = None
 
         if self.dataset_type == 0 and aux_path:
             try:
@@ -117,21 +119,34 @@ class PairValidationDialog(QDialog):
                 QMessageBox.warning(self, 'Аннотации', f'Ошибка чтения аннотаций: {exc}')
         elif self.dataset_type == 1 and aux_path:
             mask = read_mask_with_fallback(aux_path)
-            if mask is not None:
+            if mask is None:
+                mask_status = '⚠ Маска не прочитана — проверьте путь/формат файла'
+                mask_short_status = '⚠ Маска не прочитана'
+            else:
                 if mask.shape != (h, w):
-                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                remap = getattr(parent, 'mask_class_remap', None) or {}
-                if remap:
-                    # Original source mask is the selector for every class mapping.
-                    palette_indices = np.asarray(mask, dtype=np.int32).copy()
-                    for source_pixel, class_id in remap.items():
-                        palette_indices[mask == int(source_pixel)] = int(class_id) + 1
-                    mask_for_display = palette_indices
+                    mask_status = (f'⚠ Размер маски {mask.shape[1]}×{mask.shape[0]} '
+                                   f'не совпадает со снимком {w}×{h}')
+                    mask_short_status = '⚠ Размеры не совпадают'
+                # Mapping keys are SOURCE pixel values (not class numbers).
+                # Discard unselected values, leaving raw mask untouched.
+                remap = getattr(parent, 'mask_class_remap', None) or None
+                display, report = blend_index_mask(
+                    display, mask, _palette_color,
+                    opacity=0.6, pixel_offset=1, background_value=0,
+                    pixel_to_class=remap,
+                )
+                detail = report.description()
+                if report.is_empty:
+                    mask_status = '⚠ Маска не содержит видимых классов. ' + detail
+                    mask_short_status = '⚠ Нет видимых классов'
+                elif mask_status is not None:
+                    mask_status += '; ' + detail
                 else:
-                    mask_for_display = mask
-                encoding = MaskEncoding(offset=1, background_value=0)
-                display = overlay_class_mask(display, mask_for_display, _palette_color,
-                                             encoding=encoding, opacity=0.5)
+                    mask_status = 'Маска наложена. ' + detail
+                    mask_short_status = f'Маска: {report.percentage:.1f}% пикселей'
+        elif self.dataset_type == 1:
+            mask_status = '⚠ К паре не привязан файл маски'
+            mask_short_status = '⚠ Нет файла маски'
 
         valid, error, color_type, bit_type = validator.validate_full(pair)
         ctext = {'color': 'Цветное', 'gray_real': 'Ч/Б (1 канал)',
@@ -177,10 +192,12 @@ class PairValidationDialog(QDialog):
         if self.dataset_type == 0:
             count_label = QLabel(f'Аннотаций: {len(annotations)}')
         elif self.dataset_type == 1:
-            count_label = QLabel('Наложение индексной маски')
+            count_label = QLabel(mask_short_status or '⚠ Маска отсутствует')
         else:
             count_label = QLabel('Без аннотаций')
         count_label.setObjectName('validationMeta')
+        if self.dataset_type == 1:
+            count_label.setToolTip(mask_status or '')
         bar.addWidget(count_label)
         root.addLayout(bar)
 

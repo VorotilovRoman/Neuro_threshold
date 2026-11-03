@@ -4,13 +4,14 @@ from collections import OrderedDict
 from import_libs_internal import *
 from import_libs_methods_ui import setup_viewing_dataset_ui
 
-
 from PyQt5.QtGui import QKeySequence, QPalette
 from PyQt5.QtWidgets import QShortcut
+from utils_new.dataset_files_new import read_index_mask
+from utils_new.dataset_mask_preview_new import blend_index_mask
 from utils_new.annotation_processing import (
     normalized_annotation, class_id_for_annotation,
     crop_for_annotation, annotation_in_crop,
-    apply_class_mask_overlay, find_strong_overlaps, prepare_annotation_preview,
+    find_strong_overlaps, prepare_annotation_preview, mask_roi_at_image_scale,
 )
 
 
@@ -372,16 +373,22 @@ class ViewingDataset(QMainWindow):
         mask = self._get_mask(self.current_idx)
         crop, crop_ann, bounds = prepare_annotation_preview(
             image, ann, padding=self.crop_padding_spin.value(),
-            mask=mask, opacity=self.mask_opacity,
-            color_for_class=settings.get_dataset_class_color,
-            pixel_offset=self._mask_pixel_offset,
-            background_value=self._mask_background_value,
         )
         if crop is None:
             self.crop_view.set_annotations([], 0, 0)
             self.crop_view.set_pixmap(numpy_to_qpixmap(None))
             self.crop_detail_label.setText("Некорректная геометрия аннотации")
             return
+        if mask is not None:
+            mask_crop = mask_roi_at_image_scale(mask, w, h, bounds)
+            crop, _info = blend_index_mask(
+                crop, mask_crop, settings.get_dataset_class_color,
+                opacity=self.mask_opacity,
+                pixel_offset=self._mask_pixel_offset,
+                background_value=self._mask_background_value,
+                annotations=[crop_ann] if crop_ann else None,
+                prefer_annotation_classes=True,
+            )
         ch, cw = crop.shape[:2]
         self.crop_view.set_annotations([crop_ann] if crop_ann else [], cw, ch)
         # QPixmap не перерисовывается из исходного изображения и не проходит
@@ -588,30 +595,28 @@ class ViewingDataset(QMainWindow):
             base = os.path.splitext(os.path.basename(img_path))[0]
             for ext in ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'):
                 cand = os.path.join(self.mask_folder, base + ext)
-                if os.path.exists(cand):
+                if os.path.exists(cand) and os.path.normcase(os.path.abspath(cand)) != os.path.normcase(os.path.abspath(img_path)):
                     mask_path = cand
                     break
 
         mask = None
         if mask_path and os.path.exists(mask_path):
             try:
-                mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-                if mask is not None and mask.ndim == 3:
-                    # An RGB/RGBA mask is not an index map unless the color
-                    # channels are identical. Silently reading only B would
-                    # create false class labels on empty image regions.
-                    if (mask.shape[2] < 3
-                            or not np.array_equal(mask[:, :, 0], mask[:, :, 1])
-                            or not np.array_equal(mask[:, :, 0], mask[:, :, 2])):
-                        self.log(f"⚠️ Маска {mask_path}: цветная RGB/RGBA-кодировка "
-                                 "без карты соответствия цвет→класс; "
-                                 "наложение пропущено, чтобы не искажать классы.")
-                        mask = None
-                    else:
-                        mask = mask[:, :, 0]
+                mask = read_index_mask(mask_path)
+                if mask.size and not np.any(mask != 0) and self._mask_background_value == 0:
+                    self.log(f"⚠️ Маска состоит только из фона (pixel=0): {mask_path}")
+                elif idx < 3:
+                    values, counts = np.unique(mask, return_counts=True)
+                    summary = ', '.join(f'{int(v)}:{int(n)}'
+                                        for v, n in zip(values[:12], counts[:12]))
+                    self.log(f"[Mask preview] {os.path.basename(mask_path)}: "
+                             f"dtype={mask.dtype}, values={{ {summary} }}")
             except Exception as e:
                 self.log(f"Warning: could not load mask {mask_path}: {e}")
 
+        if mask is None and (self._yaml_mask_map or self.mask_folder):
+            self.log(f"⚠️ Маска не найдена/не прочитана для {os.path.basename(img_path)}"
+                     + (f" (путь: {mask_path})" if mask_path else ""))
         self._mask_cache[idx] = mask
         while len(self._mask_cache) > self._mask_cache_max:
             self._mask_cache.popitem(last=False)
@@ -668,14 +673,15 @@ class ViewingDataset(QMainWindow):
 
     def apply_mask_overlay(self, img, mask):
         """Цвет пикселя маски соответствует цвету КЛАССА в общей палитре."""
-        return apply_class_mask_overlay(
-            img, mask, self.mask_opacity,
-            settings.get_dataset_class_color,
+        blended, _info = blend_index_mask(
+            img, mask, settings.get_dataset_class_color,
+            opacity=self.mask_opacity,
             pixel_offset=self._mask_pixel_offset,
             background_value=self._mask_background_value,
             annotations=self.current_annotations,
-            restrict_to_annotations=bool(self.current_annotations),
+            prefer_annotation_classes=True,
         )
+        return blended
 
     def update_info_label(self):
         total = len(self.image_paths)
