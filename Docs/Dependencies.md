@@ -1,106 +1,151 @@
-# Зависимости и установка
+# Зависимости, установка и диагностика
 
-[Навигация](README.md) · [Все места импортов](Module_Reference.md#внешние-импортируемые-модули)
+[Навигация](README.md) · [Архитектура](Architecture.md) · [План миграции](Import_Architecture_Plan.md)
 
-## Базовая среда
+## Окружение и установка
 
-Проверенная среда: Linux x86_64, Python **3.12.14**, PyTorch **2.11.0+cpu**, torchvision **0.26.0+cpu**. Для обычного запуска нужен графический сеанс Qt. Для автоматической проверки можно использовать `QT_QPA_PLATFORM=offscreen`; этот режим не показывает окно пользователю. GPU не обязателен. Минимальная версия Python не закреплена метаданными проекта: прежнее заявление «3.8+» не следует считать проверенным для текущего набора пакетов. Используйте Python 3.12.
-
-`requirements.txt` закрепляет прямые зависимости, но не является полным lockfile транзитивных пакетов и не включает все дополнительные возможности. Qt, NumPy, OpenCV, PyTorch, Ultralytics, ONNX Runtime и другие зависимости импортируются общим агрегатором при запуске, даже если соответствующая DL-вкладка не выбрана.
-
-| Пакет в requirements.txt | Версия | Роль |
-| --- | --- | --- |
-| numpy | 2.4.3 | Массивы, геометрия, маски |
-| opencv-python | 4.13.0.92 | Чтение, обработка, контуры, морфология; import `cv2` |
-| scipy | 1.17.1 | Численные алгоритмы и обработка изображений |
-| scikit-image | 0.26.0 | Пороговые/интерактивные операции, суперпиксели; import `skimage` |
-| scikit-learn | 1.8.0 | ML, кластеризация, метрики; import `sklearn` |
-| joblib | 1.5.3 | Сохранение ML-моделей и кэшей |
-| networkx | 3.6.1 | Графовые алгоритмы сегментации |
-| pandas | 3.0.2 | Таблицы отчётов и статистики |
-| tqdm | 4.67.3 | Прогресс операций, в том числе зависимость ML-инструментов |
-| requests | 2.33.1 | HTTP-клиент в общем пространстве импортов |
-| PyYAML | 6.0.3 | YAML датасетов; import `yaml` |
-| Pillow | 12.1.1 | Изображения; import `PIL` |
-| torch | 2.11.0+cu130 | Нейросети; в проверенной CPU-среде заменён на 2.11.0+cpu |
-| torchvision | 0.26.0+cu130 | Модели и преобразования; CPU-вариант 0.26.0+cpu |
-| ultralytics | 8.4.36 | YOLO: обучение, инференс, сортировка, авторазметка |
-| onnxruntime | 1.25.1 | ONNX-инференс, базовый пакет без обещания CUDA execution provider |
-| albumentations | 2.0.8 | Аугментации |
-| PyQt5 | 5.15.11 | Десктопный интерфейс |
-| matplotlib | 3.10.8 | Графики, гистограммы, Qt canvas |
-| seaborn | 0.13.2 | Визуализация статистики |
-
-`install.py` сначала пытается установить CUDA-сборки из индекса PyTorch, при неудаче вызывает неприкреплённые `torch` и `torchvision`, затем по одному ставит остальные пакеты. Он перехватывает ошибки pip и не гарантирует ненулевой код выхода при неполной установке. Надпись «Готово» не заменяет `pip check` и запуск приложения. Для воспроизводимой CPU-установки используйте следующие команды, не меняющие requirements.txt.
-
-## Установка CPU
-
-Выполняйте из корня репозитория. Пример для Bash; в Windows активируйте `.venv\Scripts\activate` и замените команды подготовки файлов эквивалентным Python-скриптом.
+Проверенная версия Python — 3.12, Linux x86_64, Torch CPU. Закреплённый набор
+современных пакетов не рассчитан на Python 3.8. Используйте отдельный venv;
+установщик отказывается изменять глобальный Python.
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'torch==2.11.0+cpu' 'torchvision==0.26.0+cpu' \
-  --index-url https://download.pytorch.org/whl/cpu
-python - <<'PY'
-from pathlib import Path
-lines = Path('requirements.txt').read_text().splitlines()
-Path('.venv/requirements-cpu.txt').write_text('\n'.join(
-    line for line in lines if not line.startswith(('torch==', 'torchvision=='))
-) + '\n')
-Path('.venv/constraints-cpu.txt').write_text('torch==2.11.0+cpu\ntorchvision==0.26.0+cpu\n')
-PY
-python -m pip install -r .venv/requirements-cpu.txt -c .venv/constraints-cpu.txt
-python -m pip check
+python install.py --torch cpu
+python dependency_health.py --load
 python main.py
 ```
 
-Для GPU выбирайте согласованную пару torch/torchvision под драйвер и платформу по официальным инструкциям PyTorch. Значение `+cu130` требует соответствующего индекса сборок; простой `pip install -r requirements.txt` с PyPI не является универсальной CUDA-установкой. Код поддерживает CPU/CUDA/MPS не во всех компонентах одинаково; наличие пункта в UI не доказывает доступность устройства. Проверьте `torch.cuda.is_available()` или MPS перед длительным обучением.
+В Windows активация: `.venv\Scripts\activate`. Для совместимого GPU выберите
+`python install.py --torch cu130`. Профиль задаётся явно; скрытого fallback на
+CPU или неприкреплённые torch/torchvision нет. CUDA/MPS в этой миграции не
+проверялись. Наличие пункта UI не доказывает доступность ускорителя.
 
-## Дополнительные зависимости
-
-Они найдены в исходниках, но не закреплены в requirements.txt. Версии для них проект не задаёт, полная совместимость всех сочетаний не проверена. Устанавливайте только нужный набор в тот же venv, затем повторяйте `python -m pip check`.
-
-| Пакет / Python import | Возможность и потребитель | Что происходит без пакета |
-| --- | --- | --- |
-| `xgboost` | `utils_ops/traditional_ml_ops.py`, классификатор XGBoost | Метод недоступен, остальные ML-модели остаются |
-| `segmentation-models-pytorch` / `segmentation_models_pytorch` | U‑Net и DeepLab: `utils_ops/deep_learning_ops.py`, workers обучения | Нельзя загрузить соответствующий segmentor; UNet worker проверяет доступность отдельно |
-| `sahi` | `tabs/slice_dataset_sahi.py` | Вкладка открывается, slicing требует пакет |
-| `ImageHash` / `imagehash` | `utils/dataset_audit_logic.py`, поиск похожих изображений | Нет перцептивного поиска дубликатов; точное хеширование — отдельная операция |
-| `open-clip-torch` / `open_clip` | CLIP-эмбеддинги в аудите и `cluster/extract_embeddings.py` | В аудите предусмотрена попытка fallback на transformers |
-| `transformers` | CLIP fallback и отдельные операции извлечения/классификации эмбеддингов в cluster | Нужен для выбранного backend; установка не реализует SegFormer в GUI |
-| `umap-learn` / `umap` | Проекция эмбеддингов: аудит и cluster | В соответствующих ветках есть fallback PCA |
-| `hdbscan` | Кластеризация эмбеддингов | В аудите fallback DBSCAN; другие CLI проверять отдельно |
-| `shapely` | `annotation_processing`, `annotations.geometry`, геометрия генератора | Часть операций использует OpenCV fallback; невыпуклые случаи и точность могут различаться |
-| `tifffile` | Чтение сложных TIFF в `dataset_files_new` | Альтернативные читатели доступны, но поддержка конкретного TIFF не гарантирована |
-| `segment-anything` / `segment_anything` | `SAMSegmentor` в deep_learning_ops | Импорт проверяется, но загрузка и predict SAM — заглушки; установка пакета их не реализует |
-| `onnx` | ONNX export/check в UNet/DeepLab worker | Не требуется для самого ONNX-инференса через onnxruntime; нужен для экспортной ветки |
-| `pascal-voc-writer` / `pascal_voc_writer` | `utils_training/yolo2voc.py`, XML-конвертация | CLI выводит инструкцию по установке |
-| `psutil` | Мониторинг памяти, выбор batch в workers | Может поступать транзитивно; не следует полагаться на это как на прямую декларацию |
-
-`pip` нужен установщику. `gradio` и `imutils` встречаются в строковом сборе версий `main._save_libs_info`, но не являются основанием для обязательной установки. `dataset_analysis_ui` в fallback-импорте — ошибочный локальный путь, а не пакет PyPI. `utils_new` — локальный namespace package.
-
-Пример установки выбранных возможностей:
+`install.py` ставит согласованную пару одним вызовом pip, затем общий набор и
+выбранные extras одним resolver-вызовом, нормализует поставщика cv2 и проверяет
+итог в новом процессе. Ошибка pip или диагностики даёт ненулевой код выхода.
+Скрипт работает независимо от текущего каталога; используется текущий Python.
 
 ```bash
-python -m pip install xgboost sahi ImageHash segmentation-models-pytorch
-python -m pip check
+python install.py --dry-run --torch cpu --extra training
+python install.py --torch cpu --extra training --extra export
+python install.py --torch cpu --extra audit --extra sahi
 ```
 
-Для CLIP/SAM устанавливайте backend из доверенного источника и учитывайте его собственные требования. Автоматическая установка всех исследовательских backend не нужна для работы базовых вкладок.
+## Один поставщик cv2 и отдельный Qt
 
-## Файлы, сеть и переменные
+Все четыре wheels `opencv-python`, `opencv-python-headless`,
+`opencv-contrib-python`, `opencv-contrib-python-headless` предоставляют общий
+модуль `cv2` и пересекающиеся файлы. Их совместная установка недопустима даже
+при совпадающих версиях: удаление одного может удалить файлы другого.
 
-- Сервер БД, web-сервер и обязательные API-ключи не требуются. Датасеты и веса пользователь выбирает с диска.
-- Для установки нужны PyPI и хранилища wheel (`pypi.org`, `files.pythonhosted.org`), CPU/CUDA PyTorch (`download.pytorch.org`, возможный redirect `download-r2.pytorch.org`).
-- Ultralytics, SMP/torchvision и CLIP могут скачивать веса: возможны GitHub release assets, PyTorch model storage и Hugging Face. Точный адрес зависит от модели/backend. Успешная установка пакетов не проверяет доступ к этим весам. В ограниченной сети сначала выберите модель и проверьте конкретное скачивание; можно предоставить совместимые файлы локально.
-- `COLLECT_LIBS_INFO=1`: записать `libs_info.txt` при закрытии главного окна.
-- `QT_QPA_PLATFORM=offscreen`: только для headless-проверок.
-- `NO_ALBUMENTATIONS_UPDATE=1`: отключает проверку обновлений Albumentations.
-- `MPLCONFIGDIR`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `YOLO_CONFIG_DIR`: задавайте доступные для записи каталоги в ограниченной среде. Они не перенаправляют JSON из `settings/` проекта.
+Выбран **opencv-python-headless 4.13.0.92**. Он поддерживает используемые
+вычисления OpenCV, а окна приложения создаёт **PyQt5**. Вызовов HighGUI
+(`cv2.imshow`, `cv2.waitKey`) в проекте нет; отдельная сборка Qt из desktop
+OpenCV не нужна и может конфликтовать с plugins PyQt5.
 
-## Что проверено
+Ultralytics 8.4.36 требует именно дистрибутив `opencv-python` в метаданных,
+хотя использует доступный в headless API `cv2`. Общий resolver поэтому может
+временно установить оба wheel. Установщик после этого удаляет конкурентов и
+обязательно переустанавливает выбранный wheel с `--no-deps --force-reinstall`,
+восстанавливая общие файлы. Он не импортирует нативные модули до завершения
+установки. Не запускайте приложение и не устанавливайте пакеты одновременно.
 
-В текущей Linux CPU-среде установлены базовые зависимости с CPU-парой torch/torchvision. `pip check` прошёл. Все **16** вкладок по отдельности созданы и показаны в Qt offscreen без загрузки весов; это проверка инициализации, не всех кнопок. Проверены загрузка/отображение `Docs/test_image.png`, пять пороговых и два градиентных метода и CPU-операция torch. Проверки roundtrip геометрии, кодирования масок, resize и генерации YOLO/mask/YAML/COCO на искусственном примере также прошли и описаны в [руководстве](User_Guide.md#проверка-работоспособности).
+После любых ручных изменений зависимостей:
 
-Полное обучение, качество нейросетевого инференса, экспорт всех архитектур, GPU/MPS и интерактивная работа мышью не проверены. Ошибка сохранения облачного черновика относится к платформе среды, а не к зависимости приложения; инструкции установки выше не требуют этого API.
+```bash
+python install.py --repair-opencv
+python dependency_health.py
+python dependency_health.py --load
+```
+
+Обычный `python -m pip check` сообщает:
+
+```text
+ultralytics 8.4.36 requires opencv-python, which is not installed.
+```
+
+Это **явное исключение метаданных**, а не чистый результат pip check.
+`dependency_health.py` допускает только эту конкретную недостающую зависимость
+Ultralytics при наличии единственного headless-поставщика. Любые прочие
+несовместимости, отсутствие других библиотек или несколько поставщиков — ошибка.
+Полной согласованности с метаданными сторонних wheels такая политика не обещает;
+не следует устанавливать второй wheel лишь ради устранения сообщения pip check.
+
+Ultralytics AutoInstall отключён через `runtime_policy.configure_ultralytics()`
+во всех путях приложения, workers и CLI. Проверки backend не должны менять
+venv во время инференса или возвращать второй wheel OpenCV. Если дополнительный
+backend нужен, установите его явно и повторите нормализацию/диагностику.
+
+## Прямые версии и профили
+
+`requirements.txt` фиксирует прямые версии, но не является полным lockfile
+транзитивных зависимостей. `requirements/constraints.txt` удерживает пару Torch
+при добавлении extras и версию временного OpenCV wheel. CPU/CUDA wheels указаны
+отдельно в `requirements/torch-cpu.txt` и `requirements/torch-cu130.txt`.
+
+| Пакет | Версия | Назначение |
+| --- | --- | --- |
+| numpy | 2.4.3 | Массивы |
+| opencv-python-headless | 4.13.0.92 | Изображения и геометрия без собственного Qt |
+| scipy | 1.17.1 | Численные операции |
+| scikit-image | 0.26.0 | Сегментация |
+| scikit-learn | 1.8.0 | Классическое ML |
+| joblib | 1.5.3 | Сохранение моделей |
+| networkx | 3.6.1 | Графовые методы |
+| pandas | 3.0.2 | Табличные отчёты |
+| tqdm | 4.67.3 | Прогресс CLI |
+| requests | 2.33.1 | HTTP |
+| PyYAML | 6.0.3 | YAML |
+| Pillow | 12.1.1 | Чтение изображений |
+| torch / torchvision | 2.11.0 / 0.26.0 | Пара с суффиксом +cpu или +cu130 выбранного профиля |
+| ultralytics | 8.4.36 | YOLO |
+| onnxruntime | 1.25.1 | ONNX CPU-инференс; CUDA provider не обещается |
+| albumentations | 2.0.8 | Аугментации изображений/масок |
+| PyQt5 | 5.15.11 | GUI |
+| matplotlib / seaborn | 3.10.8 / 0.13.2 | Графики |
+
+Обычный `pip install -r requirements.txt` не выполняет нормализацию cv2 и не
+выбирает явный Torch backend. Предпочтителен `install.py`; после ручного pip
+нужен `--repair-opencv` и диагностика.
+
+## Дополнительные возможности
+
+| Extra | Пакеты | Возможности |
+| --- | --- | --- |
+| `training` | segmentation-models-pytorch, psutil | U-Net/DeepLab, мониторинг обучения |
+| `audit` | ImageHash, open-clip-torch, transformers, umap-learn, hdbscan, xgboost | Аудит, эмбеддинги, исследовательское ML |
+| `sahi` | sahi | Нарезка датасета |
+| `export` | onnx, tifffile, shapely, pascal-voc-writer | Экспорт моделей/разметки, TIFF, геометрия |
+
+Extras декларированы в отдельных файлах, их транзитивные версии не заперты.
+Полная совместимость всех optional backend и весов не проверена. Доступность
+через `find_spec` означает наличие пакета, не успешную загрузку модели. Отсутствие
+optional пакета не мешает базовому запуску. UNet/DeepLab workers обрабатывают
+`--help` до загрузки SMP; обучение требует SMP. SAM/SegFormer в GUI по-прежнему
+имеют незавершённые ветки; установка дополнительных пакетов их не реализует.
+
+## Сеть и переменные
+
+- Для установки нужны PyPI/wheel storage и `download.pytorch.org` с возможными redirects.
+- Ultralytics, SMP/torchvision и CLIP могут скачивать веса с GitHub, PyTorch
+  storage и Hugging Face. Успешный импорт не подтверждает доступность весов.
+- `COLLECT_LIBS_INFO=1` сохраняет версии через metadata, не загружая ML при
+  закрытии главного окна; CUDA опрашивается только если Torch уже загружен.
+- `QT_QPA_PLATFORM=offscreen` — только для автоматических GUI-проверок.
+- `NO_ALBUMENTATIONS_UPDATE=1` отключает проверку обновлений Albumentations.
+- `MPLCONFIGDIR`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `YOLO_CONFIG_DIR` позволяют
+  выбрать доступные каталоги кешей. JSON в `settings/` проекта остаются отдельно.
+
+## Проверки
+
+```bash
+python -m unittest discover -s tests -v
+NEURO_RUN_GUI_TESTS=1 python -m unittest discover -s tests -v
+python dependency_health.py --load
+```
+
+Проверяются границы импортов, отсутствие циклов верхнего уровня, отдельные и
+совместные вкладки, прямой/модульный запуск и CLI workers без обучения. Подробнее
+о результатах и ограничениях — в [плане](Import_Architecture_Plan.md).
+GPU/MPS, качество обучения и инференс с реальными весами эти тесты не покрывают.
