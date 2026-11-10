@@ -1,0 +1,3 @@
+# Optional features; versions are not locked. Validate your model backend.
+segmentation-models-pytorch
+psutil

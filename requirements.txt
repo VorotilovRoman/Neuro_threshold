@@ -1,5 +1,6 @@
+-c requirements/constraints.txt
 numpy==2.4.3
-opencv-python==4.13.0.92
+opencv-python-headless==4.13.0.92
 scipy==1.17.1
 scikit-image==0.26.0
 scikit-learn==1.8.0
@@ -11,9 +12,9 @@ requests==2.33.1
 PyYAML==6.0.3
 Pillow==12.1.1
 
-# PyTorch с поддержкой CUDA 13 (особая сборка)
-torch==2.11.0+cu130
-torchvision==0.26.0+cu130
+# Backend wheels are selected by install.py --torch cpu|cu130
+torch==2.11.0
+torchvision==0.26.0
 
 ultralytics==8.4.36
 onnxruntime==1.25.1

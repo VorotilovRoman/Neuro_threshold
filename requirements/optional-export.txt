@@ -1,0 +1,5 @@
+# Optional features; versions are not locked. Validate your model backend.
+onnx
+tifffile
+shapely
+pascal-voc-writer

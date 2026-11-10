@@ -1,118 +1,72 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-import importlib
-import platform
+"""Install a consistent dependency profile into the current Python environment."""
+import argparse
 import subprocess
 import sys
+from pathlib import Path
+
+from dependency_health import OPENCV_PROVIDERS, SELECTED_OPENCV, installed_opencv
+
+ROOT = Path(__file__).resolve().parent
+TORCH_PROFILES = ('cpu', 'cu130')
+EXTRAS = ('training', 'audit', 'sahi', 'export')
 
 
-# ------------------------------------------------------------
-# Утилиты
-# ------------------------------------------------------------
-def run_pip_install(package, extra_index=None):
-    """Устанавливает пакет через pip и возвращает True/False."""
-    cmd = [sys.executable, "-m", "pip", "install"]
-    if extra_index:
-        cmd.extend(["--index-url", extra_index])
-    cmd.append(package)
+def run_pip(*args, dry_run=False):
+    command = [sys.executable, '-m', 'pip', *args]
+    print('+', ' '.join(command), flush=True)
+    if not dry_run:
+        subprocess.run(command, cwd=ROOT, check=True)
+
+
+def normalize_opencv(dry_run=False):
+    """Repair shared cv2 files after removing competing OpenCV wheels."""
+    providers = installed_opencv()
+    competing = [name for name in OPENCV_PROVIDERS if name != SELECTED_OPENCV and name in providers]
+    if dry_run:
+        competing = [name for name in OPENCV_PROVIDERS if name != SELECTED_OPENCV]
+    if competing:
+        run_pip('uninstall', '-y', *competing, dry_run=dry_run)
+    if competing or SELECTED_OPENCV not in providers:
+        # Uninstall removes shared files even if the headless metadata survives.
+        pin = next(line.strip() for line in (ROOT / 'requirements.txt').read_text().splitlines()
+                   if line.startswith(SELECTED_OPENCV + '=='))
+        run_pip('install', '--no-deps', '--force-reinstall', pin, dry_run=dry_run)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--torch', choices=TORCH_PROFILES, default='cpu',
+                        help='Explicit Torch/torchvision wheel profile (default: cpu)')
+    parser.add_argument('--extra', action='append', choices=EXTRAS, default=[],
+                        help='Optional feature dependencies; may be repeated')
+    parser.add_argument('--dry-run', action='store_true', help='Print commands without installing')
+    parser.add_argument('--repair-opencv', action='store_true',
+                        help='Only normalize cv2 providers and verify the existing environment')
+    args = parser.parse_args(argv)
+    if sys.prefix == sys.base_prefix and not args.dry_run:
+        parser.error('Activate a virtual environment first: python -m venv .venv')
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print(f"✓ Установлен: {package}")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"✗ Ошибка установки {package}: {e.stderr}")
-        return False
+        if not args.repair_opencv:
+            # Resolve the matching pair together. Never silently switch GPU/CPU profiles.
+            run_pip('install', '-r', str(ROOT / 'requirements' / f'torch-{args.torch}.txt'),
+                    dry_run=args.dry_run)
+            requirements = ['-r', str(ROOT / 'requirements.txt')]
+            for extra in sorted(set(args.extra)):
+                requirements.extend(['-r', str(ROOT / 'requirements' / f'optional-{extra}.txt')])
+            run_pip('install', *requirements, dry_run=args.dry_run)
+        normalize_opencv(dry_run=args.dry_run)
+        if not args.dry_run:
+            # No native modules have been imported by this installer. Validate in
+            # a new process after all wheel files have reached their final state.
+            subprocess.run([sys.executable, str(ROOT / 'dependency_health.py'), '--load'],
+                           cwd=ROOT, check=True)
+            print('Installation verified. See any explicit OpenCV metadata exceptions above.')
+        return 0
+    except (subprocess.CalledProcessError, OSError) as exc:
+        print(f'Installation failed: {exc}', file=sys.stderr)
+        return 1
 
-def get_pip():
-    try:
-        import pip
-        return True
-    except ImportError:
-        return False
 
-# ------------------------------------------------------------
-# Установка PyTorch с поддержкой CUDA 13
-# ------------------------------------------------------------
-def install_pytorch():
-    print("Установка PyTorch и torchvision...")
-    # Пробуем официальный nightly‑индекс для CUDA 13 (если доступен)
-    # Реальный индекс для cu130 отсутствует, поэтому используем последний стабильный с CUDA 12.4
-    # (это удовлетворяет условию "или больше", т.к. 2.5.1 новее формально)
-    torch_version = "2.11.0"
-    torchvision_version = "0.26.0"
-    cuda_version = "cu130"
-    index_url = f"https://download.pytorch.org/whl/{cuda_version}"
-    print(f"torch=={torch_version}")
-    success = run_pip_install(f"torch=={torch_version}", extra_index=index_url)
-    print(f"torchvision=={torchvision_version}")
-    success &= run_pip_install(f"torchvision=={torchvision_version}", extra_index=index_url)
-    if not success:
-        print("Не удалось установить CUDA‑версию. Пробуем CPU‑версию.")
-        run_pip_install("torch")
-        run_pip_install("torchvision")
-    # Дополнительно проверяем, установилась ли нужная версия
-    try:
-        import torch
-        print(f"PyTorch установлен: {torch.__version__}, CUDA доступна: {torch.cuda.is_available()}")
-    except ImportError:
-        print("PyTorch не установлен!")
-
-# ------------------------------------------------------------
-# Установка остальных пакетов из requirements.txt
-# ------------------------------------------------------------
-def install_other_packages():
-    print("\nУстановка остальных библиотек...")
-    with open("requirements.txt", "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            # Пропускаем torch и torchvision, т.к. уже обработаны
-            if line.startswith("torch") or line.startswith("torchvision"):
-                continue
-            run_pip_install(line)
-
-# ------------------------------------------------------------
-# Проверка установки
-# ------------------------------------------------------------
-def verify_installation():
-    print("\n=== Проверка установленных библиотек ===")
-    modules = [
-        ("cv2", "opencv-python"),
-        ("torch", "PyTorch"),
-        ("numpy", "NumPy"),
-        ("ultralytics", "Ultralytics YOLO"),
-        ("albumentations", "Albumentations"),
-        ("PyQt5.QtCore", "PyQt5"),
-        ("sklearn", "scikit-learn"),
-        ("pandas", "pandas"),
-        ("matplotlib", "matplotlib"),
-    ]
-    for mod, name in modules:
-        try:
-            m = __import__(mod)
-            version = getattr(m, "__version__", "unknown")
-            print(f"{name}: {version}")
-        except ImportError:
-            print(f"{name}: не установлен")
-
-# ------------------------------------------------------------
-# Главная функция
-# ------------------------------------------------------------
-def main():
-    print("=== Установка зависимостей для проекта ===\n")
-    print(f"ОС: {platform.system()}")
-    print(f"Python: {sys.version}")
-
-    if not get_pip():
-        print("Ошибка: pip не найден. Установите pip и повторите попытку.")
-        sys.exit(1)
-
-    install_pytorch()
-    install_other_packages()
-    verify_installation()
-    print("\nГотово!")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    raise SystemExit(main())

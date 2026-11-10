@@ -1,0 +1,5 @@
+# Keep the Torch pair stable during optional dependency resolution.
+torch==2.11.0
+torchvision==0.26.0
+# Transient provider pulled by Ultralytics; removed by install.py afterwards.
+opencv-python==4.13.0.92

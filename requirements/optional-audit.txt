@@ -1,0 +1,7 @@
+# Optional features; versions are not locked. Validate your model backend.
+ImageHash
+open-clip-torch
+transformers
+umap-learn
+hdbscan
+xgboost
