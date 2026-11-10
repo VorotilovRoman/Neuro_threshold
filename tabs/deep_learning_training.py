@@ -1,19 +1,19 @@
 # deep_learning_training.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_deep_learning_training_ui
-
-print("load deep_learning_training")
+import json
+import os
+import sys
 
 # ------------------------------------------------------------
 # Получение версии Ultralytics YOLO (для информационных целей)
 # ------------------------------------------------------------
-ULTRALYTICS_AVAILABLE = False
-try:
-    version = ultralytics.__version__
-    print(f"Ultralytics YOLO version: {version}")
-    ULTRALYTICS_AVAILABLE = True
-except (ImportError, AttributeError):
-    print("Не удалось определить версию YOLO (ultralytics не установлена или повреждена)")
+from importlib.util import find_spec
+
+from PyQt5.QtCore import QProcess
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
+
+from ui_tabs.deep_learning_training_ui import setup_deep_learning_training_ui
+
+ULTRALYTICS_AVAILABLE = find_spec('ultralytics') is not None
 
 
 class YoloTrainWindow(QMainWindow):

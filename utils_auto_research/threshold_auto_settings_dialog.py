@@ -1,4 +1,17 @@
-from import_libs_external import *
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QScrollArea,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
 
 class AutoSettingsDialog(QDialog):
     def __init__(self, parent=None, current_settings=None):

@@ -22,27 +22,58 @@
 utils_new/annotation_processing.py. Только модели AE/VAE и их препроцессинг
 пока импортируются из utils_aeb/yolo_aeb_utils.py.
 """
-from import_libs_internal import *
+import os
+import sys
 
-
-from import_libs_methods_ui import setup_yolo_ae_vae_ui
-
-from utils_new.annotation_processing import (
-    detection_to_unified, detections_to_unified, yolo_result_to_detections,
-    render_unified_annotations, aeb_transform_image, render_ae_error_map,
-    longest_edge_angle_deg, apply_object_morphology,
-    crop_to_detection, rotate_with_optional_crop,
-    cls_suffix_from_detection,
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
 )
+
+from ui_tabs.yolo_test_aeb_ui import setup_yolo_ae_vae_ui
+from utils.image_io import LazyImageCache, load_one_image_item, numpy_to_qpixmap
+from utils.presets import PresetManager
+from utils.settings import settings
 from utils_aeb.yolo_aeb_utils import (
+    ConvAutoencoder,
+    ConvAutoencoderGN,
+    ConvDecoder,
+    ConvDecoderGN,
     # модели AE/VAE — старые conv+BN
-    ConvEncoder, ConvDecoder, ConvAutoencoder, ConvVAE,
+    ConvEncoder,
     # модели AE/VAE — новые conv+GN
-    ConvEncoderGN, ConvDecoderGN, ConvAutoencoderGN, ConvVAEGN,
+    ConvEncoderGN,
+    ConvVAE,
+    ConvVAEGN,
+    UNetAE,
+    UNetDecoder,
     # модели AE/VAE — U-Net
-    UNetEncoder, UNetDecoder, UNetAE, UNetVAE,
+    UNetEncoder,
+    UNetVAE,
+    build_ae_model_from_cfg,
     # фабрика и препроцессинг
-    detect_arch, build_ae_model_from_cfg, preprocess_image_for_ae,
+    detect_arch,
+    preprocess_image_for_ae,
+)
+from utils_new.annotation_processing import (
+    aeb_transform_image,
+    apply_object_morphology,
+    cls_suffix_from_detection,
+    crop_to_detection,
+    detection_to_unified,
+    detections_to_unified,
+    longest_edge_angle_deg,
+    render_ae_error_map,
+    render_unified_annotations,
+    rotate_with_optional_crop,
+    yolo_result_to_detections,
 )
 
 # Защитный лимит для QPixmap/QImage и GDI на Windows.
@@ -150,6 +181,7 @@ class YoloAEBPresetManager(PresetManager):
 # ============================================================
 class YoloInspectWindow(QMainWindow):
     def __init__(self):
+        import torch
         super().__init__()
         self.setWindowTitle("YOLO + AE/VAE")
 
@@ -302,12 +334,14 @@ class YoloInspectWindow(QMainWindow):
     # Устройства
     # --------------------------------------------------------
     def _resolve_device(self):
+        import torch
         d = self.device_combo.currentText()
         if d == "auto":
             return "0" if torch.cuda.is_available() else "cpu"
         return d
 
     def _resolve_torch_device(self):
+        import torch
         d = self.device_combo.currentText()
         if d == "auto":
             return torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
@@ -547,6 +581,7 @@ class YoloInspectWindow(QMainWindow):
         self._load_yolo_model_from_path(path)
 
     def _load_yolo_model_from_path(self, path):
+        from ultralytics import YOLO
         if not path or not os.path.isfile(path):
             self.log(f"[YOLO] Файл не найден: {path!r}")
             return False
@@ -1036,6 +1071,7 @@ class YoloInspectWindow(QMainWindow):
         self._load_ae_model_from_path(path)
 
     def _load_ae_model_from_path(self, path):
+        import torch
         if not path or not os.path.isfile(path):
             self.log(f"[AE/VAE] Файл не найден: {path!r}")
             return False
@@ -1146,6 +1182,7 @@ class YoloInspectWindow(QMainWindow):
                 self.log(f"[Пресет] AE/VAE-модель не найдена: {ae_path}")
 
     def clear_ae_model(self):
+        import torch
         if self.ae_model is None:
             return
         try:
@@ -1187,6 +1224,7 @@ class YoloInspectWindow(QMainWindow):
         self.error_view.set_pixmap(numpy_to_qpixmap(None))
 
     def apply_ae(self, silent=False):
+        import torch
         if self.ae_model is None:
             if not silent:
                 QMessageBox.warning(self, "Нет модели AE/VAE",

@@ -25,7 +25,10 @@
 
 Ничего из этого модуля не зависит от QWidget-ов и не трогает UI.
 """
-from import_libs_internal import *
+import cv2
+import numpy as np
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 
@@ -808,7 +811,13 @@ def preprocess_image_for_ae(img_bgr, cfg):
 # All neural model code above remains unchanged.
 # ============================================================================
 from utils_new.annotation_processing import (
-    longest_edge_angle_deg, build_detection_mask, morph_image_in_mask,
-    apply_object_morphology, fill_outside_object, crop_to_detection,
-    rotate_with_optional_crop, cls_suffix_from_detection, limit_image_size,
+    apply_object_morphology,
+    build_detection_mask,
+    cls_suffix_from_detection,
+    crop_to_detection,
+    fill_outside_object,
+    limit_image_size,
+    longest_edge_angle_deg,
+    morph_image_in_mask,
+    rotate_with_optional_crop,
 )

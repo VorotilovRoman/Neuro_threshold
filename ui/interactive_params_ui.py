@@ -1,8 +1,18 @@
 # interactive_params_ui.py
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QSpinBox, QDoubleSpinBox, QSlider, QGroupBox,
-                             QComboBox, QCheckBox, QGridLayout)
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class InteractiveParametersUI(QWidget):

@@ -1,16 +1,27 @@
 # slice_dataset_sahi.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_sahi_slicer_ui
-
 import json
+import math
 import os
 import random
 import shutil
 import sys
-import traceback
 import tempfile
-import math
+import traceback
 from contextlib import redirect_stdout
+
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QMainWindow,
+    QMessageBox,
+    QShortcut,
+)
+
+from ui_tabs.slice_dataset_sahi_ui import setup_sahi_slicer_ui
+from utils_new.dataset_loader_new import DatasetLoaderMixin
+from utils_new.dataset_validation_new import ImageStats, PairValidator
 
 try:
     from sahi.slicing import slice_coco

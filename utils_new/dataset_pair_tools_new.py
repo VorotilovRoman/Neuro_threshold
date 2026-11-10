@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
 """Folder scanning, image-file conversion and pair-display presentation metadata. Qt-free."""
 import os
+
 import cv2
 import numpy as np
+
 from utils_new.dataset_files_new import _read_with_fallback, write_image
 from utils_new.dataset_image_stats_new import ImageStats
 from utils_new.dataset_pair_validator_new import (
-    PairValidator, read_mask_with_fallback, IMG_EXTENSIONS, INPUT_FORMAT_AUTO,
+    IMG_EXTENSIONS,
+    INPUT_FORMAT_AUTO,
+    PairValidator,
+    read_mask_with_fallback,
 )
+
 
 def _list_images(folder):
     result = {}

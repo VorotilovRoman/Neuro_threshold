@@ -24,13 +24,25 @@ from dataclasses import dataclass, replace
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
+from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer
 from PyQt5.QtGui import (
-    QBrush, QColor, QCursor, QFont, QFontMetricsF,
-    QPainter, QPen, QPixmap, QPolygonF, QTransform,
+    QBrush,
+    QColor,
+    QCursor,
+    QFont,
+    QFontMetricsF,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+    QTransform,
 )
 from PyQt5.QtWidgets import (
-    QFileDialog, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QMenu,
+    QFileDialog,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QMenu,
 )
 
 from utils.settings import settings

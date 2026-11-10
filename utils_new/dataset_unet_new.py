@@ -2,7 +2,9 @@
 """U-Net masks_data.yaml discovery without wildcard/legacy imports."""
 import os
 from pathlib import Path
+
 import yaml
+
 
 def load_unet_yaml(yaml_path, log_cb=None):
     """
@@ -155,10 +157,11 @@ def write_yolo_txt_for_unet_pairs(pairs, output_labels_dir, *,
     Keeps each original image paired with its original mask.  Only labels are
     temporary; mask files are never rewritten.  Uses shared canonical geometry.
     """
+    import cv2
+
+    from utils_new.annotations import ImageSize, MaskEncoding, mask_to_annotations
     from utils_new.dataset_files_new import read_index_mask
     from utils_new.dataset_yolo_labels_new import write_yolo_labels
-    from utils_new.annotations import ImageSize, MaskEncoding, mask_to_annotations
-    import cv2
     output = Path(output_labels_dir)
     output.mkdir(parents=True, exist_ok=True)
     result = []

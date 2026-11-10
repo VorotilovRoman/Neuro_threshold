@@ -1,12 +1,38 @@
 # dataset_analysis_ui.py
-from import_libs_internal import *
-from PyQt5.QtCore import QSize, Qt
-from PyQt5.QtGui import QPixmap
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg as FigureCanvas,
+)
+from matplotlib.backends.backend_qt5agg import (
     NavigationToolbar2QT as NavigationToolbar,
 )
 from matplotlib.figure import Figure
+from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtGui import QPixmap
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
+    QSplitter,
+    QTableWidget,
+    QToolBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.log_widget import LogWidget
 
 
 class TrainingImageLabel(QLabel):

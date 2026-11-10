@@ -1,4 +1,7 @@
-from import_libs_internal import *
+import logging
+
+import cv2
+import numpy as np
 
 # Настройка логгера
 logger = logging.getLogger("aug_utils")
@@ -77,6 +80,7 @@ def _log_verbose_annotations(prefix, annotations):
         logger.debug(f"{prefix} [{i}] {typ} cls={cls} coords={coords}")
 
 def _get_fill_params(fill_color):
+    import albumentations as A
     try:
         A.PadIfNeeded(1, 1, fill=fill_color)
         return {'fill': fill_color}

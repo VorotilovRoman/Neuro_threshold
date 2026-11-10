@@ -20,8 +20,9 @@ Label Convert: YOLO (detection + segmentation) -> VOC Pascal format.
 
 import argparse
 import os
-import sys
 import shutil
+import sys
+
 from PIL import Image
 
 try:

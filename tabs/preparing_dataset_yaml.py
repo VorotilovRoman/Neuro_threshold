@@ -1,27 +1,36 @@
 # -*- coding: utf-8 -*-
 """Dataset Preparation V17: new generator, canonical validation and loading."""
-from import_libs_internal import *
 import os
 import sys
-import yaml
 
+import yaml
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QKeySequence
-from PyQt5.QtWidgets import (QApplication, QFileDialog, QListWidgetItem,
-                             QMainWindow, QMessageBox, QShortcut, QTableWidgetItem)
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QShortcut,
+    QTableWidgetItem,
+)
 
-
-from import_libs_methods_ui import setup_preparing_dataset_yaml_ui
-
+from ui_tabs.preparing_dataset_yaml_ui import setup_preparing_dataset_yaml_ui
 from utils_new.dataset_loader_new import DatasetLoaderMixin
+from utils_new.dataset_preparation_bridge import (
+    mask_classes_from_rows,
+    normalize_generation_pairs,
+)
 from utils_new.dataset_validation_new import (
-    ImageStats, PairValidator, select_pairs_for_conversion, convert_pairs_color,
-    select_pairs_for_8bit_png, convert_pairs_to_8bit_png,
+    ImageStats,
+    PairValidator,
+    convert_pairs_color,
+    convert_pairs_to_8bit_png,
+    select_pairs_for_8bit_png,
+    select_pairs_for_conversion,
 )
 from utils_new.DatasetGenerator_new import DatasetGeneratorThread
-from utils_new.dataset_preparation_bridge import (
-    mask_classes_from_rows, normalize_generation_pairs,
-)
 
 
 class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):

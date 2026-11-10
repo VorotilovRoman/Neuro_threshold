@@ -1,5 +1,36 @@
 # deep_learning_methods_ui.py
-from import_libs_internal import *
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.DL_predict_settings import (
+    CustomONNXInferenceSettings,
+    DeepLabV3InferenceSettings,
+    SAMInferenceSettings,
+    SegFormerInferenceSettings,
+    UNetInferenceSettings,
+    YOLOInferenceSettings,
+)
+from ui.image_navigation import ImageNavigationWidget
+from ui.log_widget import LogWidget
+from utils.smart_view import SmartGraphicsView
 
 
 def setup_deep_learning_methods_ui(parent):

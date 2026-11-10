@@ -1,5 +1,15 @@
 # deep_learning_training_ui.py
-from import_libs_internal import *
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QScrollArea, QSplitter, QTabWidget, QVBoxLayout, QWidget
+
+from ui.DL_train_settings_base import UNetTrainWidget, YOLOTrainWidget
+from ui.DL_train_settings_new_model import (
+    DeepLabV3TrainWidget,
+    SAMTrainWidget,
+    SegFormerTrainWidget,
+)
+from ui.log_widget import LogWidget
+
 
 def setup_deep_learning_training_ui(parent):
     central = QWidget()

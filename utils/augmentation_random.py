@@ -1,5 +1,16 @@
 # utils/augmentation_random.py
-from import_libs_internal import *
+import logging
+import math
+import random
+
+import cv2
+import numpy as np
+
+from utils.aug_utils import (
+    clip_annotations,
+    compose_affine_matrices,
+    repair_obb_to_rectangle,
+)
 
 # ---------------------------------------------------------------------
 # Для детекции (аннотации)
@@ -269,6 +280,7 @@ def apply_complex_augmentations_mask(image, mask, aug_config, border_color=(0, 0
 
     Возвращает (aug_img, aug_mask).
     """
+    import albumentations as A
     img = image.copy()
     msk = mask.copy()
 

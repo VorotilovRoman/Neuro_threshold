@@ -4,9 +4,9 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .model import Annotation, MaskEncoding, ImageSize
-from .masks import annotation_binary_mask
 from .geometry import bounds
+from .masks import annotation_binary_mask
+from .model import Annotation, ImageSize, MaskEncoding
 
 
 def _bgr_color(color_for_class, cls):

@@ -1,4 +1,24 @@
-from import_libs_internal import *
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.image_navigation import ImageNavigationWidget
+from ui.log_widget import LogWidget
+from utils_new.dataset_review_view import DatasetReviewGraphicsView
 
 
 def setup_viewing_dataset_ui(parent):
@@ -211,8 +231,8 @@ def setup_viewing_dataset_ui(parent):
     main_layout.addWidget(main_splitter, 1)  # растягивается
 
     # ----- Гистограмма (скрыта по умолчанию) -----
-    from matplotlib.figure import Figure
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
 
     parent.hist_canvas = FigureCanvas(Figure(figsize=(5, 2)))
     parent.hist_ax = parent.hist_canvas.figure.add_subplot(111)

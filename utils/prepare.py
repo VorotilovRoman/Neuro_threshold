@@ -1,27 +1,27 @@
 # utils/prepare.py
 # Обновлённая версия с использованием общих метрик из metrics_core
 
-import pandas as pd
-import numpy as np
+# Импорты для кластеризации
+import json
+import os
+import re
 from ast import literal_eval
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 # Импорт общих функций из metrics_core
 from utils.metrics_core import (
     DEFAULT_IOU_THRESHOLDS,
-    parse_objects,
-    iou,
     compute_precision_recall_f1,
-    compute_metrics as compute_metrics_core
+    iou,
+    parse_objects,
 )
-
-# Импорты для кластеризации
-import json
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
-import os
-import re
+from utils.metrics_core import compute_metrics as compute_metrics_core
 
 
 # ---------- Вспомогательная функция для детального расчёта метрик (несколько порогов) ----------

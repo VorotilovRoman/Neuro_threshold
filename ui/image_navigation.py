@@ -1,7 +1,19 @@
 # ui/image_navigation.py
-from import_libs_external import *
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QTextEdit,
+    QWidget,
+)
 
 from utils.settings import settings
+
 
 class ImageNavigationWidget(QWidget):
     load_images = pyqtSignal()

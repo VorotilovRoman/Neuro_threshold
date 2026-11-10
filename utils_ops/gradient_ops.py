@@ -1,4 +1,6 @@
-from import_libs_external import *
+import cv2
+import numpy as np
+
 
 def apply_gradient_method(gray, method, params):
     if method == "Sobel":

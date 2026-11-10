@@ -1,4 +1,28 @@
-from import_libs_internal import *
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QTextEdit,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.DL_predict_settings import YOLOInferenceSettings
+from ui.image_navigation import ImageNavigationWidget
+from ui.log_widget import LogWidget
+from utils.smart_view import SmartGraphicsView
+
 
 def setup_demo_ensemble_methods_ui(parent):
     central = QWidget()

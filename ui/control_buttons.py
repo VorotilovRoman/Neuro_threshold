@@ -1,6 +1,7 @@
 # widgets/control_buttons.py
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QPushButton
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import QHBoxLayout, QPushButton, QWidget
+
 
 class ControlButtons(QWidget):
     generate = pyqtSignal()

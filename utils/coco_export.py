@@ -21,7 +21,6 @@
     • file_name — относительный путь от корня датасета
       (images/{split}/name.png).
 """
-from import_libs_external import *
 import json
 import os
 from pathlib import Path
@@ -30,7 +29,9 @@ import cv2
 import numpy as np
 
 from utils.image_io import (
-    load_annotations, read_mask_with_fallback, FORMAT_HINT_AUTO,
+    FORMAT_HINT_AUTO,
+    load_annotations,
+    read_mask_with_fallback,
 )
 
 

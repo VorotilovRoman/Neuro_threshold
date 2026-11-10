@@ -1,178 +1,320 @@
-# import_libs_internal.py
 # -*- coding: utf-8 -*-
+"""Legacy lazy import facade.
 
-from import_libs_external import *
+New code imports names directly from their owning modules. Named imports here
+remain compatible; importing the facade itself does not load ML or GUI stacks.
+A legacy wildcard import necessarily resolves every public export.
+"""
+from importlib import import_module as _import_module
 
-# ========== Утилиты проекта (общие) ==========
-from utils.image_io import (
-    load_images_universal, save_coordinates, numpy_to_qpixmap, save_annotations,
-    read_image_with_fallback, read_mask_with_fallback,      # NEW
-    resize_to_max_side, normalize_to_uint8,
-    load_dataset_from_yaml_with_masks, load_dataset_from_yaml,
-    convert_to_grayscale, load_annotations,
-    read_image_with_fallback_find, convert_segment_masks_to_yolo_seg_manual,
-    load_one_image_item, LazyImageCache, canonicalize_obb_corners,
-    # NEW — константы форматов
-    FORMAT_HINT_AUTO, FORMAT_HINT_MIXED, FORMAT_HINT_DETECT,
-    FORMAT_HINT_OBB_CORNERS, FORMAT_HINT_OBB_XYWHR, FORMAT_HINT_SEGMENT,
-)
-from utils.yaml_io import (
-    load_yolo_yaml, load_unet_yaml_pairs, find_mask_for_image,
-)
+_EXPORTS = {
+    'A': ('albumentations', None),
+    'AutoResearch': ('utils_auto_research.threshold_auto_research', 'AutoResearch'),
+    'AutoSettingsDialog': ('utils_auto_research.threshold_auto_settings_dialog', 'AutoSettingsDialog'),
+    'BrightnessAnalyzer': ('utils.dataset_analysis_logic', 'BrightnessAnalyzer'),
+    'ClassImbalanceAnalyzer': ('utils.dataset_analysis_logic', 'ClassImbalanceAnalyzer'),
+    'ControlButtons': ('ui.control_buttons', 'ControlButtons'),
+    'CustomONNXInferenceSettings': ('ui.DL_predict_settings', 'CustomONNXInferenceSettings'),
+    'DEFAULT_IOU_THRESHOLDS': ('utils.metrics_core', 'DEFAULT_IOU_THRESHOLDS'),
+    'DatasetAnalyzer': ('utils.dataset_analysis_logic', 'DatasetAnalyzer'),
+    'DatasetGeneratorThread': ('utils_new.DatasetGenerator_new', 'DatasetGeneratorThread'),
+    'DatasetLoaderMixin': ('utils_new.dataset_loader_new', 'DatasetLoaderMixin'),
+    'DatasetReviewGraphicsView': ('utils_new.dataset_review_view', 'DatasetReviewGraphicsView'),
+    'DeepLabV3InferenceSettings': ('ui.DL_predict_settings', 'DeepLabV3InferenceSettings'),
+    'DeepLabV3TrainWidget': ('ui.DL_train_settings_new_model', 'DeepLabV3TrainWidget'),
+    'DeepLearningPresetManager': ('utils.presets', 'DeepLearningPresetManager'),
+    'FORMAT_HINT_AUTO': ('utils.image_io', 'FORMAT_HINT_AUTO'),
+    'FORMAT_HINT_DETECT': ('utils.image_io', 'FORMAT_HINT_DETECT'),
+    'FORMAT_HINT_MIXED': ('utils.image_io', 'FORMAT_HINT_MIXED'),
+    'FORMAT_HINT_OBB_CORNERS': ('utils.image_io', 'FORMAT_HINT_OBB_CORNERS'),
+    'FORMAT_HINT_OBB_XYWHR': ('utils.image_io', 'FORMAT_HINT_OBB_XYWHR'),
+    'FORMAT_HINT_SEGMENT': ('utils.image_io', 'FORMAT_HINT_SEGMENT'),
+    'Figure': ('matplotlib.figure', 'Figure'),
+    'FigureCanvas': ('matplotlib.backends.backend_qt5agg', 'FigureCanvasQTAgg'),
+    'FilterParams': ('utils.dataset_analysis_logic', 'FilterParams'),
+    'GradientAutoResearch': ('utils_auto_research.gradient_auto_research', 'GradientAutoResearch'),
+    'GradientAutoSettingsDialog': ('utils_auto_research.gradient_auto_settings_dialog', 'GradientAutoSettingsDialog'),
+    'GradientPresetManager': ('utils.presets', 'GradientPresetManager'),
+    'INPUT_IMAGES': ('utils.DatasetGenerator', 'INPUT_IMAGES'),
+    'INPUT_LABELS': ('utils.DatasetGenerator', 'INPUT_LABELS'),
+    'INPUT_MASKS': ('utils.DatasetGenerator', 'INPUT_MASKS'),
+    'ImageNavigationWidget': ('ui.image_navigation', 'ImageNavigationWidget'),
+    'ImageStats': ('utils_new.dataset_validation_new', 'ImageStats'),
+    'InteractivePresetManager': ('utils.presets', 'InteractivePresetManager'),
+    'LazyImageCache': ('utils.image_io', 'LazyImageCache'),
+    'LogWidget': ('ui.log_widget', 'LogWidget'),
+    'NavigationShortcutInstaller': ('ui.image_navigation', 'NavigationShortcutInstaller'),
+    'NavigationToolbar': ('matplotlib.backends.backend_qt5agg', 'NavigationToolbar2QT'),
+    'OrderedDict': ('collections', 'OrderedDict'),
+    'PairValidationDialog': ('utils.dataset_validation', 'PairValidationDialog'),
+    'PairValidator': ('utils_new.dataset_validation_new', 'PairValidator'),
+    'Path': ('pathlib', 'Path'),
+    'PresetManager': ('utils.presets', 'PresetManager'),
+    'QAbstractItemView': ('PyQt5.QtWidgets', 'QAbstractItemView'),
+    'QAction': ('PyQt5.QtWidgets', 'QAction'),
+    'QApplication': ('PyQt5.QtWidgets', 'QApplication'),
+    'QBrush': ('PyQt5.QtGui', 'QBrush'),
+    'QButtonGroup': ('PyQt5.QtWidgets', 'QButtonGroup'),
+    'QCheckBox': ('PyQt5.QtWidgets', 'QCheckBox'),
+    'QColor': ('PyQt5.QtGui', 'QColor'),
+    'QComboBox': ('PyQt5.QtWidgets', 'QComboBox'),
+    'QCursor': ('PyQt5.QtGui', 'QCursor'),
+    'QDesktopServices': ('PyQt5.QtGui', 'QDesktopServices'),
+    'QDialog': ('PyQt5.QtWidgets', 'QDialog'),
+    'QDialogButtonBox': ('PyQt5.QtWidgets', 'QDialogButtonBox'),
+    'QDir': ('PyQt5.QtCore', 'QDir'),
+    'QDoubleSpinBox': ('PyQt5.QtWidgets', 'QDoubleSpinBox'),
+    'QFileDialog': ('PyQt5.QtWidgets', 'QFileDialog'),
+    'QFileSystemModel': ('PyQt5.QtWidgets', 'QFileSystemModel'),
+    'QFont': ('PyQt5.QtGui', 'QFont'),
+    'QFormLayout': ('PyQt5.QtWidgets', 'QFormLayout'),
+    'QFrame': ('PyQt5.QtWidgets', 'QFrame'),
+    'QGraphicsPixmapItem': ('PyQt5.QtWidgets', 'QGraphicsPixmapItem'),
+    'QGraphicsScene': ('PyQt5.QtWidgets', 'QGraphicsScene'),
+    'QGraphicsView': ('PyQt5.QtWidgets', 'QGraphicsView'),
+    'QGridLayout': ('PyQt5.QtWidgets', 'QGridLayout'),
+    'QGroupBox': ('PyQt5.QtWidgets', 'QGroupBox'),
+    'QHBoxLayout': ('PyQt5.QtWidgets', 'QHBoxLayout'),
+    'QHeaderView': ('PyQt5.QtWidgets', 'QHeaderView'),
+    'QImage': ('PyQt5.QtGui', 'QImage'),
+    'QInputDialog': ('PyQt5.QtWidgets', 'QInputDialog'),
+    'QKeySequence': ('PyQt5.QtGui', 'QKeySequence'),
+    'QLabel': ('PyQt5.QtWidgets', 'QLabel'),
+    'QLineEdit': ('PyQt5.QtWidgets', 'QLineEdit'),
+    'QListWidget': ('PyQt5.QtWidgets', 'QListWidget'),
+    'QListWidgetItem': ('PyQt5.QtWidgets', 'QListWidgetItem'),
+    'QMainWindow': ('PyQt5.QtWidgets', 'QMainWindow'),
+    'QMenu': ('PyQt5.QtWidgets', 'QMenu'),
+    'QMessageBox': ('PyQt5.QtWidgets', 'QMessageBox'),
+    'QMouseEvent': ('PyQt5.QtGui', 'QMouseEvent'),
+    'QObject': ('PyQt5.QtCore', 'QObject'),
+    'QPainter': ('PyQt5.QtGui', 'QPainter'),
+    'QPainterPath': ('PyQt5.QtGui', 'QPainterPath'),
+    'QPalette': ('PyQt5.QtGui', 'QPalette'),
+    'QPen': ('PyQt5.QtGui', 'QPen'),
+    'QPixmap': ('PyQt5.QtGui', 'QPixmap'),
+    'QPointF': ('PyQt5.QtCore', 'QPointF'),
+    'QProcess': ('PyQt5.QtCore', 'QProcess'),
+    'QProgressBar': ('PyQt5.QtWidgets', 'QProgressBar'),
+    'QProgressDialog': ('PyQt5.QtWidgets', 'QProgressDialog'),
+    'QPushButton': ('PyQt5.QtWidgets', 'QPushButton'),
+    'QRadioButton': ('PyQt5.QtWidgets', 'QRadioButton'),
+    'QRectF': ('PyQt5.QtCore', 'QRectF'),
+    'QScrollArea': ('PyQt5.QtWidgets', 'QScrollArea'),
+    'QSettings': ('PyQt5.QtCore', 'QSettings'),
+    'QShortcut': ('PyQt5.QtWidgets', 'QShortcut'),
+    'QSizePolicy': ('PyQt5.QtWidgets', 'QSizePolicy'),
+    'QSlider': ('PyQt5.QtWidgets', 'QSlider'),
+    'QSpinBox': ('PyQt5.QtWidgets', 'QSpinBox'),
+    'QSplashScreen': ('PyQt5.QtWidgets', 'QSplashScreen'),
+    'QSplitter': ('PyQt5.QtWidgets', 'QSplitter'),
+    'QStackedWidget': ('PyQt5.QtWidgets', 'QStackedWidget'),
+    'QTabWidget': ('PyQt5.QtWidgets', 'QTabWidget'),
+    'QTableWidget': ('PyQt5.QtWidgets', 'QTableWidget'),
+    'QTableWidgetItem': ('PyQt5.QtWidgets', 'QTableWidgetItem'),
+    'QTextEdit': ('PyQt5.QtWidgets', 'QTextEdit'),
+    'QThread': ('PyQt5.QtCore', 'QThread'),
+    'QTimer': ('PyQt5.QtCore', 'QTimer'),
+    'QToolBox': ('PyQt5.QtWidgets', 'QToolBox'),
+    'QToolButton': ('PyQt5.QtWidgets', 'QToolButton'),
+    'QTransform': ('PyQt5.QtGui', 'QTransform'),
+    'QTreeView': ('PyQt5.QtWidgets', 'QTreeView'),
+    'QUrl': ('PyQt5.QtCore', 'QUrl'),
+    'QVBoxLayout': ('PyQt5.QtWidgets', 'QVBoxLayout'),
+    'QWheelEvent': ('PyQt5.QtGui', 'QWheelEvent'),
+    'QWidget': ('PyQt5.QtWidgets', 'QWidget'),
+    'Qt': ('PyQt5.QtCore', 'Qt'),
+    'RandomForestRegressor': ('sklearn.ensemble', 'RandomForestRegressor'),
+    'ResolutionAnalyzer': ('utils.dataset_analysis_logic', 'ResolutionAnalyzer'),
+    'SAMInferenceSettings': ('ui.DL_predict_settings', 'SAMInferenceSettings'),
+    'SAMTrainWidget': ('ui.DL_train_settings_new_model', 'SAMTrainWidget'),
+    'SUBTYPE_DETECT': ('utils.annotation_converter', 'SUBTYPE_DETECT'),
+    'SUBTYPE_KEEP': ('utils.annotation_converter', 'SUBTYPE_KEEP'),
+    'SUBTYPE_OBB': ('utils.annotation_converter', 'SUBTYPE_OBB'),
+    'SUBTYPE_SEGMENT': ('utils.annotation_converter', 'SUBTYPE_SEGMENT'),
+    'SegFormerInferenceSettings': ('ui.DL_predict_settings', 'SegFormerInferenceSettings'),
+    'SegFormerTrainWidget': ('ui.DL_train_settings_new_model', 'SegFormerTrainWidget'),
+    'SmartGraphicsView': ('utils.smart_view', 'SmartGraphicsView'),
+    'SmartGraphicsViewNew': ('utils_new.smart_view_new', 'SmartGraphicsViewNew'),
+    'StandardScaler': ('sklearn.preprocessing', 'StandardScaler'),
+    'T': ('torchvision.transforms', None),
+    'ThreadPoolExecutor': ('concurrent.futures', 'ThreadPoolExecutor'),
+    'TraditionalMLPresetManager': ('utils.presets', 'TraditionalMLPresetManager'),
+    'TrainingResultsLoader': ('utils.dataset_analysis_logic', 'TrainingResultsLoader'),
+    'UNetInferenceSettings': ('ui.DL_predict_settings', 'UNetInferenceSettings'),
+    'UNetTrainWidget': ('ui.DL_train_settings_base', 'UNetTrainWidget'),
+    'YOLO': ('ultralytics', 'YOLO'),
+    'YOLOInferenceSettings': ('ui.DL_predict_settings', 'YOLOInferenceSettings'),
+    'YOLOTrainWidget': ('ui.DL_train_settings_base', 'YOLOTrainWidget'),
+    'active_contour_segmentation': ('utils_ops.interactive_ops', 'active_contour_segmentation'),
+    'add_cluster_labels': ('utils.prepare', 'add_cluster_labels'),
+    'add_meanap_metrics': ('utils.prepare', 'add_meanap_metrics'),
+    'aggregate_by_params': ('utils.prepare', 'aggregate_by_params'),
+    'analyze': ('utils.analysis', 'analyze'),
+    'apply_affine_to_points_np': ('utils.aug_utils', 'apply_affine_to_points_np'),
+    'apply_complex_augmentations': ('utils.augmentation_random', 'apply_complex_augmentations'),
+    'apply_complex_augmentations_mask': ('utils.augmentation_random', 'apply_complex_augmentations_mask'),
+    'apply_gradient_method': ('utils_ops.gradient_ops', 'apply_gradient_method'),
+    'apply_morphology': ('utils_ops.segmentation_ops', 'apply_morphology'),
+    'apply_simple_augmentations': ('utils.augmentation_base', 'apply_simple_augmentations'),
+    'apply_simple_augmentations_mask': ('utils.augmentation_base', 'apply_simple_augmentations_mask'),
+    'apply_theme': ('utils.settings', 'apply_theme'),
+    'apply_threshold_method': ('utils_ops.segmentation_ops', 'apply_threshold_method'),
+    'build_pair_display': ('utils.dataset_validation', 'build_pair_display'),
+    'canonicalize_obb_corners': ('utils.image_io', 'canonicalize_obb_corners'),
+    'clear_brightness_cache': ('utils.dataset_analysis_logic', 'clear_brightness_cache'),
+    'clip_annotations': ('utils.aug_utils', 'clip_annotations'),
+    'cluster_open_close': ('utils.prepare', 'cluster_open_close'),
+    'colorsys': ('colorsys', None),
+    'compose_affine_matrices': ('utils.aug_utils', 'compose_affine_matrices'),
+    'compute_elbow_kmeans': ('utils_ops.traditional_ml_ops', 'compute_elbow_kmeans'),
+    'convert_annotations': ('utils.annotation_converter', 'convert_annotations'),
+    'convert_pairs_color': ('utils_new.dataset_validation_new', 'convert_pairs_color'),
+    'convert_pairs_to_8bit_png': ('utils_new.dataset_validation_new', 'convert_pairs_to_8bit_png'),
+    'convert_segment_masks_to_yolo_seg': ('ultralytics.data.converter', 'convert_segment_masks_to_yolo_seg'),
+    'convert_segment_masks_to_yolo_seg_manual': ('utils.image_io', 'convert_segment_masks_to_yolo_seg_manual'),
+    'convert_to_grayscale': ('utils.image_io', 'convert_to_grayscale'),
+    'create_segmentor': ('utils_ops.deep_learning_ops', 'create_segmentor'),
+    'create_superpixels': ('utils_ops.traditional_ml_ops', 'create_superpixels'),
+    'cv2': ('cv2', None),
+    'datetime': ('datetime', 'datetime'),
+    'delete_annotation_by_index': ('utils_ops.segmentation_ops', 'delete_annotation_by_index'),
+    'detect_device': ('utils.dataset_audit_logic', 'detect_device'),
+    'draw_class_label': ('utils_ops.segmentation_ops', 'draw_class_label'),
+    'draw_label': ('utils_ops.segmentation_ops', 'draw_label'),
+    'draw_label_rotated': ('utils_ops.segmentation_ops', 'draw_label_rotated'),
+    'draw_selected_objects': ('utils_ops.segmentation_ops', 'draw_selected_objects'),
+    'draw_yolo_annotations': ('utils_ops.segmentation_ops', 'draw_yolo_annotations'),
+    'ensemble_detections': ('utils.ensemble_utils', 'ensemble_detections'),
+    'export_coco_from_labels': ('utils.coco_export', 'export_coco_from_labels'),
+    'export_coco_from_masks': ('utils.coco_export', 'export_coco_from_masks'),
+    'export_masks_from_annotations': ('utils.unet_export', 'export_masks_from_annotations'),
+    'extract_pixel_features': ('utils_ops.traditional_ml_ops', 'extract_pixel_features'),
+    'extract_superpixel_features': ('utils_ops.traditional_ml_ops', 'extract_superpixel_features'),
+    'extract_threshold_params': ('utils.ensemble_utils', 'extract_threshold_params'),
+    'filter_anomaly_count': ('utils.prepare', 'filter_anomaly_count'),
+    'filter_duplicates': ('utils.prepare', 'filter_duplicates'),
+    'filter_full_image_object': ('utils.prepare', 'filter_full_image_object'),
+    'filter_invalid_params': ('utils.prepare', 'filter_invalid_params'),
+    'filter_no_true_objects': ('utils.prepare', 'filter_no_true_objects'),
+    'filter_oversegmentation': ('utils.prepare', 'filter_oversegmentation'),
+    'filter_zero_true': ('utils.prepare', 'filter_zero_true'),
+    'find_boundaries': ('skimage.segmentation', 'find_boundaries'),
+    'find_mask_for_image': ('utils.yaml_io', 'find_mask_for_image'),
+    'find_optimal_k_elbow': ('utils_ops.traditional_ml_ops', 'find_optimal_k_elbow'),
+    'format_object_for_list': ('utils_ops.segmentation_ops', 'format_object_for_list'),
+    'get_class_color': ('utils_ops.segmentation_ops', 'get_class_color'),
+    'get_detections_from_preset': ('utils.ensemble_utils', 'get_detections_from_preset'),
+    'get_display_params': ('utils_ops.segmentation_ops', 'get_display_params'),
+    'global_top_diverse': ('utils.analysis', 'global_top_diverse'),
+    'grabcut_segmentation': ('utils_ops.interactive_ops', 'grabcut_segmentation'),
+    'hashlib': ('hashlib', None),
+    'img_as_float': ('skimage.util', 'img_as_float'),
+    'iou_xyxy': ('utils.metrics_core', 'iou_xyxy'),
+    'is_unet_yaml': ('utils.unet_io', 'is_unet_yaml'),
+    'joblib': ('joblib', None),
+    'json': ('json', None),
+    'lazy_snapping': ('utils_ops.interactive_ops', 'lazy_snapping'),
+    'literal_eval': ('ast', 'literal_eval'),
+    'load_annotations': ('utils.image_io', 'load_annotations'),
+    'load_coco': ('utils.coco_io', 'load_coco'),
+    'load_dataset_from_yaml': ('utils.image_io', 'load_dataset_from_yaml'),
+    'load_dataset_from_yaml_with_masks': ('utils.image_io', 'load_dataset_from_yaml_with_masks'),
+    'load_images_universal': ('utils.image_io', 'load_images_universal'),
+    'load_one_image_item': ('utils.image_io', 'load_one_image_item'),
+    'load_unet_yaml': ('utils.unet_io', 'load_unet_yaml'),
+    'load_unet_yaml_pairs': ('utils.yaml_io', 'load_unet_yaml_pairs'),
+    'load_yolo_yaml': ('utils.yaml_io', 'load_yolo_yaml'),
+    'log_annotations_summary': ('utils.aug_utils', 'log_annotations_summary'),
+    'logging': ('logging', None),
+    'mask_classes_from_rows': ('utils_new.dataset_preparation_bridge', 'mask_classes_from_rows'),
+    'math': ('math', None),
+    'mean_absolute_error': ('sklearn.metrics', 'mean_absolute_error'),
+    'nn': ('torch.nn', None),
+    'normalize_generation_pairs': ('utils_new.dataset_preparation_bridge', 'normalize_generation_pairs'),
+    'normalize_method_name': ('utils_ops.segmentation_ops', 'normalize_method_name'),
+    'normalize_to_uint8': ('utils.image_io', 'normalize_to_uint8'),
+    'np': ('numpy', None),
+    'numpy_to_qpixmap': ('utils.image_io', 'numpy_to_qpixmap'),
+    'nx': ('networkx', None),
+    'onecut_segmentation': ('utils_ops.interactive_ops', 'onecut_segmentation'),
+    'optimize_invert': ('utils.prepare', 'optimize_invert'),
+    'ort': ('onnxruntime', None),
+    'os': ('os', None),
+    'pd': ('pandas', None),
+    'plt': ('matplotlib.pyplot', None),
+    'predict_pixelwise': ('utils_ops.traditional_ml_ops', 'predict_pixelwise'),
+    'predict_superpixel': ('utils_ops.traditional_ml_ops', 'predict_superpixel'),
+    'pyqtSignal': ('PyQt5.QtCore', 'pyqtSignal'),
+    'queue': ('queue', None),
+    'r2_score': ('sklearn.metrics', 'r2_score'),
+    'random': ('random', None),
+    'random_walker_segmentation': ('utils_ops.interactive_ops', 'random_walker_segmentation'),
+    're': ('re', None),
+    'read_image_with_fallback': ('utils.image_io', 'read_image_with_fallback'),
+    'read_image_with_fallback_find': ('utils.image_io', 'read_image_with_fallback_find'),
+    'read_mask_with_fallback': ('utils.image_io', 'read_mask_with_fallback'),
+    'repair_obb_to_rectangle': ('utils.aug_utils', 'repair_obb_to_rectangle'),
+    'resize_image_and_annotations': ('utils.aug_utils', 'resize_image_and_annotations'),
+    'resize_image_and_annotations_stretch': ('utils.aug_utils', 'resize_image_and_annotations_stretch'),
+    'resize_to_max_side': ('utils.image_io', 'resize_to_max_side'),
+    'run_ensemble': ('utils.ensemble_utils', 'run_ensemble'),
+    'sample_rows': ('utils.prepare', 'sample_rows'),
+    'save_annotations': ('utils.image_io', 'save_annotations'),
+    'save_coordinates': ('utils.image_io', 'save_coordinates'),
+    'save_unique_params': ('utils.prepare', 'save_unique_params'),
+    'scan_detection_pairs': ('utils.dataset_validation', 'scan_detection_pairs'),
+    'scan_image_only_pairs': ('utils.dataset_validation', 'scan_image_only_pairs'),
+    'scan_segmentation_pairs': ('utils.dataset_validation', 'scan_segmentation_pairs'),
+    'segment_contours': ('utils_ops.segmentation_ops', 'segment_contours'),
+    'segment_min_area_rect': ('utils_ops.segmentation_ops', 'segment_min_area_rect'),
+    'segment_projections': ('utils_ops.segmentation_ops', 'segment_projections'),
+    'segmentation': ('skimage', 'segmentation'),
+    'select_pairs_for_8bit_png': ('utils_new.dataset_validation_new', 'select_pairs_for_8bit_png'),
+    'select_pairs_for_conversion': ('utils_new.dataset_validation_new', 'select_pairs_for_conversion'),
+    'settings': ('utils.settings', 'settings'),
+    'shutil': ('shutil', None),
+    'slic': ('skimage.segmentation', 'slic'),
+    'sns': ('seaborn', None),
+    'supercut_segmentation': ('utils_ops.interactive_ops', 'supercut_segmentation'),
+    'sys': ('sys', None),
+    'threading': ('threading', None),
+    'time': ('time', None),
+    'to_detect': ('utils.annotation_converter', 'to_detect'),
+    'to_obb': ('utils.annotation_converter', 'to_obb'),
+    'to_segment': ('utils.annotation_converter', 'to_segment'),
+    'torch': ('torch', None),
+    'traceback': ('traceback', None),
+    'train_decision_tree': ('utils_ops.traditional_ml_ops', 'train_decision_tree'),
+    'train_kmeans': ('utils_ops.traditional_ml_ops', 'train_kmeans'),
+    'train_meanshift': ('utils_ops.traditional_ml_ops', 'train_meanshift'),
+    'train_random_forest': ('utils_ops.traditional_ml_ops', 'train_random_forest'),
+    'train_svm': ('utils_ops.traditional_ml_ops', 'train_svm'),
+    'train_test_split': ('sklearn.model_selection', 'train_test_split'),
+    'train_xgboost': ('utils_ops.traditional_ml_ops', 'train_xgboost'),
+    'ultralytics': ('ultralytics', None),
+    'update_annotation_list': ('utils_ops.segmentation_ops', 'update_annotation_list'),
+    'warnings': ('warnings', None),
+    'watershed_segmentation': ('utils_ops.interactive_ops', 'watershed_segmentation'),
+    'write_unet_yaml': ('utils.unet_export', 'write_unet_yaml'),
+    'write_yolo_txt_for_coco_items': ('utils.coco_io', 'write_yolo_txt_for_coco_items'),
+    'xyxy_to_yolo': ('utils.metrics_core', 'xyxy_to_yolo'),
+    'yaml': ('yaml', None),
+    'yolo_to_xyxy': ('utils.metrics_core', 'yolo_to_xyxy'),
+}
+__all__ = list(_EXPORTS)
 
-# ========== НОВЫЕ модули (генерация датасетов) ==========
-from utils.annotation_converter import (
-    convert_annotations,
-    to_detect, to_obb, to_segment,
-    SUBTYPE_KEEP, SUBTYPE_DETECT, SUBTYPE_OBB, SUBTYPE_SEGMENT,
-)
-from utils.coco_export import (
-    export_coco_from_labels, export_coco_from_masks,
-)
-from utils.coco_io import (
-    load_coco, write_yolo_txt_for_coco_items,
-)
-from utils.unet_export import (
-    export_masks_from_annotations, write_unet_yaml,
-)
-from utils.unet_io import (
-    load_unet_yaml, is_unet_yaml,
-)
 
-# ========== Остальные утилиты проекта ==========
-from utils_ops.segmentation_ops import (
-    segment_contours, segment_projections, segment_min_area_rect,
-    get_display_params, normalize_method_name,
-    apply_threshold_method, apply_morphology, draw_selected_objects,
-    format_object_for_list, update_annotation_list, delete_annotation_by_index,
-    draw_yolo_annotations, draw_label, draw_label_rotated, get_class_color,
-    draw_class_label,
-)
-from utils.settings import settings, apply_theme
-from utils.presets import (
-    PresetManager, GradientPresetManager, InteractivePresetManager,
-    TraditionalMLPresetManager, DeepLearningPresetManager,
-)
-from utils.analysis import analyze, global_top_diverse
-from utils.prepare import (
-    sample_rows, aggregate_by_params,
-    filter_full_image_object, filter_invalid_params, filter_anomaly_count,
-    filter_zero_true, filter_oversegmentation, filter_duplicates,
-    add_cluster_labels, save_unique_params, add_meanap_metrics,
-    cluster_open_close, optimize_invert, filter_no_true_objects,
-)
-from utils.metrics_core import DEFAULT_IOU_THRESHOLDS, yolo_to_xyxy, xyxy_to_yolo, iou_xyxy
-
-from utils.smart_view import SmartGraphicsView
-# Новая ветка компонента разметки. Остальные вкладки остаются на старом SmartGraphicsView.
-from utils_new.smart_view_new import SmartGraphicsViewNew
-
-from utils_new.dataset_review_view import DatasetReviewGraphicsView
-
-# ========== Градиентные методы ==========
-from utils_ops.gradient_ops import apply_gradient_method
-from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog
-from utils_auto_research.gradient_auto_research import GradientAutoResearch
-
-# ========== Интерактивные методы ==========
-from utils_ops.interactive_ops import (
-    grabcut_segmentation, watershed_segmentation, lazy_snapping,
-    supercut_segmentation, onecut_segmentation,
-    random_walker_segmentation, active_contour_segmentation,
-)
-
-# ========== Традиционные ML ==========
-from utils_ops.traditional_ml_ops import (
-    extract_pixel_features, extract_superpixel_features, create_superpixels,
-    train_kmeans, train_meanshift, train_svm, train_random_forest,
-    train_xgboost, train_decision_tree,
-    predict_pixelwise, predict_superpixel,
-    compute_elbow_kmeans, find_optimal_k_elbow,
-)
-
-# ========== Глубокое обучение ==========
-from utils_ops.deep_learning_ops import create_segmentor
-
-# ========== Автоисследование ==========
-from utils_auto_research.threshold_auto_research import AutoResearch
-from utils_auto_research.threshold_auto_settings_dialog import AutoSettingsDialog
-
-# ========== Ансамбли ==========
-from utils.ensemble_utils import (
-    run_ensemble, get_detections_from_preset,
-    extract_threshold_params, ensemble_detections,
-)
-
-# ========== Аугментации ==========
-from utils.aug_utils import (
-    repair_obb_to_rectangle, log_annotations_summary,
-    resize_image_and_annotations, clip_annotations,
-    compose_affine_matrices, resize_image_and_annotations_stretch,
-    apply_affine_to_points_np,
-)
-from utils.augmentation_base import (
-    apply_simple_augmentations, apply_simple_augmentations_mask,
-)
-from utils.augmentation_random import (
-    apply_complex_augmentations, apply_complex_augmentations_mask,
-)
-
-# ========== UI компоненты ==========
-from ui.image_navigation import ImageNavigationWidget, NavigationShortcutInstaller
-from ui.log_widget import LogWidget
-from ui.control_buttons import ControlButtons
-
-# ========== Генератор датасетов ==========
-from utils.DatasetGenerator import (
-    DatasetGeneratorThread,
-    INPUT_LABELS, INPUT_MASKS, INPUT_IMAGES,
-)
-
-# ========== Тренеры DL ==========
-from ui.DL_train_settings_base import YOLOTrainWidget, UNetTrainWidget
-from ui.DL_train_settings_new_model import (
-    DeepLabV3TrainWidget, SegFormerTrainWidget, SAMTrainWidget,
-)
-from ui.DL_predict_settings import (
-    YOLOInferenceSettings,
-    UNetInferenceSettings,
-    DeepLabV3InferenceSettings,
-    SegFormerInferenceSettings,
-    SAMInferenceSettings,
-    CustomONNXInferenceSettings,
-)
+def __getattr__(name):
+    try:
+        module_name, attribute = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    module = _import_module(module_name)
+    value = module if attribute is None else getattr(module, attribute)
+    globals()[name] = value
+    return value
 
 
-from utils.dataset_validation import (
-    ImageStats,
-    PairValidator,
-    PairValidationDialog,
-    scan_detection_pairs,
-    scan_segmentation_pairs,
-    scan_image_only_pairs,
-    select_pairs_for_conversion,
-    convert_pairs_color,
-    select_pairs_for_8bit_png,
-    convert_pairs_to_8bit_png,
-    build_pair_display,
-    DatasetLoaderMixin,
-)
-
-
-from utils_new.dataset_validation_new import (
-    ImageStats, PairValidator, select_pairs_for_conversion, convert_pairs_color,
-    select_pairs_for_8bit_png, convert_pairs_to_8bit_png,
-)
-from utils_new.DatasetGenerator_new import DatasetGeneratorThread
-from utils_new.dataset_preparation_bridge import (
-    mask_classes_from_rows, normalize_generation_pairs,
-)
-
-from utils_new.dataset_loader_new import DatasetLoaderMixin
-
-from utils.dataset_analysis_logic import (
-    DatasetAnalyzer, FilterParams,
-    ClassImbalanceAnalyzer, ResolutionAnalyzer, BrightnessAnalyzer,
-    TrainingResultsLoader, clear_brightness_cache,
-)
-from utils.dataset_audit_logic import detect_device
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

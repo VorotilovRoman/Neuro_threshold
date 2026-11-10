@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Image color/depth classification and conversion without Qt."""
 import os
+
 import cv2
 import numpy as np
+
 
 class ImageStats:
     @staticmethod

@@ -8,8 +8,9 @@
 
 Возвращает плоский список пар (img_path, label_or_none) + мета.
 """
-from import_libs_external import *
+import os
 
+import yaml
 
 _IMG_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
 

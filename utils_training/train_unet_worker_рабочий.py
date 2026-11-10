@@ -19,23 +19,23 @@
 #                       Для инференса в приложении пользователь отдельно выбирает
 #                       hard / keep_aspect_pad (в metadata: inference_resize_mode).
 
-import sys
+import argparse
+import csv
 import io
 import json
-import argparse
 import os
 import signal
-import csv
+import sys
 from datetime import datetime
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.transforms import functional as TF
-import numpy as np
-from PIL import Image
 
 # Принудительная буферизация вывода
 if hasattr(sys.stdout, 'reconfigure'):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 from .model import Annotation, ImageSize
 
 
@@ -112,8 +113,9 @@ def legacy_convert_annotations(values, size: ImageSize, target: str, *,
 
 def to_detection_dict(ann: Annotation, *, class_name=None, confidence=None):
     """Canonical annotation -> YOLO+AE/VAE detection dictionary in pixels."""
-    from .geometry import bounds
     import cv2
+
+    from .geometry import bounds
     x0, y0, x1, y1 = bounds(ann.points_px)
     if ann.kind == 'segment':
         rect = cv2.minAreaRect(np.asarray(ann.points_px, dtype=np.float32))

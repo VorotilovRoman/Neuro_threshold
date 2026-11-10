@@ -1,6 +1,31 @@
 # utils/dataset_validation.py
-from import_libs_internal import *
+import json
+import os
+import traceback
+
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
+
+from utils.coco_io import load_coco, write_yolo_txt_for_coco_items
+from utils.image_io import load_annotations, numpy_to_qpixmap, read_mask_with_fallback
 from utils.smart_view import SmartGraphicsView
+from utils.unet_io import is_unet_yaml, load_unet_yaml
+from utils.yaml_io import load_yolo_yaml
 
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
 

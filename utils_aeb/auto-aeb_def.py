@@ -1,17 +1,18 @@
 # auto-aeb.py — legacy conv+BN
-import os
 import glob
+import os
 import random
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 from PIL import Image
-import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
+
 # ================== КОНФИГ ==================
 DATA_DIR     = r"C:\Users\prodis\Pictures\filters\crop_filters\BD"
 OUT_DIR      = r"C:\Users\prodis\Pictures\filters\crop_filters\BD\runs_ae_def_new"

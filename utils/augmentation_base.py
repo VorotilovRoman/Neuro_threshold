@@ -1,5 +1,12 @@
 # utils/augmentation_base.py
-from import_libs_internal import *
+import logging
+import random
+
+import cv2
+import numpy as np
+
+from utils.aug_utils import clip_annotations, repair_obb_to_rectangle
+
 # ---------------------------------------------------------------------
 # Для детекции (аннотации)
 # -------------------------------------------------

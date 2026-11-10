@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Filesystem image I/O, Unicode-safe and independent of Qt."""
 from pathlib import Path
+
 import cv2
 import numpy as np
+
 
 def _read_with_fallback(path, flags):
     """Read image/mask with Unicode-path fallback (notably Windows Cyrillic)."""
@@ -189,9 +191,10 @@ def load_one_image_item(image_path, resize_enabled=True, max_side=1024,
             'annotations': annotations, 'path': str(image_path)}
 
 
+import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-import threading
+
 
 class LazyImageCache:
     def __init__(self, paths, loader, window=8, prefetch_ahead=4,

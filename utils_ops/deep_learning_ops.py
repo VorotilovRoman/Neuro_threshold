@@ -1,21 +1,21 @@
 # deep_learning_ops.py
-from import_libs_external import *
+import os
+import sys
+import time
+
+import cv2
+import numpy as np
+
 
 # ------------------ Логирование с немедленным выводом ------------------
 def _log(msg):
     print(msg)
     sys.stdout.flush()
 
-try:
-    print(f"PyTorch version for deep_learning: {torch.__version__}")
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
+from importlib.util import find_spec
 
-try:
-    ONNX_AVAILABLE = True
-except ImportError:
-    ONNX_AVAILABLE = False
+TORCH_AVAILABLE = find_spec('torch') is not None
+ONNX_AVAILABLE = find_spec('onnxruntime') is not None
 
 
 # Допустимые режимы ресайза
@@ -49,6 +49,7 @@ class TorchSegmentor(BaseSegmentor):
 
     def _get_device(self):
         # Поддержка режима "auto"
+        import torch
         if self.device == "auto":
             if torch.cuda.is_available():
                 return torch.device('cuda')
@@ -113,6 +114,7 @@ class TorchSegmentor(BaseSegmentor):
             pad_info = (pad_left, pad_top, new_h, new_w) — для обратного вырезания
                        рабочей области из маски.
         """
+        import torchvision.transforms as T
         _log(f"[Preprocess] Входное изображение: shape={image.shape}, dtype={image.dtype}")
 
         # --- Каналы в RGB ---
@@ -221,8 +223,10 @@ class UNetSegmentor(TorchSegmentor):
             FileNotFoundError: если файл весов или метафайл не найден
             ValueError: если метафайл имеет неверный формат
         """
-        import segmentation_models_pytorch as smp
         import json
+
+        import segmentation_models_pytorch as smp
+        import torch
 
         if not weights_path or not os.path.exists(weights_path):
             raise FileNotFoundError(f"Файл модели U-Net не найден: {weights_path}")
@@ -361,6 +365,7 @@ class UNetSegmentor(TorchSegmentor):
 
         Параметр threshold игнорируется для num_classes > 2.
         """
+        import torch
         start_time = time.time()
 
         input_size = self.metadata.get('input_size', 512)
@@ -442,8 +447,10 @@ class DeepLabV3Segmentor(TorchSegmentor):
             FileNotFoundError: если файл весов не найден
             ValueError: если отсутствует *_meta.json
         """
-        import segmentation_models_pytorch as smp
         import json
+
+        import segmentation_models_pytorch as smp
+        import torch
 
         if not weights_path or not os.path.exists(weights_path):
             raise FileNotFoundError(f"Файл модели DeepLab не найден: {weights_path}")
@@ -610,6 +617,7 @@ class DeepLabV3Segmentor(TorchSegmentor):
 
         Параметр threshold игнорируется для num_classes > 2.
         """
+        import torch
         start_time = time.time()
 
         input_size = self.metadata.get('input_size', 513)
@@ -873,7 +881,7 @@ class SAMSegmentor(BaseSegmentor):
     """Segment Anything Model (заглушка)."""
     def load(self, model_type='vit_h', model_path=None):
         try:
-            from segment_anything import sam_model_registry, SamPredictor
+            from segment_anything import SamPredictor, sam_model_registry
         except ImportError:
             raise ImportError("segment-anything is required for SAM")
         self.metadata = {
@@ -894,6 +902,7 @@ class SAMSegmentor(BaseSegmentor):
 class ONNXSegmentor(BaseSegmentor):
     """ONNX Runtime инференс."""
     def load(self, model_path):
+        import onnxruntime as ort
         if not ONNX_AVAILABLE:
             raise ImportError("onnxruntime is not installed")
         self.metadata = {'model_type': 'Custom ONNX', 'path': model_path}

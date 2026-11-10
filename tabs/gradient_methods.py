@@ -1,7 +1,42 @@
 # gradient_methods.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_gradient_ui
+import json
+import os
+import sys
+
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+)
+
 from path_setup import get_project_root
+from ui_tabs.gradient_methods_ui import setup_gradient_ui
+from utils.image_io import (
+    LazyImageCache,
+    load_one_image_item,
+    numpy_to_qpixmap,
+    save_annotations,
+)
+from utils.presets import GradientPresetManager
+from utils.settings import settings
+from utils_auto_research.gradient_auto_research import GradientAutoResearch
+from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog
+from utils_ops.gradient_ops import apply_gradient_method
+from utils_ops.segmentation_ops import (
+    apply_morphology,
+    draw_selected_objects,
+    format_object_for_list,
+    get_display_params,
+    segment_contours,
+    segment_min_area_rect,
+    segment_projections,
+)
 
 
 class GradientMethodsWindow(QMainWindow):
@@ -159,7 +194,9 @@ class GradientMethodsWindow(QMainWindow):
 
     def save_auto_settings(self):
         if self.auto_settings is None:
-            from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog
+            from utils_auto_research.gradient_auto_settings_dialog import (
+                GradientAutoSettingsDialog,
+            )
             self.auto_settings = GradientAutoSettingsDialog._default_settings(None)
         try:
             os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)

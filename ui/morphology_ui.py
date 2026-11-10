@@ -17,12 +17,19 @@ from __future__ import annotations
 
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
-    QCheckBox, QComboBox, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox,
+    QComboBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QSpinBox,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-from utils_new.morphology import MorphologyStep, SUPPORTED_OPERATIONS, SUPPORTED_SHAPES
-
+from utils_new.morphology import SUPPORTED_OPERATIONS, SUPPORTED_SHAPES, MorphologyStep
 
 _LABELS = {
     "close": "Закрытие",

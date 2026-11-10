@@ -4,8 +4,14 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from .geometry import (
+    GeometryError,
+    bounds,
+    canonical_obb_points,
+    is_axis_aligned,
+    rectangle_points,
+)
 from .model import Annotation, ImageSize, MaskEncoding
-from .geometry import canonical_obb_points, rectangle_points, bounds, is_axis_aligned, GeometryError
 
 
 def _dtype_for_values(values):

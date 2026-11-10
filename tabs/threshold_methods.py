@@ -11,24 +11,35 @@ import sys
 import cv2
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
-    QApplication, QFileDialog, QInputDialog, QListWidgetItem, QMainWindow,
-    QMessageBox, QLabel, QSlider,
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QLabel,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QSlider,
 )
 
 from path_setup import get_project_root
-from utils.image_io import LazyImageCache, load_one_image_item, numpy_to_qpixmap, save_annotations
-from utils.presets import PresetManager
-from utils_new.morphology import apply_morphology as apply_shared_morphology
-from utils.settings import settings
-from utils_new.threshold_processing import apply_threshold_method, normalize_method_name
-from utils_new.annotation_processing import (
-    extract_annotations_from_mask, format_object_for_list,
+from ui_tabs.threshold_methods_ui import setup_threshold_ui
+from utils.image_io import (
+    LazyImageCache,
+    load_one_image_item,
+    numpy_to_qpixmap,
+    save_annotations,
 )
+from utils.presets import PresetManager
+from utils.settings import settings
 from utils_auto_research.threshold_auto_research import AutoResearch
 from utils_auto_research.threshold_auto_settings_dialog import AutoSettingsDialog
+from utils_new.annotation_processing import (
+    extract_annotations_from_mask,
+    format_object_for_list,
+)
+from utils_new.morphology import apply_morphology as apply_shared_morphology
+from utils_new.threshold_processing import apply_threshold_method, normalize_method_name
 
-
-from import_libs_methods_ui import setup_threshold_ui
 
 class _LegacyMorphologyRatioSlider(QSlider):
     """Невидимый Qt-совместимый адаптер для старого AutoResearch.

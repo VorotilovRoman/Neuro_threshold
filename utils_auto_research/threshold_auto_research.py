@@ -1,4 +1,8 @@
-from import_libs_external import *
+import os
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QProgressDialog
+
 
 class AutoResearch:
     def __init__(self, main_window, search_all=False):

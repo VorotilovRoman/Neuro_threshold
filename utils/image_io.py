@@ -1,7 +1,16 @@
 # utils/image_io.py
-from import_libs_external import *
-
 import math
+import os
+import threading
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
+
+import cv2
+import numpy as np
+import yaml
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import QMessageBox, QProgressDialog
 
 # ============================================================
 # Жёсткие пределы

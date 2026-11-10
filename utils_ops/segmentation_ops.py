@@ -1,5 +1,9 @@
 # utils/segmentation_ops.py
-from import_libs_external import *
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QListWidget, QListWidgetItem
+
 from utils.settings import settings
 
 

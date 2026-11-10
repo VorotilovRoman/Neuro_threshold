@@ -1,8 +1,26 @@
 # widgets/DL_train_settings_base.py
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import pyqtSignal, Qt
 import os
 import sys
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QRadioButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class BaseTrainWidget(QWidget):

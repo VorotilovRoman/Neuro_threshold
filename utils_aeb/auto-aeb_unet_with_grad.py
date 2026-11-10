@@ -1,20 +1,21 @@
 # auto-aeb_unet.py — U-Net AE/VAE + edge channel (disk cache) + soft arch + PatchGAN
-import os
 import glob
-import time
-import random
 import hashlib
+import os
+import random
+import time
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.transforms import functional as TF
-from PIL import Image
-import matplotlib.pyplot as plt
+
 # ================== КОНФИГ ==================
 DATA_DIR     = r"D:\ДАТАСЕТЫ НЕЙРО\фильтры керамика\new\new"
 OUT_DIR      = r"D:\ДАТАСЕТЫ НЕЙРО\фильтры керамика\new\new\runs_ae_def_new"

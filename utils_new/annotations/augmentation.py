@@ -1,14 +1,23 @@
 """Seeded augmentation plans: random choices materialized before any mutation."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-import random
 import math
+import random
+from dataclasses import dataclass
+
 import numpy as np
 
-from .model import ImageSize, AnnotationSample
-from .transforms import (Flip, Rotate90, Rotate, Shear, Crop, Resize,
-                         TransformPlan, transform_sample)
+from .model import AnnotationSample, ImageSize
+from .transforms import (
+    Crop,
+    Flip,
+    Resize,
+    Rotate,
+    Rotate90,
+    Shear,
+    TransformPlan,
+    transform_sample,
+)
 
 
 @dataclass(frozen=True)

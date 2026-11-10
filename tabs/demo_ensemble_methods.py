@@ -1,7 +1,41 @@
-from import_libs_internal import *
-from import_libs_methods_ui import setup_demo_ensemble_methods_ui
-
+import os
+import sys
 import traceback
+
+import cv2
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtGui import QPixmap
+from PyQt5.QtWidgets import (
+    QApplication,
+    QDoubleSpinBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QProgressDialog,
+)
+
+from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
+from utils.ensemble_utils import (
+    ensemble_detections,
+    extract_threshold_params,
+    get_detections_from_preset,
+)
+from utils.image_io import load_images_universal, numpy_to_qpixmap
+from utils.presets import PresetManager
+from utils.settings import settings
+from utils_ops.segmentation_ops import (
+    apply_morphology,
+    apply_threshold_method,
+    draw_selected_objects,
+    draw_yolo_annotations,
+    get_display_params,
+    segment_contours,
+    segment_min_area_rect,
+    segment_projections,
+)
+
 
 def print_flush(*args, **kwargs):
     print(*args, **kwargs)
@@ -9,13 +43,9 @@ def print_flush(*args, **kwargs):
 # ------------------------------------------------------------
 # Получение версии Ultralytics YOLO (для информационных целей)
 # ------------------------------------------------------------
-ULTRALYTICS_AVAILABLE = False
-try:
-    version = ultralytics.__version__
-    print(f"Ultralytics YOLO version: {version}")
-    ULTRALYTICS_AVAILABLE = True
-except (ImportError, AttributeError):
-    print("Не удалось определить версию YOLO (ultralytics не установлена или повреждена)")
+from importlib.util import find_spec
+
+ULTRALYTICS_AVAILABLE = find_spec('ultralytics') is not None
 
 
 class YoloInferThread(QThread):
@@ -47,6 +77,7 @@ class YoloInferThread(QThread):
         self.log("Получен сигнал остановки...")
 
     def run(self):
+        from ultralytics import YOLO
         if not ULTRALYTICS_AVAILABLE:
             self.finished_signal.emit(False, "Библиотека ultralytics не установлена.")
             return
@@ -235,6 +266,7 @@ class YoloDemoWindow(QMainWindow):
         self.log(f"Выбрано устройство: {self.device}")
 
     def resolve_device(self):
+        import torch
         if self.device == 'auto':
             return '0' if torch.cuda.is_available() else 'cpu'
         elif self.device == 'mps':

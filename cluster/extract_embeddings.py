@@ -10,9 +10,9 @@ extract_embeddings.py (с поддержкой rotation-robust TTA)
       Итог — один инвариантный к поворотам вектор на изображение.
 """
 
+import argparse
 import os
 import sys
-import argparse
 import warnings
 
 import cv2
@@ -20,7 +20,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 warnings.filterwarnings("ignore", category=UserWarning)
 

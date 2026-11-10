@@ -15,12 +15,16 @@
 Loss Inspection, кластеризация эмбеддингов) —
 в utils/dataset_audit_logic.py.
 """
-from import_libs_internal import *
-from PIL import Image
+import os
+import shutil
+
 import cv2
 import numpy as np
-import os
+from PIL import Image
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QTableWidgetItem
 
+from utils.image_io import load_annotations
 
 # ============================================================
 # Кэш яркости (модульный)

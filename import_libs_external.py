@@ -1,95 +1,150 @@
-# libs_external.py
 # -*- coding: utf-8 -*-
+"""Legacy lazy import facade.
 
-# ========== Стандартные библиотеки ==========
-import sys
-import os
-import json
-import re
-import time
-import random
-import hashlib
-import shutil
-import traceback
-import warnings
-from pathlib import Path
-from datetime import datetime
+New code imports names directly from their owning modules. Named imports here
+remain compatible; importing the facade itself does not load ML or GUI stacks.
+A legacy wildcard import necessarily resolves every public export.
+"""
+from importlib import import_module as _import_module
 
-# ========== Сторонние библиотеки ==========
-import cv2
-import torch
-import torchvision.transforms as T
-import torch.nn as nn
-import numpy as np
-import math
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import colorsys
-import yaml
-import joblib
-import albumentations as A
-import onnxruntime as ort
-from ast import literal_eval
+_EXPORTS = {
+    'A': ('albumentations', None),
+    'Figure': ('matplotlib.figure', 'Figure'),
+    'FigureCanvas': ('matplotlib.backends.backend_qt5agg', 'FigureCanvasQTAgg'),
+    'NavigationToolbar': ('matplotlib.backends.backend_qt5agg', 'NavigationToolbar2QT'),
+    'OrderedDict': ('collections', 'OrderedDict'),
+    'Path': ('pathlib', 'Path'),
+    'QAbstractItemView': ('PyQt5.QtWidgets', 'QAbstractItemView'),
+    'QAction': ('PyQt5.QtWidgets', 'QAction'),
+    'QApplication': ('PyQt5.QtWidgets', 'QApplication'),
+    'QBrush': ('PyQt5.QtGui', 'QBrush'),
+    'QButtonGroup': ('PyQt5.QtWidgets', 'QButtonGroup'),
+    'QCheckBox': ('PyQt5.QtWidgets', 'QCheckBox'),
+    'QColor': ('PyQt5.QtGui', 'QColor'),
+    'QComboBox': ('PyQt5.QtWidgets', 'QComboBox'),
+    'QCursor': ('PyQt5.QtGui', 'QCursor'),
+    'QDesktopServices': ('PyQt5.QtGui', 'QDesktopServices'),
+    'QDialog': ('PyQt5.QtWidgets', 'QDialog'),
+    'QDialogButtonBox': ('PyQt5.QtWidgets', 'QDialogButtonBox'),
+    'QDir': ('PyQt5.QtCore', 'QDir'),
+    'QDoubleSpinBox': ('PyQt5.QtWidgets', 'QDoubleSpinBox'),
+    'QFileDialog': ('PyQt5.QtWidgets', 'QFileDialog'),
+    'QFileSystemModel': ('PyQt5.QtWidgets', 'QFileSystemModel'),
+    'QFont': ('PyQt5.QtGui', 'QFont'),
+    'QFormLayout': ('PyQt5.QtWidgets', 'QFormLayout'),
+    'QFrame': ('PyQt5.QtWidgets', 'QFrame'),
+    'QGraphicsPixmapItem': ('PyQt5.QtWidgets', 'QGraphicsPixmapItem'),
+    'QGraphicsScene': ('PyQt5.QtWidgets', 'QGraphicsScene'),
+    'QGraphicsView': ('PyQt5.QtWidgets', 'QGraphicsView'),
+    'QGridLayout': ('PyQt5.QtWidgets', 'QGridLayout'),
+    'QGroupBox': ('PyQt5.QtWidgets', 'QGroupBox'),
+    'QHBoxLayout': ('PyQt5.QtWidgets', 'QHBoxLayout'),
+    'QHeaderView': ('PyQt5.QtWidgets', 'QHeaderView'),
+    'QImage': ('PyQt5.QtGui', 'QImage'),
+    'QInputDialog': ('PyQt5.QtWidgets', 'QInputDialog'),
+    'QKeySequence': ('PyQt5.QtGui', 'QKeySequence'),
+    'QLabel': ('PyQt5.QtWidgets', 'QLabel'),
+    'QLineEdit': ('PyQt5.QtWidgets', 'QLineEdit'),
+    'QListWidget': ('PyQt5.QtWidgets', 'QListWidget'),
+    'QListWidgetItem': ('PyQt5.QtWidgets', 'QListWidgetItem'),
+    'QMainWindow': ('PyQt5.QtWidgets', 'QMainWindow'),
+    'QMenu': ('PyQt5.QtWidgets', 'QMenu'),
+    'QMessageBox': ('PyQt5.QtWidgets', 'QMessageBox'),
+    'QMouseEvent': ('PyQt5.QtGui', 'QMouseEvent'),
+    'QObject': ('PyQt5.QtCore', 'QObject'),
+    'QPainter': ('PyQt5.QtGui', 'QPainter'),
+    'QPainterPath': ('PyQt5.QtGui', 'QPainterPath'),
+    'QPalette': ('PyQt5.QtGui', 'QPalette'),
+    'QPen': ('PyQt5.QtGui', 'QPen'),
+    'QPixmap': ('PyQt5.QtGui', 'QPixmap'),
+    'QPointF': ('PyQt5.QtCore', 'QPointF'),
+    'QProcess': ('PyQt5.QtCore', 'QProcess'),
+    'QProgressBar': ('PyQt5.QtWidgets', 'QProgressBar'),
+    'QProgressDialog': ('PyQt5.QtWidgets', 'QProgressDialog'),
+    'QPushButton': ('PyQt5.QtWidgets', 'QPushButton'),
+    'QRadioButton': ('PyQt5.QtWidgets', 'QRadioButton'),
+    'QRectF': ('PyQt5.QtCore', 'QRectF'),
+    'QScrollArea': ('PyQt5.QtWidgets', 'QScrollArea'),
+    'QSettings': ('PyQt5.QtCore', 'QSettings'),
+    'QShortcut': ('PyQt5.QtWidgets', 'QShortcut'),
+    'QSizePolicy': ('PyQt5.QtWidgets', 'QSizePolicy'),
+    'QSlider': ('PyQt5.QtWidgets', 'QSlider'),
+    'QSpinBox': ('PyQt5.QtWidgets', 'QSpinBox'),
+    'QSplashScreen': ('PyQt5.QtWidgets', 'QSplashScreen'),
+    'QSplitter': ('PyQt5.QtWidgets', 'QSplitter'),
+    'QStackedWidget': ('PyQt5.QtWidgets', 'QStackedWidget'),
+    'QTabWidget': ('PyQt5.QtWidgets', 'QTabWidget'),
+    'QTableWidget': ('PyQt5.QtWidgets', 'QTableWidget'),
+    'QTableWidgetItem': ('PyQt5.QtWidgets', 'QTableWidgetItem'),
+    'QTextEdit': ('PyQt5.QtWidgets', 'QTextEdit'),
+    'QThread': ('PyQt5.QtCore', 'QThread'),
+    'QTimer': ('PyQt5.QtCore', 'QTimer'),
+    'QToolBox': ('PyQt5.QtWidgets', 'QToolBox'),
+    'QToolButton': ('PyQt5.QtWidgets', 'QToolButton'),
+    'QTransform': ('PyQt5.QtGui', 'QTransform'),
+    'QTreeView': ('PyQt5.QtWidgets', 'QTreeView'),
+    'QUrl': ('PyQt5.QtCore', 'QUrl'),
+    'QVBoxLayout': ('PyQt5.QtWidgets', 'QVBoxLayout'),
+    'QWheelEvent': ('PyQt5.QtGui', 'QWheelEvent'),
+    'QWidget': ('PyQt5.QtWidgets', 'QWidget'),
+    'Qt': ('PyQt5.QtCore', 'Qt'),
+    'RandomForestRegressor': ('sklearn.ensemble', 'RandomForestRegressor'),
+    'StandardScaler': ('sklearn.preprocessing', 'StandardScaler'),
+    'T': ('torchvision.transforms', None),
+    'ThreadPoolExecutor': ('concurrent.futures', 'ThreadPoolExecutor'),
+    'YOLO': ('ultralytics', 'YOLO'),
+    'colorsys': ('colorsys', None),
+    'convert_segment_masks_to_yolo_seg': ('ultralytics.data.converter', 'convert_segment_masks_to_yolo_seg'),
+    'cv2': ('cv2', None),
+    'datetime': ('datetime', 'datetime'),
+    'find_boundaries': ('skimage.segmentation', 'find_boundaries'),
+    'hashlib': ('hashlib', None),
+    'img_as_float': ('skimage.util', 'img_as_float'),
+    'joblib': ('joblib', None),
+    'json': ('json', None),
+    'literal_eval': ('ast', 'literal_eval'),
+    'logging': ('logging', None),
+    'math': ('math', None),
+    'mean_absolute_error': ('sklearn.metrics', 'mean_absolute_error'),
+    'nn': ('torch.nn', None),
+    'np': ('numpy', None),
+    'nx': ('networkx', None),
+    'ort': ('onnxruntime', None),
+    'os': ('os', None),
+    'pd': ('pandas', None),
+    'plt': ('matplotlib.pyplot', None),
+    'pyqtSignal': ('PyQt5.QtCore', 'pyqtSignal'),
+    'queue': ('queue', None),
+    'r2_score': ('sklearn.metrics', 'r2_score'),
+    'random': ('random', None),
+    're': ('re', None),
+    'segmentation': ('skimage', 'segmentation'),
+    'shutil': ('shutil', None),
+    'slic': ('skimage.segmentation', 'slic'),
+    'sns': ('seaborn', None),
+    'sys': ('sys', None),
+    'threading': ('threading', None),
+    'time': ('time', None),
+    'torch': ('torch', None),
+    'traceback': ('traceback', None),
+    'train_test_split': ('sklearn.model_selection', 'train_test_split'),
+    'ultralytics': ('ultralytics', None),
+    'warnings': ('warnings', None),
+    'yaml': ('yaml', None),
+}
+__all__ = list(_EXPORTS)
 
 
-import threading
-import queue
-from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
-
-import logging
-
-# Ultralytics YOLO
-import ultralytics
-from ultralytics import YOLO
-from ultralytics.data.converter import convert_segment_masks_to_yolo_seg
+def __getattr__(name):
+    try:
+        module_name, attribute = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    module = _import_module(module_name)
+    value = module if attribute is None else getattr(module, attribute)
+    globals()[name] = value
+    return value
 
 
-import networkx as nx
-# Scikit-learn
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, r2_score
-from skimage import segmentation
-from skimage.segmentation import slic, find_boundaries
-from skimage.util import img_as_float
-from sklearn.preprocessing import StandardScaler
-
-
-from ast import literal_eval
-
-# ========== PyQt5 ==========
-from PyQt5.QtCore import (
-    Qt, QProcess, QTimer, QSettings, QThread, pyqtSignal, QRectF, QPointF, QObject, QDir, QUrl
-)
-from PyQt5.QtGui import (
-    QCursor, QPixmap, QPainter, QColor, QImage, QWheelEvent, QMouseEvent, QDesktopServices,
-    QTransform, QPalette, QFont, QPen, QBrush, QPainterPath, QKeySequence
-)
-
-from PyQt5.QtWidgets import (
-    QApplication, QToolButton, QMainWindow, QWidget, QFileSystemModel,
-    QRadioButton, QTreeView, QStackedWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton,
-    QLabel, QSlider, QCheckBox, QComboBox, QGroupBox, QTextEdit, QSplitter,
-    QSpinBox, QGridLayout, QSizePolicy, QListWidget, QAbstractItemView,
-    QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QProgressDialog,
-    QMenu, QAction, QGraphicsView, QSplashScreen, QProgressBar, QDoubleSpinBox,
-    QDialogButtonBox, QScrollArea, QFormLayout, QGraphicsScene, QGraphicsPixmapItem,
-    QFrame, QLineEdit, QButtonGroup, QShortcut, QToolBox
-)
-
-# ========== Matplotlib ==========
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvasQTAgg as FigureCanvas,
-    NavigationToolbar2QT as NavigationToolbar,
-)
-
-from matplotlib.figure import Figure
-
-# ========== Печать версий ==========
-print(f"OpenCV version: {cv2.__version__}")
-print(f"PyTorch version: {torch.__version__}")
-print(f"albumentations version: {A.__version__}")
-print(f"Ultralytics YOLO version: {ultralytics.__version__}")
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

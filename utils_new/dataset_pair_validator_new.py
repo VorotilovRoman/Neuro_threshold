@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """Strict YOLO-label and image/mask pair validation. Qt-free."""
 import os
+
 import cv2
 import numpy as np
+
 from utils_new.annotations import ImageSize, to_legacy
 from utils_new.dataset_files_new import _read_with_fallback, read_index_mask
-from utils_new.dataset_yolo_labels_new import read_yolo_labels
 from utils_new.dataset_image_stats_new import ImageStats
+from utils_new.dataset_yolo_labels_new import read_yolo_labels
+
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
 INPUT_FORMAT_AUTO = 'auto'
 INPUT_FORMAT_MIXED = 'mixed'

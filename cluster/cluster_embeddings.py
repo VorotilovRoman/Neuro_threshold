@@ -13,20 +13,20 @@ cluster_embeddings.py — кластеризация эмбеддингов DINO
 применялись к новым эмбеддингам.
 """
 
-import os
-import sys
+import argparse
 import csv
 import json
-import argparse
+import os
+import sys
 import warnings
-import joblib
 
-import numpy as np
 import cv2
+import joblib
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score

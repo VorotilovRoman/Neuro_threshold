@@ -1,30 +1,61 @@
 # layout_dataset.py
-from import_libs_external import *
+import os
+import sys
+import traceback
+
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import (
+    QAction,
+    QApplication,
+    QColorDialog,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QProgressDialog,
+    QSpinBox,
+    QVBoxLayout,
+)
+
+from ui_tabs.layout_dataset_ui import setup_layout_dataset_ui
 from utils.settings import settings
-from utils_ops.segmentation_ops import update_annotation_list
-from import_libs_methods_ui import setup_layout_dataset_ui
+from utils_new.dataset_catalog_new import import_coco_catalog
+from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
 
 # V20: shared dataset services; legacy utility imports are not required.
 # The UI import above is intentionally left unchanged.
 from utils_new.dataset_files_new import (
-    read_image_with_fallback, read_mask_with_fallback,
-    image_size_from_file, normalize_to_uint8, resize_to_max_side,
-    convert_to_grayscale, load_one_image_item, LazyImageCache,
+    LazyImageCache,
+    convert_to_grayscale,
+    image_size_from_file,
+    load_one_image_item,
+    normalize_to_uint8,
+    read_image_with_fallback,
+    read_mask_with_fallback,
+    resize_to_max_side,
 )
-from utils_new.dataset_yolo_labels_new import (
-    load_annotations, load_annotations_for_image,
-    save_annotations, save_annotations_for_image, canonicalize_obb_corners,
-)
-from utils_new.dataset_yaml_new import load_yolo_yaml, find_mask_for_image
 from utils_new.dataset_unet_new import (
-    load_unet_yaml_pairs, write_yolo_txt_for_unet_pairs,
+    load_unet_yaml_pairs,
+    write_yolo_txt_for_unet_pairs,
 )
-from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
-from utils_new.dataset_catalog_new import import_coco_catalog
+from utils_new.dataset_yaml_new import find_mask_for_image, load_yolo_yaml
+from utils_new.dataset_yolo_labels_new import (
+    canonicalize_obb_corners,
+    load_annotations,
+    load_annotations_for_image,
+    save_annotations,
+    save_annotations_for_image,
+)
 from utils_new.smart_view_new import numpy_to_qpixmap, set_fill_color_button_preview
-from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import QColorDialog
-
+from utils_ops.segmentation_ops import update_annotation_list
 
 
 # ============================================================
@@ -974,6 +1005,7 @@ class Labeler(QMainWindow):
     #  AUTO-LABEL (YOLO)
     # ======================================================================
     def _resolve_auto_device(self):
+        import torch
         d = self.auto_device_combo.currentText()
         if d == "auto":
             try:
@@ -991,6 +1023,7 @@ class Labeler(QMainWindow):
         return d
 
     def load_auto_model(self):
+        from ultralytics import YOLO
         path, _ = QFileDialog.getOpenFileName(
             self, "Выберите модель YOLO", "",
             "YOLO weights (*.pt *.onnx *.engine);;Все файлы (*)"
@@ -1420,7 +1453,7 @@ class Labeler(QMainWindow):
                             self.image_paths[idx])
                         if label_path:
                             try:
-                                existing = load_annotations_for_image(label_path, img_path)
+                                existing = load_annotations_for_image(label_path, self.image_paths[idx])
                             except Exception:
                                 existing = []
                         else:

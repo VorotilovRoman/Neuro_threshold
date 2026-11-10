@@ -6,11 +6,10 @@
 Используется при экспорте YOLO-датасета в выбранный subtype
 (например, всё в detect или всё в segment).
 """
-from import_libs_external import *
+import cv2
 import numpy as np
 
 from utils.image_io import canonicalize_obb_corners
-
 
 SUBTYPE_KEEP    = 'keep'
 SUBTYPE_DETECT  = 'detect'

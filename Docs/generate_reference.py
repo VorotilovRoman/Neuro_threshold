@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import ast
+import sys
 from collections import defaultdict
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / 'Docs'

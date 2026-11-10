@@ -1,24 +1,52 @@
 # dataset_analysis.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_dataset_analysis_ui
-
-
-try:
-    from dataset_analysis_ui import TrainingImageLabel
-except ImportError:
-    try:
-        from import_libs_methods_ui import TrainingImageLabel
-    except ImportError:
-        TrainingImageLabel = None
-
-from collections import Counter
-import traceback
+import io
 import os
 import shutil
 import subprocess
-import io
+import sys
 import sys as _sys
+import traceback
+from collections import Counter
+
+import cv2
 import numpy as np
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QColor, QKeySequence, QPixmap
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QScrollArea,
+    QShortcut,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui_tabs.dataset_analysis_ui import TrainingImageLabel, setup_dataset_analysis_ui
+from utils.dataset_analysis_logic import (
+    BrightnessAnalyzer,
+    ClassImbalanceAnalyzer,
+    DatasetAnalyzer,
+    FilterParams,
+    ResolutionAnalyzer,
+    TrainingResultsLoader,
+    clear_brightness_cache,
+)
+from utils.dataset_audit_logic import detect_device
+from utils.image_io import load_annotations
+from utils_new.dataset_loader_new import DatasetLoaderMixin
+from utils_new.dataset_validation_new import ImageStats, PairValidator
+from utils_ops.segmentation_ops import get_class_color
 
 
 # ============================================================
@@ -1230,8 +1258,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             QMessageBox.warning(self, "Нет данных",
                                 "Нет пар для анализа.")
             return
-        from utils.dataset_audit_logic import (
-            DuplicateDetector, LeakageChecker)
+        from utils.dataset_audit_logic import DuplicateDetector, LeakageChecker
         self._stop_requested = False
         self.btn_run_duplicates.setEnabled(False)
         self.btn_stop_duplicates.setEnabled(True)
@@ -1683,8 +1710,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             QMessageBox.warning(self, "Нет данных",
                                 "Нет пар для анализа.")
             return
-        from utils.dataset_audit_logic import (
-            ObjectDistributionHeatmap)
+        from utils.dataset_audit_logic import ObjectDistributionHeatmap
         self._stop_requested = False
         self.btn_run_heatmap.setEnabled(False)
         self.btn_stop_heatmap.setEnabled(True)
@@ -2353,8 +2379,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                     "Дождитесь.")
             return
 
-        from utils.dataset_audit_logic import (
-            EmbeddingClusterThread, CLIP_AVAILABLE)
+        from utils.dataset_audit_logic import CLIP_AVAILABLE, EmbeddingClusterThread
         if not CLIP_AVAILABLE:
             QMessageBox.warning(self, "CLIP не установлен",
                                 "pip install open_clip_torch")

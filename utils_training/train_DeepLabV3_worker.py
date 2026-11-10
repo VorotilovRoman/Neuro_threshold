@@ -95,24 +95,24 @@
 #   - class_weights автоматически на нужном device
 # ------------------------------------------------------------------------------
 
-import sys
+import argparse
+import copy
+import csv
 import io
 import json
-import argparse
 import os
 import signal
-import csv
-import copy
+import sys
 from datetime import datetime
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.transforms import functional as TF
-import numpy as np
-from PIL import Image
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(line_buffering=True)

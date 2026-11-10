@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """YOLO data.yaml discovery without wildcard/legacy imports."""
 import os
+
 import yaml
 
 _IMG_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')

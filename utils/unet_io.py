@@ -4,7 +4,6 @@
 
 Возвращает пары (img_path, mask_path) + метаданные классов.
 """
-from import_libs_external import *
 import os
 from pathlib import Path
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # test_train_worker.py
-import subprocess
 import json
 import os
+import subprocess
 import sys
 import time
 from itertools import product

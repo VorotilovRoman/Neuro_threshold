@@ -9,19 +9,37 @@ from __future__ import annotations
 from copy import deepcopy
 
 from path_setup import setup_project_path
+
 setup_project_path()
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
-    QApplication, QColorDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSlider,
-    QSpinBox, QVBoxLayout, QWidget,
+    QApplication,
+    QColorDialog,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
 from utils.settings import (
-    DEFAULT_DATASET_CLASS_PALETTE_BGR, FONT_SIZE_PX_MAX, FONT_SIZE_PX_MIN,
-    LINE_THICKNESS_PX_MAX, LINE_THICKNESS_PX_MIN, apply_theme, settings,
+    DEFAULT_DATASET_CLASS_PALETTE_BGR,
+    FONT_SIZE_PX_MAX,
+    FONT_SIZE_PX_MIN,
+    LINE_THICKNESS_PX_MAX,
+    LINE_THICKNESS_PX_MIN,
+    apply_theme,
+    settings,
 )
 
 
@@ -71,7 +89,9 @@ class SettingsWidget(QWidget):
         appearance_layout = QVBoxLayout(appearance)
         theme_row = QHBoxLayout()
         theme_row.addWidget(QLabel('Тема:'))
-        from PyQt5.QtWidgets import QComboBox  # локально, чтобы не расширять публичный API
+        from PyQt5.QtWidgets import (
+            QComboBox,  # локально, чтобы не расширять публичный API
+        )
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(['тёмная', 'светлая'])
         theme_row.addWidget(self.theme_combo, 1)

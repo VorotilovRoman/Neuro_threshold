@@ -9,15 +9,30 @@ import os
 import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QImage, QPixmap, QKeySequence
-from PyQt5.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel, QMessageBox,
-                             QPushButton, QVBoxLayout, QWidget, QFrame,
-                             QShortcut, QLineEdit, QSizePolicy)
+from PyQt5.QtGui import QImage, QKeySequence, QPixmap
+from PyQt5.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QShortcut,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from utils_new.dataset_io_new import _read_with_fallback
-from utils_new.dataset_validation_new import ImageStats, load_annotations, read_mask_with_fallback
-from utils_new.dataset_review_view import DatasetReviewGraphicsView
 from utils_new.dataset_mask_preview_new import blend_index_mask
+from utils_new.dataset_review_view import DatasetReviewGraphicsView
+from utils_new.dataset_validation_new import (
+    ImageStats,
+    load_annotations,
+    read_mask_with_fallback,
+)
 
 
 def _to_qpixmap(bgr):

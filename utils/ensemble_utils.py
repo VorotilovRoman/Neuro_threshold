@@ -1,4 +1,15 @@
-from import_libs_internal import *
+import cv2
+import numpy as np
+
+from utils.metrics_core import iou_xyxy, xyxy_to_yolo, yolo_to_xyxy
+from utils_ops.segmentation_ops import (
+    apply_morphology,
+    apply_threshold_method,
+    segment_contours,
+    segment_min_area_rect,
+    segment_projections,
+)
+
 # ========== Вспомогательные функции для вложенности ==========
 
 def contains_center(box1, box2):

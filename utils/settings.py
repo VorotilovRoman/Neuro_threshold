@@ -1,8 +1,13 @@
 # settings.py
-from import_libs_external import *
+import colorsys
+import json
+import os
 from copy import deepcopy
-from path_setup import get_project_root
 
+from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtGui import QColor, QPalette
+
+from path_setup import get_project_root
 
 # Исходные BGR-цвета классов 0..9 из utils.segmentation_ops.CLASS_COLORS.
 # Этот модуль не импортирует segmentation_ops, чтобы избежать циклического импорта.

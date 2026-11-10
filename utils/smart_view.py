@@ -1,16 +1,19 @@
 # smart_view.py
-from import_libs_internal import *
 import math
 
-from utils.settings import settings   # ← добавить
+import cv2
+import numpy as np
+from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt5.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen
+from PyQt5.QtWidgets import (
+    QFileDialog,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QMenu,
+)
 
-
-ULTRALYTICS_AVAILABLE = False
-try:
-    from ultralytics.utils.ops import xyxyxyxy2xywhr, xywhr2xyxyxyxy  # noqa: F401
-    ULTRALYTICS_AVAILABLE = True
-except (ImportError, AttributeError):
-    pass
+from utils.settings import settings  # ← добавить
 
 
 class SmartGraphicsView(QGraphicsView):

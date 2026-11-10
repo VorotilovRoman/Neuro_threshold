@@ -1,7 +1,46 @@
 # interactive_methods.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_interactive_ui
+import os
+import sys
 
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+)
+
+from ui_tabs.interactive_methods_ui import setup_interactive_ui
+from utils.image_io import (
+    LazyImageCache,
+    load_one_image_item,
+    numpy_to_qpixmap,
+    save_annotations,
+)
+from utils.presets import InteractivePresetManager
+from utils.settings import settings
+from utils_ops.interactive_ops import (
+    active_contour_segmentation,
+    grabcut_segmentation,
+    lazy_snapping,
+    onecut_segmentation,
+    random_walker_segmentation,
+    supercut_segmentation,
+    watershed_segmentation,
+)
+from utils_ops.segmentation_ops import (
+    apply_morphology,
+    draw_selected_objects,
+    format_object_for_list,
+    get_display_params,
+    segment_contours,
+    segment_min_area_rect,
+    segment_projections,
+)
 
 
 class InteractiveMethodsWindow(QMainWindow):

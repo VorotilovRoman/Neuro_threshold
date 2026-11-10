@@ -1,6 +1,51 @@
 # traditional_ml_methods.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_traditional_ml_ui
+import os
+import sys
+
+import cv2
+import joblib
+import numpy as np
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QInputDialog,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QSpinBox,
+)
+from sklearn.preprocessing import StandardScaler
+
+from ui_tabs.traditional_ml_methods_ui import setup_traditional_ml_ui
+from utils.image_io import load_images_universal, numpy_to_qpixmap, save_annotations
+from utils.presets import TraditionalMLPresetManager
+from utils.settings import settings
+from utils_ops.segmentation_ops import (
+    apply_morphology,
+    draw_selected_objects,
+    format_object_for_list,
+    get_display_params,
+    segment_contours,
+    segment_min_area_rect,
+    segment_projections,
+)
+from utils_ops.traditional_ml_ops import (
+    compute_elbow_kmeans,
+    create_superpixels,
+    extract_pixel_features,
+    extract_superpixel_features,
+    find_optimal_k_elbow,
+    predict_superpixel,
+    train_decision_tree,
+    train_kmeans,
+    train_meanshift,
+    train_random_forest,
+    train_svm,
+    train_xgboost,
+)
 
 
 class TraditionalMLWindow(QMainWindow):

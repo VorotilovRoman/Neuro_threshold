@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication, QGraphicsView
+
 from utils_new.smart_view_new import SmartGraphicsViewNew
 
 

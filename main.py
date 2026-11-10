@@ -1,6 +1,23 @@
 # main.py
-from import_libs_internal import *
+import os
+import sys
+from datetime import datetime
+
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor, QKeySequence, QPainter, QPixmap
+from PyQt5.QtWidgets import (
+    QApplication,
+    QDialog,
+    QMainWindow,
+    QMessageBox,
+    QShortcut,
+    QSplashScreen,
+    QTabWidget,
+)
+
 from main_ui import StartupDialog
+from ui.image_navigation import NavigationShortcutInstaller
+from utils.settings import apply_theme, settings
 
 COLLECT_LIBS_INFO = False
 

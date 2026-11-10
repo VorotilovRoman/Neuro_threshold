@@ -1,15 +1,30 @@
-import sys
 import os
+import sys
 import traceback
 from datetime import datetime
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QPushButton, QLabel, QSpinBox,
-                             QFileDialog, QMessageBox, QListWidget,
-                             QListWidgetItem, QAbstractItemView, QColorDialog,
-                             QComboBox, QCheckBox)
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPixmap, QImage, QColor
+
 from PIL import Image, ImageDraw, ImageFont
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QColor, QImage, QPixmap
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
 
 # ---------------------- Логирование ----------------------
 def log_event(message):

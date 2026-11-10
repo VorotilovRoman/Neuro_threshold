@@ -1,6 +1,6 @@
 # path_setup.py
-import sys
 import os
+import sys
 
 PROJECT_ROOT = None
 

@@ -11,48 +11,25 @@
 Базовая статистика (площади, классы, дисбаланс, разрешение, яркость) —
 в utils/dataset_analysis_logic.py.
 """
-from import_libs_internal import *
-from PIL import Image  # noqa: F401
-
 import hashlib
 import os
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
+from importlib.util import find_spec
 
-import numpy as np
 import cv2
+import numpy as np
+from PIL import Image  # noqa: F401
+from PyQt5.QtCore import QThread, pyqtSignal
 
+from utils.image_io import load_annotations
 
-try:
-    import imagehash
-    IMAGEHASH_AVAILABLE = True
-except ImportError:
-    IMAGEHASH_AVAILABLE = False
-
-try:
-    import torch
-    import open_clip
-    CLIP_AVAILABLE = True
-    _CLIP_BACKEND = 'open_clip'
-except ImportError:
-    try:
-        from transformers import CLIPModel, CLIPProcessor
-        CLIP_AVAILABLE = True
-        _CLIP_BACKEND = 'transformers'
-    except ImportError:
-        CLIP_AVAILABLE = False
-        _CLIP_BACKEND = None
-
-try:
-    import umap
-    UMAP_AVAILABLE = True
-except ImportError:
-    UMAP_AVAILABLE = False
-
-try:
-    import hdbscan
-    HDBSCAN_AVAILABLE = True
-except ImportError:
-    HDBSCAN_AVAILABLE = False
+IMAGEHASH_AVAILABLE = find_spec('imagehash') is not None
+CLIP_AVAILABLE = find_spec('torch') is not None and (
+    find_spec('open_clip') is not None or find_spec('transformers') is not None)
+_CLIP_BACKEND = ('open_clip' if find_spec('open_clip') is not None else
+                 'transformers' if CLIP_AVAILABLE else None)
+UMAP_AVAILABLE = find_spec('umap') is not None
+HDBSCAN_AVAILABLE = find_spec('hdbscan') is not None
 
 
 # ============================================================
@@ -102,6 +79,7 @@ class DuplicateDetector:
             return None
         try:
             with Image.open(path) as img:
+                import imagehash
                 return imagehash.phash(img.convert('RGB'),
                                         hash_size=hash_size)
         except Exception:
@@ -560,10 +538,12 @@ class EmbeddingClusterThread(QThread):
 
         try:
             if _CLIP_BACKEND == 'open_clip':
+                import open_clip
                 model, _, preprocess = \
                     open_clip.create_model_and_transforms(
                         'ViT-B-32', pretrained='laion2b_s34b_b79k')
             else:
+                from transformers import CLIPModel, CLIPProcessor
                 model = CLIPModel.from_pretrained(
                     "openai/clip-vit-base-patch32")
                 processor = CLIPProcessor.from_pretrained(
@@ -650,6 +630,7 @@ class EmbeddingClusterThread(QThread):
 
         if UMAP_AVAILABLE:
             try:
+                import umap
                 emb_2d = umap.UMAP(
                     n_neighbors=15, min_dist=0.1,
                     n_components=2, metric='cosine',
@@ -667,6 +648,7 @@ class EmbeddingClusterThread(QThread):
 
         if HDBSCAN_AVAILABLE:
             try:
+                import hdbscan
                 labels = hdbscan.HDBSCAN(
                     min_cluster_size=5, min_samples=3,
                     metric='euclidean').fit_predict(emb_2d)

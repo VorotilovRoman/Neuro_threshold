@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import sys
+import argparse
 import json
 import os
-import signal
-import argparse
-import traceback
 import shutil
+import signal
+import sys
+import traceback
 from datetime import datetime
+
 
 def log(msg):
     """Вывод сообщения с немедленным сбросом буфера."""
@@ -93,8 +94,8 @@ def main():
 
         # Импорт YOLO
         try:
-            from ultralytics import YOLO
             import ultralytics
+            from ultralytics import YOLO
             log(f"Ultralytics YOLO version: {ultralytics.__version__}")
         except ImportError as e:
             log(f"Ошибка импорта ultralytics: {e}")

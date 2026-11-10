@@ -1,4 +1,13 @@
-from import_libs_external import *
+from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class LogWidget(QWidget):

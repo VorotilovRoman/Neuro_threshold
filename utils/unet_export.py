@@ -24,7 +24,6 @@
     class_names: ["background", ...]
     mask_class_offset: 1
 """
-from import_libs_external import *
 import os
 from pathlib import Path
 
@@ -32,7 +31,7 @@ import cv2
 import numpy as np
 import yaml
 
-from utils.image_io import load_annotations, FORMAT_HINT_AUTO
+from utils.image_io import FORMAT_HINT_AUTO, load_annotations
 
 
 def _choose_dtype(max_pixel_value):

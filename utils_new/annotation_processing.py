@@ -21,6 +21,8 @@ import numpy as np
 
 from utils_new.morphology import (
     MorphologyStep,
+)
+from utils_new.morphology import (
     apply_morphology as apply_shared_morphology,
 )
 

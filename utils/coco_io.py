@@ -5,7 +5,6 @@
 Возвращает canonical-аннотации в формате приложения.
 bbox → detect; segmentation → segment (или obb, если 4 точки и похоже на прямоугольник).
 """
-from import_libs_external import *
 import json
 import os
 from pathlib import Path

@@ -8,29 +8,48 @@ signal contract for optional future tab migration.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-import json
 import hashlib
+import json
 import os
-from pathlib import Path
 import random
 import shutil
 import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import cv2
 import numpy as np
 
 from utils_new.annotations import (
-    Annotation, AnnotationSample, ImageSize, MaskEncoding,
-    Resize, Flip, TransformPlan, AugmentationPlan, transform_sample, build_augmentation_plan, apply_augmentation_plan,
-    convert_annotation, polygon_area, remap_mask_indices, mask_to_annotations,
+    Annotation,
+    AnnotationSample,
+    AugmentationPlan,
+    Flip,
+    ImageSize,
+    MaskEncoding,
+    Resize,
+    TransformPlan,
+    apply_augmentation_plan,
+    build_augmentation_plan,
+    convert_annotation,
+    mask_to_annotations,
+    polygon_area,
+    remap_mask_indices,
+    transform_sample,
+)
+from utils_new.dataset_io_new import (
+    make_index_mask,
+    read_image,
+    read_index_mask,
+    read_yolo_labels,
+    write_classes_and_yaml,
+    write_coco_split,
+    write_image,
+    write_index_mask,
+    write_yolo_labels,
 )
 from utils_new.dataset_mask_diagnostics_new import mask_statistics
-from utils_new.dataset_io_new import (
-    read_image, read_index_mask, read_yolo_labels, write_image, write_index_mask,
-    write_yolo_labels, make_index_mask, write_classes_and_yaml, write_coco_split,
-)
 
 INPUT_LABELS = 0
 INPUT_MASKS = 1
@@ -384,8 +403,10 @@ class DatasetGeneratorCoreNew:
 
     def _sanitize_input_annotations(self, annotations, image_path):
         """Repair documented topology defects and isolate unrecoverable labels."""
-        from utils_new.annotations.geometry import (GeometryError,
-                                                    sanitize_annotation_topology)
+        from utils_new.annotations.geometry import (
+            GeometryError,
+            sanitize_annotation_topology,
+        )
         result = []
         for index, ann in enumerate(annotations, 1):
             try:

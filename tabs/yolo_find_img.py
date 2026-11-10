@@ -1,6 +1,31 @@
 # yolo_find_img.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_yolo_find_img_ui
+import hashlib
+import os
+import shutil
+import sys
+
+import cv2
+from PyQt5.QtCore import QDir, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt5.QtGui import QCursor, QDesktopServices, QPixmap
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFileSystemModel,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui_tabs.yolo_find_img_ui import setup_yolo_find_img_ui
+from utils.image_io import normalize_to_uint8, read_image_with_fallback_find
 
 TEMP_THUMB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_thumbs")
 
@@ -141,6 +166,7 @@ class ScanThread(QThread):
         return percent <= m
 
     def run(self):
+        from ultralytics import YOLO
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
         all_images = []
         self.log_msg.emit(f"Сбор изображений в папке: {self.root_dir}")
@@ -375,6 +401,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Классы модели
     # --------------------------------------------------------
     def update_model_classes(self, model_path):
+        from ultralytics import YOLO
         if not model_path or not os.path.exists(model_path):
             self.class_list_widget.clear()
             self.class_list_widget.addItem("Не удалось загрузить классы")
@@ -534,6 +561,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             self.log("Запрошена остановка сканирования...")
 
     def resolve_device(self, device_str):
+        import torch
         if device_str == 'auto':
             return '0' if torch.cuda.is_available() else 'cpu'
         elif device_str == 'mps':

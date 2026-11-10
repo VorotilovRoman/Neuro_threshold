@@ -1,13 +1,23 @@
 # -*- coding: utf-8 -*-
 """YOLO/U-Net dataset metadata, indexed masks, and COCO export. Qt-free."""
 from __future__ import annotations
+
 import json
 from pathlib import Path
+
 import numpy as np
 import yaml
-from utils_new.annotations import (ImageSize, MaskEncoding, bounds, polygon_area,
-                                   rasterize_annotations, mask_to_annotations)
+
+from utils_new.annotations import (
+    ImageSize,
+    MaskEncoding,
+    bounds,
+    mask_to_annotations,
+    polygon_area,
+    rasterize_annotations,
+)
 from utils_new.dataset_files_new import write_image
+
 
 def write_index_mask(path, mask):
     if mask.ndim != 2 or not np.issubdtype(mask.dtype, np.integer):

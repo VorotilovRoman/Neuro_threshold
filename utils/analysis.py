@@ -1,6 +1,13 @@
 # analysis.py (исправленная версия для методов с малым количеством данных)
 
-from import_libs_external import *
+import os
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split
+
 from utils.metrics_core import DEFAULT_IOU_THRESHOLDS
 from utils.prepare import add_meanap_metrics
 

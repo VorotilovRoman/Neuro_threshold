@@ -1,13 +1,14 @@
-import numpy as np
-import cv2
-from skimage import segmentation, feature
-from sklearn.cluster import KMeans, MeanShift
-from sklearn.svm import SVC
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.preprocessing import StandardScaler
-import joblib
 import warnings
+
+import cv2
+import joblib
+import numpy as np
+from skimage import feature, segmentation
+from sklearn.cluster import KMeans, MeanShift
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
 
 # Для XGBoost (если установлен)
 try:

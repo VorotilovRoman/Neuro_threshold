@@ -1,6 +1,31 @@
 # layout_dataset_ui.py
-from import_libs_internal import *
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
+from ui.image_navigation import ImageNavigationWidget
+from ui.log_widget import LogWidget
+from utils_new.smart_view_new import SmartGraphicsViewNew
+from utils_ops.segmentation_ops import get_class_color
 
 
 def setup_layout_dataset_ui(parent):

@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+
 from .model import Annotation, ImageSize
 
 try:
-    from shapely.geometry import Polygon as _Polygon, box as _box
+    from shapely.geometry import Polygon as _Polygon
+    from shapely.geometry import box as _box
 except ImportError:
     _Polygon = _box = None
 

@@ -11,9 +11,32 @@ UI-слой вкладки YOLO + AE/VAE.
   • правая панель управления в QScrollArea;
   • лог с кнопкой переключения — в правой половине, под настройками.
 """
-from import_libs_internal import *
-from utils_new.dataset_review_view import DatasetReviewGraphicsView
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.image_navigation import ImageNavigationWidget
+from ui.log_widget import LogWidget
 from ui.morphology_ui import MorphologyWidget
+from utils_new.dataset_review_view import DatasetReviewGraphicsView
 
 
 def setup_yolo_ae_vae_ui(parent):

@@ -24,15 +24,16 @@ Workflow:
     3) python cluster_embeddings.py        # по эмбеддингам из *_aligned
 """
 
+import argparse
+import csv
 import os
 import sys
-import csv
-import argparse
 import warnings
 
 import cv2
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 

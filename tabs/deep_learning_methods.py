@@ -1,12 +1,50 @@
 # deep_learning_methods.py
-from import_libs_internal import *
-from import_libs_methods_ui import setup_deep_learning_methods_ui
+import os
+import sys
+
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+)
+
+from ui_tabs.deep_learning_methods_ui import setup_deep_learning_methods_ui
+from utils.image_io import (
+    LazyImageCache,
+    load_one_image_item,
+    numpy_to_qpixmap,
+    save_annotations,
+)
+from utils.presets import DeepLearningPresetManager
+from utils.settings import settings
+from utils_ops.deep_learning_ops import create_segmentor
+from utils_ops.segmentation_ops import (
+    apply_morphology,
+    draw_selected_objects,
+    format_object_for_list,
+    get_display_params,
+    segment_contours,
+    segment_min_area_rect,
+    segment_projections,
+)
 
 # Дополнительные Qt-виджеты (на случай, если не подтянуты из import_libs_internal)
 try:
     from PyQt5.QtWidgets import (
-        QFormLayout, QSpinBox, QDoubleSpinBox, QCheckBox,
-        QComboBox, QLabel, QGroupBox, QLineEdit,
+        QCheckBox,
+        QComboBox,
+        QDoubleSpinBox,
+        QFormLayout,
+        QGroupBox,
+        QLabel,
+        QLineEdit,
+        QSpinBox,
     )
 except ImportError:
     pass

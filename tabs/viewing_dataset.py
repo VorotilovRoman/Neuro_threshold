@@ -1,39 +1,73 @@
 # viewing_dataset.py
+import os
+import sys
+import traceback
 from collections import OrderedDict
 
-from import_libs_external import *
+import cv2
+import numpy as np
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QColor, QKeySequence, QPalette
+from PyQt5.QtWidgets import (
+    QAction,
+    QApplication,
+    QColorDialog,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QShortcut,
+    QSpinBox,
+    QVBoxLayout,
+)
+
+from ui_tabs.viewing_dataset_ui import setup_viewing_dataset_ui
 from utils.settings import settings
-from import_libs_methods_ui import setup_viewing_dataset_ui
+from utils_new.annotation_processing import (
+    annotation_in_crop,
+    class_id_for_annotation,
+    crop_for_annotation,
+    find_strong_overlaps,
+    mask_roi_at_image_scale,
+    normalized_annotation,
+    prepare_annotation_preview,
+)
+from utils_new.dataset_catalog_new import import_coco_catalog
+from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
 
 # V20: shared dataset services; legacy utility imports are not required.
 # The UI import above is intentionally left unchanged.
 from utils_new.dataset_files_new import (
-    read_image_with_fallback, read_mask_with_fallback,
-    image_size_from_file, normalize_to_uint8, resize_to_max_side,
-    convert_to_grayscale, load_one_image_item, LazyImageCache,
+    LazyImageCache,
+    convert_to_grayscale,
+    image_size_from_file,
+    load_one_image_item,
+    normalize_to_uint8,
+    read_image_with_fallback,
+    read_index_mask,
+    read_mask_with_fallback,
+    resize_to_max_side,
 )
-from utils_new.dataset_yolo_labels_new import (
-    load_annotations, load_annotations_for_image,
-    save_annotations, save_annotations_for_image, canonicalize_obb_corners,
-)
-from utils_new.dataset_yaml_new import load_yolo_yaml, find_mask_for_image
-from utils_new.dataset_unet_new import (
-    load_unet_yaml_pairs, write_yolo_txt_for_unet_pairs,
-)
-from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
-from utils_new.dataset_catalog_new import import_coco_catalog
-from utils_new.smart_view_new import numpy_to_qpixmap, set_fill_color_button_preview
-
-
-from PyQt5.QtGui import QColor, QKeySequence, QPalette
-from PyQt5.QtWidgets import QColorDialog, QShortcut
-from utils_new.dataset_files_new import read_index_mask
 from utils_new.dataset_mask_preview_new import blend_index_mask
-from utils_new.annotation_processing import (
-    normalized_annotation, class_id_for_annotation,
-    crop_for_annotation, annotation_in_crop,
-    find_strong_overlaps, prepare_annotation_preview, mask_roi_at_image_scale,
+from utils_new.dataset_unet_new import (
+    load_unet_yaml_pairs,
+    write_yolo_txt_for_unet_pairs,
 )
+from utils_new.dataset_yaml_new import find_mask_for_image, load_yolo_yaml
+from utils_new.dataset_yolo_labels_new import (
+    canonicalize_obb_corners,
+    load_annotations,
+    load_annotations_for_image,
+    save_annotations,
+    save_annotations_for_image,
+)
+from utils_new.smart_view_new import numpy_to_qpixmap, set_fill_color_button_preview
 
 
 # ============================================================

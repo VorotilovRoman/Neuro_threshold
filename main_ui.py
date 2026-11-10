@@ -1,4 +1,12 @@
-from import_libs_external import *
+from PyQt5.QtCore import QSettings
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+)
 
 # Список всех возможных вкладок (внутреннее имя, отображаемое название)
 ALL_TABS = [

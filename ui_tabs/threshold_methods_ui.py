@@ -1,17 +1,33 @@
 # -*- coding: utf-8 -*-
 """Qt интерфейс пороговых методов с четырьмя read-only окнами utils_new."""
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QFrame, QGridLayout, QGroupBox,
-    QHBoxLayout, QLabel, QListWidget, QPushButton, QScrollArea, QSizePolicy,
-    QSlider, QSpinBox, QSplitter, QTextEdit, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from utils_new.dataset_review_view import DatasetReviewGraphicsView
 from ui.morphology_ui import MorphologyWidget
+from utils_new.dataset_review_view import DatasetReviewGraphicsView
 
 
 def setup_threshold_ui(parent):

@@ -29,22 +29,45 @@
 
 Классовая нумерация — всегда плотная 0..N-1 (после _apply_class_mapping).
 """
-from import_libs_internal import *
+import hashlib
+import os
+import random
+import shutil
+from pathlib import Path
+
+import cv2
+import numpy as np
+import yaml
+from PyQt5.QtCore import QThread, pyqtSignal
 
 from utils.annotation_converter import (
-    convert_annotations, SUBTYPE_KEEP,
+    SUBTYPE_KEEP,
+    convert_annotations,
 )
+from utils.aug_utils import (
+    resize_image_and_annotations,
+    resize_image_and_annotations_stretch,
+)
+from utils.augmentation_base import (
+    apply_simple_augmentations,
+    apply_simple_augmentations_mask,
+)
+from utils.augmentation_random import apply_complex_augmentations
 from utils.coco_export import (
-    export_coco_from_labels, export_coco_from_masks,
-)
-from utils.unet_export import (
-    export_masks_from_annotations, write_unet_yaml,
+    export_coco_from_labels,
+    export_coco_from_masks,
 )
 from utils.image_io import (
-    load_annotations, save_annotations, read_mask_with_fallback,
-    convert_segment_masks_to_yolo_seg_manual, FORMAT_HINT_AUTO,
+    FORMAT_HINT_AUTO,
+    convert_segment_masks_to_yolo_seg_manual,
+    load_annotations,
+    read_mask_with_fallback,
+    save_annotations,
 )
-
+from utils.unet_export import (
+    export_masks_from_annotations,
+    write_unet_yaml,
+)
 
 ULTRALYTICS_AVAILABLE = False
 try:

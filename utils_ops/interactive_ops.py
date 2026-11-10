@@ -1,5 +1,7 @@
 # interactive_ops.py
-from import_libs_external import *
+import cv2
+import numpy as np
+from skimage.segmentation import find_boundaries, slic
 
 # Проверка наличия networkx для Lazy Snapping
 try:
@@ -96,8 +98,9 @@ def random_walker_segmentation(img, markers, beta=130, mode='cg_j'):
     mode: solver mode ('cg_j', 'cg_mg', 'bf')
     Returns: binary mask where markers == 1 are foreground
     """
-    from skimage.segmentation import random_walker
     import warnings
+
+    from skimage.segmentation import random_walker
 
     if len(img.shape) == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -198,8 +201,8 @@ def supercut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1
     """
     SuperCut using graph cut (max-flow/min-cut) on superpixels.
     """
-    from skimage.segmentation import slic, find_boundaries
     import networkx as nx
+    from skimage.segmentation import find_boundaries, slic
 
     # Приведение размеров к целым числам
     h, w = int(img.shape[0]), int(img.shape[1])
@@ -307,8 +310,8 @@ def onecut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1.0
     - Unary costs: data_weight * log probability from GMM color models.
     - Pairwise costs: spatial_weight * exp(-color_diff^2 / (2*color_sigma^2)).
     """
-    from skimage.segmentation import slic, find_boundaries
     import networkx as nx
+    from skimage.segmentation import find_boundaries, slic
     from sklearn.mixture import GaussianMixture
 
     h, w = int(img.shape[0]), int(img.shape[1])

@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 """COCO JSON ingestion using canonical geometry and the common YOLO writer."""
-import os
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 
-from utils_new.annotations import ImageSize, from_legacy, to_legacy, canonical_obb_points
-from utils_new.dataset_io_new import write_yolo_labels, read_image
+from utils_new.annotations import (
+    ImageSize,
+    canonical_obb_points,
+    from_legacy,
+    to_legacy,
+)
+from utils_new.dataset_io_new import read_image, write_yolo_labels
 
 
 def canonicalize_obb_corners(norm_points, width, height):

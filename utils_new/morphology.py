@@ -35,7 +35,6 @@ from typing import Mapping, Optional, Sequence, Union
 import cv2
 import numpy as np
 
-
 SUPPORTED_OPERATIONS = ("close", "open", "erode", "dilate")
 SUPPORTED_SHAPES = ("Rectangle", "Ellipse", "Cross")
 

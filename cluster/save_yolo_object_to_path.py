@@ -11,14 +11,13 @@ yolo_crop_objects.py
     python yolo_crop_objects.py -i ./images -o ./crops -m ./best.pt --class-id 0 --conf 0.9
 """
 
+import argparse
 import os
 import sys
-import argparse
 
 import cv2
 import numpy as np
 from ultralytics import YOLO
-
 
 # ============================================================================
 #  НАСТРОЙКИ ПО УМОЛЧАНИЮ

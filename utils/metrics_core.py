@@ -1,4 +1,8 @@
-from import_libs_external import *
+import re
+from ast import literal_eval
+
+import numpy as np
+import pandas as pd
 
 # ========== Константы ==========
 DEFAULT_IOU_THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]

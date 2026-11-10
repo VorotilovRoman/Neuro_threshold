@@ -12,24 +12,24 @@ test_new_image.py
     по (class_id, cluster_id).
 """
 
-import os
-import sys
+import argparse
 import csv
 import json
-import argparse
+import os
+import sys
 import warnings
 from dataclasses import dataclass, field
 
 import cv2
+import joblib
+import matplotlib
 import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-import joblib
-import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 from ultralytics import YOLO
 
 warnings.filterwarnings("ignore", category=UserWarning)

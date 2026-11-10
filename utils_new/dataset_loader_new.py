@@ -10,23 +10,39 @@ import traceback
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QFileDialog, QLabel,
-                             QListWidgetItem, QMessageBox, QTableWidgetItem)
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QFileDialog,
+    QLabel,
+    QListWidgetItem,
+    QMessageBox,
+    QTableWidgetItem,
+)
 
-from utils_new.dataset_image_stats_new import ImageStats
-from utils_new.dataset_pair_validator_new import PairValidator
-from utils_new.dataset_pair_tools_new import (
-    build_pair_display, scan_detection_pairs, scan_segmentation_pairs,
-    scan_image_only_pairs,
-)
-from utils_new.dataset_catalog_new import (
-    load_yolo_catalog, load_unet_catalog, discover_coco_json,
-    import_coco_catalog, collect_label_classes, collect_mask_classes,
-    resolve_class_name, dense_class_remap, CatalogSourceError,
-)
-from utils_new.dataset_unet_new import is_unet_yaml
-from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
 from ui.pair_validation_dialog_new import PairValidationDialog
+from utils_new.dataset_catalog_new import (
+    CatalogSourceError,
+    collect_label_classes,
+    collect_mask_classes,
+    dense_class_remap,
+    discover_coco_json,
+    import_coco_catalog,
+    load_unet_catalog,
+    load_yolo_catalog,
+    resolve_class_name,
+)
+from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
+from utils_new.dataset_image_stats_new import ImageStats
+from utils_new.dataset_pair_tools_new import (
+    build_pair_display,
+    scan_detection_pairs,
+    scan_image_only_pairs,
+    scan_segmentation_pairs,
+)
+from utils_new.dataset_pair_validator_new import PairValidator
+from utils_new.dataset_unet_new import is_unet_yaml
+
 
 class DatasetLoaderMixin:
     """

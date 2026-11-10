@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """YOLO TXT decode/encode at the boundary of the pixel-space annotation core."""
 from __future__ import annotations
+
 import math
 from pathlib import Path
+
 import cv2
 import numpy as np
+
 from utils_new.annotations import Annotation, ImageSize, from_legacy, to_legacy
 from utils_new.annotations.geometry import is_rectangle
+
 LABEL_HINTS = {'auto','mixed','detect','obb_corners','obb_xywhr','obb_xywhr_legacy','segment'}
 
 def _xywhr_points(vals, size=None):
