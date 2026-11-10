@@ -77,7 +77,8 @@ class ImagePlayer(QMainWindow):
         self._tab_widgets.append(widget)
 
         if isinstance(widget, QMainWindow):
-            content = widget.centralWidget()
+            content = widget.takeCentralWidget()
+            widget.setParent(self)
             if content is None:
                 content = widget
         else:
@@ -229,115 +230,35 @@ class ImagePlayer(QMainWindow):
 
     def _save_libs_info(self):
         """Собирает версии ключевых библиотек и записывает в libs_info.txt."""
-        libs = {}
-
-        def get_version(module, attr='__version__'):
-            try:
-                return getattr(module, attr, 'unknown')
-            except Exception:
-                return 'not available'
-
-        try:
-            import cv2
-            libs['opencv-python'] = get_version(cv2)
-        except ImportError:
-            libs['opencv-python'] = 'not installed'
-
-        try:
-            import torch
-            libs['torch'] = get_version(torch)
-        except ImportError:
-            libs['torch'] = 'not installed'
-
-        try:
-            import numpy
-            libs['numpy'] = get_version(numpy)
-        except ImportError:
-            libs['numpy'] = 'not installed'
-
-        try:
-            import albumentations as A
-            libs['albumentations'] = get_version(A)
-        except ImportError:
-            libs['albumentations'] = 'not installed'
-
-        try:
-            import ultralytics
-            libs['ultralytics'] = get_version(ultralytics)
-        except ImportError:
-            libs['ultralytics'] = 'not installed'
-
-        try:
-            import matplotlib
-            libs['matplotlib'] = get_version(matplotlib)
-        except ImportError:
-            libs['matplotlib'] = 'not installed'
-
-        try:
-            import sklearn
-            libs['scikit-learn'] = get_version(sklearn)
-        except ImportError:
-            libs['scikit-learn'] = 'not installed'
-
-        try:
-            import skimage
-            libs['scikit-image'] = get_version(skimage)
-        except ImportError:
-            libs['scikit-image'] = 'not installed'
-
-        try:
-            import PIL
-            libs['Pillow'] = get_version(PIL)
-        except ImportError:
-            libs['Pillow'] = 'not installed'
-
-        try:
-            import yaml
-            libs['PyYAML'] = get_version(yaml)
-        except ImportError:
-            libs['PyYAML'] = 'not installed'
-
-        try:
-            import onnxruntime as ort
-            libs['onnxruntime'] = getattr(ort, '__version__', 'unknown')
-        except ImportError:
-            libs['onnxruntime'] = 'not installed'
-
-        try:
-            from PyQt5.QtCore import PYQT_VERSION_STR, QT_VERSION_STR
-            libs['PyQt5'] = PYQT_VERSION_STR
-            libs['Qt'] = QT_VERSION_STR
-        except ImportError:
-            libs['PyQt5'] = 'not installed'
-
-        libs['Python'] = sys.version
-
-        extra_libs = {
-            'torchvision': 'torchvision',
-            'pandas': 'pandas',
-            'seaborn': 'seaborn',
-            'requests': 'requests',
-            'tqdm': 'tqdm',
-            'networkx': 'networkx',
-            'joblib': 'joblib',
-            'scipy': 'scipy',
-            'gradio': 'gradio',
-            'imutils': 'imutils',
-        }
-
-        for pkg_name, module_name in extra_libs.items():
-            try:
-                mod = __import__(module_name)
-                libs[pkg_name] = get_version(mod)
-            except ImportError:
-                libs[pkg_name] = 'not installed'
-
         import platform
+        from importlib.metadata import PackageNotFoundError, version
+
+        packages = (
+            'opencv-python-headless', 'opencv-python', 'torch', 'torchvision',
+            'numpy', 'albumentations', 'ultralytics', 'matplotlib', 'scikit-learn',
+            'scikit-image', 'Pillow', 'PyYAML', 'onnxruntime', 'PyQt5', 'pandas',
+            'seaborn', 'requests', 'tqdm', 'networkx', 'joblib', 'scipy',
+        )
+        libs = {}
+        for name in packages:
+            try:
+                libs[name] = version(name)
+            except PackageNotFoundError:
+                libs[name] = 'not installed'
+        libs['Python'] = sys.version
         libs['OS'] = platform.platform()
-        libs['CUDA available'] = torch.cuda.is_available()
-        if torch.cuda.is_available():
-            libs['CUDA version'] = torch.version.cuda
-            libs['GPU device'] = torch.cuda.get_device_name(0)
+        # Reporting installed versions must not load Torch during shutdown.
+        torch_module = sys.modules.get('torch')
+        if torch_module is None:
+            libs['CUDA available'] = 'not probed (torch not loaded)'
+        else:
+            try:
+                libs['CUDA available'] = torch_module.cuda.is_available()
+                if libs['CUDA available']:
+                    libs['CUDA version'] = torch_module.version.cuda
+                    libs['GPU device'] = torch_module.cuda.get_device_name(0)
+            except Exception as exc:
+                libs['CUDA available'] = f'probe failed: {exc}'
 
         lines = [f"Library versions collected at {datetime.now()}"]
         lines.append("=" * 50)
@@ -392,7 +313,8 @@ def main():
     window.show()
     window.showMaximized()
 
-    sys.exit(app.exec_())
+    from ui.application import exec_window
+    sys.exit(exec_window(window, app))
 
 
 if __name__ == "__main__":

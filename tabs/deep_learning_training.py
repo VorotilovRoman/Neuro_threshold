@@ -1,3 +1,11 @@
+
+# Allow both `python -m tabs.<name>` and direct execution from any directory.
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
 # deep_learning_training.py
 import json
 import os
@@ -11,6 +19,7 @@ from importlib.util import find_spec
 from PyQt5.QtCore import QProcess
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 
+from path_setup import get_project_root
 from ui_tabs.deep_learning_training_ui import setup_deep_learning_training_ui
 
 ULTRALYTICS_AVAILABLE = find_spec('ultralytics') is not None
@@ -166,6 +175,7 @@ class YoloTrainWindow(QMainWindow):
         self.log("=" * 30)
 
         self.train_process = QProcess()
+        self.train_process.setWorkingDirectory(get_project_root())
         self.train_process.setProcessChannelMode(QProcess.MergedChannels)
         self.train_process.readyReadStandardOutput.connect(self._on_yolo_output)
         self.train_process.finished.connect(self._on_yolo_finished)
@@ -364,6 +374,7 @@ class YoloTrainWindow(QMainWindow):
 
         # --- 3. Запуск процесса ---
         self.unet_process = QProcess()
+        self.unet_process.setWorkingDirectory(get_project_root())
         self.unet_process.setProcessChannelMode(QProcess.MergedChannels)
         self.unet_process.readyReadStandardOutput.connect(self._on_unet_output)
         self.unet_process.finished.connect(self._on_unet_finished)
@@ -594,6 +605,7 @@ class YoloTrainWindow(QMainWindow):
 
         # --- 4. Запуск процесса ---
         self.deeplab_process = QProcess()
+        self.deeplab_process.setWorkingDirectory(get_project_root())
         self.deeplab_process.setProcessChannelMode(QProcess.MergedChannels)
         self.deeplab_process.readyReadStandardOutput.connect(self._on_deeplab_output)
         self.deeplab_process.finished.connect(self._on_deeplab_finished)
@@ -765,4 +777,5 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = YoloTrainWindow()
     window.show()
-    sys.exit(app.exec_())
+    from ui.application import exec_window
+    sys.exit(exec_window(window, app))

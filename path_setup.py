@@ -1,24 +1,17 @@
-# path_setup.py
-import os
+"""Stable project paths, independent of the process working directory."""
 import sys
+from pathlib import Path
 
-PROJECT_ROOT = None
+PROJECT_ROOT = str(Path(__file__).resolve().parent)
+
 
 def setup_project_path():
-    global PROJECT_ROOT
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    root = current_dir
-    while root != os.path.dirname(root):
-        if os.path.exists(os.path.join(root, 'main.py')):
-            break
-        root = os.path.dirname(root)
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    PROJECT_ROOT = root
-    return root
+    """Explicit compatibility helper; normal module imports need no mutation."""
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
+    return PROJECT_ROOT
+
 
 def get_project_root():
-    global PROJECT_ROOT
-    if PROJECT_ROOT is None:
-        return setup_project_path()
+    """Return the repository root without changing the import search path."""
     return PROJECT_ROOT

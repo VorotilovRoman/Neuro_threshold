@@ -1,3 +1,11 @@
+
+# Allow both `python -m tabs.<name>` and direct execution from any directory.
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
 # gradient_methods.py
 import json
 import os
@@ -831,4 +839,5 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = GradientMethodsWindow()
     window.show()
-    sys.exit(app.exec_())
+    from ui.application import exec_window
+    sys.exit(exec_window(window, app))

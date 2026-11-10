@@ -74,12 +74,6 @@ except ImportError:
     print("Предупреждение: PyYAML не установлен. Параметры будут сохранены в JSON.")
 
 # Попытка импорта segmentation_models_pytorch
-try:
-    import segmentation_models_pytorch as smp
-except ImportError:
-    print("Ошибка: не установлена библиотека 'segmentation-models-pytorch'")
-    print("Установите: pip install segmentation-models-pytorch")
-    sys.exit(1)
 
 # ========== Глобальные конфигурации ==========
 DECODER_CHANNELS = (256, 128, 64, 32, 16)  # каналы декодера U-Net
@@ -337,6 +331,7 @@ class SegmentationDataset(Dataset):
 
 # ---------- Функции потерь (поддержка бинарной и многоклассовой) ----------
 def get_loss_function(loss_name, num_classes=1):
+    import segmentation_models_pytorch as smp
     loss_name = loss_name.lower().replace(' ', '')
     if num_classes > 1:
         # Многоклассовый режим
@@ -872,6 +867,7 @@ def main():
     parser.add_argument('--params', type=str, help='JSON-строка с параметрами')
     parser.add_argument('--params_file', type=str, help='Путь к JSON-файлу с параметрами')
     args = parser.parse_args()
+    import segmentation_models_pytorch as smp
 
     log("WORKER STARTED")
 

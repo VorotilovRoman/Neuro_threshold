@@ -4,6 +4,14 @@
 Поддерживается legacy API ThresholdWindow для автоподбора и пресетов.
 Графические окна read-only; векторная разметка рисуется поверх базового QPixmap.
 """
+
+# Allow both `python -m tabs.<name>` and direct execution from any directory.
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
 import json
 import os
 import sys
@@ -1036,4 +1044,5 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = ThresholdWindow()
     window.show()
-    sys.exit(app.exec_())
+    from ui.application import exec_window
+    sys.exit(exec_window(window, app))

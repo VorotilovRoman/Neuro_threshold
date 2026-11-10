@@ -145,12 +145,6 @@ try:
 except ImportError:
     print("Предупреждение: PyYAML не установлен. Параметры будут сохранены в JSON.")
 
-try:
-    import segmentation_models_pytorch as smp
-except ImportError:
-    print("Ошибка: не установлена библиотека 'segmentation-models-pytorch'")
-    print("Установите: pip install segmentation-models-pytorch")
-    sys.exit(1)
 
 # ========== Глобальные конфигурации ==========
 NUM_WORKERS_DEFAULT = 4
@@ -472,6 +466,7 @@ def get_loss_function(loss_name, num_classes, ignore_index=None,
     """
     Патч 1: weights_tensor создаётся на нужном устройстве (device).
     """
+    import segmentation_models_pytorch as smp
     loss_weights = loss_weights or {'ce': 1.0, 'dice': 1.0, 'focal': 0.0}
 
     weights_tensor = None
@@ -1018,6 +1013,7 @@ def main():
     parser.add_argument('--params', type=str)
     parser.add_argument('--params_file', type=str)
     args = parser.parse_args()
+    import segmentation_models_pytorch as smp
 
     log("WORKER STARTED (DeepLabV3 / DeepLabV3+)")
 
