@@ -471,4 +471,5 @@ if __name__ == "__main__":
     window = CollageApp()
     window.show()
     log_event("Главное окно показано")
-    sys.exit(app.exec_())
+    from ui.application import exec_window
+    sys.exit(exec_window(window, app))

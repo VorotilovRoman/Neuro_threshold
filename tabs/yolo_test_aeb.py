@@ -589,6 +589,8 @@ class YoloInspectWindow(QMainWindow):
         self._load_yolo_model_from_path(path)
 
     def _load_yolo_model_from_path(self, path):
+        from runtime_policy import configure_ultralytics
+        configure_ultralytics()
         from ultralytics import YOLO
         if not path or not os.path.isfile(path):
             self.log(f"[YOLO] Файл не найден: {path!r}")

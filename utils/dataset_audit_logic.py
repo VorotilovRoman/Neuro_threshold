@@ -293,6 +293,8 @@ class LossInspectionThread(QThread):
         self.log_signal.emit(
             f"[LossInspection] старт (device: {self.device})")
         try:
+            from runtime_policy import configure_ultralytics
+            configure_ultralytics()
             from ultralytics import YOLO
         except ImportError:
             self.finished_signal.emit({

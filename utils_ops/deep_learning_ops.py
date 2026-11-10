@@ -712,6 +712,8 @@ class YOLOSegmentor(BaseSegmentor):
     """
     def load(self, model_path=None):
         try:
+            from runtime_policy import configure_ultralytics
+            configure_ultralytics()
             from ultralytics import YOLO
         except ImportError:
             raise ImportError("ultralytics is required for YOLO")

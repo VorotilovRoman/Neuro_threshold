@@ -64,10 +64,7 @@ assert IMG_H % 16 == 0 and IMG_W % 16 == 0
 assert COLOR_MODE in ("color", "grayscale")
 assert MODEL_TYPE in ("ae", "vae")
 
-os.makedirs(OUT_DIR, exist_ok=True)
-random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED)
+
 
 
 # ------------------ SSIM Loss ------------------
@@ -373,6 +370,10 @@ def evaluate(model, loader, criterion_mse, criterion_ssim, model_type, device, b
 
 
 def main():
+    os.makedirs(OUT_DIR, exist_ok=True)
+    random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
     print(f"{'='*60}")
     print(f"Конфиг:")
     print(f"  MODEL_TYPE     = {MODEL_TYPE}"

@@ -61,6 +61,8 @@ class YoloTrainWindow(QMainWindow):
             self.log("⚠️ Библиотека ultralytics не установлена, невозможно определить параметры модели")
             return
         try:
+            from runtime_policy import configure_ultralytics
+            configure_ultralytics()
             from ultralytics import YOLO
             tmp_model = YOLO(model_path)
             task = getattr(tmp_model, 'task', 'unknown')

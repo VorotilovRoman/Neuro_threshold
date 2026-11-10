@@ -15,8 +15,8 @@ FACADES = {'import_libs_external', 'import_libs_internal', 'import_libs_methods_
 def python_sources():
     # Only project sources, never virtual environments or generated output.
     import subprocess
-    paths = subprocess.check_output(['git', 'ls-files', '-z', '*.py'], cwd=ROOT, text=True)
-    return [ROOT / p for p in paths.rstrip('\0').split('\0') if not p.startswith('Docs/')]
+    paths = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '*.py'], cwd=ROOT, text=True)
+    return [ROOT / p for p in sorted(set(paths.rstrip('\0').split('\0'))) if not p.startswith('Docs/')]
 
 
 def eager_imports(nodes):
@@ -79,6 +79,24 @@ class ArchitectureTests(unittest.TestCase):
         for name in graph:
             visit(name, [])
 
+    def test_legacy_scripts_defer_mutation_until_main(self):
+        paths = [ROOT / 'rename_data.py', *(ROOT / 'utils_aeb').glob('auto-*.py')]
+        forbidden = ('os.makedirs', 'random.seed', 'np.random.seed', 'torch.manual_seed',
+                     'torch.cuda.manual_seed_all')
+        def calls(nodes):
+            for node in nodes:
+                if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                    continue
+                if isinstance(node, ast.If) and '__name__' in ast.unparse(node.test):
+                    continue
+                if isinstance(node, ast.Call):
+                    yield ast.unparse(node.func)
+                yield from calls(list(ast.iter_child_nodes(node)))
+        for path in paths:
+            with self.subTest(path=path.name):
+                used = set(calls(ast.parse(path.read_text()).body))
+                self.assertFalse(used & set(forbidden), used & set(forbidden))
+
     def test_legacy_facades_are_lazy(self):
         self.run_python('''import importlib, sys
 for name in ('import_libs_external', 'import_libs_internal', 'import_libs_methods_ui'):
@@ -105,6 +123,7 @@ import utils.smart_view
 import utils.augmentation_base
 import utils.augmentation_random
 import utils.presets
+import utils.DatasetGenerator
 import utils.settings
 import main_ui
 import tabs.threshold_methods

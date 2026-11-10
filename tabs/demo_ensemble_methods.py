@@ -85,6 +85,8 @@ class YoloInferThread(QThread):
         self.log("Получен сигнал остановки...")
 
     def run(self):
+        from runtime_policy import configure_ultralytics
+        configure_ultralytics()
         from ultralytics import YOLO
         if not ULTRALYTICS_AVAILABLE:
             self.finished_signal.emit(False, "Библиотека ultralytics не установлена.")

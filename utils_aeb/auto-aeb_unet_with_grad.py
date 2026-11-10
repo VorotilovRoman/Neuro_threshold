@@ -107,13 +107,7 @@ if USE_GAN and MODEL_TYPE == "vae" and BETA_VAE_TARGET > 0.5:
     print(f"[WARN] USE_GAN=True и BETA_VAE_TARGET={BETA_VAE_TARGET} > 0.5 — "
           f"GAN и KL могут конфликтовать. Рекомендуется β ≤ 0.3 или MODEL_TYPE='ae'.")
 
-os.makedirs(OUT_DIR, exist_ok=True)
-if USE_EDGE_CHANNEL:
-    os.makedirs(EDGE_CACHE_DIR, exist_ok=True)
 
-random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED)
 
 
 # ================== РЁБРА / МЕДИАНА ==================
@@ -760,6 +754,13 @@ def evaluate(model, loader, criterion_l1, criterion_grad, criterion_ssim,
 
 # ================== MAIN ==================
 def main():
+    os.makedirs(OUT_DIR, exist_ok=True)
+    if USE_EDGE_CHANNEL:
+        os.makedirs(EDGE_CACHE_DIR, exist_ok=True)
+
+    random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
     print("=" * 60)
     print("Конфиг:")
     print(f"  MODEL_TYPE        = {MODEL_TYPE}"

@@ -11,12 +11,22 @@ yolo_crop_objects.py
     python yolo_crop_objects.py -i ./images -o ./crops -m ./best.pt --class-id 0 --conf 0.9
 """
 
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
+
 import argparse
 import os
 import sys
 
 import cv2
 import numpy as np
+
+from runtime_policy import configure_ultralytics
+
+configure_ultralytics()
 from ultralytics import YOLO
 
 # ============================================================================

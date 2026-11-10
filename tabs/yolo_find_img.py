@@ -174,6 +174,8 @@ class ScanThread(QThread):
         return percent <= m
 
     def run(self):
+        from runtime_policy import configure_ultralytics
+        configure_ultralytics()
         from ultralytics import YOLO
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
         all_images = []
@@ -409,6 +411,8 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Классы модели
     # --------------------------------------------------------
     def update_model_classes(self, model_path):
+        from runtime_policy import configure_ultralytics
+        configure_ultralytics()
         from ultralytics import YOLO
         if not model_path or not os.path.exists(model_path):
             self.class_list_widget.clear()

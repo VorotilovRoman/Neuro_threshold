@@ -158,6 +158,8 @@ class YoloValThread(QThread):
 
     def run(self):
         try:
+            from runtime_policy import configure_ultralytics
+            configure_ultralytics()
             from ultralytics import YOLO
             from ultralytics.utils import LOGGER
         except ImportError:
@@ -1989,6 +1991,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 and self._audit_model_cache_path == path):
             return self._audit_model_cache
         try:
+            from runtime_policy import configure_ultralytics
+            configure_ultralytics()
             from ultralytics import YOLO
             m = YOLO(path)
             if self._device.startswith('cuda'):

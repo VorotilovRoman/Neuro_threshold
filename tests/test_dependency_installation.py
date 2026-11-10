@@ -1,6 +1,8 @@
 """Checks for the installer policy without mutating the test environment."""
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import dependency_health
@@ -30,6 +32,7 @@ class InstallationTests(unittest.TestCase):
         result = subprocess.CompletedProcess([], 1, output, '')
         with patch.object(dependency_health, 'installed_opencv',
                           return_value={'opencv-python-headless': '4.13.0.92'}), \
+                patch.object(dependency_health, 'direct_requirement_errors', return_value=[]), \
                 patch.object(dependency_health.subprocess, 'run', return_value=result):
             errors, notes = dependency_health.check_environment()
         self.assertEqual(len(errors), 1)
@@ -42,6 +45,15 @@ class InstallationTests(unittest.TestCase):
                 patch.object(install, 'normalize_opencv') as normalize:
             self.assertEqual(install.main([]), 1)
         normalize.assert_not_called()
+
+    def test_direct_pin_check_accepts_local_torch_builds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            requirements = Path(directory) / 'requirements.txt'
+            requirements.write_text('torch==2.11.0\n')
+            with patch.object(dependency_health.metadata, 'version', return_value='2.11.0+cpu'):
+                self.assertEqual(dependency_health.direct_requirement_errors(requirements), [])
+            with patch.object(dependency_health.metadata, 'version', return_value='2.12.0+cpu'):
+                self.assertEqual(len(dependency_health.direct_requirement_errors(requirements)), 1)
 
     def test_cpu_and_gpu_pairs_are_explicit(self):
         for backend in install.TORCH_PROFILES:

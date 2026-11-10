@@ -12,6 +12,12 @@ test_new_image.py
     по (class_id, cluster_id).
 """
 
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
+
 import argparse
 import csv
 import json
@@ -30,6 +36,10 @@ from PIL import Image
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+from runtime_policy import configure_ultralytics
+
+configure_ultralytics()
 from ultralytics import YOLO
 
 warnings.filterwarnings("ignore", category=UserWarning)

@@ -33,6 +33,7 @@ import hashlib
 import os
 import random
 import shutil
+from importlib.util import find_spec
 from pathlib import Path
 
 import cv2
@@ -69,13 +70,7 @@ from utils.unet_export import (
     write_unet_yaml,
 )
 
-ULTRALYTICS_AVAILABLE = False
-try:
-    import ultralytics
-    print(f"Ultralytics YOLO version: {ultralytics.__version__}")
-    ULTRALYTICS_AVAILABLE = True
-except (ImportError, AttributeError):
-    print("Не удалось определить версию YOLO (ultralytics не установлена или повреждена)")
+ULTRALYTICS_AVAILABLE = find_spec('ultralytics') is not None
 
 
 # Значения input_type — синхронизированы с UI

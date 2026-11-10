@@ -25,13 +25,6 @@ import sys
 
 from PIL import Image
 
-try:
-    from pascal_voc_writer import Writer
-except ImportError:
-    print("Ошибка: библиотека 'pascal-voc-writer' не установлена.")
-    print("Установите: pip install pascal-voc-writer")
-    sys.exit(1)
-
 YAML_AVAILABLE = False
 try:
     import yaml
@@ -73,6 +66,7 @@ def convert_yolo_txt_to_voc_xml(txt_path, img_path, class_names, output_xml_path
     class_names: список имён классов (индекс = id)
     output_xml_path: куда сохранить .xml
     """
+    from pascal_voc_writer import Writer
     with Image.open(img_path) as img:
         w, h = img.size
 

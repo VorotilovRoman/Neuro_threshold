@@ -104,3 +104,10 @@ QApplication, без зависимости от порядка finalization Pyt
 загрузила NumPy, OpenCV, Torch, torchvision, Ultralytics, ONNX Runtime,
 Albumentations, PyQt5. Единственное сообщение pip check — явно описанное
 требование Ultralytics к desktop-дистрибутиву. Пять тестов установщика прошли.
+
+Дополнение финального аудита: runtime_policy запрещает AutoInstall Ultralytics
+до его загрузки и при уже импортированном backend. Проверка отсутствующего
+backend подтверждает, что subprocess/pip не вызывается. Старые AE/VAE scripts
+больше не создают каталоги и не меняют seed при импорте; rename_data требует
+явную CLI-папку; yolo2voc --help работает без pascal-voc-writer. Полная suite
+содержит 19 успешно пройденных тестов, включая обработку данных.

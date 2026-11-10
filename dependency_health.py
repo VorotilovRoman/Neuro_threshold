@@ -3,8 +3,10 @@ import argparse
 import importlib
 import importlib.metadata as metadata
 import json
+import re
 import subprocess
 import sys
+from pathlib import Path
 
 SELECTED_OPENCV = 'opencv-python-headless'
 OPENCV_PROVIDERS = (
@@ -23,6 +25,26 @@ def installed_opencv():
     return versions
 
 
+def direct_requirement_errors(requirements_file=None):
+    """Validate the declared direct pins, accepting local Torch build suffixes."""
+    requirements_file = requirements_file or Path(__file__).with_name('requirements.txt')
+    errors = []
+    for line in requirements_file.read_text(encoding='utf-8').splitlines():
+        match = re.fullmatch(r'([A-Za-z0-9_.-]+)==([^\s#]+)', line.strip())
+        if not match:
+            continue
+        name, expected = match.groups()
+        try:
+            actual = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            errors.append(f'{name}: required {expected}, not installed')
+            continue
+        comparable = actual.split('+')[0] if name in {'torch', 'torchvision'} else actual
+        if comparable != expected:
+            errors.append(f'{name}: expected {expected}, installed {actual}')
+    return errors
+
+
 def check_environment():
     """Return errors and explicitly allowed metadata exceptions.
 
@@ -31,7 +53,7 @@ def check_environment():
     pip check quiet: their shared files would become ambiguous again.
     """
     providers = installed_opencv()
-    errors = []
+    errors = direct_requirement_errors()
     notes = []
     if set(providers) != {SELECTED_OPENCV}:
         errors.append('Expected only opencv-python-headless; found: ' + repr(providers))
@@ -67,6 +89,9 @@ def main(argv=None):
         for name in ('numpy', 'cv2', 'torch', 'torchvision', 'ultralytics',
                      'onnxruntime', 'albumentations', 'PyQt5.QtCore'):
             try:
+                if name == 'ultralytics':
+                    from runtime_policy import configure_ultralytics
+                    configure_ultralytics()
                 module = importlib.import_module(name)
                 version = getattr(module, '__version__', getattr(module, 'QT_VERSION_STR', 'unknown'))
                 print(name, version, getattr(module, '__file__', 'built-in'))

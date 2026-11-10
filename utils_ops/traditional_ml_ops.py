@@ -6,7 +6,6 @@ import numpy as np
 from skimage import feature, segmentation
 from sklearn.cluster import KMeans, MeanShift
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 

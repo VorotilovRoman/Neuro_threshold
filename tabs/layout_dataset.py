@@ -1031,6 +1031,8 @@ class Labeler(QMainWindow):
         return d
 
     def load_auto_model(self):
+        from runtime_policy import configure_ultralytics
+        configure_ultralytics()
         from ultralytics import YOLO
         path, _ = QFileDialog.getOpenFileName(
             self, "Выберите модель YOLO", "",

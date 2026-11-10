@@ -310,6 +310,9 @@ def __getattr__(name):
         module_name, attribute = _EXPORTS[name]
     except KeyError:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    if module_name.split('.')[0] == 'ultralytics':
+        from runtime_policy import configure_ultralytics
+        configure_ultralytics()
     module = _import_module(module_name)
     value = module if attribute is None else getattr(module, attribute)
     globals()[name] = value

@@ -91,14 +91,35 @@ QMessageBox.critical = fail
                 with self.subTest(case=case):
                     self.assertEqual(status, 0, output)
 
+    def test_module_cache_and_no_ultralytics_autoinstall(self):
+        status, output = self.run_python(['-c', """
+import importlib, cv2, torch
+original = cv2
+# Also cover a caller who imported Ultralytics before application policy.
+import ultralytics
+from runtime_policy import configure_ultralytics
+configure_ultralytics()
+from ultralytics.utils import checks
+from unittest.mock import patch
+assert not checks.AUTOINSTALL
+with patch.object(checks.subprocess, 'check_output') as installer:
+    checks.check_requirements('neuro_architecture_missing_backend_12345==0')
+    installer.assert_not_called()
+for _ in range(10):
+    assert importlib.import_module('cv2') is original
+    assert importlib.import_module('torch') is torch
+assert ultralytics.utils.patches.cv2 is original
+"""])
+        self.assertEqual(status, 0, output)
+
     def test_worker_help_without_qt_or_training(self):
         for name in ('train_yolo_worker.py', 'train_unet_worker.py',
-                     'train_unet_worker_рабочий.py', 'train_DeepLabV3_worker.py'):
+                     'train_unet_worker_рабочий.py', 'train_DeepLabV3_worker.py', 'yolo2voc.py'):
             with self.subTest(worker=name):
                 path = ROOT / 'utils_training' / name
                 status, output = self.run_python([str(path), '--help'], self.temp.name)
                 self.assertEqual(status, 0, output)
-                self.assertIn('--params', output)
+                self.assertIn('--yaml' if name == 'yolo2voc.py' else '--params', output)
 
 
 if __name__ == '__main__':

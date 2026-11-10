@@ -1,3 +1,9 @@
+
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import argparse
@@ -94,6 +100,8 @@ def main():
 
         # Импорт YOLO
         try:
+            from runtime_policy import configure_ultralytics
+            configure_ultralytics()
             import ultralytics
             from ultralytics import YOLO
             log(f"Ultralytics YOLO version: {ultralytics.__version__}")
