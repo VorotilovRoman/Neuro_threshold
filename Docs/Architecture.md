@@ -120,3 +120,12 @@ flowchart LR
 backend до загрузки YOLO, в том числе при ранее импортированном Ultralytics.
 Эта политика применяется также в workers, CLI и старых фасадах. Устанавливать
 дополнительные backend следует через install.py, а не во время инференса.
+
+## Синхронизация с master 5043de7
+
+Редактор и просмотр используют общие build_label_save_plan и
+format_label_save_confirmation из dataset_yolo_labels_new. Карта чтения
+_yaml_label_map отделена от _save_label_map; build_yolo_save_target_map
+из dataset_yaml_new определяет канонический путь сохранения по split YAML.
+Новые helpers не зависят от Qt. При объединении сохранены явные импорты,
+автономные точки входа, runtime policy и общий Qt lifecycle ветки work.

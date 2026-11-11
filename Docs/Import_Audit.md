@@ -2,11 +2,11 @@
 
 [План](Import_Architecture_Plan.md) · [Архитектура](Architecture.md) · [Установка](Dependencies.md)
 
-Проверено 136 Python-файлов: 131 прикладной модуль, четыре файла тестов и генератор документации. Все прикладные модули импортированы первыми в отдельных процессах. Переименование файлов, обучение и загрузка весов при аудите не запускались.
+Проверено 137 Python-файлов: 131 прикладной модуль, пять файлов тестов и генератор документации. Все прикладные модули импортированы первыми в отдельных процессах. Переименование файлов, обучение и загрузка весов при аудите не запускались.
 
 ## Результаты
 
-- Все 21 тест полной suite прошли в Python 3.12 / Linux / Torch CPU.
+- Все 21 тест прежней полной suite и четыре регрессии слияния (25 суммарно) прошли в Python 3.12 / Linux / Torch CPU.
 - AST/компиляция и Ruff F821/F822/F823/F403/F405 прошли для всех Python-файлов.
 - В eager-графе локальных импортов нет циклов; wildcard и внутреннее использование import_libs_* отсутствуют.
 - Все 15 вкладок импортируются по одной и в обоих порядках без main; 30 запусков direct/module прошли.
@@ -70,6 +70,7 @@ python Docs/generate_reference.py
 | [tests/test_dependency_installation.py](../tests/test_dependency_installation.py) | Импорт unittest и выполнение полной suite |
 | [tests/test_import_architecture.py](../tests/test_import_architecture.py) | Импорт unittest и выполнение полной suite |
 | [tests/test_processing_smoke.py](../tests/test_processing_smoke.py) | Импорт unittest и выполнение полной suite |
+| [tests/test_label_save_merge.py](../tests/test_label_save_merge.py) | Четыре проверки сохранения после слияния master |
 | [tests/test_runtime_imports.py](../tests/test_runtime_imports.py) | Импорт unittest и выполнение полной suite |
 | [ui/DL_predict_settings.py](../ui/DL_predict_settings.py) | Независимый импорт — OK; AST/компиляция — OK |
 | [ui/DL_train_settings_base.py](../ui/DL_train_settings_base.py) | Независимый импорт — OK; AST/компиляция — OK |
@@ -179,3 +180,9 @@ CUDA/MPS, полное обучение, инференс с реальными 
 встречные требования Ultralytics и Albumentations/albucore, добавлены две
 регрессии ремонта единственного wheel (повреждённые файлы/неверная версия).
 Сравнение и источники: [OpenCV_Decision.md](OpenCV_Decision.md).
+
+Синхронизация с master `5043de7`: конфликты явных импортов разрешены без
+возврата агрегаторов. Проверены канонические YAML-пути и вложенность, коллизии
+TXT, подсчёт перезаписей и предупреждение U-Net; обе вкладки проверены при
+отказе/согласии и Save All с непрочитанной записью. Новые проверки находятся
+в [tests/test_label_save_merge.py](../tests/test_label_save_merge.py).

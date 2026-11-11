@@ -4,7 +4,7 @@
 
 Автоматическое приложение: одинаковые AST функций/методов в разных файлах, от 9 строк исходника. Имя функции, docstring и номера строк игнорируются; аргументы и тело сохраняются. Сигнатуры и окружающие импорты проверяйте перед объединением. Это не поиск похожих алгоритмов и не доказательство взаимозаменяемости классов.
 
-Групп совпадений: **145**.
+Групп совпадений: **147**.
 
 ## 1. mouseMoveEvent
 
@@ -135,8 +135,8 @@
 
 ## 26. _validate_unified_annotation
 
-- [tabs/layout_dataset.py:72](../tabs/layout_dataset.py#L72) — `_validate_unified_annotation`, 40 строк
-- [tabs/viewing_dataset.py:84](../tabs/viewing_dataset.py#L84) — `_validate_unified_annotation`, 40 строк
+- [tabs/layout_dataset.py:78](../tabs/layout_dataset.py#L78) — `_validate_unified_annotation`, 40 строк
+- [tabs/viewing_dataset.py:90](../tabs/viewing_dataset.py#L90) — `_validate_unified_annotation`, 40 строк
 
 ## 27. detect_annotation_type
 
@@ -241,25 +241,25 @@
 - [utils/smart_view.py:1273](../utils/smart_view.py#L1273) — `mouseReleaseEvent`, 27 строк
 - [utils_new/smart_view_new.py:1535](../utils_new/smart_view_new.py#L1535) — `mouseReleaseEvent`, 27 строк
 
-## 47. _load_bg
+## 47. _load_coco_into_labeler
+
+- [tabs/layout_dataset.py:664](../tabs/layout_dataset.py#L664) — `_load_coco_into_labeler`, 26 строк
+- [tabs/viewing_dataset.py:1556](../tabs/viewing_dataset.py#L1556) — `_load_coco_into_viewer`, 25 строк
+
+## 48. _load_bg
 
 - [utils/image_io.py:1045](../utils/image_io.py#L1045) — `_load_bg`, 26 строк
 - [utils_new/dataset_files_new.py:266](../utils_new/dataset_files_new.py#L266) — `_load_bg`, 26 строк
 
-## 48. _apply_segment_change
+## 49. _apply_segment_change
 
 - [utils/smart_view.py:1441](../utils/smart_view.py#L1441) — `_apply_segment_change`, 26 строк
 - [utils_new/smart_view_new.py:1703](../utils_new/smart_view_new.py#L1703) — `_apply_segment_change`, 26 строк
 
-## 49. _default_settings
+## 50. _default_settings
 
 - [utils_auto_research/threshold_auto_research.py:156](../utils_auto_research/threshold_auto_research.py#L156) — `_default_settings`, 26 строк
 - [utils_auto_research/threshold_auto_settings_dialog.py:52](../utils_auto_research/threshold_auto_settings_dialog.py#L52) — `_default_settings`, 25 строк
-
-## 50. _load_coco_into_labeler
-
-- [tabs/layout_dataset.py:640](../tabs/layout_dataset.py#L640) — `_load_coco_into_labeler`, 24 строк
-- [tabs/viewing_dataset.py:1503](../tabs/viewing_dataset.py#L1503) — `_load_coco_into_viewer`, 23 строк
 
 ## 51. _open_pair_validation
 
@@ -306,8 +306,8 @@
 
 ## 59. _detect_annotation_to_obb
 
-- [tabs/layout_dataset.py:117](../tabs/layout_dataset.py#L117) — `_detect_annotation_to_obb`, 22 строк
-- [tabs/viewing_dataset.py:129](../tabs/viewing_dataset.py#L129) — `_detect_annotation_to_obb`, 22 строк
+- [tabs/layout_dataset.py:123](../tabs/layout_dataset.py#L123) — `_detect_annotation_to_obb`, 22 строк
+- [tabs/viewing_dataset.py:135](../tabs/viewing_dataset.py#L135) — `_detect_annotation_to_obb`, 22 строк
 
 ## 60. update_object_list
 
@@ -323,8 +323,8 @@
 
 ## 62. _start_annotation_validation
 
-- [tabs/layout_dataset.py:829](../tabs/layout_dataset.py#L829) — `_start_annotation_validation`, 20 строк
-- [tabs/viewing_dataset.py:839](../tabs/viewing_dataset.py#L839) — `_start_annotation_validation`, 20 строк
+- [tabs/layout_dataset.py:857](../tabs/layout_dataset.py#L857) — `_start_annotation_validation`, 20 строк
+- [tabs/viewing_dataset.py:851](../tabs/viewing_dataset.py#L851) — `_start_annotation_validation`, 20 строк
 
 ## 63. _validate_all_pairs
 
@@ -365,8 +365,8 @@
 
 ## 70. run
 
-- [tabs/layout_dataset.py:171](../tabs/layout_dataset.py#L171) — `run`, 18 строк
-- [tabs/viewing_dataset.py:183](../tabs/viewing_dataset.py#L183) — `run`, 18 строк
+- [tabs/layout_dataset.py:177](../tabs/layout_dataset.py#L177) — `run`, 18 строк
+- [tabs/viewing_dataset.py:189](../tabs/viewing_dataset.py#L189) — `run`, 18 строк
 
 ## 71. save_as_preset
 
@@ -478,27 +478,32 @@
 - [utils_training/train_unet_worker.py:134](../utils_training/train_unet_worker.py#L134) — `signal_handler`, 15 строк
 - [utils_training/train_unet_worker_рабочий.py:128](../utils_training/train_unet_worker_рабочий.py#L128) — `signal_handler`, 15 строк
 
-## 93. _resolve_label_path
+## 93. _confirm_label_save
 
-- [tabs/layout_dataset.py:156](../tabs/layout_dataset.py#L156) — `_resolve_label_path`, 14 строк
-- [tabs/viewing_dataset.py:168](../tabs/viewing_dataset.py#L168) — `_resolve_label_path`, 14 строк
+- [tabs/layout_dataset.py:2070](../tabs/layout_dataset.py#L2070) — `_confirm_label_save`, 14 строк
+- [tabs/viewing_dataset.py:984](../tabs/viewing_dataset.py#L984) — `_confirm_label_save`, 14 строк
 
-## 94. validate_all
+## 94. _resolve_label_path
+
+- [tabs/layout_dataset.py:162](../tabs/layout_dataset.py#L162) — `_resolve_label_path`, 14 строк
+- [tabs/viewing_dataset.py:174](../tabs/viewing_dataset.py#L174) — `_resolve_label_path`, 14 строк
+
+## 95. validate_all
 
 - [utils/dataset_validation.py:219](../utils/dataset_validation.py#L219) — `validate_all`, 14 строк
 - [utils_new/dataset_pair_validator_new.py:81](../utils_new/dataset_pair_validator_new.py#L81) — `validate_all`, 14 строк
 
-## 95. prefetch
+## 96. prefetch
 
 - [utils/image_io.py:1072](../utils/image_io.py#L1072) — `prefetch`, 14 строк
 - [utils_new/dataset_files_new.py:293](../utils_new/dataset_files_new.py#L293) — `prefetch`, 14 строк
 
-## 96. _continue_drawing
+## 97. _continue_drawing
 
 - [utils/smart_view.py:1575](../utils/smart_view.py#L1575) — `_continue_drawing`, 14 строк
 - [utils_new/smart_view_new.py:1840](../utils_new/smart_view_new.py#L1840) — `_continue_drawing`, 14 строк
 
-## 97. forward
+## 98. forward
 
 - [utils_aeb/auto-aeb_def.py:90](../utils_aeb/auto-aeb_def.py#L90) — `forward`, 14 строк
 - [utils_aeb/auto-aeb_def_new.py:103](../utils_aeb/auto-aeb_def_new.py#L103) — `forward`, 14 строк
@@ -506,96 +511,96 @@
 - [utils_aeb/auto-aeb_unet.py:95](../utils_aeb/auto-aeb_unet.py#L95) — `forward`, 14 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:185](../utils_aeb/auto-aeb_unet_with_grad.py#L185) — `forward`, 14 строк
 
-## 98. row_adaptive_threshold
+## 99. row_adaptive_threshold
 
 - [utils_new/threshold_processing.py:95](../utils_new/threshold_processing.py#L95) — `row_adaptive_threshold`, 14 строк
 - [utils_ops/segmentation_ops.py:227](../utils_ops/segmentation_ops.py#L227) — `row_adaptive_threshold`, 14 строк
 
-## 99. collect_images
+## 100. collect_images
 
 - [cluster/canonicalize_crops.py:109](../cluster/canonicalize_crops.py#L109) — `collect_images`, 13 строк
 - [cluster/canonicalize_crops_method2.py:126](../cluster/canonicalize_crops_method2.py#L126) — `collect_images`, 13 строк
 
-## 100. on_resize_mode_changed
+## 101. on_resize_mode_changed
 
 - [tabs/gradient_methods.py:648](../tabs/gradient_methods.py#L648) — `on_resize_mode_changed`, 13 строк
 - [tabs/interactive_methods.py:927](../tabs/interactive_methods.py#L927) — `on_resize_mode_changed`, 13 строк
-- [tabs/layout_dataset.py:503](../tabs/layout_dataset.py#L503) — `on_resize_mode_changed`, 13 строк
+- [tabs/layout_dataset.py:519](../tabs/layout_dataset.py#L519) — `on_resize_mode_changed`, 13 строк
 - [tabs/threshold_methods.py:777](../tabs/threshold_methods.py#L777) — `on_resize_mode_changed`, 13 строк
 
-## 101. _log_exception
+## 102. _log_exception
 
-- [tabs/layout_dataset.py:613](../tabs/layout_dataset.py#L613) — `_log_exception`, 13 строк
-- [tabs/viewing_dataset.py:307](../tabs/viewing_dataset.py#L307) — `_log_exception`, 13 строк
+- [tabs/layout_dataset.py:637](../tabs/layout_dataset.py#L637) — `_log_exception`, 13 строк
+- [tabs/viewing_dataset.py:315](../tabs/viewing_dataset.py#L315) — `_log_exception`, 13 строк
 
-## 102. shutdown
+## 103. shutdown
 
 - [utils/image_io.py:1100](../utils/image_io.py#L1100) — `shutdown`, 13 строк
 - [utils_new/dataset_files_new.py:321](../utils_new/dataset_files_new.py#L321) — `shutdown`, 13 строк
 
-## 103. __getattr__
+## 104. __getattr__
 
 - [import_libs_external.py:138](../import_libs_external.py#L138) — `__getattr__`, 12 строк
 - [import_libs_internal.py:308](../import_libs_internal.py#L308) — `__getattr__`, 12 строк
 
-## 104. select_pairs_for_8bit_png
+## 105. select_pairs_for_8bit_png
 
 - [utils/dataset_validation.py:582](../utils/dataset_validation.py#L582) — `select_pairs_for_8bit_png`, 12 строк
 - [utils_new/dataset_pair_tools_new.py:131](../utils_new/dataset_pair_tools_new.py#L131) — `select_pairs_for_8bit_png`, 12 строк
 
-## 105. select_pairs_for_conversion
+## 106. select_pairs_for_conversion
 
 - [utils/dataset_validation.py:541](../utils/dataset_validation.py#L541) — `select_pairs_for_conversion`, 12 строк
 - [utils_new/dataset_pair_tools_new.py:88](../utils_new/dataset_pair_tools_new.py#L88) — `select_pairs_for_conversion`, 12 строк
 
-## 106. trim_around
+## 107. trim_around
 
 - [utils/image_io.py:1087](../utils/image_io.py#L1087) — `trim_around`, 12 строк
 - [utils_new/dataset_files_new.py:308](../utils_new/dataset_files_new.py#L308) — `trim_around`, 12 строк
 
-## 107. _finish_drawing
+## 108. _finish_drawing
 
 - [utils/smart_view.py:1590](../utils/smart_view.py#L1590) — `_finish_drawing`, 12 строк
 - [utils_new/smart_view_new.py:1855](../utils_new/smart_view_new.py#L1855) — `_finish_drawing`, 12 строк
 
-## 108. _setup_edit_mode
+## 109. _setup_edit_mode
 
 - [utils/smart_view.py:191](../utils/smart_view.py#L191) — `_setup_edit_mode`, 12 строк
 - [utils_new/smart_view_new.py:283](../utils_new/smart_view_new.py#L283) — `_setup_edit_mode`, 12 строк
 
-## 109. __init__
+## 110. __init__
 
 - [utils_aeb/auto-aeb_def.py:175](../utils_aeb/auto-aeb_def.py#L175) — `__init__`, 12 строк
 - [utils_aeb/auto-aeb_old.py:177](../utils_aeb/auto-aeb_old.py#L177) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:39](../utils_aeb/yolo_aeb_utils.py#L39) — `__init__`, 12 строк
 
-## 110. __init__
+## 111. __init__
 
 - [utils_aeb/auto-aeb_def.py:193](../utils_aeb/auto-aeb_def.py#L193) — `__init__`, 12 строк
 - [utils_aeb/auto-aeb_old.py:195](../utils_aeb/auto-aeb_old.py#L195) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:57](../utils_aeb/yolo_aeb_utils.py#L57) — `__init__`, 12 строк
 
-## 111. __init__
+## 112. __init__
 
 - [utils_aeb/auto-aeb_def_new.py:198](../utils_aeb/auto-aeb_def_new.py#L198) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:134](../utils_aeb/yolo_aeb_utils.py#L134) — `__init__`, 12 строк
 
-## 112. __init__
+## 113. __init__
 
 - [utils_aeb/auto-aeb_def_new.py:216](../utils_aeb/auto-aeb_def_new.py#L216) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:152](../utils_aeb/yolo_aeb_utils.py#L152) — `__init__`, 12 строк
 
-## 113. __init__
+## 114. __init__
 
 - [utils_aeb/auto-aeb_unet.py:309](../utils_aeb/auto-aeb_unet.py#L309) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:322](../utils_aeb/yolo_aeb_utils.py#L322) — `__init__`, 12 строк
 
-## 114. get_optimizer
+## 115. get_optimizer
 
 - [utils_training/train_unet_worker.py:371](../utils_training/train_unet_worker.py#L371) — `get_optimizer`, 12 строк
 - [utils_training/train_unet_worker_рабочий.py:376](../utils_training/train_unet_worker_рабочий.py#L376) — `get_optimizer`, 12 строк
 
-## 115. delete_current_preset
+## 116. delete_current_preset
 
 - [tabs/deep_learning_methods.py:456](../tabs/deep_learning_methods.py#L456) — `delete_current_preset`, 11 строк
 - [tabs/gradient_methods.py:174](../tabs/gradient_methods.py#L174) — `delete_current_preset`, 11 строк
@@ -603,57 +608,57 @@
 - [tabs/traditional_ml_methods.py:378](../tabs/traditional_ml_methods.py#L378) — `delete_current_preset`, 11 строк
 - [tabs/yolo_test_aeb.py:1398](../tabs/yolo_test_aeb.py#L1398) — `delete_current_preset`, 11 строк
 
-## 116. closeEvent
+## 117. closeEvent
 
 - [tabs/gradient_methods.py:217](../tabs/gradient_methods.py#L217) — `closeEvent`, 11 строк
 - [tabs/threshold_methods.py:312](../tabs/threshold_methods.py#L312) — `closeEvent`, 11 строк
 
-## 117. to_display_bgr
+## 118. to_display_bgr
 
 - [utils/dataset_validation.py:107](../utils/dataset_validation.py#L107) — `to_display_bgr`, 11 строк
 - [utils/dataset_validation.py:133](../utils/dataset_validation.py#L133) — `to_bgr3`, 11 строк
 - [utils_new/dataset_image_stats_new.py:70](../utils_new/dataset_image_stats_new.py#L70) — `to_display_bgr`, 11 строк
 - [utils_new/dataset_image_stats_new.py:96](../utils_new/dataset_image_stats_new.py#L96) — `to_bgr3`, 11 строк
 
-## 118. to_gray
+## 119. to_gray
 
 - [utils/dataset_validation.py:120](../utils/dataset_validation.py#L120) — `to_gray`, 11 строк
 - [utils_new/dataset_image_stats_new.py:83](../utils_new/dataset_image_stats_new.py#L83) — `to_gray`, 11 строк
 
-## 119. to_uint8
+## 120. to_uint8
 
 - [utils/dataset_validation.py:94](../utils/dataset_validation.py#L94) — `to_uint8`, 11 строк
 - [utils_new/dataset_image_stats_new.py:57](../utils_new/dataset_image_stats_new.py#L57) — `to_uint8`, 11 строк
 
-## 120. _hit_test_any
+## 121. _hit_test_any
 
 - [utils/smart_view.py:449](../utils/smart_view.py#L449) — `_hit_test_any`, 11 строк
 - [utils_new/smart_view_new.py:711](../utils_new/smart_view_new.py#L711) — `_hit_test_any`, 11 строк
 
-## 121. _hit_test_detect
+## 122. _hit_test_detect
 
 - [utils/smart_view.py:425](../utils/smart_view.py#L425) — `_hit_test_detect`, 11 строк
 - [utils_new/smart_view_new.py:687](../utils_new/smart_view_new.py#L687) — `_hit_test_detect`, 11 строк
 
-## 122. _scene_per_px
+## 123. _scene_per_px
 
 - [utils/smart_view.py:345](../utils/smart_view.py#L345) — `_scene_per_px`, 11 строк
 - [utils_new/smart_view_new.py:604](../utils_new/smart_view_new.py#L604) — `_scene_per_px`, 11 строк
 
-## 123. __getitem__
+## 124. __getitem__
 
 - [utils_aeb/auto-aeb_def.py:149](../utils_aeb/auto-aeb_def.py#L149) — `__getitem__`, 11 строк
 - [utils_aeb/auto-aeb_def_new.py:162](../utils_aeb/auto-aeb_def_new.py#L162) — `__getitem__`, 11 строк
 - [utils_aeb/auto-aeb_old.py:151](../utils_aeb/auto-aeb_old.py#L151) — `__getitem__`, 11 строк
 - [utils_aeb/auto-aeb_unet.py:180](../utils_aeb/auto-aeb_unet.py#L180) — `__getitem__`, 11 строк
 
-## 124. __init__
+## 125. __init__
 
 - [utils_aeb/auto-aeb_def.py:230](../utils_aeb/auto-aeb_def.py#L230) — `__init__`, 11 строк
 - [utils_aeb/auto-aeb_old.py:232](../utils_aeb/auto-aeb_old.py#L232) — `__init__`, 11 строк
 - [utils_aeb/yolo_aeb_utils.py:94](../utils_aeb/yolo_aeb_utils.py#L94) — `__init__`, 11 строк
 
-## 125. _fit
+## 126. _fit
 
 - [utils_aeb/auto-aeb_def.py:134](../utils_aeb/auto-aeb_def.py#L134) — `_fit`, 11 строк
 - [utils_aeb/auto-aeb_def_new.py:147](../utils_aeb/auto-aeb_def_new.py#L147) — `_fit`, 11 строк
@@ -661,22 +666,22 @@
 - [utils_aeb/auto-aeb_unet.py:165](../utils_aeb/auto-aeb_unet.py#L165) — `_fit`, 11 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:258](../utils_aeb/auto-aeb_unet_with_grad.py#L258) — `_fit`, 11 строк
 
-## 126. __init__
+## 127. __init__
 
 - [utils_aeb/auto-aeb_unet.py:288](../utils_aeb/auto-aeb_unet.py#L288) — `__init__`, 11 строк
 - [utils_aeb/yolo_aeb_utils.py:301](../utils_aeb/yolo_aeb_utils.py#L301) — `__init__`, 11 строк
 
-## 127. imwrite_safe
+## 128. imwrite_safe
 
 - [cluster/canonicalize_crops.py:97](../cluster/canonicalize_crops.py#L97) — `imwrite_safe`, 10 строк
 - [cluster/canonicalize_crops_method2.py:114](../cluster/canonicalize_crops_method2.py#L114) — `imwrite_safe`, 10 строк
 
-## 128. closeEvent
+## 129. closeEvent
 
 - [tabs/deep_learning_methods.py:1168](../tabs/deep_learning_methods.py#L1168) — `closeEvent`, 10 строк
 - [tabs/interactive_methods.py:1048](../tabs/interactive_methods.py#L1048) — `closeEvent`, 10 строк
 
-## 129. on_object_selection_changed
+## 130. on_object_selection_changed
 
 - [tabs/deep_learning_methods.py:1125](../tabs/deep_learning_methods.py#L1125) — `on_object_selection_changed`, 10 строк
 - [tabs/gradient_methods.py:734](../tabs/gradient_methods.py#L734) — `on_object_selection_changed`, 10 строк
@@ -684,75 +689,80 @@
 - [tabs/threshold_methods.py:956](../tabs/threshold_methods.py#L956) — `on_object_selection_changed`, 10 строк
 - [tabs/traditional_ml_methods.py:1229](../tabs/traditional_ml_methods.py#L1229) — `on_object_selection_changed`, 10 строк
 
-## 130. _log_exception
+## 131. _resolve_save_path_for_img
+
+- [tabs/layout_dataset.py:2059](../tabs/layout_dataset.py#L2059) — `_resolve_save_path_for_img`, 10 строк
+- [tabs/viewing_dataset.py:973](../tabs/viewing_dataset.py#L973) — `_resolve_save_path_for_img`, 10 строк
+
+## 132. _log_exception
 
 - [utils/dataset_validation.py:906](../utils/dataset_validation.py#L906) — `_log_exception`, 10 строк
 - [utils_new/dataset_loader_new.py:123](../utils_new/dataset_loader_new.py#L123) — `_log_exception`, 10 строк
 
-## 131. _on_file_list_double_clicked
+## 133. _on_file_list_double_clicked
 
 - [utils/dataset_validation.py:926](../utils/dataset_validation.py#L926) — `_on_file_list_double_clicked`, 10 строк
 - [utils_new/dataset_loader_new.py:143](../utils_new/dataset_loader_new.py#L143) — `_on_file_list_double_clicked`, 10 строк
 
-## 132. _on_input_format_changed
+## 134. _on_input_format_changed
 
 - [utils/dataset_validation.py:1589](../utils/dataset_validation.py#L1589) — `_on_input_format_changed`, 10 строк
 - [utils_new/dataset_loader_new.py:742](../utils_new/dataset_loader_new.py#L742) — `_on_input_format_changed`, 10 строк
 
-## 133. _finite
+## 135. _finite
 
 - [utils/smart_view.py:526](../utils/smart_view.py#L526) — `_finite`, 10 строк
 - [utils_new/smart_view_new.py:788](../utils_new/smart_view_new.py#L788) — `_finite`, 10 строк
 
-## 134. _resolve_relative_to_yaml
+## 136. _resolve_relative_to_yaml
 
 - [utils/yaml_io.py:21](../utils/yaml_io.py#L21) — `_resolve_relative_to_yaml`, 10 строк
 - [utils_new/dataset_yaml_new.py:9](../utils_new/dataset_yaml_new.py#L9) — `_resolve_relative_to_yaml`, 10 строк
 
-## 135. get_scheduler
+## 137. get_scheduler
 
 - [utils_training/train_unet_worker.py:386](../utils_training/train_unet_worker.py#L386) — `get_scheduler`, 10 строк
 - [utils_training/train_unet_worker_рабочий.py:391](../utils_training/train_unet_worker_рабочий.py#L391) — `get_scheduler`, 10 строк
 
-## 136. save_args_yaml
+## 138. save_args_yaml
 
 - [utils_training/train_unet_worker.py:517](../utils_training/train_unet_worker.py#L517) — `save_args_yaml`, 10 строк
 - [utils_training/train_unet_worker_рабочий.py:503](../utils_training/train_unet_worker_рабочий.py#L503) — `save_args_yaml`, 10 строк
 
-## 137. apply_transform
+## 139. apply_transform
 
 - [cluster/canonicalize_crops.py:143](../cluster/canonicalize_crops.py#L143) — `apply_transform`, 9 строк
 - [cluster/canonicalize_crops_method2.py:163](../cluster/canonicalize_crops_method2.py#L163) — `apply_transform`, 9 строк
 
-## 138. apply_transform
+## 140. apply_transform
 
 - [cluster/extract_embeddings.py:113](../cluster/extract_embeddings.py#L113) — `apply_transform`, 9 строк
 - [cluster/test_new_image.py:197](../cluster/test_new_image.py#L197) — `apply_transform`, 9 строк
 
-## 139. load_images_from_dialog
+## 141. load_images_from_dialog
 
 - [tabs/gradient_methods.py:541](../tabs/gradient_methods.py#L541) — `load_images_from_dialog`, 9 строк
 - [tabs/interactive_methods.py:825](../tabs/interactive_methods.py#L825) — `load_images_from_dialog`, 9 строк
-- [tabs/layout_dataset.py:484](../tabs/layout_dataset.py#L484) — `load_images`, 9 строк
+- [tabs/layout_dataset.py:494](../tabs/layout_dataset.py#L494) — `load_images`, 9 строк
 - [tabs/threshold_methods.py:618](../tabs/threshold_methods.py#L618) — `load_images_from_dialog`, 9 строк
 
-## 140. _update_color_stats_label
+## 142. _update_color_stats_label
 
 - [utils/dataset_validation.py:1420](../utils/dataset_validation.py#L1420) — `_update_color_stats_label`, 9 строк
 - [utils_new/dataset_loader_new.py:573](../utils_new/dataset_loader_new.py#L573) — `_update_color_stats_label`, 9 строк
 
-## 141. _update_pair_count_label
+## 143. _update_pair_count_label
 
 - [utils/dataset_validation.py:1867](../utils/dataset_validation.py#L1867) — `_update_pair_count_label`, 9 строк
 - [utils_new/dataset_loader_new.py:977](../utils_new/dataset_loader_new.py#L977) — `_update_pair_count_label`, 9 строк
 
-## 142. __init__
+## 144. __init__
 
 - [utils_aeb/auto-aeb_def.py:211](../utils_aeb/auto-aeb_def.py#L211) — `__init__`, 9 строк
 - [utils_aeb/auto-aeb_old.py:213](../utils_aeb/auto-aeb_old.py#L213) — `__init__`, 9 строк
 - [utils_aeb/yolo_aeb_utils.py:75](../utils_aeb/yolo_aeb_utils.py#L75) — `__init__`, 9 строк
 
-## 143. collect_images
+## 145. collect_images
 
 - [utils_aeb/auto-aeb_def.py:162](../utils_aeb/auto-aeb_def.py#L162) — `collect_images`, 9 строк
 - [utils_aeb/auto-aeb_def_new.py:175](../utils_aeb/auto-aeb_def_new.py#L175) — `collect_images`, 9 строк
@@ -760,12 +770,12 @@
 - [utils_aeb/auto-aeb_unet.py:193](../utils_aeb/auto-aeb_unet.py#L193) — `collect_images`, 9 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:382](../utils_aeb/auto-aeb_unet_with_grad.py#L382) — `collect_images`, 9 строк
 
-## 144. forward
+## 146. forward
 
 - [utils_aeb/auto-aeb_unet.py:122](../utils_aeb/auto-aeb_unet.py#L122) — `forward`, 9 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:211](../utils_aeb/auto-aeb_unet_with_grad.py#L211) — `forward`, 9 строк
 
-## 145. median_blur
+## 147. median_blur
 
 - [utils_aeb/auto-aeb_unet_with_grad.py:120](../utils_aeb/auto-aeb_unet_with_grad.py#L120) — `median_blur`, 9 строк
 - [utils_aeb/yolo_aeb_utils.py:537](../utils_aeb/yolo_aeb_utils.py#L537) — `_median_blur_torch`, 9 строк

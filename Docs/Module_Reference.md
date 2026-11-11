@@ -4,7 +4,7 @@
 
 Сгенерировано `python Docs/generate_reference.py` из текущих исходников. Каталог исключает саму документацию и скрытые каталоги.
 
-Проанализировано Python-модулей: **135**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
+Проанализировано Python-модулей: **136**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
 
 Для всех модулей перечислены верхнеуровневые функции и классы. Для всех каталогов утилит дополнительно перечислены сигнатуры методов классов. Вложенные локальные функции не являются отдельным API и в список не включены. Приватные имена сохранены для поиска реализации.
 
@@ -44,6 +44,7 @@
 - [tabs.yolo_test_aeb](#tabs-yolo-test-aeb)
 - [tests.test_dependency_installation](#tests-test-dependency-installation)
 - [tests.test_import_architecture](#tests-test-import-architecture)
+- [tests.test_label_save_merge](#tests-test-label-save-merge)
 - [tests.test_processing_smoke](#tests-test-processing-smoke)
 - [tests.test_runtime_imports](#tests-test-runtime-imports)
 - [ui.DL_predict_settings](#ui-DL-predict-settings)
@@ -743,8 +744,8 @@
 - [utils_new.dataset_coco_new](#utils-new-dataset-coco-new): `write_yolo_txt_for_coco_items`
 - [utils_new.dataset_files_new](#utils-new-dataset-files-new): `LazyImageCache`, `convert_to_grayscale`, `image_size_from_file`, `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`, `read_mask_with_fallback`, `resize_to_max_side`
 - [utils_new.dataset_unet_new](#utils-new-dataset-unet-new): `load_unet_yaml_pairs`, `write_yolo_txt_for_unet_pairs`
-- [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `find_mask_for_image`, `load_yolo_yaml`
-- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `canonicalize_obb_corners`, `load_annotations`, `load_annotations_for_image`, `save_annotations`, `save_annotations_for_image`
+- [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `build_yolo_save_target_map`, `find_mask_for_image`, `load_yolo_yaml`
+- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `build_label_save_plan`, `canonicalize_obb_corners`, `format_label_save_confirmation`, `load_annotations`, `load_annotations_for_image`, `save_annotations`, `save_annotations_for_image`
 - [utils_new.smart_view_new](#utils-new-smart-view-new): `numpy_to_qpixmap`, `set_fill_color_button_preview`
 - [utils_ops.segmentation_ops](#utils-ops-segmentation-ops): `update_annotation_list`
 
@@ -752,10 +753,10 @@
 
 **Объявления:**
 
-- [`_validate_unified_annotation(ann)`](../tabs/layout_dataset.py#L72) — Возвращает (is_valid, err_msg).
-- [`_detect_annotation_to_obb(ann)`](../tabs/layout_dataset.py#L117) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
-- Класс [`LabelValidationThread`](../tabs/layout_dataset.py#L141) (`QThread`)
-- Класс [`Labeler`](../tabs/layout_dataset.py#L191) (`QMainWindow`)
+- [`_validate_unified_annotation(ann)`](../tabs/layout_dataset.py#L78) — Возвращает (is_valid, err_msg).
+- [`_detect_annotation_to_obb(ann)`](../tabs/layout_dataset.py#L123) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+- Класс [`LabelValidationThread`](../tabs/layout_dataset.py#L147) (`QThread`)
+- Класс [`Labeler`](../tabs/layout_dataset.py#L197) (`QMainWindow`)
 
 <a id="tabs-model-research"></a>
 
@@ -903,18 +904,18 @@
 - [utils_new.dataset_files_new](#utils-new-dataset-files-new): `LazyImageCache`, `convert_to_grayscale`, `image_size_from_file`, `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`, `read_index_mask`, `read_mask_with_fallback`, `resize_to_max_side`
 - [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new): `blend_index_mask`
 - [utils_new.dataset_unet_new](#utils-new-dataset-unet-new): `load_unet_yaml_pairs`, `write_yolo_txt_for_unet_pairs`
-- [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `find_mask_for_image`, `load_yolo_yaml`
-- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `canonicalize_obb_corners`, `load_annotations`, `load_annotations_for_image`, `save_annotations`, `save_annotations_for_image`
+- [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `build_yolo_save_target_map`, `find_mask_for_image`, `load_yolo_yaml`
+- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `build_label_save_plan`, `canonicalize_obb_corners`, `format_label_save_confirmation`, `load_annotations`, `load_annotations_for_image`, `save_annotations`, `save_annotations_for_image`
 - [utils_new.smart_view_new](#utils-new-smart-view-new): `numpy_to_qpixmap`, `set_fill_color_button_preview`
 
 **Внешние/stdlib импорты:** `PyQt5.QtCore.QThread`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QColor`, `PyQt5.QtGui.QKeySequence`, `PyQt5.QtGui.QPalette`, `PyQt5.QtWidgets.QAction`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QColorDialog`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QDialogButtonBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidgetItem`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QShortcut`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `collections.OrderedDict`, `cv2`, `numpy`, `os`, `pathlib.Path`, `sys`, `traceback`.
 
 **Объявления:**
 
-- [`_validate_unified_annotation(ann)`](../tabs/viewing_dataset.py#L84) — Возвращает (is_valid, err_msg).
-- [`_detect_annotation_to_obb(ann)`](../tabs/viewing_dataset.py#L129) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
-- Класс [`LabelValidationThread`](../tabs/viewing_dataset.py#L153) (`QThread`)
-- Класс [`ViewingDataset`](../tabs/viewing_dataset.py#L203) (`QMainWindow`)
+- [`_validate_unified_annotation(ann)`](../tabs/viewing_dataset.py#L90) — Возвращает (is_valid, err_msg).
+- [`_detect_annotation_to_obb(ann)`](../tabs/viewing_dataset.py#L135) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+- Класс [`LabelValidationThread`](../tabs/viewing_dataset.py#L159) (`QThread`)
+- Класс [`ViewingDataset`](../tabs/viewing_dataset.py#L209) (`QMainWindow`)
 
 <a id="tabs-yolo-find-img"></a>
 
@@ -999,6 +1000,24 @@
 - [`python_sources()`](../tests/test_import_architecture.py#L15)
 - [`eager_imports(nodes)`](../tests/test_import_architecture.py#L22)
 - Класс [`ArchitectureTests`](../tests/test_import_architecture.py#L34) (`unittest.TestCase`)
+
+<a id="tests-test-label-save-merge"></a>
+
+## tests.test_label_save_merge
+
+Исходник: [tests/test_label_save_merge.py](../tests/test_label_save_merge.py#L1).
+
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+
+**Прямые локальные импорты:**
+- [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `build_yolo_save_target_map`
+- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `build_label_save_plan`, `format_label_save_confirmation`
+
+**Внешние/stdlib импорты:** `os`, `pathlib.Path`, `subprocess`, `sys`, `tempfile`, `unittest`.
+
+**Объявления:**
+
+- Класс [`LabelSaveMergeTests`](../tests/test_label_save_merge.py#L18) (`unittest.TestCase`)
 
 <a id="tests-test-processing-smoke"></a>
 
@@ -3679,12 +3698,12 @@
 
 Исходник: [utils_new/dataset_yaml_new.py](../utils_new/dataset_yaml_new.py#L1).
 
-**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new).
+**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_label_save_merge](#tests-test-label-save-merge), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new).
 
 **Прямые локальные импорты:**
 - нет
 
-**Внешние/stdlib импорты:** `os`, `yaml`.
+**Внешние/stdlib импорты:** `os`, `pathlib.Path`, `yaml`.
 
 **Объявления:**
 
@@ -3695,6 +3714,8 @@
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset).
 - [`load_yolo_yaml(yaml_path, log_cb=None)`](../utils_new/dataset_yaml_new.py#L151) — Парсит YOLO data.yaml.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new).
+- [`build_yolo_save_target_map(yaml_path, image_paths, *, root=None)`](../utils_new/dataset_yaml_new.py#L233) — Resolve canonical labels/<split>/<image>.txt destinations for YOLO YAML.
+  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_label_save_merge](#tests-test-label-save-merge).
 
 <a id="utils-new-dataset-yolo-labels-new"></a>
 
@@ -3702,14 +3723,14 @@
 
 Исходник: [utils_new/dataset_yolo_labels_new.py](../utils_new/dataset_yolo_labels_new.py#L1).
 
-**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new).
+**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_label_save_merge](#tests-test-label-save-merge), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.__init__](#utils-new-annotations---init--): `Annotation`, `ImageSize`, `from_legacy`, `to_legacy`
 - [utils_new.annotations.geometry](#utils-new-annotations-geometry): `is_rectangle`
 - [utils_new.dataset_files_new](#utils-new-dataset-files-new): `image_size_from_file`
 
-**Внешние/stdlib импорты:** `__future__.annotations`, `cv2`, `math`, `numpy`, `pathlib.Path`.
+**Внешние/stdlib импорты:** `__future__.annotations`, `cv2`, `dataclasses.dataclass`, `math`, `numpy`, `pathlib.Path`.
 
 **Объявления:**
 
@@ -3732,6 +3753,11 @@
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [utils_new.dataset_files_new](#utils-new-dataset-files-new).
 - [`save_annotations(annotations, txt_path, img_w, img_h, obb_as_xywhr=False)`](../utils_new/dataset_yolo_labels_new.py#L280)
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset).
+- Класс [`LabelSavePlan`](../utils_new/dataset_yolo_labels_new.py#L327)
+- [`build_label_save_plan(entries)`](../utils_new/dataset_yolo_labels_new.py#L335) — Refuse collisions; count only existing *destination* .txt files.
+  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_label_save_merge](#tests-test-label-save-merge).
+- [`format_label_save_confirmation(plan, *, operation='Save', obb_format='corners', source_kind='images', unloaded_count=0)`](../utils_new/dataset_yolo_labels_new.py#L356) — Human-readable summary for the shared Qt Yes/No dialogs.
+  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_label_save_merge](#tests-test-label-save-merge).
 
 <a id="utils-new-morphology"></a>
 
