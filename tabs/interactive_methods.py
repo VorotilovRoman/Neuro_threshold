@@ -153,7 +153,7 @@ class InteractiveMethodsWindow(QMainWindow):
         segmentation_actions.log(self, message)
 
     def on_global_settings_changed(self, new_settings=None):
-        self.update_annotated_view()
+        segmentation_results.refresh_styles(self)
 
     def update_preset_combo(self):
         segmentation_actions.update_preset_combo(self)
@@ -586,7 +586,7 @@ class InteractiveMethodsWindow(QMainWindow):
             display_img = result.copy()
 
         self.current_base_image = display_img.copy()
-        if self.mask is not None and self.draw_combo.currentText() != "None":
+        if self.mask is not None and self.draw_combo.currentData() != 'none':
             _, self.current_objects_full = self.draw_objects_on_image(display_img, processed, draw=False)
         else:
             self.current_objects_full = []
@@ -677,8 +677,8 @@ class InteractiveMethodsWindow(QMainWindow):
 
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentText()
-        if mode in ["Contours (simple)", "Min area rectangle"]:
+        mode = self.draw_combo.currentData()
+        if mode in ['segment', 'obb']:
             self.hull_checkbox.setVisible(True)
         else:
             self.hull_checkbox.setVisible(False)
@@ -696,7 +696,7 @@ class InteractiveMethodsWindow(QMainWindow):
     #  Отрисовка объектов
     # ----------------------------------------------------------------------
     def draw_objects_on_image(self, img, binary, draw=True):
-        return extract_objects(img, binary, self.draw_combo.currentText(), self.hull_checkbox.isChecked())
+        return extract_objects(img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked())
 
     # ----------------------------------------------------------------------
     #  Лог и гистограмма

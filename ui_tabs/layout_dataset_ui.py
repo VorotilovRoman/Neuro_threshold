@@ -76,7 +76,7 @@ def setup_layout_dataset_ui(parent):
     parent.tool_group = QButtonGroup(parent)
     parent.tool_group.setExclusive(True)
 
-    parent.btn_tool_rect = QPushButton("📦 Box")
+    parent.btn_tool_rect = QPushButton("📦 BBox")
     parent.btn_tool_rect.setToolTip("Рисовать ограничивающий прямоугольник (detect)")
 
     parent.btn_tool_segment = QPushButton("✏️ Segment")

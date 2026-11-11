@@ -129,7 +129,7 @@ class GradientMethodsWindow(QMainWindow):
         segmentation_actions.log(self, message)
 
     def on_global_settings_changed(self, new_settings=None):
-        self.update_annotated_view()
+        segmentation_results.refresh_styles(self)
 
     def update_preset_combo(self):
         segmentation_actions.update_preset_combo(self)
@@ -455,8 +455,8 @@ class GradientMethodsWindow(QMainWindow):
         self.schedule_update()
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentText()
-        if mode in ["Segmentation (Polygon)", "OBB (Oriented Box)"]:
+        mode = self.draw_combo.currentData()
+        if mode in ['segment', 'obb']:
             self.hull_checkbox.setVisible(True)
         else:
             self.hull_checkbox.setVisible(False)
@@ -472,7 +472,7 @@ class GradientMethodsWindow(QMainWindow):
 
     # ---------- Отрисовка объектов (унифицированная) ----------
     def draw_objects_on_image(self, img, binary, draw=True):
-        return extract_objects(img, binary, self.draw_combo.currentText(), self.hull_checkbox.isChecked())
+        return extract_objects(img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked())
 
     # ---------- Сохранение аннотаций ----------
     def save_current_annotations(self):

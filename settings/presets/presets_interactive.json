@@ -1,6 +1,6 @@
 {
     "default": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "interactive",
         "morphology": {
             "version": 1,
@@ -28,7 +28,6 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "None",
         "use_hull": false,
         "method": "GrabCut",
         "method_params": {
@@ -53,6 +52,7 @@
             "ac_convergence": 0.0001,
             "ac_init_type": "Rectangle",
             "ac_smooth_check": true
-        }
+        },
+        "annotation_mode": "none"
     }
 }

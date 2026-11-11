@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert owner.model_result_view.annotations==[('detect',3,.5,.5,.5,.5)]
     assert 'conf=0.910' in owner.model_analysis_text.toPlainText()
     np.testing.assert_array_equal(pixels(owner.model_result_view),original)
-    preset=make_preset('threshold',method='Simple Threshold',params={'threshold':127},draw_mode='Bounding Box (Detect)')
+    preset=make_preset('threshold',method='Simple Threshold',params={'threshold':127},annotation_mode='detect')
     owner.preset_manager.presets={'pixels':preset};owner.active_preset_name='pixels'
     owner.apply_preset_to_image()
     assert owner.preset_result_view.annotations==owner.current_objects and len(owner.current_objects)==1

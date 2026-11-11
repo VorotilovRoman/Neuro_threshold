@@ -308,7 +308,7 @@ class TraditionalMLWindow(QMainWindow):
         segmentation_actions.log(self, message)
 
     def on_global_settings_changed(self, new_settings=None):
-        self.update_annotated_view()
+        segmentation_results.refresh_styles(self)
 
     def schedule_update(self):
         self.update_timer.start(50)
@@ -969,7 +969,7 @@ class TraditionalMLWindow(QMainWindow):
 
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentText()
+        mode = self.draw_combo.currentData()
         self.hull_checkbox.setVisible(mode in ("Segmentation (Polygon)", "OBB (Oriented Box)"))
         if self.display_images:
             self.schedule_update()
@@ -985,7 +985,7 @@ class TraditionalMLWindow(QMainWindow):
     #  Отрисовка объектов
     # ----------------------------------------------------------------------
     def draw_objects_on_image(self, img, binary, draw=True):
-        return extract_objects(img, binary, self.draw_combo.currentText(), self.hull_checkbox.isChecked())
+        return extract_objects(img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked())
 
     # ----------------------------------------------------------------------
     #  Лог и гистограмма

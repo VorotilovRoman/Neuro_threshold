@@ -89,11 +89,11 @@ class SegmentationCommonTests(unittest.TestCase):
         mask[10:40,20:70]=255
         mask[23:25,35:38]=0
         image = np.zeros((80,120,3),np.uint8)
-        for mode,fn in [('Segmentation (Polygon)',segment_contours),('Bounding Box (Detect)',segment_projections),
-                        ('OBB (Oriented Box)',segment_min_area_rect)]:
+        for mode,fn in [('segment',segment_contours),('detect',segment_projections),
+                        ('obb',segment_min_area_rect)]:
             old = fn(image,mask,draw=False,**({'use_hull':False} if fn!=segment_projections else {}))[1]
             self.assertEqual(postprocessing.extract_objects(image,mask,mode)[1],old)
-        self.assertTrue(postprocessing.extract_objects(image,mask,'Contours (simple)')[1])
+        self.assertTrue(postprocessing.extract_objects(image,mask,'segment')[1])
 
     def test_preset_store_writes_atomically_without_widget_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:

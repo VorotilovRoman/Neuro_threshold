@@ -1,10 +1,11 @@
 """Current segmentation preset schema. Relative morphology is not supported."""
 
 from copy import deepcopy
+from utils_new.annotations.modes import validate_mode
 
 from utils_new.morphology import SUPPORTED_OPERATIONS, SUPPORTED_SHAPES
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 KINDS = ("threshold", "gradient", "interactive", "traditional_ml", "deep_learning")
 
 
@@ -59,7 +60,7 @@ def validate_morphology(state):
 def validate_preset(state, kind=None):
     if not isinstance(state, dict) or state.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(
-            "Нужен пресет schema_version=2. Старые относительные пресеты не поддерживаются."
+            "Нужен пресет schema_version=3. Старые относительные пресеты не поддерживаются."
         )
     if state.get("kind") not in KINDS or (kind is not None and state["kind"] != kind):
         raise ValueError("Пресет принадлежит другой вкладке методов.")
@@ -70,8 +71,9 @@ def validate_preset(state, kind=None):
         state.get("use_hull"), bool
     ):
         raise ValueError("invert и use_hull должны быть логическими значениями.")
-    if not isinstance(state.get("draw_mode"), str):
-        raise ValueError("draw_mode должен быть строкой.")
+    validate_mode(state.get('annotation_mode'))
+    if 'draw_mode' in state:
+        raise ValueError('draw_mode больше не поддерживается; используйте annotation_mode.')
     key = "model" if state["kind"] in ("traditional_ml", "deep_learning") else "method"
     if not isinstance(state.get(key), str) or not state[key]:
         raise ValueError(f"Не задан {key}.")
@@ -86,7 +88,7 @@ def make_preset(kind, **parameters):
         "kind": kind,
         "morphology": default_morphology(),
         "invert": False,
-        "draw_mode": "None",
+        "annotation_mode": "none",
         "use_hull": False,
         **deepcopy(parameters),
     }

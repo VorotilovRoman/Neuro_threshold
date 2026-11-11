@@ -801,7 +801,7 @@ class ModelResearchApp(QMainWindow):
                 counter += 1
             preset_params = self._extract_preset_params(method, params_str)
             preset_dict = make_preset('threshold', method=method, params=preset_params,
-                                      invert=bool(invert), draw_mode="Segmentation (Polygon)")
+                                      invert=bool(invert), annotation_mode='segment')
             if preset_mgr.add_preset_dict(name, preset_dict):
                 added.append(name)
         if added:

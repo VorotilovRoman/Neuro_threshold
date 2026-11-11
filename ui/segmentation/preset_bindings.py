@@ -170,7 +170,7 @@ class MethodPresetManager(PresetManager):
         state.update(
             morphology=main.morphology_widget.get_settings(),
             invert=main.invert_checkbox.isChecked(),
-            draw_mode=main.draw_combo.currentText(),
+            annotation_mode=main.draw_combo.currentData(),
             use_hull=main.hull_checkbox.isChecked(),
         )
         self._capture_extra(state)
@@ -203,17 +203,18 @@ class MethodPresetManager(PresetManager):
         )
         updates += [
             (main.invert_checkbox, state["invert"]),
-            (main.draw_combo, state["draw_mode"]),
             (main.hull_checkbox, state["use_hull"]),
         ]
         for widget, value in updates:
             validate_control(widget, value)
         with blocked_signals(
-            [*(widget for widget, _ in updates), main.morphology_widget]
+            [*(widget for widget, _ in updates), main.morphology_widget, main.draw_combo]
         ):
             self._before_apply(state)
             for widget, value in updates:
                 set_control_value(widget, value)
+            main.draw_combo.setCurrentIndex(main.draw_combo.findData(state['annotation_mode']))
+            main.hull_checkbox.setVisible(state['annotation_mode'] in ('obb','segment'))
             main.morphology_widget.set_settings(state["morphology"])
         self._after_apply(state)
         return True

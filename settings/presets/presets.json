@@ -1,6 +1,6 @@
 {
     "Simple": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "threshold",
         "morphology": {
             "version": 1,
@@ -28,15 +28,15 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "Bounding Box (Detect)",
         "use_hull": false,
         "method": "Simple Threshold",
         "params": {
             "threshold": 127
-        }
+        },
+        "annotation_mode": "detect"
     },
     "Otsu": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "threshold",
         "morphology": {
             "version": 1,
@@ -64,13 +64,13 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "Bounding Box (Detect)",
         "use_hull": false,
         "method": "Otsu",
-        "params": {}
+        "params": {},
+        "annotation_mode": "detect"
     },
     "ISODATA": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "threshold",
         "morphology": {
             "version": 1,
@@ -98,11 +98,11 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "Bounding Box (Detect)",
         "use_hull": false,
         "method": "ISODATA",
         "params": {
             "init": 128
-        }
+        },
+        "annotation_mode": "detect"
     }
 }

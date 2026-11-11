@@ -1,6 +1,6 @@
 {
     "default": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "gradient",
         "morphology": {
             "version": 1,
@@ -28,7 +28,6 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "None",
         "use_hull": false,
         "sobel_kernel": 3,
         "sobel_scale": 1,
@@ -40,6 +39,7 @@
         "method": "Sobel",
         "threshold": 127,
         "fill_contours": true,
-        "min_area_percent": 0.0
+        "min_area_percent": 0.0,
+        "annotation_mode": "none"
     }
 }

@@ -1,6 +1,6 @@
 {
     "default": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "deep_learning",
         "morphology": {
             "version": 1,
@@ -28,7 +28,6 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "None",
         "use_hull": false,
         "model": "U-Net",
         "device": "Auto (best available)",
@@ -45,10 +44,11 @@
         "deeplab_backbone": "resnet50",
         "deeplab_output_stride": "8",
         "unet_threshold": 0.5,
-        "deeplab_threshold": 0.5
+        "deeplab_threshold": 0.5,
+        "annotation_mode": "none"
     },
     "123": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "deep_learning",
         "morphology": {
             "version": 1,
@@ -76,7 +76,6 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "None",
         "use_hull": false,
         "model": "YOLO-seg",
         "device": "Auto (best available)",
@@ -93,10 +92,11 @@
         "deeplab_backbone": "resnet50",
         "deeplab_output_stride": "8",
         "unet_threshold": 0.5,
-        "deeplab_threshold": 0.5
+        "deeplab_threshold": 0.5,
+        "annotation_mode": "none"
     },
     "321": {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": "deep_learning",
         "morphology": {
             "version": 1,
@@ -124,7 +124,6 @@
             "contour_width_px": null
         },
         "invert": false,
-        "draw_mode": "Segmentation (Polygon)",
         "use_hull": true,
         "model": "U-Net",
         "device": "Auto (best available)",
@@ -141,6 +140,7 @@
         "deeplab_backbone": "resnet50",
         "deeplab_output_stride": "8",
         "unet_threshold": 0.5,
-        "deeplab_threshold": 0.5
+        "deeplab_threshold": 0.5,
+        "annotation_mode": "segment"
     }
 }

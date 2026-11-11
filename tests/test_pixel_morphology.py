@@ -125,7 +125,7 @@ class PixelPresetTests(unittest.TestCase):
             "threshold",
             method="Simple Threshold",
             params={"threshold": 128},
-            draw_mode="Bounding Box (Detect)",
+            annotation_mode='detect',
         )
         initial = get_detections_from_preset(image, gray, preset)
         preset["morphology"]["operations"][2]["kernel_px"] = 13
@@ -207,7 +207,7 @@ with tempfile.TemporaryDirectory() as directory:
         state=panel.get_settings();owner.preset_manager.presets_file=str(Path(directory)/(key+'.json'))
         owner.preset_manager.add_preset('pixels')
         saved=json.loads(Path(owner.preset_manager.presets_file).read_text())['pixels']
-        assert saved['morphology']==state and saved['schema_version']==2
+        assert saved['morphology']==state and saved['schema_version']==3
         panel.set_order(['close','open','erode','dilate']);panel.set_operation_size('close',2)
         owner.preset_manager.load_presets();assert owner.preset_manager.apply_preset('pixels')
         assert panel.get_settings()==state
@@ -237,7 +237,7 @@ app=QApplication([])
 w=ImagePlayer([('yolo_demo','Ensemble')]);owner=w._tab_widgets[0]
 gray=np.full((80,120),255,np.uint8);gray[20:60,30:90]=0
 owner.current_image=cv2.cvtColor(gray,cv2.COLOR_GRAY2BGR);owner.current_gray=gray
-preset=make_preset('threshold',method='Simple Threshold',params={'threshold':127},draw_mode='Bounding Box (Detect)')
+preset=make_preset('threshold',method='Simple Threshold',params={'threshold':127},annotation_mode='detect')
 preset['morphology']['operations'][2]['kernel_px']=13
 owner.preset_manager.presets={'pixels':preset};owner.active_preset_name='pixels'
 assert owner.get_current_preset_settings()['params']=={'threshold':127}

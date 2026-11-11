@@ -17,6 +17,7 @@ def current_image(owner):
 
 
 def update_object_list(owner):
+    owner._focused_object_index = -1
     previous = owner.object_list.blockSignals(True)
     try:
         owner.object_list.clear()
@@ -27,6 +28,7 @@ def update_object_list(owner):
         h, w = image.shape[:2]
         for index, obj in enumerate(owner.current_objects_full):
             item = QListWidgetItem(format_object_for_list(index, obj, w, h))
+            item.setData(Qt.UserRole, index)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked)
             owner.object_list.addItem(item)
@@ -48,6 +50,13 @@ def update_overlay(owner):
     visible = [owner.current_objects_full[i] for i in owner.current_selected_indices
                if 0 <= i < len(owner.current_objects_full)]
     owner.annotated_view.set_annotations(visible, w, h)
+    focused = getattr(owner, '_focused_object_index', -1)
+    visible_indices = [i for i in owner.current_selected_indices if 0 <= i < len(owner.current_objects_full)]
+    owner._syncing_object_focus = True
+    try:
+        owner.annotated_view.set_selected_index(visible_indices.index(focused) if focused in visible_indices else -1)
+    finally:
+        owner._syncing_object_focus = False
     owner.annotated_view.refresh_annotations()
     owner.update_coordinates_display()
 
@@ -88,3 +97,21 @@ def clear_views(owner):
         view.set_pixmap(numpy_to_qpixmap(None))
         view.set_annotations([], 0, 0)
         view._segmentation_base = None
+
+
+def refresh_styles(owner):
+    """Settings only affect Qt paint; preserve pixels, masks, selection and text."""
+    for name in owner.segmentation_view_names:
+        getattr(owner,name).refresh_annotations()
+
+
+def focus_row(owner, row):
+    owner._focused_object_index = row if 0 <= row < len(owner.current_objects_full) else -1
+    update_overlay(owner)
+
+
+def focus_annotation(owner, visible_index):
+    if getattr(owner, '_syncing_object_focus', False):
+        return
+    indices = [i for i in owner.current_selected_indices if 0 <= i < len(owner.current_objects_full)]
+    owner.object_list.setCurrentRow(indices[visible_index] if 0 <= visible_index < len(indices) else -1)

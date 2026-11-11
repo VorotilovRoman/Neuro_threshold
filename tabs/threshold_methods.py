@@ -500,8 +500,8 @@ class ThresholdWindow(QMainWindow):
             self.schedule_update()
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentText()
-        if mode in ["Segmentation (Polygon)", "OBB (Oriented Box)"]:
+        mode = self.draw_combo.currentData()
+        if mode in ['segment', 'obb']:
             self.hull_checkbox.setVisible(True)
         else:
             self.hull_checkbox.setVisible(False)
@@ -517,7 +517,7 @@ class ThresholdWindow(QMainWindow):
 
     # ---------- Извлечение аннотаций из бинарной маски ----------
     def draw_objects_on_image(self, img, binary, draw=True):
-        return extract_objects(img, binary, self.draw_combo.currentText(), self.hull_checkbox.isChecked())
+        return extract_objects(img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked())
 
     # ---------- Пресеты ----------
     def update_preset_combo(self):
@@ -539,10 +539,7 @@ class ThresholdWindow(QMainWindow):
         segmentation_actions.toggle_histogram(self, checked)
 
     def on_global_settings_changed(self, new_settings=None):
-        # SmartGraphicsViewNew сам подписан на settings_changed. Пиксели
-        # повторно создавать не требуется, только обновить Qt overlay.
-        if self.original_image is not None:
-            self.annotated_view.refresh_annotations()
+        segmentation_results.refresh_styles(self)
 
 
 if __name__ == "__main__":

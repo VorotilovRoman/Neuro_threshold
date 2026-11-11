@@ -271,16 +271,16 @@ def get_detections_from_preset(image, gray, preset, confidence=0.7):
         processed = cv2.bitwise_not(processed)
 
     # 5. Выделение объектов в зависимости от draw_mode
-    draw_mode = preset.get('draw_mode', 'Segmentation (Polygon)')
+    draw_mode = preset.get('annotation_mode', 'none')
     use_hull = preset.get('use_hull', False)
 
-    if draw_mode == "None":
+    if draw_mode == 'none':
         objects = []
-    elif draw_mode == "Segmentation (Polygon)":
+    elif draw_mode == 'segment':
         _, objects = segment_contours(image.copy(), processed, use_hull, draw=False)
-    elif draw_mode == "Bounding Box (Detect)":
+    elif draw_mode == 'detect':
         _, objects = segment_projections(image.copy(), processed, draw=False)
-    elif draw_mode == "OBB (Oriented Box)":
+    elif draw_mode == 'obb':
         _, objects = segment_min_area_rect(image.copy(), processed, use_hull, draw=False)
     else:
         objects = []
