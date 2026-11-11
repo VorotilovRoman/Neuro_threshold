@@ -33,7 +33,6 @@ from utils_new.segmentation.presets import validate_preset
 from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
 from utils.ensemble_utils import (
     ensemble_detections,
-    extract_threshold_params,
     get_detections_from_preset,
 )
 from utils.image_io import load_images_universal, numpy_to_qpixmap
@@ -875,13 +874,7 @@ class YoloDemoWindow(QMainWindow):
             self.preset_info_label.setText(info_text)
 
     def get_current_preset_settings(self):
-        preset = self.preset_manager.presets.get(self.active_preset_name, {})
-        if 'params' in preset:
-            flat = preset.copy()
-            flat.update(preset['params'])
-            del flat['params']
-            return flat
-        return preset
+        return self.preset_manager.presets.get(self.active_preset_name, {})
 
     def schedule_preset_update(self):
         self.update_timer.start(50)
@@ -893,8 +886,9 @@ class YoloDemoWindow(QMainWindow):
             original = self.current_image
             gray = self.current_gray
             preset = self.get_current_preset_settings()
-            method = preset.get('method', 'Simple Threshold')
-            params = extract_threshold_params(preset, method)
+            validate_preset(preset, 'threshold')
+            method = preset['method']
+            params = preset['params']
 
             # 1. Бинаризация
             binary, thresh = apply_threshold_method(gray, method, params)
@@ -903,7 +897,6 @@ class YoloDemoWindow(QMainWindow):
             binary = cv2.bitwise_not(binary)
 
             # 3. Морфология
-            validate_preset(preset, 'threshold')
             morphology = preset['morphology']
             processed = apply_morphology(binary, morphology['operations'], shape=morphology['shape'])
 

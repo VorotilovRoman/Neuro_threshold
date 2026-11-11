@@ -252,7 +252,8 @@ def get_detections_from_preset(image, gray, preset, confidence=0.7):
     class всегда 0 (можно изменить при необходимости).
     confidence используется как порог отбора, но для пресетов все найденные объекты получают confidence = 1.0.
     """
-    method = preset.get('method', 'Simple Threshold')
+    validate_preset(preset, 'threshold')
+    method = preset['method']
     params = preset['params']
 
     # 1. Бинаризация
@@ -262,7 +263,6 @@ def get_detections_from_preset(image, gray, preset, confidence=0.7):
     binary = cv2.bitwise_not(binary)
 
     # 3. Морфология
-    validate_preset(preset, 'threshold')
     morphology = preset['morphology']
     processed = apply_morphology(binary, morphology['operations'], shape=morphology['shape'])
 

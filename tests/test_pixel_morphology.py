@@ -222,6 +222,36 @@ from ui.application import exec_window
 QTimer.singleShot(10,w.close);assert exec_window(w,app)==0
 """)
 
+    def test_ensemble_preview_keeps_nested_params_and_applies_pixel_morphology(self):
+        self.run_gui("""
+import cv2,numpy as np
+from unittest.mock import patch
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QTimer
+from main import ImagePlayer
+from ui.application import exec_window
+from utils_new.segmentation.presets import make_preset
+import tabs.demo_ensemble_methods as module
+app=QApplication([])
+w=ImagePlayer([('yolo_demo','Ensemble')]);owner=w._tab_widgets[0]
+gray=np.full((80,120),255,np.uint8);gray[20:60,30:90]=0
+owner.current_image=cv2.cvtColor(gray,cv2.COLOR_GRAY2BGR);owner.current_gray=gray
+preset=make_preset('threshold',method='Simple Threshold',params={'threshold':127},draw_mode='Bounding Box (Detect)')
+preset['morphology']['operations'][2]['kernel_px']=13
+owner.preset_manager.presets={'pixels':preset};owner.active_preset_name='pixels'
+assert owner.get_current_preset_settings()['params']=={'threshold':127}
+with patch.object(module,'apply_morphology',wraps=module.apply_morphology) as morphology,patch.object(owner,'log') as log:
+    owner.apply_preset_to_image()
+    morphology.assert_called_once()
+    assert morphology.call_args.args[1]==preset['morphology']['operations']
+    assert not any('Ошибка' in str(call) for call in log.call_args_list)
+assert len(owner.current_objects)==1
+box=owner.current_objects[0]
+assert abs(box[4]-48/120)<1e-8 and abs(box[5]-28/80)<1e-8
+assert not owner.preset_result_view.pixmap_item.pixmap().isNull()
+QTimer.singleShot(10,w.close);assert exec_window(w,app)==0
+""")
+
     def test_preset_application_restores_threshold_parameters_and_rejects_old_state_before_mutation(
         self,
     ):
