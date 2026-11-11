@@ -19,7 +19,7 @@ def run_pip(*args, dry_run=False):
         subprocess.run(command, cwd=ROOT, check=True)
 
 
-def normalize_opencv(dry_run=False):
+def normalize_opencv(dry_run=False, force=False):
     """Repair shared cv2 files after removing competing OpenCV wheels."""
     providers = installed_opencv()
     competing = [name for name in OPENCV_PROVIDERS if name != SELECTED_OPENCV and name in providers]
@@ -27,10 +27,12 @@ def normalize_opencv(dry_run=False):
         competing = [name for name in OPENCV_PROVIDERS if name != SELECTED_OPENCV]
     if competing:
         run_pip('uninstall', '-y', *competing, dry_run=dry_run)
-    if competing or SELECTED_OPENCV not in providers:
-        # Uninstall removes shared files even if the headless metadata survives.
-        pin = next(line.strip() for line in (ROOT / 'requirements.txt').read_text().splitlines()
-                   if line.startswith(SELECTED_OPENCV + '=='))
+    pin = next(line.strip() for line in (ROOT / 'requirements.txt').read_text().splitlines()
+               if line.startswith(SELECTED_OPENCV + '=='))
+    expected_version = pin.split('==', 1)[1]
+    if force or competing or providers.get(SELECTED_OPENCV) != expected_version:
+        # Removal can delete shared files; explicit repair also restores a lone
+        # wheel whose metadata survived corruption. Pin drift must be corrected.
         run_pip('install', '--no-deps', '--force-reinstall', pin, dry_run=dry_run)
 
 
@@ -55,7 +57,7 @@ def main(argv=None):
             for extra in sorted(set(args.extra)):
                 requirements.extend(['-r', str(ROOT / 'requirements' / f'optional-{extra}.txt')])
             run_pip('install', *requirements, dry_run=args.dry_run)
-        normalize_opencv(dry_run=args.dry_run)
+        normalize_opencv(dry_run=args.dry_run, force=args.repair_opencv)
         if not args.dry_run:
             # No native modules have been imported by this installer. Validate in
             # a new process after all wheel files have reached their final state.

@@ -467,8 +467,8 @@
 **Объявления:**
 
 - [`run_pip(*args, dry_run=False)`](../install.py#L15)
-- [`normalize_opencv(dry_run=False)`](../install.py#L22) — Repair shared cv2 files after removing competing OpenCV wheels.
-- [`main(argv=None)`](../install.py#L37)
+- [`normalize_opencv(dry_run=False, force=False)`](../install.py#L22) — Repair shared cv2 files after removing competing OpenCV wheels.
+- [`main(argv=None)`](../install.py#L39)
 
 <a id="main"></a>
 

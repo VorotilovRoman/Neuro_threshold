@@ -26,6 +26,20 @@ class InstallationTests(unittest.TestCase):
             install.normalize_opencv()
         pip.assert_not_called()
 
+    def test_explicit_repair_restores_single_provider_files(self):
+        with patch.object(install, 'installed_opencv', return_value={'opencv-python-headless': '4.13.0.92'}), \
+                patch.object(install, 'run_pip') as pip:
+            install.normalize_opencv(force=True)
+        pip.assert_called_once_with('install', '--no-deps', '--force-reinstall',
+                                    'opencv-python-headless==4.13.0.92', dry_run=False)
+
+    def test_single_provider_with_wrong_version_is_replaced(self):
+        with patch.object(install, 'installed_opencv', return_value={'opencv-python-headless': '5.0.0.93'}), \
+                patch.object(install, 'run_pip') as pip:
+            install.normalize_opencv()
+        pip.assert_called_once_with('install', '--no-deps', '--force-reinstall',
+                                    'opencv-python-headless==4.13.0.92', dry_run=False)
+
     def test_known_metadata_exception_does_not_hide_other_errors(self):
         output = ('ultralytics 8.4.36 requires opencv-python, which is not installed.\n'
                   'example 1 requires missing-package, which is not installed.\n')
