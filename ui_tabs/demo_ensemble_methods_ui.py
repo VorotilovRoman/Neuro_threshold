@@ -18,10 +18,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.DL_predict_settings import YOLOInferenceSettings
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from utils.smart_view import SmartGraphicsView
 
 
 def setup_demo_ensemble_methods_ui(parent):
@@ -83,7 +83,7 @@ def setup_demo_ensemble_methods_ui(parent):
 
         group_layout.addLayout(btn_layout)
 
-        view = SmartGraphicsView()
+        view = DatasetReviewGraphicsView()
         view.setMinimumSize(400, 400)
         view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         view.setStyleSheet("background-color: #2b2b2b;")

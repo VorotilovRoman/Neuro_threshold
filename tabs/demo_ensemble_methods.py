@@ -28,21 +28,18 @@ from PyQt5.QtWidgets import (
     QProgressDialog,
 )
 
-from utils_new.morphology import apply_morphology
-from utils_new.segmentation.presets import validate_preset
+from ui.image_conversion import numpy_to_qpixmap
+from ui.segmentation.preset_bindings import ThresholdPresetManager
 from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
 from utils.ensemble_utils import (
     ensemble_detections,
     get_detections_from_preset,
 )
-from utils.image_io import load_images_universal, numpy_to_qpixmap
-from ui.segmentation.preset_bindings import ThresholdPresetManager
-from ui.settings_service import settings
+from utils.image_io import load_images_universal
+from utils_new.morphology import apply_morphology
+from utils_new.segmentation.presets import validate_preset
 from utils_ops.segmentation_ops import (
     apply_threshold_method,
-    draw_selected_objects,
-    draw_yolo_annotations,
-    get_display_params,
     segment_contours,
     segment_min_area_rect,
     segment_projections,
@@ -64,6 +61,7 @@ class YoloInferThread(QThread):
     log_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(int)
     result_signal = pyqtSignal(object, list)
+    class_names_signal = pyqtSignal(dict)
     finished_signal = pyqtSignal(bool, str)
 
     def __init__(self, model_path, img, conf, iou, imgsz, device, save):
@@ -111,7 +109,7 @@ class YoloInferThread(QThread):
                             device=self.device, save=self.save)
 
             result = results[0]
-            img_with_boxes = result.plot()
+            self.class_names_signal.emit(dict(getattr(result, 'names', {}) or {}))
 
             yolo_lines = []
             if result.boxes is not None:
@@ -126,7 +124,8 @@ class YoloInferThread(QThread):
                     bh = (y2 - y1) / h
                     yolo_lines.append(f"{cls} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f} {conf:.6f}")
 
-            self.result_signal.emit(img_with_boxes, yolo_lines)
+            # Qt owns the overlay; keep the image pixels free of annotations.
+            self.result_signal.emit(self.img.copy(), yolo_lines)
             self.progress_signal.emit(100)
             self.log("=== Инференс завершён ===")
             self.finished_signal.emit(True, "Инференс успешно завершён!")
@@ -361,6 +360,7 @@ class YoloDemoWindow(QMainWindow):
         self.infer_thread = YoloInferThread(model_path, img, conf, iou, imgsz, device, save)
         self.infer_thread.log_signal.connect(self.log)
         self.infer_thread.progress_signal.connect(self.update_progress)
+        self.infer_thread.class_names_signal.connect(self.set_yolo_class_names)
         self.infer_thread.result_signal.connect(self.display_yolo_result)
         self.infer_thread.result_signal.connect(self.on_yolo_result_for_ensemble)
         self.infer_thread.finished_signal.connect(self.on_inference_finished)
@@ -497,10 +497,7 @@ class YoloDemoWindow(QMainWindow):
             annotations.append(('detect', int(cls), cx, cy, w, h))
             lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} (conf={conf:.3f})")
 
-        # Рисуем аннотации на изображении
-        annotated = draw_yolo_annotations(img, annotations, color=(255, 0, 0))
-        pixmap = numpy_to_qpixmap(annotated)
-        self.ensemble_result_view.set_pixmap(pixmap)
+        self._show_image_in_view(self.ensemble_result_view, img, annotations)
 
         if lines:
             self.ensemble_analysis_text.setText("\n".join(lines))
@@ -552,6 +549,7 @@ class YoloDemoWindow(QMainWindow):
         self.current_image = self.images[self.current_index]
         self.current_gray = self.gray_images[self.current_index]
         self.current_image_path = self.image_paths[self.current_index]
+        self._clear_result_views()
         print_flush(f"Current image: {self.current_image_path}, shape {self.current_image.shape}")
         try:
             self.display_current_groundtruth()
@@ -572,6 +570,30 @@ class YoloDemoWindow(QMainWindow):
         self._auto_run_yolo_if_model_loaded()
         print_flush("=== _update_current_image_and_run END ===")
 
+    def _show_image_in_view(self, view, image, annotations=()):
+        """Present working pixels and normalized vectors in the read-only Qt view."""
+        view.set_selected_index(-1)
+        if image is None:
+            view.set_annotations([], 0, 0)
+            view.set_pixmap(QPixmap())
+            view.setSceneRect(0, 0, 0, 0)
+            view.resetTransform()
+            return
+        height, width = image.shape[:2]
+        view.set_annotations(list(annotations), width, height)
+        view.set_pixmap(numpy_to_qpixmap(image))
+        stage = next(name for name, candidate in self.view_widgets.items() if candidate is view)
+        basename = os.path.splitext(os.path.basename(self.current_image_path or 'image'))[0]
+        view.set_suggested_save_name(f'{stage}_{basename}')
+
+    def _clear_result_views(self):
+        for name in ('model_result_view', 'preset_result_view', 'ensemble_result_view'):
+            self._show_image_in_view(getattr(self, name), None)
+        for name in ('model_analysis_text', 'preset_analysis_text', 'ensemble_analysis_text'):
+            getattr(self, name).clear()
+        self.current_objects = []
+        self.ensemble_yolo_detections = []
+
     def display_current_groundtruth(self):
         print_flush("=== display_current_groundtruth START ===")
         if not self.images or self.current_index >= len(self.images):
@@ -580,24 +602,7 @@ class YoloDemoWindow(QMainWindow):
         img = self.images[self.current_index].copy()
         ann = self.annotations_list[self.current_index] if self.current_index < len(self.annotations_list) else []
         print_flush(f"Annotations count: {len(ann)}")
-        if ann:
-            try:
-                img = draw_yolo_annotations(img, ann)
-                print_flush("  -> draw_yolo_annotations succeeded")
-            except Exception as e:
-                print_flush(f"  -> Exception in draw_yolo_annotations: {e}")
-                traceback.print_exc()
-        try:
-            pixmap = numpy_to_qpixmap(img)
-            if not pixmap.isNull():
-                self.preview_view.set_pixmap(pixmap)
-                print_flush("  -> pixmap set to preview_view")
-            else:
-                self.preview_view.set_pixmap(QPixmap())
-                print_flush("  -> pixmap is null")
-        except Exception as e:
-            print_flush(f"  -> Exception setting pixmap: {e}")
-            traceback.print_exc()
+        self._show_image_in_view(self.preview_view, img, ann)
 
         # Формируем текстовое представление для всех типов аннотаций
         lines = []
@@ -760,7 +765,9 @@ class YoloDemoWindow(QMainWindow):
         self.current_gray = None
         self.current_image_path = None
         self.current_folder = None
-        self.preview_view.set_pixmap(QPixmap())
+        self.update_timer.stop()
+        self._show_image_in_view(self.preview_view, None)
+        self._clear_result_views()
         self.groundtruth_analysis_text.clear()
         self.update_navigation_state()
         self.log("Resize mode changed, images cleared. Please load images again.")
@@ -942,32 +949,7 @@ class YoloDemoWindow(QMainWindow):
             binary = binary[:, :, 0]
         result[binary == 0] = [255, 255, 255]
 
-        if self.current_objects:
-            thickness, font_scale, font_thickness, _ = get_display_params(result.shape)
-            color_rect = settings.get_color('annotation')
-            color_label = settings.get_color('label_text')
-
-
-            # Выбираем все индексы объектов
-            all_indices = list(range(len(self.current_objects)))
-            result = draw_selected_objects(
-                result, self.current_objects, all_indices,
-                draw_mode="",  # не используется, т.к. тип определён в объекте
-                use_hull=False,  # не используется
-                color_rect=color_rect,
-                color_label=color_label,
-                thickness=thickness,
-                font_scale=font_scale,
-                font_thickness=font_thickness
-            )
-
-        pixmap = numpy_to_qpixmap(result)
-        if not pixmap.isNull():
-            self.preset_result_view.set_pixmap(pixmap)
-
-
-
-
+        self._show_image_in_view(self.preset_result_view, result, self.current_objects)
 
     def showEvent(self, event):
         """Переопределяем показ вкладки, чтобы обновить пресеты."""
@@ -1026,29 +1008,26 @@ class YoloDemoWindow(QMainWindow):
         self.preset_analysis_text.setText(analysis_text)
 
 
-    def display_yolo_result(self, img_with_boxes, yolo_lines):
+    def set_yolo_class_names(self, names):
+        labels = dict(names)
+        self.model_result_view.set_class_name_provider(lambda class_id: labels.get(class_id, str(class_id)))
+
+    def display_yolo_result(self, image, yolo_lines):
         print_flush("=== display_yolo_result START ===")
-        try:
-            pixmap = numpy_to_qpixmap(img_with_boxes)
-            if not pixmap.isNull():
-                self.model_result_view.set_pixmap(pixmap)
-                print_flush("  -> pixmap set to model_result_view")
-            else:
-                self.model_result_view.set_pixmap(QPixmap())
-                print_flush("  -> pixmap is null")
-        except Exception as e:
-            print_flush(f"  -> Exception setting pixmap: {e}")
-            traceback.print_exc()
         lines = []
+        annotations = []
         for line in yolo_lines:
             parts = line.split()
             if len(parts) == 6:
                 cls, cx, cy, w, h, conf = map(float, parts)
+                annotations.append(('detect', int(cls), cx, cy, w, h))
                 lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} (conf={conf:.3f})")
             elif len(parts) == 5:
                 cls, cx, cy, w, h = map(float, parts)
+                annotations.append(('detect', int(cls), cx, cy, w, h))
                 lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
         text = "\n".join(lines) if lines else "Нет детекций"
+        self._show_image_in_view(self.model_result_view, image, annotations)
         self.model_analysis_text.setText(text)
         print_flush(f"YOLO detections: {len(lines)}")
         print_flush("=== display_yolo_result END ===")

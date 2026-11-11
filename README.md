@@ -38,6 +38,7 @@ python main.py
 - [Руководство: вкладки, форматы, сохранение](Docs/User_Guide.md)
 - [Архитектура](Docs/Architecture.md) · [Аудит импортов](Docs/Import_Audit.md)
 - [Морфология пяти вкладок](Docs/Pixel_Morphology_Plan.md): четыре операции в пикселях, новые пресеты; автоподбор отложен.
+- [Новый просмотрщик демонстрации ансамблей](Docs/Ensemble_View_Migration.md)
 - [Удаление неиспользуемых utils](Docs/Utils_Removal_Audit.md)
 - [План дальнейшей работы](Docs/Segmentation_Migration_Plan.md)
 

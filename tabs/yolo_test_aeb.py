@@ -230,7 +230,7 @@ class YoloInspectWindow(QMainWindow):
         # --- UI ---
         setup_yolo_ae_vae_ui(self)
         # YOLO result display now uses the same vector Qt engine and palette
-        # as the dataset editor/viewer (without modifying old utils.smart_view).
+        # as the dataset editor/viewer through the canonical Qt viewer.
         self.yolo_view.set_callbacks(on_selection_changed=self._on_yolo_view_selection)
         self.yolo_view.set_display_style(label_mode='all')
         self.yolo_view.set_class_name_provider(self._name_for_yolo_class)

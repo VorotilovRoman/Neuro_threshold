@@ -126,7 +126,6 @@ _EXPORTS = {
     'SAMTrainWidget': ('ui.DL_train_settings_new_model', 'SAMTrainWidget'),
     'SegFormerInferenceSettings': ('ui.DL_predict_settings', 'SegFormerInferenceSettings'),
     'SegFormerTrainWidget': ('ui.DL_train_settings_new_model', 'SegFormerTrainWidget'),
-    'SmartGraphicsView': ('utils.smart_view', 'SmartGraphicsView'),
     'SmartGraphicsViewNew': ('ui.image_view', 'SmartGraphicsViewNew'),
     'StandardScaler': ('sklearn.preprocessing', 'StandardScaler'),
     'T': ('torchvision.transforms', None),

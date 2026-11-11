@@ -119,7 +119,7 @@ def guarded(name, *args, **kwargs):
     return original_import(name, *args, **kwargs)
 builtins.__import__ = guarded
 import utils_new.annotations
-import utils.smart_view
+import ui.annotation_review_view
 import utils_new.annotations.augmentation
 import ui.segmentation.preset_bindings
 import ui.settings_service

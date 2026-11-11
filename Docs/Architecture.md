@@ -62,7 +62,7 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 | `dataset_analysis` → `dataset_analysis.py` | `dataset_analysis_ui.py` | `dataset_analysis_logic`: статистика и фильтры; `dataset_audit_logic`: дубликаты, утечки, YOLO-аудит, эмбеддинги, отчёт |
 | `sahi` → `slice_dataset_sahi.py` | `slice_dataset_sahi_ui.py` | Локальный `SliceWorker`, `sahi.slicing.slice_coco`, работа с файлами и split |
 | `yolo_train` → `deep_learning_training.py` | `deep_learning_training_ui.py` | Виджеты `ui.DL_train_settings_*`; отдельные процессы YOLO, UNet, DeepLab |
-| `yolo_demo` → `demo_ensemble_methods.py` | `demo_ensemble_methods_ui.py` | `utils.ensemble_utils`: YOLO + классические пресеты, собственные WBF/NMS и метрики |
+| `yolo_demo` → `demo_ensemble_methods.py` | `demo_ensemble_methods_ui.py` | `utils.ensemble_utils`: YOLO + классические пресеты, WBF/NMS и метрики; четыре новых read-only Qt-вида |
 | `yolo_sort` → `yolo_find_img.py` | `yolo_find_img_ui.py` | YOLO, фоновый поиск, список/миниатюры, копирование или перемещение |
 | `yolo_aeb` → `yolo_test_aeb.py` | `yolo_test_aeb_ui.py` | `utils_aeb.yolo_aeb_utils`, `utils_new.annotation_processing`: YOLO-объекты, AE/VAE, кропы и карты ошибок |
 | `settings` | `ui/settings_ui.py`, без ui_tabs | `ui.settings_service`: тема, палитра классов, размеры и шорткаты |
@@ -93,15 +93,18 @@ flowchart LR
 
 ## Существующая старая ветка
 
-В `utils` осталось восемь модулей с рабочими потребителями: image_io,
-smart_view, analysis, prepare, metrics_core, ensemble_utils, dataset_analysis_logic
+В `utils` осталось семь модулей с рабочими потребителями: image_io,
+analysis, prepare, metrics_core, ensemble_utils, dataset_analysis_logic
 и dataset_audit_logic. Старый набор генератора/валидации/I/O и алиасы
 settings/presets удалены после проверки графа и строковых экспортов.
 [Подробный аудит удаления](Utils_Removal_Audit.md).
 
 Канонические Qt-виды находятся в `ui.image_view` и `ui.annotation_review_view`;
 все потребители обновлены, прежних файлов-алиасов в utils_new нет.
-`utils.smart_view` ещё использует демонстрация ансамблей. `utils_auto_research`
+Демонстрация ансамблей использует четыре DatasetReviewGraphicsView с векторными
+рамками; `utils.smart_view` удалён после перевода единственного потребителя и
+проверки отсутствия строковых экспортов. [Результат и проверки](Ensemble_View_Migration.md).
+`utils_auto_research`
 сохраняет уникальные алгоритмы до последнего этапа; запуск в UI временно отключён.
 
 ## Зависимости вне import-графа

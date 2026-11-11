@@ -33,6 +33,7 @@ REMOVED = {
         "yaml_io",
         "settings",
         "presets",
+        "smart_view",
     )
 }
 REMOVED |= {"utils_new.smart_view_new", "utils_new.dataset_review_view"}
