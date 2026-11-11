@@ -226,3 +226,59 @@ def load_yolo_yaml(yaml_path, log_cb=None):
     return pairs, names_dict, base_path, splits_info
 
 
+
+
+# --- Shared save destinations for editor/viewer (read locations may differ). ---
+def build_yolo_save_target_map(yaml_path, image_paths, *, root=None):
+    """Resolve canonical labels/<split>/<image>.txt destinations for YOLO YAML.
+
+    Does not use the old .txt location found during loading. This is important
+    when some labels are missing or were stored beside images. Files are not
+    created until an explicit Save/Save All confirmation.
+    """
+    from pathlib import Path
+
+    yaml_path = str(yaml_path)
+    with open(yaml_path, 'r', encoding='utf-8-sig') as stream:
+        cfg = yaml.safe_load(stream) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError(f'Expected YOLO YAML mapping: {yaml_path}')
+    if root is None:
+        root = (_resolve_relative_to_yaml(cfg.get('path'), yaml_path)
+                if cfg.get('path') else os.path.dirname(os.path.abspath(yaml_path)))
+    root_path = Path(root).resolve()
+    images = {os.path.normcase(os.path.abspath(str(image))): str(image)
+              for image in image_paths}
+    targets = {}
+    # User-facing output uses three canonical splits even for the synonyms
+    # 'valid' and 'validation'. Input directories themselves may use aliases.
+    split_values = [('train', 'train'), ('val', 'val'), ('valid', 'val'),
+                    ('validation', 'val'), ('test', 'test')]
+    for split_key, output_split in split_values:
+        dirs = _resolve_split_dirs(cfg.get(split_key), str(root_path))
+        for directory in dirs:
+            directory = Path(directory).resolve()
+            for normalized, original in images.items():
+                if original in targets:
+                    continue
+                image_file = Path(original).resolve()
+                try:
+                    local = image_file.relative_to(directory)
+                except ValueError:
+                    continue
+                # _resolve_split_dirs can return folders containing further
+                # nested dirs. Mirror subpaths to avoid filename collisions.
+                target = root_path / 'labels' / output_split / local.with_suffix('.txt')
+                targets[original] = str(target)
+    if len(targets) != len(images):
+        missing = [image for image in images.values() if image not in targets]
+        raise ValueError('Cannot determine YAML split for saving labels: '
+                         + ', '.join(missing[:5]))
+    reversed_targets = {}
+    for image, target in targets.items():
+        identity = os.path.normcase(os.path.abspath(target))
+        if identity in reversed_targets:
+            raise ValueError('Two images would overwrite one YOLO label: '
+                             f'{reversed_targets[identity]} and {image} -> {target}')
+        reversed_targets[identity] = image
+    return targets

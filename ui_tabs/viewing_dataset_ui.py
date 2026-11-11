@@ -1,4 +1,5 @@
 from import_libs_internal import *
+from utils_new.dataset_review_view import DatasetReviewGraphicsView
 
 
 def setup_viewing_dataset_ui(parent):

@@ -1,5 +1,6 @@
 # layout_dataset_ui.py
 from import_libs_internal import *
+from utils_new.smart_view_new import SmartGraphicsViewNew
 
 
 

@@ -14,8 +14,11 @@ from utils_new.dataset_files_new import (
 from utils_new.dataset_yolo_labels_new import (
     load_annotations, load_annotations_for_image,
     save_annotations, save_annotations_for_image, canonicalize_obb_corners,
+    build_label_save_plan, format_label_save_confirmation,
 )
-from utils_new.dataset_yaml_new import load_yolo_yaml, find_mask_for_image
+from utils_new.dataset_yaml_new import (
+    load_yolo_yaml, find_mask_for_image, build_yolo_save_target_map,
+)
 from utils_new.dataset_unet_new import (
     load_unet_yaml_pairs, write_yolo_txt_for_unet_pairs,
 )
@@ -162,6 +165,8 @@ class Labeler(QMainWindow):
         # Карта {путь_к_изображению: путь_к_файлу_меток}.
         self._yaml_label_map = {}
         self._label_folder = None
+        self._save_label_map = {}
+        self._save_source_kind = 'images'
 
         self.img_w = 0
         self.img_h = 0
@@ -409,6 +414,8 @@ class Labeler(QMainWindow):
         self.all_annotations = [None] * len(all_files)
         self._yaml_label_map = dict(label_map) if label_map else {}
         self._label_folder = None
+        self._save_label_map = {}
+        self._save_source_kind = 'images'
 
         self.image_view.set_annotations([], 0, 0)
         self.image_view.set_selected_index(-1)
@@ -458,7 +465,13 @@ class Labeler(QMainWindow):
             return
         self.log("Перезагрузка изображений с новыми настройками ресайза...")
         label_map = self._yaml_label_map if self._yaml_label_map else None
+        saved_targets = dict(self._save_label_map)
+        saved_kind = self._save_source_kind
+        saved_folder = self._label_folder
         self._load_images(list(self.image_paths), label_map=label_map)
+        self._save_label_map = saved_targets
+        self._save_source_kind = saved_kind
+        self._label_folder = saved_folder
         self.log(f"Перезагружено {len(self.image_paths)} изображений.")
 
     def on_resize_mode_changed(self, enabled):
@@ -485,6 +498,8 @@ class Labeler(QMainWindow):
         self.current_index = 0
         self._yaml_label_map = {}
         self._label_folder = None
+        self._save_label_map = {}
+        self._save_source_kind = 'images'
         self._validation_per_image = {}
         self.validation_status_label.setVisible(False)
         self.validation_status_label.setText("")
@@ -526,6 +541,8 @@ class Labeler(QMainWindow):
 
         self._yaml_label_map = {}
         self._label_folder = folder
+        self._save_label_map = {}
+        self._save_source_kind = 'labels'
 
         self.all_annotations = [[] for _ in self.image_paths]
         count = 0
@@ -556,8 +573,12 @@ class Labeler(QMainWindow):
 
             image_paths = [p for p, _ in pairs]
             label_map = {p: lp for p, lp in pairs if lp is not None}
+            save_target_map = build_yolo_save_target_map(
+                file_path, image_paths, root=root)
 
             self._load_images(image_paths, label_map=label_map)
+            self._save_label_map = save_target_map
+            self._save_source_kind = 'yolo'
             self.log(f"=== Загрузка YAML: {file_path} ===")
             self.log(f"Root: {root}")
             for split, n in splits_info.items():
@@ -616,6 +637,8 @@ class Labeler(QMainWindow):
         image_paths = [img for img, _ in pairs]
         label_map = {img: label for img, label in pairs}
         self._load_images(image_paths, label_map=label_map)
+        self._save_label_map = dict(label_map)
+        self._save_source_kind = 'coco'
         self.log(f"=== Загрузка COCO ({len(catalog.sources)} JSON) ===")
         self.log(f"Изображений: {len(image_paths)}, классов: {len(catalog.class_names)}")
         self.log(f"Временные labels: {tmp_dir}")
@@ -654,6 +677,8 @@ class Labeler(QMainWindow):
         image_paths = [img for img, _ in pairs]
         label_map = {img: label for img, label in pairs}
         self._load_images(image_paths, label_map=label_map)
+        self._save_label_map = dict(label_map)
+        self._save_source_kind = 'unet'
         self.log(f"=== Загрузка U-Net YAML: {yaml_path} ===")
         self.log(f"Root: {root}, пар: {len(image_paths)}, "
                  f"classes: {len(class_names)}, offset={mask_offset}")
@@ -1961,38 +1986,60 @@ class Labeler(QMainWindow):
             QMessageBox.warning(self, "No Image", "No image loaded.")
             return
         img_path = self.image_paths[self.current_index]
-        txt_path = self._resolve_save_path_for_img(img_path)
-
-        obb_as_xywhr = self.chk_obb_xywhr.isChecked()
-        success = save_annotations_for_image(
-            self.current_annotations, txt_path, img_path,
-            obb_as_xywhr=obb_as_xywhr,
-        )
-        if success:
-            fmt = "xywhr" if obb_as_xywhr else "corners"
-            self.log(f"Saved {len(self.current_annotations)} labels to {txt_path} "
-                     f"(OBB format: {fmt})")
-            QMessageBox.information(self, "Save",
-                                    f"Labels saved to {txt_path}")
-        else:
-            self.log(f"Error saving labels to {txt_path}")
-            QMessageBox.critical(self, "Error",
-                                 f"Failed to save labels to {txt_path}")
+        as_xywhr = self.chk_obb_xywhr.isChecked()
+        try:
+            plan = self._confirm_label_save([img_path], 'Save', as_xywhr)
+            if plan is None:
+                return
+            txt_path = plan.entries[0][1]
+            success = save_annotations_for_image(
+                self.current_annotations, txt_path, img_path,
+                obb_as_xywhr=as_xywhr)
+            if success:
+                self._sync_current_annotations_to_storage()
+                self._after_label_saved(img_path, txt_path)
+                self.log(f"Saved {len(self.current_annotations)} labels to {txt_path}")
+                QMessageBox.information(self, "Save", f"Labels saved to {txt_path}")
+            else:
+                self.log(f"Error saving labels to {txt_path}")
+                QMessageBox.critical(self, "Error", f"Failed to save labels to {txt_path}")
+        except Exception as exc:
+            self.log(f"[Save] ошибка: {exc}")
+            QMessageBox.critical(self, "Save", str(exc))
 
     # ----------------------------------------------------------------------
     #  Сохранить все аннотации
     # ----------------------------------------------------------------------
     def _resolve_save_path_for_img(self, img_path):
-        """Куда сохранять .txt для данного изображения (без требования
-        существования файла)."""
-        if self._yaml_label_map:
-            lp = self._yaml_label_map.get(img_path)
-            if lp:
-                return lp
+        """Destination is separate from the label path used during loading."""
+        if img_path in self._save_label_map:
+            return self._save_label_map[img_path]
         if self._label_folder:
             base = os.path.splitext(os.path.basename(img_path))[0]
             return os.path.join(self._label_folder, base + '.txt')
+        if self._save_source_kind in ('yolo', 'unet', 'coco'):
+            raise ValueError(f'Missing save destination for {img_path}')
         return os.path.splitext(img_path)[0] + '.txt'
+
+    def _confirm_label_save(self, items, operation, obb_as_xywhr):
+        """One shared plan/summary for Save and Save All, both tabs."""
+        plan = build_label_save_plan(
+            (img, self._resolve_save_path_for_img(img)) for img in items)
+        summary = format_label_save_confirmation(
+            plan, operation=operation,
+            obb_format='xywhr' if obb_as_xywhr else 'corners',
+            source_kind=self._save_source_kind,
+            unloaded_count=(max(0, len(self.image_paths)-len(items))
+                            if operation == 'Save All' else 0))
+        answer = QMessageBox.question(
+            self, operation, summary, QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No)
+        return plan if answer == QMessageBox.Yes else None
+
+    def _after_label_saved(self, image_path, target_path):
+        """Reopen future lazy reads from the newly saved canonical YOLO path."""
+        if self._save_source_kind == 'yolo':
+            self._yaml_label_map[image_path] = target_path
 
     def save_all_annotations(self):
         """Сохраняет аннотации всех уже загруженных/изменённых изображений."""
@@ -2020,14 +2067,14 @@ class Labeler(QMainWindow):
         obb_as_xywhr = self.chk_obb_xywhr.isChecked()
         fmt = "xywhr" if obb_as_xywhr else "corners"
 
-        reply = QMessageBox.question(
-            self, "Save All",
-            f"Сохранить аннотации для {len(loaded)} изображений?\n\n"
-            f"Формат OBB: {fmt}.\n"
-            f"Существующие .txt будут перезаписаны.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-        )
-        if reply != QMessageBox.Yes:
+        try:
+            plan = self._confirm_label_save(
+                [self.image_paths[i] for i, _ in loaded], 'Save All', obb_as_xywhr)
+        except Exception as exc:
+            self.log(f"[Save All] ошибка подготовки: {exc}")
+            QMessageBox.critical(self, "Save All", str(exc))
+            return
+        if plan is None:
             return
 
         ok = 0
@@ -2042,6 +2089,7 @@ class Labeler(QMainWindow):
                 )
                 if success:
                     ok += 1
+                    self._after_label_saved(img_path, txt_path)
                 else:
                     err += 1
                     self.log(f"[Save All] ошибка записи: {txt_path}")

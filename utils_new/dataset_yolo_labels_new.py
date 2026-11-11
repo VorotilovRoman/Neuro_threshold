@@ -313,3 +313,71 @@ def save_annotations(annotations, txt_path, img_w, img_h, obb_as_xywhr=False):
         return True
     except (OSError, TypeError, ValueError, IndexError):
         return False
+
+
+# --- Shared save confirmation plan for editor and viewer, without Qt imports. ---
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class LabelSavePlan:
+    """Exact output paths and overwrite counts, computed before confirmation."""
+    entries: tuple[tuple[str, str], ...]  # (image_path, label_path)
+    overwrite_count: int
+    create_count: int
+    directories: tuple[str, ...]
+
+
+def build_label_save_plan(entries):
+    """Refuse collisions; count only existing *destination* .txt files."""
+    seen = set()
+    normalized = []
+    for image, destination in entries:
+        image = str(image)
+        destination = str(destination)
+        if not destination.lower().endswith('.txt'):
+            raise ValueError(f'Expected YOLO .txt destination: {destination}')
+        key = str(Path(destination).resolve()).casefold()
+        if key in seen:
+            raise ValueError(f'Duplicate output label path: {destination}')
+        seen.add(key)
+        normalized.append((image, destination))
+    if not normalized:
+        raise ValueError('No loaded image annotations to save')
+    old = sum(Path(dest).is_file() for _, dest in normalized)
+    directories = tuple(sorted({str(Path(dest).parent) for _, dest in normalized}))
+    return LabelSavePlan(tuple(normalized), old, len(normalized) - old, directories)
+
+
+def format_label_save_confirmation(plan, *, operation='Save', obb_format='corners',
+                                   source_kind='images', unloaded_count=0):
+    """Human-readable summary for the shared Qt Yes/No dialogs."""
+    if not plan.entries:
+        raise ValueError('Empty save plan')
+    count = len(plan.entries)
+    parts = [
+        f'{operation}: подтвердить сохранение аннотаций?',
+        f'Файлов .txt: {count}',
+        f'Перезапись существующих .txt: {plan.overwrite_count}',
+        f'Новых .txt: {plan.create_count}',
+        f'Формат OBB: {obb_format}',
+    ]
+    if operation == 'Save All' and unloaded_count:
+        parts.append(f'Не загружены/не изменены в памяти — не сохраняются: {unloaded_count}')
+    if count == 1:
+        parts.extend(('', 'Путь назначения:', plan.entries[0][1]))
+    else:
+        parts.extend(('', 'Папки назначения:'))
+        parts.extend(plan.directories[:8])
+        if len(plan.directories) > 8:
+            parts.append(f'... и ещё {len(plan.directories) - 8} папок')
+        parts.extend(('', 'Примеры файлов назначения:'))
+        parts.extend(destination for _, destination in plan.entries[:5])
+        if count > 5:
+            parts.append(f'... и ещё {count - 5} файлов')
+    if source_kind == 'unet':
+        parts.extend(('', 'ВНИМАНИЕ: источник — U-Net YAML.',
+                      'Сохраняются ТОЛЬКО преобразованные YOLO-аннотации (.txt).',
+                      'Исходные PNG-маски НЕ изменяются; обратной записи в маски нет.'))
+    if plan.overwrite_count:
+        parts.extend(('', 'Существующие файлы .txt будут заменены после подтверждения.'))
+    return '\n'.join(parts)
