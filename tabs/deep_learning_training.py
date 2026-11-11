@@ -7,6 +7,10 @@ if __name__ == "__main__" and not __package__:
     _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
 
 # deep_learning_training.py
+from runtime_torch import prepare_windows_torch
+
+prepare_windows_torch()
+
 import json
 import os
 import sys

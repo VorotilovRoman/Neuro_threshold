@@ -49,13 +49,8 @@ def _check_cancel(cancel_check):
 
 def detect_device():
     """Автоопределение устройства: 'cuda:0', если доступно, иначе 'cpu'."""
-    try:
-        import torch
-        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
-            return 'cuda:0'
-    except Exception:
-        pass
-    return 'cpu'
+    from runtime_torch import get_torch_runtime
+    return get_torch_runtime().device
 
 
 # ============================================================
@@ -295,10 +290,12 @@ class LossInspectionThread(QThread):
         try:
             from runtime_policy import configure_ultralytics
             configure_ultralytics()
+            from runtime_torch import require_torch
+            require_torch()
             from ultralytics import YOLO
-        except ImportError:
+        except (ImportError, OSError, RuntimeError) as exc:
             self.finished_signal.emit({
-                'error': 'ultralytics не установлен', 'suspicious': []})
+                'error': f'PyTorch/Ultralytics недоступен: {exc}', 'suspicious': []})
             return
 
         try:
@@ -539,6 +536,8 @@ class EmbeddingClusterThread(QThread):
             return
 
         try:
+            from runtime_torch import require_torch
+            require_torch()
             if _CLIP_BACKEND == 'open_clip':
                 import open_clip
                 model, _, preprocess = \
@@ -577,7 +576,8 @@ class EmbeddingClusterThread(QThread):
         batch_imgs = []
         total = len(self.pairs)
 
-        import torch
+        from runtime_torch import require_torch
+        torch = require_torch()
         from PIL import Image as _Img
 
         def flush_batch(batch_paths):

@@ -1,4 +1,8 @@
 # main.py
+from runtime_torch import prepare_windows_torch
+
+prepare_windows_torch()
+
 import os
 import sys
 from datetime import datetime

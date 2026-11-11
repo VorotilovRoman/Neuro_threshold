@@ -129,3 +129,12 @@ _yaml_label_map отделена от _save_label_map; build_yolo_save_target_ma
 из dataset_yaml_new определяет канонический путь сохранения по split YAML.
 Новые helpers не зависят от Qt. При объединении сохранены явные импорты,
 автономные точки входа, runtime policy и общий Qt lifecycle ветки work.
+
+## Windows и состояние загрузчика Torch
+
+runtime_torch — нижний слой без Qt/NumPy. На Windows main и автономные вкладки
+вызывают prepare_windows_torch до остальных нативных стеков; на Linux вызов
+ничего не загружает. get_torch_runtime сохраняет успешный модуль либо ошибку
+загрузки; detect_device использует это состояние без повторного импорта после
+сбоя. Вкладка анализа различает недоступный Torch и CPU без CUDA.
+Подробности и границы проверки: [Windows_Torch_DLL](Windows_Torch_DLL.md).

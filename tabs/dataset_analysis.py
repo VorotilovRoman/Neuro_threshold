@@ -7,6 +7,10 @@ if __name__ == "__main__" and not __package__:
     _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
 
 # dataset_analysis.py
+from runtime_torch import prepare_windows_torch
+
+prepare_windows_torch()
+
 import io
 import os
 import shutil
@@ -160,11 +164,13 @@ class YoloValThread(QThread):
         try:
             from runtime_policy import configure_ultralytics
             configure_ultralytics()
+            from runtime_torch import require_torch
+            require_torch()
             from ultralytics import YOLO
             from ultralytics.utils import LOGGER
-        except ImportError:
+        except (ImportError, OSError, RuntimeError) as exc:
             self.finished_signal.emit({
-                'error': 'ultralytics не установлен',
+                'error': f'PyTorch/Ultralytics недоступен: {exc}',
                 'metrics': None})
             return
 
@@ -296,31 +302,27 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self.setMinimumHeight(800)
         setup_dataset_analysis_ui(self)
 
-        # Автоопределение устройства + лог
-        self._device = detect_device()
-        try:
-            import torch
-            if self._device.startswith('cuda'):
-                gpu_count = torch.cuda.device_count()
-                try:
-                    gpu_name = (torch.cuda.get_device_name(0)
-                                if gpu_count > 0 else '?')
-                except Exception:
-                    gpu_name = '?'
-                self._audit_log(
-                    f"[DEVICE] Обнаружен GPU: {gpu_name} "
-                    f"(CUDA devices: {gpu_count}). "
-                    f"Модели будут выполняться на {self._device}.",
-                    tag="INIT", level='OK')
-            else:
-                self._audit_log(
-                    "[DEVICE] GPU не обнаружен (CUDA недоступна). "
-                    "Модели будут выполняться на CPU.",
-                    tag="INIT", level='WARN')
-        except ImportError:
+        # A failed DLL import is cached; do not retry it after detect_device.
+        from runtime_torch import get_torch_runtime
+        runtime = get_torch_runtime()
+        self._device = runtime.device
+        if runtime.module is None:
             self._audit_log(
-                "[DEVICE] PyTorch не установлен. "
-                "Модели будут выполняться на CPU.",
+                "[DEVICE] PyTorch недоступен. Анализ датасета без моделей доступен; "
+                "нейросетевые операции требуют исправной установки PyTorch. "
+                + runtime.error, tag="INIT", level='WARN')
+        elif runtime.error:
+            self._audit_log(
+                "[DEVICE] Ошибка проверки CUDA; выбран CPU. " + runtime.error,
+                tag="INIT", level='WARN')
+        elif runtime.device.startswith('cuda'):
+            self._audit_log(
+                f"[DEVICE] Обнаружен GPU: {runtime.gpu_name} "
+                f"(CUDA devices: {runtime.gpu_count}). Модели будут выполняться на {runtime.device}.",
+                tag="INIT", level='OK')
+        else:
+            self._audit_log(
+                "[DEVICE] CUDA недоступна; PyTorch загружен, выбран CPU.",
                 tag="INIT", level='WARN')
 
         self.images_folder = self.labels_folder = self.masks_folder = None
@@ -1993,6 +1995,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         try:
             from runtime_policy import configure_ultralytics
             configure_ultralytics()
+            from runtime_torch import require_torch
+            require_torch()
             from ultralytics import YOLO
             m = YOLO(path)
             if self._device.startswith('cuda'):

@@ -4,7 +4,7 @@
 
 Сгенерировано `python Docs/generate_reference.py` из текущих исходников. Каталог исключает саму документацию и скрытые каталоги.
 
-Проанализировано Python-модулей: **136**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
+Проанализировано Python-модулей: **138**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
 
 Для всех модулей перечислены верхнеуровневые функции и классы. Для всех каталогов утилит дополнительно перечислены сигнатуры методов классов. Вложенные локальные функции не являются отдельным API и в список не включены. Приватные имена сохранены для поиска реализации.
 
@@ -27,6 +27,7 @@
 - [path_setup](#path-setup)
 - [rename_data](#rename-data)
 - [runtime_policy](#runtime-policy)
+- [runtime_torch](#runtime-torch)
 - [tabs.dataset_analysis](#tabs-dataset-analysis)
 - [tabs.deep_learning_methods](#tabs-deep-learning-methods)
 - [tabs.deep_learning_training](#tabs-deep-learning-training)
@@ -47,6 +48,7 @@
 - [tests.test_label_save_merge](#tests-test-label-save-merge)
 - [tests.test_processing_smoke](#tests-test-processing-smoke)
 - [tests.test_runtime_imports](#tests-test-runtime-imports)
+- [tests.test_torch_runtime](#tests-test-torch-runtime)
 - [ui.DL_predict_settings](#ui-DL-predict-settings)
 - [ui.DL_train_settings_base](#ui-DL-train-settings-base)
 - [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model)
@@ -177,7 +179,7 @@
 | `skimage` | [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `sklearn` | [cluster.cluster_embeddings](#cluster-cluster-embeddings), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [utils.analysis](#utils-analysis), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.prepare](#utils-prepare), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `tifffile` | [utils.image_io](#utils-image-io) |
-| `torch` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
+| `torch` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `torchvision` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.test_new_image](#cluster-test-new-image), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `transformers` | [utils.dataset_audit_logic](#utils-dataset-audit-logic) |
 | `ultralytics` | [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker) |
@@ -481,6 +483,7 @@
 
 **Прямые локальные импорты:**
 - [main_ui](#main-ui): `StartupDialog`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [tabs.dataset_analysis](#tabs-dataset-analysis): `DatasetAnalysisWindow`
 - [tabs.deep_learning_methods](#tabs-deep-learning-methods): `DeepLearningWindow`
 - [tabs.deep_learning_training](#tabs-deep-learning-training): `YoloTrainWindow`
@@ -505,8 +508,8 @@
 
 **Объявления:**
 
-- Класс [`ImagePlayer`](../main.py#L25) (`QMainWindow`)
-- [`main()`](../main.py#L278)
+- Класс [`ImagePlayer`](../main.py#L29) (`QMainWindow`)
+- [`main()`](../main.py#L282)
 
 <a id="main-ui"></a>
 
@@ -581,6 +584,29 @@
 - [`configure_ultralytics()`](../runtime_policy.py#L6) — Keep optional backend installation under install.py's control.
   Явно импортируют: [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [dependency_health](#dependency-health), [import_libs_external](#import-libs-external), [import_libs_internal](#import-libs-internal), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker).
 
+<a id="runtime-torch"></a>
+
+## runtime_torch
+
+Исходник: [runtime_torch.py](../runtime_torch.py#L1).
+
+**Прямые потребители:** [main](#main), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_torch_runtime](#tests-test-torch-runtime), [utils.dataset_audit_logic](#utils-dataset-audit-logic).
+
+**Прямые локальные импорты:**
+- нет
+
+**Внешние/stdlib импорты:** `dataclasses.dataclass`, `importlib`, `sys`, `threading`.
+
+**Объявления:**
+
+- Класс [`TorchRuntime`](../runtime_torch.py#L9)
+- [`get_torch_runtime()`](../runtime_torch.py#L21) — Cache failure as well as success; never retry a broken native loader.
+  Явно импортируют: [tabs.dataset_analysis](#tabs-dataset-analysis), [utils.dataset_audit_logic](#utils-dataset-audit-logic).
+- [`prepare_windows_torch()`](../runtime_torch.py#L43) — Load Torch before GUI/native stacks on Windows; keep Linux loading lazy.
+  Явно импортируют: [main](#main), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb).
+- [`require_torch()`](../runtime_torch.py#L54) — Return the loaded module or report the cached failure without retrying.
+  Явно импортируют: [tabs.dataset_analysis](#tabs-dataset-analysis), [utils.dataset_audit_logic](#utils-dataset-audit-logic).
+
 <a id="tabs-dataset-analysis"></a>
 
 ## tabs.dataset_analysis
@@ -591,6 +617,7 @@
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [runtime_torch](#runtime-torch): `get_torch_runtime`, `prepare_windows_torch`, `require_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui): `TrainingImageLabel`, `setup_dataset_analysis_ui`
 - [utils.dataset_analysis_logic](#utils-dataset-analysis-logic): `BrightnessAnalyzer`, `ClassImbalanceAnalyzer`, `DatasetAnalyzer`, `FilterParams`, `ResolutionAnalyzer`, `TrainingResultsLoader`, `clear_brightness_cache`
@@ -600,12 +627,12 @@
 - [utils_new.dataset_validation_new](#utils-new-dataset-validation-new): `ImageStats`, `PairValidator`
 - [utils_ops.segmentation_ops](#utils-ops-segmentation-ops): `get_class_color`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QThread`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QColor`, `PyQt5.QtGui.QKeySequence`, `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFrame`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QShortcut`, `PyQt5.QtWidgets.QTableWidgetItem`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `collections.Counter`, `cv2`, `io`, `logging`, `matplotlib.pyplot`, `numpy`, `os`, `pathlib.Path`, `shutil`, `subprocess`, `sys`, `torch`, `traceback`, `ultralytics.YOLO`, `ultralytics.utils.LOGGER`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QThread`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QColor`, `PyQt5.QtGui.QKeySequence`, `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFrame`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QShortcut`, `PyQt5.QtWidgets.QTableWidgetItem`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `collections.Counter`, `cv2`, `io`, `logging`, `matplotlib.pyplot`, `numpy`, `os`, `pathlib.Path`, `shutil`, `subprocess`, `sys`, `traceback`, `ultralytics.YOLO`, `ultralytics.utils.LOGGER`.
 
 **Объявления:**
 
-- Класс [`YoloValThread`](../tabs/dataset_analysis.py#L63) (`QThread`)
-- Класс [`DatasetAnalysisWindow`](../tabs/dataset_analysis.py#L291) (`DatasetLoaderMixin, QMainWindow`)
+- Класс [`YoloValThread`](../tabs/dataset_analysis.py#L67) (`QThread`)
+- Класс [`DatasetAnalysisWindow`](../tabs/dataset_analysis.py#L297) (`DatasetLoaderMixin, QMainWindow`)
 
 <a id="tabs-deep-learning-methods"></a>
 
@@ -616,6 +643,7 @@
 **Прямые потребители:** [main](#main).
 
 **Прямые локальные импорты:**
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui): `setup_deep_learning_methods_ui`
 - [utils.image_io](#utils-image-io): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`
@@ -628,8 +656,8 @@
 
 **Объявления:**
 
-- Класс [`DeepLearningWindow`](../tabs/deep_learning_methods.py#L61) (`QMainWindow`)
-- [`center_window(window, width=1200, height=800)`](../tabs/deep_learning_methods.py#L1180)
+- Класс [`DeepLearningWindow`](../tabs/deep_learning_methods.py#L65) (`QMainWindow`)
+- [`center_window(window, width=1200, height=800)`](../tabs/deep_learning_methods.py#L1184)
 
 <a id="tabs-deep-learning-training"></a>
 
@@ -642,6 +670,7 @@
 **Прямые локальные импорты:**
 - [path_setup](#path-setup): `get_project_root`
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui): `setup_deep_learning_training_ui`
 
@@ -649,7 +678,7 @@
 
 **Объявления:**
 
-- Класс [`YoloTrainWindow`](../tabs/deep_learning_training.py#L28) (`QMainWindow`)
+- Класс [`YoloTrainWindow`](../tabs/deep_learning_training.py#L32) (`QMainWindow`)
 
 <a id="tabs-demo-ensemble-methods"></a>
 
@@ -661,6 +690,7 @@
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui): `setup_demo_ensemble_methods_ui`
 - [utils.ensemble_utils](#utils-ensemble-utils): `ensemble_detections`, `extract_threshold_params`, `get_detections_from_preset`
@@ -673,10 +703,10 @@
 
 **Объявления:**
 
-- [`print_flush(*args, **kwargs)`](../tabs/demo_ensemble_methods.py#L48)
-- Класс [`YoloInferThread`](../tabs/demo_ensemble_methods.py#L59) (`QThread`)
-- Класс [`EnsembleThread`](../tabs/demo_ensemble_methods.py#L135) (`QThread`)
-- Класс [`YoloDemoWindow`](../tabs/demo_ensemble_methods.py#L200) (`QMainWindow`)
+- [`print_flush(*args, **kwargs)`](../tabs/demo_ensemble_methods.py#L52)
+- Класс [`YoloInferThread`](../tabs/demo_ensemble_methods.py#L63) (`QThread`)
+- Класс [`EnsembleThread`](../tabs/demo_ensemble_methods.py#L139) (`QThread`)
+- Класс [`YoloDemoWindow`](../tabs/demo_ensemble_methods.py#L204) (`QMainWindow`)
 
 <a id="tabs-gradient-methods"></a>
 
@@ -688,6 +718,7 @@
 
 **Прямые локальные импорты:**
 - [path_setup](#path-setup): `get_project_root`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui): `setup_gradient_ui`
 - [utils.image_io](#utils-image-io): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`
@@ -702,7 +733,7 @@
 
 **Объявления:**
 
-- Класс [`GradientMethodsWindow`](../tabs/gradient_methods.py#L50) (`QMainWindow`)
+- Класс [`GradientMethodsWindow`](../tabs/gradient_methods.py#L54) (`QMainWindow`)
 
 <a id="tabs-interactive-methods"></a>
 
@@ -713,6 +744,7 @@
 **Прямые потребители:** [main](#main).
 
 **Прямые локальные импорты:**
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui): `setup_interactive_ui`
 - [utils.image_io](#utils-image-io): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`
@@ -725,7 +757,7 @@
 
 **Объявления:**
 
-- Класс [`InteractiveMethodsWindow`](../tabs/interactive_methods.py#L54) (`QMainWindow`)
+- Класс [`InteractiveMethodsWindow`](../tabs/interactive_methods.py#L58) (`QMainWindow`)
 
 <a id="tabs-layout-dataset"></a>
 
@@ -737,6 +769,7 @@
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui): `setup_layout_dataset_ui`
 - [utils.settings](#utils-settings): `settings`
@@ -753,10 +786,10 @@
 
 **Объявления:**
 
-- [`_validate_unified_annotation(ann)`](../tabs/layout_dataset.py#L78) — Возвращает (is_valid, err_msg).
-- [`_detect_annotation_to_obb(ann)`](../tabs/layout_dataset.py#L123) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
-- Класс [`LabelValidationThread`](../tabs/layout_dataset.py#L147) (`QThread`)
-- Класс [`Labeler`](../tabs/layout_dataset.py#L197) (`QMainWindow`)
+- [`_validate_unified_annotation(ann)`](../tabs/layout_dataset.py#L82) — Возвращает (is_valid, err_msg).
+- [`_detect_annotation_to_obb(ann)`](../tabs/layout_dataset.py#L127) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+- Класс [`LabelValidationThread`](../tabs/layout_dataset.py#L151) (`QThread`)
+- Класс [`Labeler`](../tabs/layout_dataset.py#L201) (`QMainWindow`)
 
 <a id="tabs-model-research"></a>
 
@@ -768,6 +801,7 @@
 
 **Прямые локальные импорты:**
 - [path_setup](#path-setup): `get_project_root`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.model_research_ui](#ui-tabs-model-research-ui): `setup_model_research_ui`
 - [utils.analysis](#utils-analysis): `analyze`, `global_top_diverse`
@@ -780,7 +814,7 @@
 
 **Объявления:**
 
-- Класс [`ModelResearchApp`](../tabs/model_research.py#L48) (`QMainWindow`)
+- Класс [`ModelResearchApp`](../tabs/model_research.py#L52) (`QMainWindow`)
 
 <a id="tabs-preparing-dataset-yaml"></a>
 
@@ -791,6 +825,7 @@
 **Прямые потребители:** [main](#main).
 
 **Прямые локальные импорты:**
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui): `setup_preparing_dataset_yaml_ui`
 - [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new): `DatasetGeneratorThread`
@@ -802,7 +837,7 @@
 
 **Объявления:**
 
-- Класс [`DatasetPreparationWindow`](../tabs/preparing_dataset_yaml.py#L44) (`DatasetLoaderMixin, QMainWindow`)
+- Класс [`DatasetPreparationWindow`](../tabs/preparing_dataset_yaml.py#L48) (`DatasetLoaderMixin, QMainWindow`)
 
 <a id="tabs-slice-dataset-sahi"></a>
 
@@ -813,6 +848,7 @@
 **Прямые потребители:** [main](#main).
 
 **Прямые локальные импорты:**
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.slice_dataset_sahi_ui](#ui-tabs-slice-dataset-sahi-ui): `setup_sahi_slicer_ui`
 - [utils_new.dataset_loader_new](#utils-new-dataset-loader-new): `DatasetLoaderMixin`
@@ -822,17 +858,17 @@
 
 **Объявления:**
 
-- [`yolo_labels_to_coco_annotations(label_path, img_w, img_h, input_format='auto')`](../tabs/slice_dataset_sahi.py#L44)
-- [`slice_dataset(coco_json_path, image_dir, output_dir, slice_size=640, overlap=0.2, min_area_ratio=0.3)`](../tabs/slice_dataset_sahi.py#L136)
-- [`detect_dataset_format(coco_dict)`](../tabs/slice_dataset_sahi.py#L173)
-- [`describe_segmentation(coco_dict)`](../tabs/slice_dataset_sahi.py#L180)
-- [`subsample_negative_tiles(coco_dict, image_dir, keep_ratio=0.1, seed=42)`](../tabs/slice_dataset_sahi.py#L202)
-- [`split_and_move(coco_dict, output_dir, train_ratio=0.8, seed=42, strip_segmentation=False)`](../tabs/slice_dataset_sahi.py#L243) — strip_segmentation: если True — удалить поле 'segmentation' из всех
-- [`coco_to_yolo(coco_json_path, output_dir, class_names=None, annotation_format='bbox', verbose=True)`](../tabs/slice_dataset_sahi.py#L309)
-- [`write_yolo_yaml(output_dir, class_names, channels=3)`](../tabs/slice_dataset_sahi.py#L429)
-- [`visualize_samples(coco_json_path, output_dir, n=3)`](../tabs/slice_dataset_sahi.py#L444)
-- Класс [`SliceWorker`](../tabs/slice_dataset_sahi.py#L496) (`QThread`)
-- Класс [`SahiSlicerWindow`](../tabs/slice_dataset_sahi.py#L620) (`DatasetLoaderMixin, QMainWindow`)
+- [`yolo_labels_to_coco_annotations(label_path, img_w, img_h, input_format='auto')`](../tabs/slice_dataset_sahi.py#L48)
+- [`slice_dataset(coco_json_path, image_dir, output_dir, slice_size=640, overlap=0.2, min_area_ratio=0.3)`](../tabs/slice_dataset_sahi.py#L140)
+- [`detect_dataset_format(coco_dict)`](../tabs/slice_dataset_sahi.py#L177)
+- [`describe_segmentation(coco_dict)`](../tabs/slice_dataset_sahi.py#L184)
+- [`subsample_negative_tiles(coco_dict, image_dir, keep_ratio=0.1, seed=42)`](../tabs/slice_dataset_sahi.py#L206)
+- [`split_and_move(coco_dict, output_dir, train_ratio=0.8, seed=42, strip_segmentation=False)`](../tabs/slice_dataset_sahi.py#L247) — strip_segmentation: если True — удалить поле 'segmentation' из всех
+- [`coco_to_yolo(coco_json_path, output_dir, class_names=None, annotation_format='bbox', verbose=True)`](../tabs/slice_dataset_sahi.py#L313)
+- [`write_yolo_yaml(output_dir, class_names, channels=3)`](../tabs/slice_dataset_sahi.py#L433)
+- [`visualize_samples(coco_json_path, output_dir, n=3)`](../tabs/slice_dataset_sahi.py#L448)
+- Класс [`SliceWorker`](../tabs/slice_dataset_sahi.py#L500) (`QThread`)
+- Класс [`SahiSlicerWindow`](../tabs/slice_dataset_sahi.py#L624) (`DatasetLoaderMixin, QMainWindow`)
 
 <a id="tabs-threshold-methods"></a>
 
@@ -844,6 +880,7 @@
 
 **Прямые локальные импорты:**
 - [path_setup](#path-setup): `get_project_root`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui): `setup_threshold_ui`
 - [utils.image_io](#utils-image-io): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`
@@ -859,9 +896,9 @@
 
 **Объявления:**
 
-- Класс [`_LegacyMorphologyRatioSlider`](../tabs/threshold_methods.py#L52) (`QSlider`)
-- Класс [`ThresholdMorphologyPresetManager`](../tabs/threshold_methods.py#L73) (`PresetManager`)
-- Класс [`ThresholdWindow`](../tabs/threshold_methods.py#L178) (`QMainWindow`)
+- Класс [`_LegacyMorphologyRatioSlider`](../tabs/threshold_methods.py#L56) (`QSlider`)
+- Класс [`ThresholdMorphologyPresetManager`](../tabs/threshold_methods.py#L77) (`PresetManager`)
+- Класс [`ThresholdWindow`](../tabs/threshold_methods.py#L182) (`QMainWindow`)
 
 <a id="tabs-traditional-ml-methods"></a>
 
@@ -872,6 +909,7 @@
 **Прямые потребители:** [main](#main).
 
 **Прямые локальные импорты:**
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui): `setup_traditional_ml_ui`
 - [utils.image_io](#utils-image-io): `load_images_universal`, `numpy_to_qpixmap`, `save_annotations`
@@ -884,7 +922,7 @@
 
 **Объявления:**
 
-- Класс [`TraditionalMLWindow`](../tabs/traditional_ml_methods.py#L59) (`QMainWindow`)
+- Класс [`TraditionalMLWindow`](../tabs/traditional_ml_methods.py#L63) (`QMainWindow`)
 
 <a id="tabs-viewing-dataset"></a>
 
@@ -895,6 +933,7 @@
 **Прямые потребители:** [main](#main).
 
 **Прямые локальные импорты:**
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui): `setup_viewing_dataset_ui`
 - [utils.settings](#utils-settings): `settings`
@@ -912,10 +951,10 @@
 
 **Объявления:**
 
-- [`_validate_unified_annotation(ann)`](../tabs/viewing_dataset.py#L90) — Возвращает (is_valid, err_msg).
-- [`_detect_annotation_to_obb(ann)`](../tabs/viewing_dataset.py#L135) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
-- Класс [`LabelValidationThread`](../tabs/viewing_dataset.py#L159) (`QThread`)
-- Класс [`ViewingDataset`](../tabs/viewing_dataset.py#L209) (`QMainWindow`)
+- [`_validate_unified_annotation(ann)`](../tabs/viewing_dataset.py#L94) — Возвращает (is_valid, err_msg).
+- [`_detect_annotation_to_obb(ann)`](../tabs/viewing_dataset.py#L139) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+- Класс [`LabelValidationThread`](../tabs/viewing_dataset.py#L163) (`QThread`)
+- Класс [`ViewingDataset`](../tabs/viewing_dataset.py#L213) (`QMainWindow`)
 
 <a id="tabs-yolo-find-img"></a>
 
@@ -927,6 +966,7 @@
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui): `setup_yolo_find_img_ui`
 - [utils.image_io](#utils-image-io): `normalize_to_uint8`, `read_image_with_fallback_find`
@@ -935,9 +975,9 @@
 
 **Объявления:**
 
-- Класс [`ClickableLabel`](../tabs/yolo_find_img.py#L44) (`QLabel`)
-- Класс [`ScanThread`](../tabs/yolo_find_img.py#L108) (`QThread`)
-- Класс [`FindImagesWindow`](../tabs/yolo_find_img.py#L288) (`QMainWindow, setup_yolo_find_img_ui`)
+- Класс [`ClickableLabel`](../tabs/yolo_find_img.py#L48) (`QLabel`)
+- Класс [`ScanThread`](../tabs/yolo_find_img.py#L112) (`QThread`)
+- Класс [`FindImagesWindow`](../tabs/yolo_find_img.py#L292) (`QMainWindow, setup_yolo_find_img_ui`)
 
 <a id="tabs-yolo-test-aeb"></a>
 
@@ -949,6 +989,7 @@
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui): `setup_yolo_ae_vae_ui`
 - [utils.image_io](#utils-image-io): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`
@@ -961,8 +1002,8 @@
 
 **Объявления:**
 
-- Класс [`YoloAEBPresetManager`](../tabs/yolo_test_aeb.py#L94) (`PresetManager`)
-- Класс [`YoloInspectWindow`](../tabs/yolo_test_aeb.py#L190) (`QMainWindow`)
+- Класс [`YoloAEBPresetManager`](../tabs/yolo_test_aeb.py#L98) (`PresetManager`)
+- Класс [`YoloInspectWindow`](../tabs/yolo_test_aeb.py#L194) (`QMainWindow`)
 
 <a id="tests-test-dependency-installation"></a>
 
@@ -1056,6 +1097,23 @@
 **Объявления:**
 
 - Класс [`RuntimeImportTests`](../tests/test_runtime_imports.py#L15) (`unittest.TestCase`)
+
+<a id="tests-test-torch-runtime"></a>
+
+## tests.test_torch_runtime
+
+Исходник: [tests/test_torch_runtime.py](../tests/test_torch_runtime.py#L1).
+
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+
+**Прямые локальные импорты:**
+- [runtime_torch](#runtime-torch): `(модуль)`
+
+**Внешние/stdlib импорты:** `os`, `pathlib.Path`, `subprocess`, `sys`, `tempfile`, `types.SimpleNamespace`, `unittest`, `unittest.mock.Mock`, `unittest.mock.patch`.
+
+**Объявления:**
+
+- Класс [`TorchRuntimeTests`](../tests/test_torch_runtime.py#L16) (`unittest.TestCase`)
 
 <a id="ui-DL-predict-settings"></a>
 
@@ -1846,9 +1904,10 @@
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [runtime_torch](#runtime-torch): `get_torch_runtime`, `require_torch`
 - [utils.image_io](#utils-image-io): `load_annotations`
 
-**Внешние/stdlib импорты:** `PIL.Image`, `PyQt5.QtCore.QThread`, `PyQt5.QtCore.pyqtSignal`, `collections.Counter`, `collections.defaultdict`, `cv2`, `datetime.datetime`, `hashlib`, `hdbscan`, `imagehash`, `importlib.util.find_spec`, `numpy`, `open_clip`, `os`, `sklearn.cluster.DBSCAN`, `sklearn.decomposition.PCA`, `torch`, `transformers.CLIPModel`, `transformers.CLIPProcessor`, `ultralytics.YOLO`, `umap`.
+**Внешние/stdlib импорты:** `PIL.Image`, `PyQt5.QtCore.QThread`, `PyQt5.QtCore.pyqtSignal`, `collections.Counter`, `collections.defaultdict`, `cv2`, `datetime.datetime`, `hashlib`, `hdbscan`, `imagehash`, `importlib.util.find_spec`, `numpy`, `open_clip`, `os`, `sklearn.cluster.DBSCAN`, `sklearn.decomposition.PCA`, `transformers.CLIPModel`, `transformers.CLIPProcessor`, `ultralytics.YOLO`, `umap`.
 
 **Объявления:**
 
@@ -1856,24 +1915,24 @@
 - [`_check_cancel(cancel_check)`](../utils/dataset_audit_logic.py#L43)
 - [`detect_device()`](../utils/dataset_audit_logic.py#L50) — Автоопределение устройства: 'cuda:0', если доступно, иначе 'cpu'.
   Явно импортируют: [tabs.dataset_analysis](#tabs-dataset-analysis).
-- Класс [`DuplicateDetector`](../utils/dataset_audit_logic.py#L64)
-  - [`DuplicateDetector._file_md5(path, chunk_size=1 << 20)`](../utils/dataset_audit_logic.py#L66)
-  - [`DuplicateDetector._phash(path, hash_size=8)`](../utils/dataset_audit_logic.py#L77)
-  - [`DuplicateDetector.find_duplicates(pairs, phash_threshold=8, progress_cb=None, cancel_check=None)`](../utils/dataset_audit_logic.py#L89)
-- Класс [`LeakageChecker`](../utils/dataset_audit_logic.py#L144)
-  - [`LeakageChecker._infer_split(path)`](../utils/dataset_audit_logic.py#L148)
-  - [`LeakageChecker.check(duplicate_groups, pairs)`](../utils/dataset_audit_logic.py#L159)
-- Класс [`ObjectDistributionHeatmap`](../utils/dataset_audit_logic.py#L183)
-  - [`ObjectDistributionHeatmap.compute(pairs, dataset_type=0, grid_size=16, progress_cb=None, cancel_check=None)`](../utils/dataset_audit_logic.py#L185)
-- Класс [`LossInspectionThread`](../utils/dataset_audit_logic.py#L258) (`QThread`)
-  - [`LossInspectionThread.__init__(self, pairs, model_path, dataset_type=0, iou_threshold=0.3, conf_threshold=0.25, imgsz=640, device=None, input_format='auto', parent=None)`](../utils/dataset_audit_logic.py#L263)
-  - [`LossInspectionThread.cancel(self)`](../utils/dataset_audit_logic.py#L277)
-  - [`LossInspectionThread._iou_xyxy(a, b)`](../utils/dataset_audit_logic.py#L281)
-  - [`LossInspectionThread.run(self)`](../utils/dataset_audit_logic.py#L292)
-- Класс [`EmbeddingClusterThread`](../utils/dataset_audit_logic.py#L516) (`QThread`)
-  - [`EmbeddingClusterThread.__init__(self, pairs, batch_size=16, device=None, parent=None)`](../utils/dataset_audit_logic.py#L521)
-  - [`EmbeddingClusterThread.cancel(self)`](../utils/dataset_audit_logic.py#L528)
-  - [`EmbeddingClusterThread.run(self)`](../utils/dataset_audit_logic.py#L531)
+- Класс [`DuplicateDetector`](../utils/dataset_audit_logic.py#L59)
+  - [`DuplicateDetector._file_md5(path, chunk_size=1 << 20)`](../utils/dataset_audit_logic.py#L61)
+  - [`DuplicateDetector._phash(path, hash_size=8)`](../utils/dataset_audit_logic.py#L72)
+  - [`DuplicateDetector.find_duplicates(pairs, phash_threshold=8, progress_cb=None, cancel_check=None)`](../utils/dataset_audit_logic.py#L84)
+- Класс [`LeakageChecker`](../utils/dataset_audit_logic.py#L139)
+  - [`LeakageChecker._infer_split(path)`](../utils/dataset_audit_logic.py#L143)
+  - [`LeakageChecker.check(duplicate_groups, pairs)`](../utils/dataset_audit_logic.py#L154)
+- Класс [`ObjectDistributionHeatmap`](../utils/dataset_audit_logic.py#L178)
+  - [`ObjectDistributionHeatmap.compute(pairs, dataset_type=0, grid_size=16, progress_cb=None, cancel_check=None)`](../utils/dataset_audit_logic.py#L180)
+- Класс [`LossInspectionThread`](../utils/dataset_audit_logic.py#L253) (`QThread`)
+  - [`LossInspectionThread.__init__(self, pairs, model_path, dataset_type=0, iou_threshold=0.3, conf_threshold=0.25, imgsz=640, device=None, input_format='auto', parent=None)`](../utils/dataset_audit_logic.py#L258)
+  - [`LossInspectionThread.cancel(self)`](../utils/dataset_audit_logic.py#L272)
+  - [`LossInspectionThread._iou_xyxy(a, b)`](../utils/dataset_audit_logic.py#L276)
+  - [`LossInspectionThread.run(self)`](../utils/dataset_audit_logic.py#L287)
+- Класс [`EmbeddingClusterThread`](../utils/dataset_audit_logic.py#L513) (`QThread`)
+  - [`EmbeddingClusterThread.__init__(self, pairs, batch_size=16, device=None, parent=None)`](../utils/dataset_audit_logic.py#L518)
+  - [`EmbeddingClusterThread.cancel(self)`](../utils/dataset_audit_logic.py#L525)
+  - [`EmbeddingClusterThread.run(self)`](../utils/dataset_audit_logic.py#L528)
 - Класс [`ReportThread`](../utils/dataset_audit_logic.py#L679) (`QThread`)
   - [`ReportThread.__init__(self, data, save_path, sections, parent=None)`](../utils/dataset_audit_logic.py#L682)
   - [`ReportThread.run(self)`](../utils/dataset_audit_logic.py#L688)

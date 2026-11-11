@@ -33,6 +33,7 @@ python main.py
 ## Документация и проверки
 
 - [Навигация по Docs](Docs/README.md)
+- [Windows: ошибка c10.dll / WinError 1114](Docs/Windows_Torch_DLL.md)
 - [Руководство: вкладки, форматы, сохранение](Docs/User_Guide.md)
 - [Архитектура](Docs/Architecture.md) · [Аудит импортов](Docs/Import_Audit.md)
 

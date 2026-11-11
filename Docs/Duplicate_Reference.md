@@ -93,10 +93,10 @@
 
 ## 18. save_current_annotations
 
-- [tabs/deep_learning_methods.py:1017](../tabs/deep_learning_methods.py#L1017) — `save_current_annotations`, 47 строк
-- [tabs/gradient_methods.py:782](../tabs/gradient_methods.py#L782) — `save_current_annotations`, 47 строк
-- [tabs/interactive_methods.py:732](../tabs/interactive_methods.py#L732) — `save_current_annotations`, 47 строк
-- [tabs/threshold_methods.py:723](../tabs/threshold_methods.py#L723) — `save_current_annotations`, 48 строк
+- [tabs/deep_learning_methods.py:1021](../tabs/deep_learning_methods.py#L1021) — `save_current_annotations`, 47 строк
+- [tabs/gradient_methods.py:786](../tabs/gradient_methods.py#L786) — `save_current_annotations`, 47 строк
+- [tabs/interactive_methods.py:736](../tabs/interactive_methods.py#L736) — `save_current_annotations`, 47 строк
+- [tabs/threshold_methods.py:727](../tabs/threshold_methods.py#L727) — `save_current_annotations`, 48 строк
 
 ## 19. _resolve_split_dirs
 
@@ -135,8 +135,8 @@
 
 ## 26. _validate_unified_annotation
 
-- [tabs/layout_dataset.py:78](../tabs/layout_dataset.py#L78) — `_validate_unified_annotation`, 40 строк
-- [tabs/viewing_dataset.py:90](../tabs/viewing_dataset.py#L90) — `_validate_unified_annotation`, 40 строк
+- [tabs/layout_dataset.py:82](../tabs/layout_dataset.py#L82) — `_validate_unified_annotation`, 40 строк
+- [tabs/viewing_dataset.py:94](../tabs/viewing_dataset.py#L94) — `_validate_unified_annotation`, 40 строк
 
 ## 27. detect_annotation_type
 
@@ -165,10 +165,10 @@
 
 ## 32. update_coordinates_display
 
-- [tabs/deep_learning_methods.py:842](../tabs/deep_learning_methods.py#L842) — `update_coordinates_display`, 34 строк
-- [tabs/gradient_methods.py:471](../tabs/gradient_methods.py#L471) — `update_coordinates_display`, 34 строк
-- [tabs/interactive_methods.py:697](../tabs/interactive_methods.py#L697) — `update_coordinates_display`, 34 строк
-- [tabs/threshold_methods.py:544](../tabs/threshold_methods.py#L544) — `update_coordinates_display`, 36 строк
+- [tabs/deep_learning_methods.py:846](../tabs/deep_learning_methods.py#L846) — `update_coordinates_display`, 34 строк
+- [tabs/gradient_methods.py:475](../tabs/gradient_methods.py#L475) — `update_coordinates_display`, 34 строк
+- [tabs/interactive_methods.py:701](../tabs/interactive_methods.py#L701) — `update_coordinates_display`, 34 строк
+- [tabs/threshold_methods.py:548](../tabs/threshold_methods.py#L548) — `update_coordinates_display`, 36 строк
 
 ## 33. get_loss_function
 
@@ -243,8 +243,8 @@
 
 ## 47. _load_coco_into_labeler
 
-- [tabs/layout_dataset.py:664](../tabs/layout_dataset.py#L664) — `_load_coco_into_labeler`, 26 строк
-- [tabs/viewing_dataset.py:1556](../tabs/viewing_dataset.py#L1556) — `_load_coco_into_viewer`, 25 строк
+- [tabs/layout_dataset.py:668](../tabs/layout_dataset.py#L668) — `_load_coco_into_labeler`, 26 строк
+- [tabs/viewing_dataset.py:1560](../tabs/viewing_dataset.py#L1560) — `_load_coco_into_viewer`, 25 строк
 
 ## 48. _load_bg
 
@@ -278,10 +278,10 @@
 
 ## 54. update_annotated_view
 
-- [tabs/deep_learning_methods.py:820](../tabs/deep_learning_methods.py#L820) — `update_annotated_view`, 20 строк
-- [tabs/gradient_methods.py:447](../tabs/gradient_methods.py#L447) — `update_annotated_view`, 23 строк
-- [tabs/interactive_methods.py:674](../tabs/interactive_methods.py#L674) — `update_annotated_view`, 22 строк
-- [tabs/traditional_ml_methods.py:987](../tabs/traditional_ml_methods.py#L987) — `update_annotated_view`, 20 строк
+- [tabs/deep_learning_methods.py:824](../tabs/deep_learning_methods.py#L824) — `update_annotated_view`, 20 строк
+- [tabs/gradient_methods.py:451](../tabs/gradient_methods.py#L451) — `update_annotated_view`, 23 строк
+- [tabs/interactive_methods.py:678](../tabs/interactive_methods.py#L678) — `update_annotated_view`, 22 строк
+- [tabs/traditional_ml_methods.py:991](../tabs/traditional_ml_methods.py#L991) — `update_annotated_view`, 20 строк
 
 ## 55. _make_list_item
 
@@ -306,15 +306,15 @@
 
 ## 59. _detect_annotation_to_obb
 
-- [tabs/layout_dataset.py:123](../tabs/layout_dataset.py#L123) — `_detect_annotation_to_obb`, 22 строк
-- [tabs/viewing_dataset.py:135](../tabs/viewing_dataset.py#L135) — `_detect_annotation_to_obb`, 22 строк
+- [tabs/layout_dataset.py:127](../tabs/layout_dataset.py#L127) — `_detect_annotation_to_obb`, 22 строк
+- [tabs/viewing_dataset.py:139](../tabs/viewing_dataset.py#L139) — `_detect_annotation_to_obb`, 22 строк
 
 ## 60. update_object_list
 
-- [tabs/deep_learning_methods.py:800](../tabs/deep_learning_methods.py#L800) — `update_object_list`, 19 строк
-- [tabs/gradient_methods.py:425](../tabs/gradient_methods.py#L425) — `update_object_list`, 21 строк
-- [tabs/interactive_methods.py:652](../tabs/interactive_methods.py#L652) — `update_object_list`, 21 строк
-- [tabs/threshold_methods.py:503](../tabs/threshold_methods.py#L503) — `update_object_list`, 21 строк
+- [tabs/deep_learning_methods.py:804](../tabs/deep_learning_methods.py#L804) — `update_object_list`, 19 строк
+- [tabs/gradient_methods.py:429](../tabs/gradient_methods.py#L429) — `update_object_list`, 21 строк
+- [tabs/interactive_methods.py:656](../tabs/interactive_methods.py#L656) — `update_object_list`, 21 строк
+- [tabs/threshold_methods.py:507](../tabs/threshold_methods.py#L507) — `update_object_list`, 21 строк
 
 ## 61. background_symmetry_threshold
 
@@ -323,8 +323,8 @@
 
 ## 62. _start_annotation_validation
 
-- [tabs/layout_dataset.py:857](../tabs/layout_dataset.py#L857) — `_start_annotation_validation`, 20 строк
-- [tabs/viewing_dataset.py:851](../tabs/viewing_dataset.py#L851) — `_start_annotation_validation`, 20 строк
+- [tabs/layout_dataset.py:861](../tabs/layout_dataset.py#L861) — `_start_annotation_validation`, 20 строк
+- [tabs/viewing_dataset.py:855](../tabs/viewing_dataset.py#L855) — `_start_annotation_validation`, 20 строк
 
 ## 63. _validate_all_pairs
 
@@ -358,20 +358,20 @@
 
 ## 69. save_as_preset
 
-- [tabs/deep_learning_methods.py:437](../tabs/deep_learning_methods.py#L437) — `save_as_preset`, 18 строк
-- [tabs/gradient_methods.py:155](../tabs/gradient_methods.py#L155) — `save_as_preset`, 18 строк
-- [tabs/interactive_methods.py:183](../tabs/interactive_methods.py#L183) — `save_as_preset`, 16 строк
-- [tabs/traditional_ml_methods.py:359](../tabs/traditional_ml_methods.py#L359) — `save_as_preset`, 18 строк
+- [tabs/deep_learning_methods.py:441](../tabs/deep_learning_methods.py#L441) — `save_as_preset`, 18 строк
+- [tabs/gradient_methods.py:159](../tabs/gradient_methods.py#L159) — `save_as_preset`, 18 строк
+- [tabs/interactive_methods.py:187](../tabs/interactive_methods.py#L187) — `save_as_preset`, 16 строк
+- [tabs/traditional_ml_methods.py:363](../tabs/traditional_ml_methods.py#L363) — `save_as_preset`, 18 строк
 
 ## 70. run
 
-- [tabs/layout_dataset.py:177](../tabs/layout_dataset.py#L177) — `run`, 18 строк
-- [tabs/viewing_dataset.py:189](../tabs/viewing_dataset.py#L189) — `run`, 18 строк
+- [tabs/layout_dataset.py:181](../tabs/layout_dataset.py#L181) — `run`, 18 строк
+- [tabs/viewing_dataset.py:193](../tabs/viewing_dataset.py#L193) — `run`, 18 строк
 
 ## 71. save_as_preset
 
-- [tabs/threshold_methods.py:997](../tabs/threshold_methods.py#L997) — `save_as_preset`, 18 строк
-- [tabs/yolo_test_aeb.py:1379](../tabs/yolo_test_aeb.py#L1379) — `save_as_preset`, 18 строк
+- [tabs/threshold_methods.py:1001](../tabs/threshold_methods.py#L1001) — `save_as_preset`, 18 строк
+- [tabs/yolo_test_aeb.py:1383](../tabs/yolo_test_aeb.py#L1383) — `save_as_preset`, 18 строк
 
 ## 72. _segmentation_to_segment
 
@@ -480,13 +480,13 @@
 
 ## 93. _confirm_label_save
 
-- [tabs/layout_dataset.py:2070](../tabs/layout_dataset.py#L2070) — `_confirm_label_save`, 14 строк
-- [tabs/viewing_dataset.py:984](../tabs/viewing_dataset.py#L984) — `_confirm_label_save`, 14 строк
+- [tabs/layout_dataset.py:2074](../tabs/layout_dataset.py#L2074) — `_confirm_label_save`, 14 строк
+- [tabs/viewing_dataset.py:988](../tabs/viewing_dataset.py#L988) — `_confirm_label_save`, 14 строк
 
 ## 94. _resolve_label_path
 
-- [tabs/layout_dataset.py:162](../tabs/layout_dataset.py#L162) — `_resolve_label_path`, 14 строк
-- [tabs/viewing_dataset.py:174](../tabs/viewing_dataset.py#L174) — `_resolve_label_path`, 14 строк
+- [tabs/layout_dataset.py:166](../tabs/layout_dataset.py#L166) — `_resolve_label_path`, 14 строк
+- [tabs/viewing_dataset.py:178](../tabs/viewing_dataset.py#L178) — `_resolve_label_path`, 14 строк
 
 ## 95. validate_all
 
@@ -523,15 +523,15 @@
 
 ## 101. on_resize_mode_changed
 
-- [tabs/gradient_methods.py:648](../tabs/gradient_methods.py#L648) — `on_resize_mode_changed`, 13 строк
-- [tabs/interactive_methods.py:927](../tabs/interactive_methods.py#L927) — `on_resize_mode_changed`, 13 строк
-- [tabs/layout_dataset.py:519](../tabs/layout_dataset.py#L519) — `on_resize_mode_changed`, 13 строк
-- [tabs/threshold_methods.py:777](../tabs/threshold_methods.py#L777) — `on_resize_mode_changed`, 13 строк
+- [tabs/gradient_methods.py:652](../tabs/gradient_methods.py#L652) — `on_resize_mode_changed`, 13 строк
+- [tabs/interactive_methods.py:931](../tabs/interactive_methods.py#L931) — `on_resize_mode_changed`, 13 строк
+- [tabs/layout_dataset.py:523](../tabs/layout_dataset.py#L523) — `on_resize_mode_changed`, 13 строк
+- [tabs/threshold_methods.py:781](../tabs/threshold_methods.py#L781) — `on_resize_mode_changed`, 13 строк
 
 ## 102. _log_exception
 
-- [tabs/layout_dataset.py:637](../tabs/layout_dataset.py#L637) — `_log_exception`, 13 строк
-- [tabs/viewing_dataset.py:315](../tabs/viewing_dataset.py#L315) — `_log_exception`, 13 строк
+- [tabs/layout_dataset.py:641](../tabs/layout_dataset.py#L641) — `_log_exception`, 13 строк
+- [tabs/viewing_dataset.py:319](../tabs/viewing_dataset.py#L319) — `_log_exception`, 13 строк
 
 ## 103. shutdown
 
@@ -602,16 +602,16 @@
 
 ## 116. delete_current_preset
 
-- [tabs/deep_learning_methods.py:456](../tabs/deep_learning_methods.py#L456) — `delete_current_preset`, 11 строк
-- [tabs/gradient_methods.py:174](../tabs/gradient_methods.py#L174) — `delete_current_preset`, 11 строк
-- [tabs/threshold_methods.py:1016](../tabs/threshold_methods.py#L1016) — `delete_current_preset`, 11 строк
-- [tabs/traditional_ml_methods.py:378](../tabs/traditional_ml_methods.py#L378) — `delete_current_preset`, 11 строк
-- [tabs/yolo_test_aeb.py:1398](../tabs/yolo_test_aeb.py#L1398) — `delete_current_preset`, 11 строк
+- [tabs/deep_learning_methods.py:460](../tabs/deep_learning_methods.py#L460) — `delete_current_preset`, 11 строк
+- [tabs/gradient_methods.py:178](../tabs/gradient_methods.py#L178) — `delete_current_preset`, 11 строк
+- [tabs/threshold_methods.py:1020](../tabs/threshold_methods.py#L1020) — `delete_current_preset`, 11 строк
+- [tabs/traditional_ml_methods.py:382](../tabs/traditional_ml_methods.py#L382) — `delete_current_preset`, 11 строк
+- [tabs/yolo_test_aeb.py:1402](../tabs/yolo_test_aeb.py#L1402) — `delete_current_preset`, 11 строк
 
 ## 117. closeEvent
 
-- [tabs/gradient_methods.py:217](../tabs/gradient_methods.py#L217) — `closeEvent`, 11 строк
-- [tabs/threshold_methods.py:312](../tabs/threshold_methods.py#L312) — `closeEvent`, 11 строк
+- [tabs/gradient_methods.py:221](../tabs/gradient_methods.py#L221) — `closeEvent`, 11 строк
+- [tabs/threshold_methods.py:316](../tabs/threshold_methods.py#L316) — `closeEvent`, 11 строк
 
 ## 118. to_display_bgr
 
@@ -678,21 +678,21 @@
 
 ## 129. closeEvent
 
-- [tabs/deep_learning_methods.py:1168](../tabs/deep_learning_methods.py#L1168) — `closeEvent`, 10 строк
-- [tabs/interactive_methods.py:1048](../tabs/interactive_methods.py#L1048) — `closeEvent`, 10 строк
+- [tabs/deep_learning_methods.py:1172](../tabs/deep_learning_methods.py#L1172) — `closeEvent`, 10 строк
+- [tabs/interactive_methods.py:1052](../tabs/interactive_methods.py#L1052) — `closeEvent`, 10 строк
 
 ## 130. on_object_selection_changed
 
-- [tabs/deep_learning_methods.py:1125](../tabs/deep_learning_methods.py#L1125) — `on_object_selection_changed`, 10 строк
-- [tabs/gradient_methods.py:734](../tabs/gradient_methods.py#L734) — `on_object_selection_changed`, 10 строк
-- [tabs/interactive_methods.py:993](../tabs/interactive_methods.py#L993) — `on_object_selection_changed`, 10 строк
-- [tabs/threshold_methods.py:956](../tabs/threshold_methods.py#L956) — `on_object_selection_changed`, 10 строк
-- [tabs/traditional_ml_methods.py:1229](../tabs/traditional_ml_methods.py#L1229) — `on_object_selection_changed`, 10 строк
+- [tabs/deep_learning_methods.py:1129](../tabs/deep_learning_methods.py#L1129) — `on_object_selection_changed`, 10 строк
+- [tabs/gradient_methods.py:738](../tabs/gradient_methods.py#L738) — `on_object_selection_changed`, 10 строк
+- [tabs/interactive_methods.py:997](../tabs/interactive_methods.py#L997) — `on_object_selection_changed`, 10 строк
+- [tabs/threshold_methods.py:960](../tabs/threshold_methods.py#L960) — `on_object_selection_changed`, 10 строк
+- [tabs/traditional_ml_methods.py:1233](../tabs/traditional_ml_methods.py#L1233) — `on_object_selection_changed`, 10 строк
 
 ## 131. _resolve_save_path_for_img
 
-- [tabs/layout_dataset.py:2059](../tabs/layout_dataset.py#L2059) — `_resolve_save_path_for_img`, 10 строк
-- [tabs/viewing_dataset.py:973](../tabs/viewing_dataset.py#L973) — `_resolve_save_path_for_img`, 10 строк
+- [tabs/layout_dataset.py:2063](../tabs/layout_dataset.py#L2063) — `_resolve_save_path_for_img`, 10 строк
+- [tabs/viewing_dataset.py:977](../tabs/viewing_dataset.py#L977) — `_resolve_save_path_for_img`, 10 строк
 
 ## 132. _log_exception
 
@@ -741,10 +741,10 @@
 
 ## 141. load_images_from_dialog
 
-- [tabs/gradient_methods.py:541](../tabs/gradient_methods.py#L541) — `load_images_from_dialog`, 9 строк
-- [tabs/interactive_methods.py:825](../tabs/interactive_methods.py#L825) — `load_images_from_dialog`, 9 строк
-- [tabs/layout_dataset.py:494](../tabs/layout_dataset.py#L494) — `load_images`, 9 строк
-- [tabs/threshold_methods.py:618](../tabs/threshold_methods.py#L618) — `load_images_from_dialog`, 9 строк
+- [tabs/gradient_methods.py:545](../tabs/gradient_methods.py#L545) — `load_images_from_dialog`, 9 строк
+- [tabs/interactive_methods.py:829](../tabs/interactive_methods.py#L829) — `load_images_from_dialog`, 9 строк
+- [tabs/layout_dataset.py:498](../tabs/layout_dataset.py#L498) — `load_images`, 9 строк
+- [tabs/threshold_methods.py:622](../tabs/threshold_methods.py#L622) — `load_images_from_dialog`, 9 строк
 
 ## 142. _update_color_stats_label
 
