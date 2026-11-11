@@ -1,9 +1,58 @@
 {
     "default": {
+        "schema_version": 2,
+        "kind": "interactive",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
         "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
         "draw_mode": "None",
-        "use_hull": false
+        "use_hull": false,
+        "method": "GrabCut",
+        "method_params": {
+            "grabcut_iters": 5,
+            "grabcut_mode": "Both",
+            "lazy_superpixel": 50,
+            "lazy_compactness": 10.0,
+            "lazy_sigma": 1.0,
+            "lazy_color_sigma": 10.0,
+            "supercut_lambda": 0.5,
+            "supercut_sigma": 10.0,
+            "onecut_spatial": 1.0,
+            "onecut_data": 1.0,
+            "watershed_thresh": 50,
+            "watershed_min_dist": 20,
+            "rw_beta": 130.0,
+            "rw_mode": "cg_j",
+            "ac_alpha": 0.01,
+            "ac_beta": 0.1,
+            "ac_gamma": 0.01,
+            "ac_max_iter": 250,
+            "ac_convergence": 0.0001,
+            "ac_init_type": "Rectangle",
+            "ac_smooth_check": true
+        }
     }
 }

@@ -342,6 +342,9 @@ def setup_threshold_ui(parent):
     auto_config_layout = QHBoxLayout()
     parent.auto_enable_checkbox = QCheckBox("Enable auto research")
     parent.configure_auto_button = QPushButton("Configure auto research")
+    for control in (parent.auto_button, parent.auto_enable_checkbox, parent.configure_auto_button):
+        control.setEnabled(False)
+        control.setToolTip("Автоподбор будет переведён на пиксельную морфологию отдельным последним этапом.")
     auto_config_layout.addWidget(parent.auto_enable_checkbox)
     auto_config_layout.addWidget(parent.configure_auto_button)
     controls_layout.addLayout(auto_config_layout)

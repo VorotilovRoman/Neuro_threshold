@@ -37,9 +37,7 @@ from ui.settings_service import settings
 from ui_tabs.gradient_methods_ui import setup_gradient_ui
 from utils_auto_research.gradient_auto_research import GradientAutoResearch
 from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog
-from utils_new.segmentation.postprocessing import (
-    apply_relative_morphology as apply_morphology,
-)
+from utils_new.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.gradient_ops import apply_gradient_method
 
@@ -108,10 +106,8 @@ class GradientMethodsWindow(QMainWindow):
         self.fill_contours_checkbox.stateChanged.connect(self.schedule_update)
         self.min_area_spinbox.valueChanged.connect(self.on_min_area_changed)
         self.invert_checkbox.stateChanged.connect(self.schedule_update)
-        self.close_kernel_slider.valueChanged.connect(self.on_close_kernel_changed)
-        self.open_kernel_slider.valueChanged.connect(self.on_open_kernel_changed)
+        self.morphology_widget.parameters_changed.connect(self.schedule_update)
         self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
-        self.kernel_shape_combo.currentIndexChanged.connect(self.schedule_update)
 
         self.hull_checkbox.stateChanged.connect(self.on_hull_changed)
         self.object_list.itemChanged.connect(self.on_object_selection_changed)
@@ -139,10 +135,7 @@ class GradientMethodsWindow(QMainWindow):
         segmentation_actions.update_preset_combo(self)
 
     def on_preset_activated(self, index):
-        name = self.preset_combo.itemText(index)
-        if name:
-            self.preset_manager.apply_preset(name)
-            self.log(f"Применён пресет: {name}")
+        segmentation_actions.apply_preset(self, index)
 
     def save_as_preset(self):
         segmentation_actions.save_as_preset(self)
@@ -248,13 +241,7 @@ class GradientMethodsWindow(QMainWindow):
     def on_min_area_changed(self, value):
         self.schedule_update()
 
-    def on_close_kernel_changed(self, value):
-        self.close_kernel_label.setText(f"{value/200.0:.3f}")
-        self.schedule_update()
 
-    def on_open_kernel_changed(self, value):
-        self.open_kernel_label.setText(f"{value/200.0:.3f}")
-        self.schedule_update()
 
     # ---------- Основная логика ----------
     def display_current_image(self):
@@ -313,11 +300,9 @@ class GradientMethodsWindow(QMainWindow):
         _, binary = cv2.threshold(gradient, thresh_val, 255, cv2.THRESH_BINARY)
         self.binary_view.set_pixmap(numpy_to_qpixmap(binary))
 
-        # 3. Морфология (closing + opening)
-        close_factor = self.close_kernel_slider.value() / 200.0
-        open_factor = self.open_kernel_slider.value() / 200.0
-        kernel_shape = self.kernel_shape_combo.currentText()
-        processed = apply_morphology(binary, close_factor, open_factor, kernel_shape, gray.shape)
+        # 3. Морфология: четыре операции в пикселях в порядке панели
+        processed = apply_morphology(binary, self.morphology_widget.get_steps(),
+                                     shape=self.morphology_widget.kernel_shape())
         self.morph_view.set_pixmap(numpy_to_qpixmap(processed))
 
         # 4. Удаление мелких контуров (по проценту от площади изображения)
@@ -338,13 +323,6 @@ class GradientMethodsWindow(QMainWindow):
             mask_for_objects = np.zeros_like(processed)
             for cnt in contours:
                 cv2.drawContours(mask_for_objects, [cnt], -1, 255, thickness=cv2.FILLED)
-            close_factor = self.close_kernel_slider.value() / 200.0
-            if close_factor > 0:
-                kernel_size = max(3, int(min(gray.shape) * close_factor))
-                if kernel_size % 2 == 0:
-                    kernel_size += 1
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
-                mask_for_objects = cv2.morphologyEx(mask_for_objects, cv2.MORPH_CLOSE, kernel)
         else:
             mask_for_objects = processed
 

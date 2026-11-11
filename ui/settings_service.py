@@ -1,6 +1,5 @@
 # settings.py
 import colorsys
-import json
 import os
 from copy import deepcopy
 
@@ -8,6 +7,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtGui import QColor, QPalette
 
 from path_setup import get_project_root
+from utils_new.settings_store import load_settings, save_settings
 
 # Исходные BGR-цвета классов 0..9 из utils.segmentation_ops.CLASS_COLORS.
 # Этот модуль не импортирует segmentation_ops, чтобы избежать циклического импорта.
@@ -44,6 +44,7 @@ class SettingsManager(QObject):
         self.settings_file = os.path.join(root, "settings", "settings.json")
 
         self.defaults = {
+            "schema_version": 1,
             "theme": "dark",
             "primary_color": [42, 130, 218],
             "colors": {
@@ -57,14 +58,8 @@ class SettingsManager(QObject):
             # getter-множители вычисляются относительно прежних базовых размеров).
             "font_size_px": FONT_SIZE_PX_DEFAULT,
             "line_thickness_px": LINE_THICKNESS_PX_DEFAULT,
-            # Старые поля сохраняем: старый settings.json мигрирует без потери.
-            "font_size_mode": "auto",
-            "line_thickness_mode": "auto",
             # Датасет имеет отдельную палитру: все десять прежних цветов.
             "dataset_class_palette": deepcopy(DEFAULT_DATASET_CLASS_PALETTE_BGR),
-            # Старый V3-флаг сохраняется для обратной совместимости.
-            # Новая вкладка разметки всегда использует class_palette.
-            "annotation_view": {"use_class_colors": True},
             "navigation_shortcuts": {
                 "prev": "Num+4",
                 "next": "Num+6"
@@ -72,68 +67,31 @@ class SettingsManager(QObject):
         }
         self.current = self.load()
 
-    @staticmethod
-    def _with_defaults(data, defaults):
-        """Добавляет недостающие значения, сохраняя незнакомые ключи.
 
-        В частности, старые settings.json с неполной секцией colors не
-        теряют существующие цвета при добавлении новых настроек.
-        """
-        if not isinstance(data, dict):
-            return deepcopy(defaults)
-        result = deepcopy(data)
-        for key, default in defaults.items():
-            if key not in result:
-                result[key] = deepcopy(default)
-            elif isinstance(default, dict):
-                result[key] = SettingsManager._with_defaults(result[key], default)
-        return result
-
-    @staticmethod
-    def _migrate_legacy_size_settings(data):
-        """Перевести старые режимы в пиксели, только если px ещё не заданы."""
-        if not isinstance(data, dict):
-            return data
-        result = deepcopy(data)
-        if "font_size_px" not in result:
-            result["font_size_px"] = {
-                "auto": 11, "small": 8, "medium": 13, "large": 16,
-            }.get(result.get("font_size_mode", "auto"), 11)
-        if "line_thickness_px" not in result:
-            result["line_thickness_px"] = {
-                "auto": 1, "small": 1, "medium": 1, "large": 2,
-            }.get(result.get("line_thickness_mode", "auto"), 1)
-        return result
 
     def load(self):
         if os.path.exists(self.settings_file):
             try:
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                return self._with_defaults(
-                    self._migrate_legacy_size_settings(data), self.defaults
-                )
-            except Exception as e:
-                print(f"Error loading settings: {e}")
+                return load_settings(self.settings_file, self.defaults)
+            except (OSError, ValueError, TypeError) as exc:
+                print(f"Error loading settings: {exc}")
                 return deepcopy(self.defaults)
-        else:
-            data = deepcopy(self.defaults)
-            self.save(data)
-            return data
+        data = deepcopy(self.defaults)
+        self.save(data)
+        return data
 
     def save(self, settings=None):
         if settings is None:
             settings = self.current
-        # Копия предотвращает изменение defaults через current.
-        settings = deepcopy(settings)
+        data = deepcopy(settings)
         try:
-            os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
-            self.current = settings
-            self.settings_changed.emit(settings)
-        except Exception as e:
-            print(f"Error saving settings: {e}")
+            data = save_settings(self.settings_file, data, self.defaults)
+            self.current = data
+            self.settings_changed.emit(data)
+            return True
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"Error saving settings: {exc}")
+            return False
 
     def get_color(self, name):
         colors = self.current.get("colors", {}) or {}

@@ -29,7 +29,7 @@ from ui.DL_predict_settings import (
 )
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from ui.morphology_ui import RelativeMorphologyWidget
+from ui.morphology_ui import MorphologyWidget
 
 # deep_learning_methods_ui.py
 from ui.segmentation.histogram import HistogramCanvas
@@ -180,8 +180,7 @@ def setup_deep_learning_methods_ui(parent):
     morph_label = QLabel("Post-processing morphology:")
     controls_layout.addWidget(morph_label)
 
-    parent.morphology_widget = RelativeMorphologyWidget(divisor=100)
-    parent.morphology_widget.bind_legacy_names(parent)
+    parent.morphology_widget = MorphologyWidget(contour_available=False)
     controls_layout.addWidget(parent.morphology_widget)
 
     # Отрисовка объектов

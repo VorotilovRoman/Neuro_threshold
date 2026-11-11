@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
 from ui.morphology_ui import MorphologyWidget
-from utils_new.dataset_review_view import DatasetReviewGraphicsView
+from ui.annotation_review_view import DatasetReviewGraphicsView
 
 
 def setup_yolo_ae_vae_ui(parent):

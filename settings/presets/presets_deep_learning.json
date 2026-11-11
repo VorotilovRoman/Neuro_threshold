@@ -1,14 +1,37 @@
 {
     "default": {
-        "model": "U-Net",
-        "input_size": 512,
-        "sam_prompt": "box",
-        "device": "Auto (best available)",
+        "schema_version": 2,
+        "kind": "deep_learning",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
         "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
         "draw_mode": "None",
         "use_hull": false,
+        "model": "U-Net",
+        "device": "Auto (best available)",
         "unet_model_path": "",
         "deeplab_model_path": "",
         "yolo_model_path": "",
@@ -20,18 +43,43 @@
         "unet_encoder": "resnet18",
         "unet_input_size": "512",
         "deeplab_backbone": "resnet50",
-        "deeplab_output_stride": "8"
+        "deeplab_output_stride": "8",
+        "unet_threshold": 0.5,
+        "deeplab_threshold": 0.5
     },
     "123": {
-        "model": "YOLO-seg",
-        "input_size": 512,
-        "sam_prompt": "box",
-        "device": "Auto (best available)",
+        "schema_version": 2,
+        "kind": "deep_learning",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
         "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
         "draw_mode": "None",
         "use_hull": false,
+        "model": "YOLO-seg",
+        "device": "Auto (best available)",
         "unet_model_path": "",
         "deeplab_model_path": "",
         "yolo_model_path": "C:/Users/romka/PycharmProjects/Neuro_threshold/тест/yolo11s-seg.pt",
@@ -43,18 +91,43 @@
         "unet_encoder": "resnet18",
         "unet_input_size": "512",
         "deeplab_backbone": "resnet50",
-        "deeplab_output_stride": "8"
+        "deeplab_output_stride": "8",
+        "unet_threshold": 0.5,
+        "deeplab_threshold": 0.5
     },
     "321": {
-        "model": "U-Net",
-        "input_size": 512,
-        "sam_prompt": "box",
-        "device": "Auto (best available)",
+        "schema_version": 2,
+        "kind": "deep_learning",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
         "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
         "draw_mode": "Segmentation (Polygon)",
         "use_hull": true,
+        "model": "U-Net",
+        "device": "Auto (best available)",
         "unet_model_path": "C:/Users/romka/PycharmProjects/Neuro_threshold/datasetPCB_for_net_norm_masks/only_masks_dataset/train_unet/10_6/weights/best.pth",
         "deeplab_model_path": "",
         "yolo_model_path": "C:/Users/romka/PycharmProjects/Neuro_threshold/тест/yolo11s-seg.pt",
@@ -66,6 +139,8 @@
         "unet_encoder": "resnet18",
         "unet_input_size": "512",
         "deeplab_backbone": "resnet50",
-        "deeplab_output_stride": "8"
+        "deeplab_output_stride": "8",
+        "unet_threshold": 0.5,
+        "deeplab_threshold": 0.5
     }
 }

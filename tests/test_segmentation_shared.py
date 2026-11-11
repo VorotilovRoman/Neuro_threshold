@@ -79,9 +79,8 @@ class SegmentationCommonTests(unittest.TestCase):
             write_annotations_atomic([],path,1000,200)
             self.assertEqual(path.read_text(),'')
 
-    def test_relative_morphology_and_extraction_match_legacy(self):
+    def test_extraction_matches_previous_geometry(self):
         from utils_ops.segmentation_ops import (
-            apply_morphology,
             segment_contours,
             segment_min_area_rect,
             segment_projections,
@@ -89,10 +88,6 @@ class SegmentationCommonTests(unittest.TestCase):
         mask = np.zeros((80,120),np.uint8)
         mask[10:40,20:70]=255
         mask[23:25,35:38]=0
-        for shape in ('Rectangle','Ellipse','Cross'):
-            for factor in (0,.025,.1):
-                np.testing.assert_array_equal(postprocessing.apply_relative_morphology(mask,factor,.025,shape),
-                                              apply_morphology(mask,factor,.025,shape))
         image = np.zeros((80,120,3),np.uint8)
         for mode,fn in [('Segmentation (Polygon)',segment_contours),('Bounding Box (Detect)',segment_projections),
                         ('OBB (Oriented Box)',segment_min_area_rect)]:
@@ -103,7 +98,7 @@ class SegmentationCommonTests(unittest.TestCase):
     def test_preset_store_writes_atomically_without_widget_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'presets.json'
-            presets = {'default':{'close_factor':.025,'kernel_shape':'Ellipse'}}
+            presets = {'default':{'morphology':{'units':'px','shape':'Ellipse','operations':[]}}}
             write_presets(path,presets)
             self.assertEqual(read_presets(path),presets)
             before = path.read_bytes()
@@ -111,22 +106,17 @@ class SegmentationCommonTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(),before)
             self.assertEqual(list(Path(directory).glob('*.tmp')),[])
 
-    def test_compatibility_modules_share_settings_classes_and_cache_identity(self):
+    def test_current_views_and_settings_have_single_canonical_owners(self):
         import ui.annotation_review_view
         import ui.image_view
-        import ui.segmentation.preset_bindings
         import ui.settings_service
-        import utils.presets
-        import utils.settings
-        import utils_new.dataset_review_view
-        import utils_new.smart_view_new
         from utils.image_io import LazyImageCache
         from utils_new.dataset_files_new import LazyImageCache as canonical
-        self.assertIs(utils.settings,ui.settings_service)
-        self.assertIs(utils.presets,ui.segmentation.preset_bindings)
-        self.assertIs(utils_new.smart_view_new,ui.image_view)
-        self.assertIs(utils_new.dataset_review_view,ui.annotation_review_view)
-        self.assertIs(LazyImageCache,canonical)
+        self.assertIs(LazyImageCache, canonical)
+        self.assertEqual(ui.image_view.SmartGraphicsViewNew.__module__, 'ui.image_view')
+        self.assertEqual(ui.annotation_review_view.DatasetReviewGraphicsView.__module__, 'ui.annotation_review_view')
+        for module in ('utils/settings.py','utils/presets.py','utils_new/smart_view_new.py','utils_new/dataset_review_view.py'):
+            self.assertFalse((ROOT/module).exists(), module)
 
     def test_five_tabs_and_their_ui_no_longer_import_legacy_utils(self):
         code = """import importlib,sys
@@ -146,6 +136,8 @@ import utils_new.segmentation.image_session
 import utils_new.segmentation.postprocessing
 import utils_new.segmentation.export
 import utils_new.presets_store
+import utils_new.segmentation.presets
+import utils_new.settings_store
 assert not any(n.startswith(('PyQt5','torch','ultralytics','matplotlib')) for n in sys.modules)
 '''
         result = subprocess.run([sys.executable,'-c',code],cwd=ROOT,capture_output=True,text=True,timeout=30)
@@ -195,20 +187,19 @@ with tempfile.TemporaryDirectory() as directory:
         assert owner.current_selected_indices==[1]
         assert len(owner.annotated_view.annotations)==1
         assert np.array_equal(owner.current_base_image,before)
-        if index:
-            panel=owner.morphology_widget
-            assert owner.close_kernel_slider is panel.close_kernel_slider
-            events=QSignalSpy(panel.parameters_changed)
-            owner.close_kernel_slider.setValue(4)
-            assert len(events)==1
-            assert panel.get_steps((200,300))[0].kernel_px==(4 if index==1 else 8)
+        panel=owner.morphology_widget
+        events=QSignalSpy(panel.parameters_changed)
+        panel.set_operation_size('close',13)
+        assert len(events)==1
+        assert panel.get_steps()[0].kernel_px==13
         owner.preset_manager.presets_file=str(Path(directory)/(keys[index]+'.json'))
         with patch.object(QInputDialog,'getText',return_value=('shared_refactor',True)):
             owner.save_as_preset()
         stored=json.loads(Path(owner.preset_manager.presets_file).read_text())
         assert 'shared_refactor' in stored
-        if index:
-            assert stored['shared_refactor']['close_factor']==4/(200 if index==1 else 100)
+        assert stored['shared_refactor']['morphology']['operations'][0]['kernel_px']==13
+        assert stored['shared_refactor']['morphology']['units']=='px'
+        assert 'close_factor' not in stored['shared_refactor']
         owner.preset_manager.apply_preset('shared_refactor')
         cache=getattr(owner,'_lazy_cache',None)
         if cache is not None:cache.shutdown()

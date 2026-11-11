@@ -19,7 +19,6 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -219,6 +218,7 @@ class MorphologyWidget(QGroupBox):
     def get_settings(self):
         return {
             "version": 1,
+            "units": "px",
             "shape": self.kernel_shape(),
             "operations": [{"operation": key, "kernel_px": self._sizes[key].value()}
                            for key in self._order],
@@ -250,18 +250,6 @@ class MorphologyWidget(QGroupBox):
             self._loading = saved_loading
         self._notify()
 
-    def set_legacy_threshold(self, close_factor, open_factor, image_shape, shape="Rectangle"):
-        """Старый Threshold preset: доли min(H,W) → ядра в пикселях."""
-        size = min(image_shape[:2])
-        self.set_settings({
-            "shape": shape,
-            "operations": [
-                {"operation": "close", "kernel_px": max(1, int(close_factor * size)) if close_factor > 0 else 0},
-                {"operation": "open", "kernel_px": max(1, int(open_factor * size)) if open_factor > 0 else 0},
-                {"operation": "erode", "kernel_px": 0},
-                {"operation": "dilate", "kernel_px": 0},
-            ],
-        })
 
     def set_legacy_yolo(self, erosion=1, dilation=1, shape="Rectangle", contour_only=True):
         """Старый YOLO preset: размеры уже заданы в пикселях."""
@@ -279,54 +267,3 @@ class MorphologyWidget(QGroupBox):
 
 
 __all__ = ["MorphologyWidget"]
-
-
-class RelativeMorphologyWidget(QWidget):
-    """Shared legacy-unit panel while auto research/preset interfaces are frozen.
-
-    Gradient uses divisor=200, the other legacy panels use 100. Controls retain
-    their original public names; there is no lossy pixel-to-slider conversion.
-    The pixel-based MorphologyWidget above remains the threshold panel.
-    """
-    parameters_changed = pyqtSignal()
-
-    def __init__(self, parent=None, *, divisor=100):
-        super().__init__(parent)
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtWidgets import QSlider
-        self.divisor = divisor
-        layout = QVBoxLayout(self)
-        shape_row = QHBoxLayout()
-        shape_row.addWidget(QLabel('Kernel shape:'))
-        self.kernel_shape_combo = QComboBox()
-        self.kernel_shape_combo.addItems(['Rectangle', 'Ellipse', 'Cross'])
-        shape_row.addWidget(self.kernel_shape_combo)
-        layout.addLayout(shape_row)
-        self.kernel_shape_combo.currentIndexChanged.connect(self._emit_changed)
-        for name, title in [('close', 'Closing factor:'), ('open', 'Opening factor:')]:
-            row = QHBoxLayout()
-            row.addWidget(QLabel(title))
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, 10)
-            slider.setValue(0)
-            label = QLabel('0.00')
-            setattr(self, name+'_kernel_slider', slider)
-            setattr(self, name+'_kernel_label', label)
-            row.addWidget(slider)
-            row.addWidget(label)
-            layout.addLayout(row)
-            slider.valueChanged.connect(self._emit_changed)
-
-    def _emit_changed(self, *_):
-        self.parameters_changed.emit()
-
-    def bind_legacy_names(self, owner):
-        for name in ('kernel_shape_combo', 'close_kernel_slider', 'close_kernel_label',
-                     'open_kernel_slider', 'open_kernel_label'):
-            setattr(owner, name, getattr(self, name))
-
-    def get_steps(self, image_shape):
-        base = min(image_shape[:2])
-        return [MorphologyStep(name, max(1, int(slider.value()*base/self.divisor))
-                              if slider.value() > 0 else 0)
-                for name, slider in [('close', self.close_kernel_slider), ('open', self.open_kernel_slider)]]

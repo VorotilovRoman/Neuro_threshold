@@ -120,11 +120,10 @@ def guarded(name, *args, **kwargs):
 builtins.__import__ = guarded
 import utils_new.annotations
 import utils.smart_view
-import utils.augmentation_base
-import utils.augmentation_random
-import utils.presets
-import utils.DatasetGenerator
-import utils.settings
+import utils_new.annotations.augmentation
+import ui.segmentation.preset_bindings
+import ui.settings_service
+import utils_new.DatasetGenerator_new
 import main_ui
 import tabs.threshold_methods
 import tabs.layout_dataset

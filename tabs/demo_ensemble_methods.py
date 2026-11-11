@@ -28,6 +28,8 @@ from PyQt5.QtWidgets import (
     QProgressDialog,
 )
 
+from utils_new.morphology import apply_morphology
+from utils_new.segmentation.presets import validate_preset
 from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
 from utils.ensemble_utils import (
     ensemble_detections,
@@ -35,10 +37,9 @@ from utils.ensemble_utils import (
     get_detections_from_preset,
 )
 from utils.image_io import load_images_universal, numpy_to_qpixmap
-from utils.presets import PresetManager
-from utils.settings import settings
+from ui.segmentation.preset_bindings import ThresholdPresetManager
+from ui.settings_service import settings
 from utils_ops.segmentation_ops import (
-    apply_morphology,
     apply_threshold_method,
     draw_selected_objects,
     draw_yolo_annotations,
@@ -221,7 +222,7 @@ class YoloDemoWindow(QMainWindow):
         self.current_gray = None
         self.current_image_path = None
 
-        self.preset_manager = PresetManager(main_window=None)
+        self.preset_manager = ThresholdPresetManager(main_window=None)
         self.active_preset_name = "default"
         self.update_preset_combo()
 
@@ -902,10 +903,9 @@ class YoloDemoWindow(QMainWindow):
             binary = cv2.bitwise_not(binary)
 
             # 3. Морфология
-            close_factor = preset.get('close_factor', 0.0)
-            open_factor = preset.get('open_factor', 0.0)
-            kernel_shape = preset.get('kernel_shape', 'Rectangle')
-            processed = apply_morphology(binary, close_factor, open_factor, kernel_shape, gray.shape)
+            validate_preset(preset, 'threshold')
+            morphology = preset['morphology']
+            processed = apply_morphology(binary, morphology['operations'], shape=morphology['shape'])
 
             # 4. Опциональная инверсия результата (аналог invert_checkbox)
             if preset.get('invert', False):

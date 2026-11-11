@@ -96,15 +96,20 @@ class ProcessingSmokeTests(unittest.TestCase):
         import numpy as np
         import torch
 
-        from utils.augmentation_random import apply_complex_augmentations_mask
+        from utils_new.annotations import AnnotationSample, ImageSize, MaskEncoding
+        from utils_new.annotations.augmentation import build_augmentation_plan, apply_augmentation_plan
         self.assertEqual(torch.mm(torch.ones(2, 2), torch.ones(2, 2)).tolist(), [[2, 2], [2, 2]])
         mask = np.zeros((24, 32), dtype=np.uint8)
         mask[6:18, 8:24] = 1
         image = np.repeat((mask * 255)[:, :, None], 3, axis=2)
-        changed, changed_mask = apply_complex_augmentations_mask(
-            image, mask, {'random_rotate': True, 'random_rotate_angle': 30})
-        self.assertEqual(changed.shape, image.shape)
-        self.assertEqual(changed_mask.shape, mask.shape)
+        plan = build_augmentation_plan(ImageSize(32, 24),
+                                       {'random_rotate': True, 'random_rotate_angle': 30}, seed=42)
+        sample = apply_augmentation_plan(AnnotationSample(image, mask=mask, mask_encoding=MaskEncoding()), plan)
+        changed, changed_mask = sample.image, sample.mask
+        # The current geometry engine expands the canvas for arbitrary rotation.
+        self.assertGreaterEqual(changed.shape[0], image.shape[0])
+        self.assertGreaterEqual(changed.shape[1], image.shape[1])
+        self.assertEqual(changed_mask.shape, changed.shape[:2])
         self.assertEqual(set(np.unique(changed_mask)), {0, 1})
 
 

@@ -1,36 +1,108 @@
 {
     "Simple": {
+        "schema_version": 2,
+        "kind": "threshold",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
+        "invert": false,
+        "draw_mode": "Bounding Box (Detect)",
+        "use_hull": false,
         "method": "Simple Threshold",
         "params": {
             "threshold": 127
-        },
-        "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
-        "draw_mode": "Bounding Box (Detect)",
-        "use_hull": false,
-        "kernel_shape": "Rectangle"
+        }
     },
     "Otsu": {
-        "method": "Otsu",
-        "params": {},
+        "schema_version": 2,
+        "kind": "threshold",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
         "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
         "draw_mode": "Bounding Box (Detect)",
         "use_hull": false,
-        "kernel_shape": "Rectangle"
+        "method": "Otsu",
+        "params": {}
     },
     "ISODATA": {
+        "schema_version": 2,
+        "kind": "threshold",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
+        "invert": false,
+        "draw_mode": "Bounding Box (Detect)",
+        "use_hull": false,
         "method": "ISODATA",
         "params": {
             "init": 128
-        },
-        "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
-        "draw_mode": "Bounding Box (Detect)",
-        "use_hull": false,
-        "kernel_shape": "Rectangle"
+        }
     }
 }

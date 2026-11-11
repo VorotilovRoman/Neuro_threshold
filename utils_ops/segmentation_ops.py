@@ -4,7 +4,7 @@ import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem
 
-from utils.settings import settings
+from ui.settings_service import settings
 
 
 # ---------- Вспомогательные функции для отображения ----------

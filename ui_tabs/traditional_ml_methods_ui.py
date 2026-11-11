@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
 from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from ui.morphology_ui import RelativeMorphologyWidget
+from ui.morphology_ui import MorphologyWidget
 from ui.segmentation.histogram import HistogramCanvas
 
 
@@ -258,8 +258,7 @@ def setup_traditional_ml_ui(parent):
     # Морфологические операции
     morph_label = QLabel("Morphological operations (applied after segmentation):")
     controls_layout.addWidget(morph_label)
-    parent.morphology_widget = RelativeMorphologyWidget(divisor=100)
-    parent.morphology_widget.bind_legacy_names(parent)
+    parent.morphology_widget = MorphologyWidget(contour_available=False)
     controls_layout.addWidget(parent.morphology_widget)
 
     # Режим отрисовки объектов

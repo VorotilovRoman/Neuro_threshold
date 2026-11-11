@@ -37,7 +37,8 @@ python main.py
 - [Windows: ошибка c10.dll / WinError 1114](Docs/Windows_Torch_DLL.md)
 - [Руководство: вкладки, форматы, сохранение](Docs/User_Guide.md)
 - [Архитектура](Docs/Architecture.md) · [Аудит импортов](Docs/Import_Audit.md)
-- [Рефакторинг пяти вкладок сегментации](Docs/Segmentation_Refactor_Status.md): общие функции перенесены; автоподбор отложен.
+- [Морфология пяти вкладок](Docs/Pixel_Morphology_Plan.md): четыре операции в пикселях, новые пресеты; автоподбор отложен.
+- [Удаление неиспользуемых utils](Docs/Utils_Removal_Audit.md)
 - [План дальнейшей работы](Docs/Segmentation_Migration_Plan.md)
 
 ```bash

@@ -39,9 +39,7 @@ from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import TraditionalMLPresetManager
 from ui.settings_service import settings
 from ui_tabs.traditional_ml_methods_ui import setup_traditional_ml_ui
-from utils_new.segmentation.postprocessing import (
-    apply_relative_morphology as apply_morphology,
-)
+from utils_new.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.traditional_ml_ops import (
     compute_elbow_kmeans,
@@ -130,9 +128,7 @@ class TraditionalMLWindow(QMainWindow):
 
         # Морфология и отрисовка
         self.invert_checkbox.stateChanged.connect(self.schedule_update)
-        self.close_kernel_slider.valueChanged.connect(self.on_close_kernel_changed)
-        self.open_kernel_slider.valueChanged.connect(self.on_open_kernel_changed)
-        self.kernel_shape_combo.currentIndexChanged.connect(self.schedule_update)
+        self.morphology_widget.parameters_changed.connect(self.schedule_update)
         self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
         self.hull_checkbox.stateChanged.connect(self.on_hull_changed)
@@ -324,11 +320,7 @@ class TraditionalMLWindow(QMainWindow):
         segmentation_actions.update_preset_combo(self)
 
     def on_preset_activated(self, index):
-        name = self.preset_combo.itemText(index)
-        if name:
-            self.preset_manager.apply_preset(name)
-            self.log(f"Применён пресет: {name}")
-            self.schedule_update()
+        segmentation_actions.apply_preset(self, index)
 
     def save_as_preset(self):
         segmentation_actions.save_as_preset(self)
@@ -885,10 +877,8 @@ class TraditionalMLWindow(QMainWindow):
         mask = self.prediction_mask if self.prediction_mask is not None else np.zeros(gray.shape, dtype=np.uint8)
         self.ml_view.set_pixmap(numpy_to_qpixmap(mask))
 
-        close_factor = self.close_kernel_slider.value() / 100.0
-        open_factor = self.open_kernel_slider.value() / 100.0
-        kernel_shape = self.kernel_shape_combo.currentText()
-        processed = apply_morphology(mask, close_factor, open_factor, kernel_shape, gray.shape)
+        processed = apply_morphology(mask, self.morphology_widget.get_steps(),
+                                         shape=self.morphology_widget.kernel_shape())
         if self.invert_checkbox.isChecked():
             processed = cv2.bitwise_not(processed)
         self.morph_view.set_pixmap(numpy_to_qpixmap(processed))
@@ -976,13 +966,7 @@ class TraditionalMLWindow(QMainWindow):
     # ----------------------------------------------------------------------
     #  Отслеживание слайдеров и переключателей
     # ----------------------------------------------------------------------
-    def on_close_kernel_changed(self, value):
-        self.close_kernel_label.setText(f"{value/100:.2f}")
-        self.schedule_update()
 
-    def on_open_kernel_changed(self, value):
-        self.open_kernel_label.setText(f"{value/100:.2f}")
-        self.schedule_update()
 
     def on_draw_mode_changed(self, idx):
         mode = self.draw_combo.currentText()

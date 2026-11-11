@@ -65,7 +65,7 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 | `yolo_demo` → `demo_ensemble_methods.py` | `demo_ensemble_methods_ui.py` | `utils.ensemble_utils`: YOLO + классические пресеты, собственные WBF/NMS и метрики |
 | `yolo_sort` → `yolo_find_img.py` | `yolo_find_img_ui.py` | YOLO, фоновый поиск, список/миниатюры, копирование или перемещение |
 | `yolo_aeb` → `yolo_test_aeb.py` | `yolo_test_aeb_ui.py` | `utils_aeb.yolo_aeb_utils`, `utils_new.annotation_processing`: YOLO-объекты, AE/VAE, кропы и карты ошибок |
-| `settings` | `ui/settings_ui.py`, без ui_tabs | `ui.settings_service` (старый путь — алиас): тема, палитра классов, размеры и шорткаты |
+| `settings` | `ui/settings_ui.py`, без ui_tabs | `ui.settings_service`: тема, палитра классов, размеры и шорткаты |
 
 ## Новая ветка обработки датасетов
 
@@ -93,9 +93,16 @@ flowchart LR
 
 ## Существующая старая ветка
 
-`utils/image_io.py`, `yaml_io.py`, `annotation_converter.py`, `coco_io.py`, `coco_export.py`, `unet_io.py`, `unet_export.py`, `DatasetGenerator.py`, `dataset_validation.py`, `augmentation_base.py`, `augmentation_random.py`, `aug_utils.py` остаются в дереве и явно импортируются своими потребителями. Они не стали автоматически ненужными после появления `utils_new`: старые вкладки продолжают работать с legacy-форматами. Пять вкладок методов используют канонические виды из `ui.image_view` и `ui.annotation_review_view`; интерактивный ввод расширяет их через SegmentationInputView. Старые пути новых видов — совместимые алиасы. `utils.smart_view` оставлен другим старым потребителям. Подмена одного другим без проверки событий и координат недопустима.
+В `utils` осталось восемь модулей с рабочими потребителями: image_io,
+smart_view, analysis, prepare, metrics_core, ensemble_utils, dataset_analysis_logic
+и dataset_audit_logic. Старый набор генератора/валидации/I/O и алиасы
+settings/presets удалены после проверки графа и строковых экспортов.
+[Подробный аудит удаления](Utils_Removal_Audit.md).
 
-`utils_auto_research` содержит два перебора параметров и два диалога диапазонов. `utils.presets` — алиас `ui.segmentation.preset_bindings`; JSON store находится в `utils_new.presets_store`. `utils.metrics_core` объединяет метрики для отчётов; `utils.prepare` готовит таблицы; `utils.analysis` ранжирует параметры. `ui` содержит общие панели навигации, морфологии, логов, настройки моделей и диалог проверки пар.
+Канонические Qt-виды находятся в `ui.image_view` и `ui.annotation_review_view`;
+все потребители обновлены, прежних файлов-алиасов в utils_new нет.
+`utils.smart_view` ещё использует демонстрация ансамблей. `utils_auto_research`
+сохраняет уникальные алгоритмы до последнего этапа; запуск в UI временно отключён.
 
 ## Зависимости вне import-графа
 
@@ -154,18 +161,23 @@ clicked или QTest.mouseClick(button) обходит перекрывающи�
 ## Общие службы пяти вкладок сегментации
 
 Общие загрузка/навигация, результаты, экспорт, гистограмма, действия пресетов
-и log находятся в `ui/segmentation`. Чтение/resize и postprocessing — в
-`utils_new/segmentation`, без Qt. Политика `legacy-segmentation-v1` сохраняет
-старую яркость; четыре вкладки остаются ленивыми, ML использует eager-адаптер.
-`ui.settings_service` владеет единым settings QObject. Прежние пути settings,
-presets и новых видов указывают на те же модули и сохраняют identity.
+и log находятся в `ui/segmentation`. Чтение/resize и извлечение объектов — в
+`utils_new/segmentation`, без Qt. Политика яркости `legacy-segmentation-v1`
+сохраняется независимо от отмены старых форматов пресетов; четыре вкладки
+остаются ленивыми, ML использует eager-адаптер.
 
-Новая общая RelativeMorphologyWidget сохраняет относительные единицы четырёх
-вкладок (/200 у gradient, /100 у остальных); threshold сохраняет пиксельную
-панель. Автоподбор и его специальные адаптеры заморожены до последнего этапа.
-Уникальные алгоритмы в `utils_ops` не переносились.
+Все пять используют `ui.morphology_ui.MorphologyWidget` и
+`utils_new.morphology.apply_morphology`: close/open/erode/dilate в пикселях,
+общая форма и изменяемый порядок. Нет процентных регуляторов и повторного
+скрытого closing градиентного fill. Уникальные backend остаются в `utils_ops`.
 
-[Исходный аудит](Segmentation_Tabs_Audit.md) · [Текущий результат](Segmentation_Refactor_Status.md)
-· [Уточнённый план](Segmentation_Migration_Plan.md). `test_segmentation_shared`
-защищает совместимость, ROI/FG/BG, экспорт, отсутствие legacy-import в пяти
-вкладках и отсутствие GUI в новом вычислительном ядре.
+Preset schema_version=2 проверяет `utils_new.segmentation.presets`; Qt binding
+находится в `ui.segmentation.preset_bindings`. Настройки schema_version=1 хранит
+`utils_new.settings_store`, QObject/сигналы — `ui.settings_service`.
+Атомарный JSON I/O — `utils_new.json_store`. Старые схемы не конвертируются.
+Ансамбли исполняют новую морфологию; относительный отчёт не может незаметно
+создать старый пресет обратно. Автоподбор — последний отдельный этап.
+
+[Пиксельный этап и проверки](Pixel_Morphology_Plan.md) · [Удаление утилит](Utils_Removal_Audit.md)
+· [Общий план](Segmentation_Migration_Plan.md). `test_segmentation_shared` и
+`test_pixel_morphology` защищают общие службы, маски/пресеты и новые границы.

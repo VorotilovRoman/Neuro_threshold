@@ -32,14 +32,9 @@
             255
         ]
     },
-    "font_size_mode": "auto",
-    "line_thickness_mode": "auto",
     "navigation_shortcuts": {
         "prev": "Left",
         "next": "Right"
-    },
-    "annotation_view": {
-        "use_class_colors": true
     },
     "font_size_px": 27,
     "line_thickness_px": 7,
@@ -94,5 +89,6 @@
             100,
             0
         ]
-    ]
+    ],
+    "schema_version": 1
 }

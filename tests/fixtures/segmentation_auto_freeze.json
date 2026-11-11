@@ -10,9 +10,7 @@
       "load_auto_settings": "50539862ae62ffcccd8b3c3e23a5e6da68d8f54a4bd9833c846f43c8186d13d3",
       "save_auto_settings": "9f75c9827dbb875c5a1a22a187fed3853c0c4cc9c19488ab638f00361f218d7e",
       "open_auto_settings": "b61a4c5a8a676330255bce4221a7b6be890054ee4be1e388fc7507542df01891",
-      "run_auto_optimization": "bcd6bf22f84839ec3b4f519b7e2d0483010f82cc24251117ac39bf98a876a7f7",
-      "_sync_legacy_morph_sliders": "7fe3a25aa5bd22127b4576a753b2b350c2db7515308000678b258d6fe846d445",
-      "_on_legacy_ratio_change": "53dcc566111403bd5082d17f016c0fcbb9d55c4c71da15906e1d7477539df4a5"
+      "run_auto_optimization": "bcd6bf22f84839ec3b4f519b7e2d0483010f82cc24251117ac39bf98a876a7f7"
     },
     "tabs/gradient_methods.py": {
       "load_auto_settings": "a888f3cb5af779c12c6d1fee45b3e54a67e8479341084166063237aec1619d7d",

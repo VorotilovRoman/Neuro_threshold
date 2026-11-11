@@ -1,5 +1,9 @@
 # Аудит первых пяти вкладок сегментации
 
+Текущее состояние после перехода на пиксели и удаления старых импортов:
+[Пиксельная морфология](Pixel_Morphology_Plan.md) · [Удаление утилит](Utils_Removal_Audit.md).
+Ниже — отчёт соответствующего предыдущего этапа.
+
 [План миграции](Segmentation_Migration_Plan.md) · [Документация](README.md)
 
 **Исторический снимок до рефакторинга.** Текущее состояние и исправления:
@@ -233,95 +237,95 @@ fit/predict. processEvents перед вызовом не делает само 
 
 ### tabs/threshold_methods.py
 
-- [runtime_torch](../runtime_torch.py): `prepare_windows_torch`.
-- [path_setup](../path_setup.py): `get_project_root`.
-- [ui_tabs.threshold_methods_ui](../ui_tabs/threshold_methods_ui.py): `setup_threshold_ui`.
-- [utils.image_io](../utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
-- [utils.presets](../utils/presets.py): `PresetManager`.
-- [utils.settings](../utils/settings.py): `settings`.
-- [utils_auto_research.threshold_auto_research](../utils_auto_research/threshold_auto_research.py): `AutoResearch`.
-- [utils_auto_research.threshold_auto_settings_dialog](../utils_auto_research/threshold_auto_settings_dialog.py): `AutoSettingsDialog`.
-- [utils_new.annotation_processing](../utils_new/annotation_processing.py): `extract_annotations_from_mask`, `format_object_for_list`.
-- [utils_new.morphology](../utils_new/morphology.py): `apply_morphology`.
-- [utils_new.threshold_processing](../utils_new/threshold_processing.py): `apply_threshold_method`, `normalize_method_name`.
-- [ui.application](../ui/application.py): `exec_window`.
+- [runtime_torch](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/runtime_torch.py): `prepare_windows_torch`.
+- [path_setup](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/path_setup.py): `get_project_root`.
+- [ui_tabs.threshold_methods_ui](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui_tabs/threshold_methods_ui.py): `setup_threshold_ui`.
+- [utils.image_io](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
+- [utils.presets](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/presets.py): `PresetManager`.
+- [utils.settings](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/settings.py): `settings`.
+- [utils_auto_research.threshold_auto_research](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_auto_research/threshold_auto_research.py): `AutoResearch`.
+- [utils_auto_research.threshold_auto_settings_dialog](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_auto_research/threshold_auto_settings_dialog.py): `AutoSettingsDialog`.
+- [utils_new.annotation_processing](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_new/annotation_processing.py): `extract_annotations_from_mask`, `format_object_for_list`.
+- [utils_new.morphology](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_new/morphology.py): `apply_morphology`.
+- [utils_new.threshold_processing](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_new/threshold_processing.py): `apply_threshold_method`, `normalize_method_name`.
+- [ui.application](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/application.py): `exec_window`.
 
 ### tabs/gradient_methods.py
 
-- [runtime_torch](../runtime_torch.py): `prepare_windows_torch`.
-- [path_setup](../path_setup.py): `get_project_root`.
-- [ui_tabs.gradient_methods_ui](../ui_tabs/gradient_methods_ui.py): `setup_gradient_ui`.
-- [utils.image_io](../utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
-- [utils.presets](../utils/presets.py): `GradientPresetManager`.
-- [utils.settings](../utils/settings.py): `settings`.
-- [utils_auto_research.gradient_auto_research](../utils_auto_research/gradient_auto_research.py): `GradientAutoResearch`.
-- [utils_auto_research.gradient_auto_settings_dialog](../utils_auto_research/gradient_auto_settings_dialog.py): `GradientAutoSettingsDialog`.
-- [utils_ops.gradient_ops](../utils_ops/gradient_ops.py): `apply_gradient_method`.
-- [utils_ops.segmentation_ops](../utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
-- [ui.application](../ui/application.py): `exec_window`.
+- [runtime_torch](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/runtime_torch.py): `prepare_windows_torch`.
+- [path_setup](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/path_setup.py): `get_project_root`.
+- [ui_tabs.gradient_methods_ui](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui_tabs/gradient_methods_ui.py): `setup_gradient_ui`.
+- [utils.image_io](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
+- [utils.presets](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/presets.py): `GradientPresetManager`.
+- [utils.settings](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/settings.py): `settings`.
+- [utils_auto_research.gradient_auto_research](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_auto_research/gradient_auto_research.py): `GradientAutoResearch`.
+- [utils_auto_research.gradient_auto_settings_dialog](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_auto_research/gradient_auto_settings_dialog.py): `GradientAutoSettingsDialog`.
+- [utils_ops.gradient_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/gradient_ops.py): `apply_gradient_method`.
+- [utils_ops.segmentation_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
+- [ui.application](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/application.py): `exec_window`.
 
 ### tabs/interactive_methods.py
 
-- [runtime_torch](../runtime_torch.py): `prepare_windows_torch`.
-- [ui_tabs.interactive_methods_ui](../ui_tabs/interactive_methods_ui.py): `setup_interactive_ui`.
-- [utils.image_io](../utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
-- [utils.presets](../utils/presets.py): `InteractivePresetManager`.
-- [utils.settings](../utils/settings.py): `settings`.
-- [utils_ops.interactive_ops](../utils_ops/interactive_ops.py): `active_contour_segmentation`, `grabcut_segmentation`, `lazy_snapping`, `onecut_segmentation`, `random_walker_segmentation`, `supercut_segmentation`, `watershed_segmentation`.
-- [utils_ops.segmentation_ops](../utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
-- [ui.application](../ui/application.py): `exec_window`.
+- [runtime_torch](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/runtime_torch.py): `prepare_windows_torch`.
+- [ui_tabs.interactive_methods_ui](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui_tabs/interactive_methods_ui.py): `setup_interactive_ui`.
+- [utils.image_io](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
+- [utils.presets](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/presets.py): `InteractivePresetManager`.
+- [utils.settings](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/settings.py): `settings`.
+- [utils_ops.interactive_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/interactive_ops.py): `active_contour_segmentation`, `grabcut_segmentation`, `lazy_snapping`, `onecut_segmentation`, `random_walker_segmentation`, `supercut_segmentation`, `watershed_segmentation`.
+- [utils_ops.segmentation_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
+- [ui.application](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/application.py): `exec_window`.
 
 ### tabs/traditional_ml_methods.py
 
-- [runtime_torch](../runtime_torch.py): `prepare_windows_torch`.
-- [ui_tabs.traditional_ml_methods_ui](../ui_tabs/traditional_ml_methods_ui.py): `setup_traditional_ml_ui`.
-- [utils.image_io](../utils/image_io.py): `load_images_universal`, `numpy_to_qpixmap`, `save_annotations`.
-- [utils.presets](../utils/presets.py): `TraditionalMLPresetManager`.
-- [utils.settings](../utils/settings.py): `settings`.
-- [utils_ops.segmentation_ops](../utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
-- [utils_ops.traditional_ml_ops](../utils_ops/traditional_ml_ops.py): `compute_elbow_kmeans`, `create_superpixels`, `extract_pixel_features`, `extract_superpixel_features`, `find_optimal_k_elbow`, `predict_superpixel`, `train_decision_tree`, `train_kmeans`, `train_meanshift`, `train_random_forest`, `train_svm`, `train_xgboost`.
-- [ui.application](../ui/application.py): `exec_window`.
+- [runtime_torch](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/runtime_torch.py): `prepare_windows_torch`.
+- [ui_tabs.traditional_ml_methods_ui](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui_tabs/traditional_ml_methods_ui.py): `setup_traditional_ml_ui`.
+- [utils.image_io](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/image_io.py): `load_images_universal`, `numpy_to_qpixmap`, `save_annotations`.
+- [utils.presets](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/presets.py): `TraditionalMLPresetManager`.
+- [utils.settings](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/settings.py): `settings`.
+- [utils_ops.segmentation_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
+- [utils_ops.traditional_ml_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/traditional_ml_ops.py): `compute_elbow_kmeans`, `create_superpixels`, `extract_pixel_features`, `extract_superpixel_features`, `find_optimal_k_elbow`, `predict_superpixel`, `train_decision_tree`, `train_kmeans`, `train_meanshift`, `train_random_forest`, `train_svm`, `train_xgboost`.
+- [ui.application](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/application.py): `exec_window`.
 
 ### tabs/deep_learning_methods.py
 
-- [runtime_torch](../runtime_torch.py): `prepare_windows_torch`.
-- [ui_tabs.deep_learning_methods_ui](../ui_tabs/deep_learning_methods_ui.py): `setup_deep_learning_methods_ui`.
-- [utils.image_io](../utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
-- [utils.presets](../utils/presets.py): `DeepLearningPresetManager`.
-- [utils.settings](../utils/settings.py): `settings`.
-- [utils_ops.deep_learning_ops](../utils_ops/deep_learning_ops.py): `create_segmentor`.
-- [utils_ops.segmentation_ops](../utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
-- [ui.application](../ui/application.py): `exec_window`.
+- [runtime_torch](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/runtime_torch.py): `prepare_windows_torch`.
+- [ui_tabs.deep_learning_methods_ui](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui_tabs/deep_learning_methods_ui.py): `setup_deep_learning_methods_ui`.
+- [utils.image_io](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/image_io.py): `LazyImageCache`, `load_one_image_item`, `numpy_to_qpixmap`, `save_annotations`.
+- [utils.presets](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/presets.py): `DeepLearningPresetManager`.
+- [utils.settings](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/settings.py): `settings`.
+- [utils_ops.deep_learning_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/deep_learning_ops.py): `create_segmentor`.
+- [utils_ops.segmentation_ops](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_ops/segmentation_ops.py): `apply_morphology`, `draw_selected_objects`, `format_object_for_list`, `get_display_params`, `segment_contours`, `segment_min_area_rect`, `segment_projections`.
+- [ui.application](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/application.py): `exec_window`.
 
 ### ui_tabs/threshold_methods_ui.py
 
-- [ui.image_navigation](../ui/image_navigation.py): `ImageNavigationWidget`.
-- [ui.log_widget](../ui/log_widget.py): `LogWidget`.
-- [ui.morphology_ui](../ui/morphology_ui.py): `MorphologyWidget`.
-- [utils_new.dataset_review_view](../utils_new/dataset_review_view.py): `DatasetReviewGraphicsView`.
+- [ui.image_navigation](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/image_navigation.py): `ImageNavigationWidget`.
+- [ui.log_widget](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/log_widget.py): `LogWidget`.
+- [ui.morphology_ui](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/morphology_ui.py): `MorphologyWidget`.
+- [utils_new.dataset_review_view](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils_new/dataset_review_view.py): `DatasetReviewGraphicsView`.
 
 ### ui_tabs/gradient_methods_ui.py
 
-- [ui.image_navigation](../ui/image_navigation.py): `ImageNavigationWidget`.
-- [ui.log_widget](../ui/log_widget.py): `LogWidget`.
-- [utils.smart_view](../utils/smart_view.py): `SmartGraphicsView`.
+- [ui.image_navigation](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/image_navigation.py): `ImageNavigationWidget`.
+- [ui.log_widget](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/log_widget.py): `LogWidget`.
+- [utils.smart_view](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/smart_view.py): `SmartGraphicsView`.
 
 ### ui_tabs/interactive_methods_ui.py
 
-- [ui.image_navigation](../ui/image_navigation.py): `ImageNavigationWidget`.
-- [ui.log_widget](../ui/log_widget.py): `LogWidget`.
-- [utils.smart_view](../utils/smart_view.py): `SmartGraphicsView`.
-- [ui.interactive_params_ui](../ui/interactive_params_ui.py): `InteractiveParametersUI`.
+- [ui.image_navigation](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/image_navigation.py): `ImageNavigationWidget`.
+- [ui.log_widget](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/log_widget.py): `LogWidget`.
+- [utils.smart_view](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/smart_view.py): `SmartGraphicsView`.
+- [ui.interactive_params_ui](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/interactive_params_ui.py): `InteractiveParametersUI`.
 
 ### ui_tabs/traditional_ml_methods_ui.py
 
-- [ui.image_navigation](../ui/image_navigation.py): `ImageNavigationWidget`.
-- [ui.log_widget](../ui/log_widget.py): `LogWidget`.
-- [utils.smart_view](../utils/smart_view.py): `SmartGraphicsView`.
+- [ui.image_navigation](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/image_navigation.py): `ImageNavigationWidget`.
+- [ui.log_widget](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/log_widget.py): `LogWidget`.
+- [utils.smart_view](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/smart_view.py): `SmartGraphicsView`.
 
 ### ui_tabs/deep_learning_methods_ui.py
 
-- [ui.DL_predict_settings](../ui/DL_predict_settings.py): `CustomONNXInferenceSettings`, `DeepLabV3InferenceSettings`, `SAMInferenceSettings`, `SegFormerInferenceSettings`, `UNetInferenceSettings`, `YOLOInferenceSettings`.
-- [ui.image_navigation](../ui/image_navigation.py): `ImageNavigationWidget`.
-- [ui.log_widget](../ui/log_widget.py): `LogWidget`.
-- [utils.smart_view](../utils/smart_view.py): `SmartGraphicsView`.
+- [ui.DL_predict_settings](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/DL_predict_settings.py): `CustomONNXInferenceSettings`, `DeepLabV3InferenceSettings`, `SAMInferenceSettings`, `SegFormerInferenceSettings`, `UNetInferenceSettings`, `YOLOInferenceSettings`.
+- [ui.image_navigation](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/image_navigation.py): `ImageNavigationWidget`.
+- [ui.log_widget](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/ui/log_widget.py): `LogWidget`.
+- [utils.smart_view](https://github.com/VorotilovRoman/Neuro_threshold/blob/89c9c11/utils/smart_view.py): `SmartGraphicsView`.

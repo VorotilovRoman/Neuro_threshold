@@ -51,8 +51,8 @@ from PyQt5.QtWidgets import (
 
 from ui_tabs.yolo_test_aeb_ui import setup_yolo_ae_vae_ui
 from utils.image_io import LazyImageCache, load_one_image_item, numpy_to_qpixmap
-from utils.presets import PresetManager
-from utils.settings import settings
+from ui.segmentation.preset_bindings import PresetManager
+from ui.settings_service import settings
 from utils_aeb.yolo_aeb_utils import (
     ConvAutoencoder,
     ConvAutoencoderGN,

@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
 
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from utils_new.smart_view_new import SmartGraphicsViewNew
+from ui.image_view import SmartGraphicsViewNew
 from utils_ops.segmentation_ops import get_class_color
 
 

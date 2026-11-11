@@ -33,9 +33,7 @@ from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import DeepLearningPresetManager
 from ui.settings_service import settings
 from ui_tabs.deep_learning_methods_ui import setup_deep_learning_methods_ui
-from utils_new.segmentation.postprocessing import (
-    apply_relative_morphology as apply_morphology,
-)
+from utils_new.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.deep_learning_ops import create_segmentor
 
@@ -128,9 +126,7 @@ class DeepLearningWindow(QMainWindow):
 
         # Морфология
         self.invert_checkbox.stateChanged.connect(self.schedule_update)
-        self.close_kernel_slider.valueChanged.connect(self.schedule_update)
-        self.open_kernel_slider.valueChanged.connect(self.schedule_update)
-        self.kernel_shape_combo.currentIndexChanged.connect(self.schedule_update)
+        self.morphology_widget.parameters_changed.connect(self.schedule_update)
         self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
         self.hull_checkbox.stateChanged.connect(self.schedule_update)
@@ -413,12 +409,7 @@ class DeepLearningWindow(QMainWindow):
         segmentation_actions.update_preset_combo(self)
 
     def on_preset_activated(self, index):
-        name = self.preset_combo.itemText(index)
-        if name:
-            self.preset_manager.apply_preset(name)
-            self.log(f"Применён пресет: {name}")
-            self.prediction_mask = None
-            self.schedule_update()
+        segmentation_actions.apply_preset(self, index)
 
     def save_as_preset(self):
         segmentation_actions.save_as_preset(self)
@@ -685,17 +676,14 @@ class DeepLearningWindow(QMainWindow):
         self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
 
     def _apply_morphology_and_draw(self, mask, gray, original):
-        close_factor = self.close_kernel_slider.value() / 100.0
-        open_factor = self.open_kernel_slider.value() / 100.0
-        kernel_shape = self.kernel_shape_combo.currentText()
 
         self.log(f"=== Постобработка морфологией ===")
         self.log(f"Входная маска (DL): {mask.shape}, dtype={mask.dtype}, "
                  f"мин={mask.min()}, макс={mask.max()}, среднее={mask.mean():.3f}")
-        self.log(f"Параметры морфологии: Closing={close_factor}, Opening={open_factor}, "
-                 f"Kernel shape={kernel_shape}")
+        self.log(f"Морфология, px: {self.morphology_widget.get_settings()}")
 
-        processed = apply_morphology(mask, close_factor, open_factor, kernel_shape, gray.shape)
+        processed = apply_morphology(mask, self.morphology_widget.get_steps(),
+                                         shape=self.morphology_widget.kernel_shape())
 
         self.log(f"Маска после морфологии: {processed.shape}, dtype={processed.dtype}, "
                  f"мин={processed.min()}, макс={processed.max()}, среднее={processed.mean():.3f}")
@@ -815,13 +803,7 @@ class DeepLearningWindow(QMainWindow):
     def schedule_update(self):
         self.update_timer.start(50)
 
-    def on_close_kernel_changed(self, value):
-        self.close_kernel_label.setText(f"{value/100:.2f}")
-        self.schedule_update()
 
-    def on_open_kernel_changed(self, value):
-        self.open_kernel_label.setText(f"{value/100:.2f}")
-        self.schedule_update()
 
     def on_draw_mode_changed(self, idx):
         mode = self.draw_combo.currentText()

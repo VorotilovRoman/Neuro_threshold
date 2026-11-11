@@ -38,7 +38,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ui_tabs.layout_dataset_ui import setup_layout_dataset_ui
-from utils.settings import settings
+from ui.settings_service import settings
 from utils_new.dataset_catalog_new import import_coco_catalog
 from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
 
@@ -72,7 +72,7 @@ from utils_new.dataset_yolo_labels_new import (
     save_annotations,
     save_annotations_for_image,
 )
-from utils_new.smart_view_new import numpy_to_qpixmap, set_fill_color_button_preview
+from ui.image_view import numpy_to_qpixmap, set_fill_color_button_preview
 from utils_ops.segmentation_ops import update_annotation_list
 
 

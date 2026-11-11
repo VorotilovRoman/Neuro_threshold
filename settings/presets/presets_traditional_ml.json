@@ -1,32 +1,92 @@
 {
     "123": {
+        "schema_version": 2,
+        "kind": "traditional_ml",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
+        "invert": false,
+        "draw_mode": "None",
+        "use_hull": false,
         "model": "XGBoost",
         "n_clusters": 2,
         "svm_kernel": "linear",
         "svm_c": 10,
         "rf_trees": 50,
         "xgb_trees": 50,
-        "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
-        "draw_mode": "None",
-        "use_hull": false,
+        "color_feature": true,
+        "texture_feature": false,
+        "spatial_feature": false,
+        "use_superpixels": false,
+        "superpixel_size": 50,
         "model_paths": {
             "XGBoost": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/xgboost.pkl"
         }
     },
     "321": {
+        "schema_version": 2,
+        "kind": "traditional_ml",
+        "morphology": {
+            "version": 1,
+            "units": "px",
+            "shape": "Rectangle",
+            "operations": [
+                {
+                    "operation": "close",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "open",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "erode",
+                    "kernel_px": 0
+                },
+                {
+                    "operation": "dilate",
+                    "kernel_px": 0
+                }
+            ],
+            "contour_only": false,
+            "contour_width_px": null
+        },
+        "invert": false,
+        "draw_mode": "None",
+        "use_hull": false,
         "model": "MeanShift",
         "n_clusters": 2,
         "svm_kernel": "linear",
         "svm_c": 10,
         "rf_trees": 50,
         "xgb_trees": 50,
-        "invert": false,
-        "close_factor": 0.0,
-        "open_factor": 0.0,
-        "draw_mode": "None",
-        "use_hull": false,
+        "color_feature": true,
+        "texture_feature": false,
+        "spatial_feature": false,
+        "use_superpixels": false,
+        "superpixel_size": 50,
         "model_paths": {
             "MeanShift": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/mean-shift.pkl"
         }

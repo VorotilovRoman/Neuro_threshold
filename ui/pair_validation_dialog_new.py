@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
 
 from utils_new.dataset_io_new import _read_with_fallback
 from utils_new.dataset_mask_preview_new import blend_index_mask
-from utils_new.dataset_review_view import DatasetReviewGraphicsView
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from utils_new.dataset_validation_new import (
     ImageStats,
     load_annotations,
@@ -48,7 +48,7 @@ def _to_qpixmap(bgr):
 def _palette_color(class_id):
     """Read current application class palette, with deterministic fallback."""
     try:
-        from utils.settings import settings
+        from ui.settings_service import settings
         return settings.get_dataset_class_color(int(class_id))
     except (AttributeError, ImportError, ValueError):
         palette = ((20, 180, 20), (220, 135, 0), (0, 185, 215),

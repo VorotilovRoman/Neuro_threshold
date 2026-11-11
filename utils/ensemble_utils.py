@@ -1,9 +1,10 @@
 import cv2
 import numpy as np
 
+from utils_new.morphology import apply_morphology
+from utils_new.segmentation.presets import validate_preset
 from utils.metrics_core import iou_xyxy, xyxy_to_yolo, yolo_to_xyxy
 from utils_ops.segmentation_ops import (
-    apply_morphology,
     apply_threshold_method,
     segment_contours,
     segment_min_area_rect,
@@ -252,7 +253,7 @@ def get_detections_from_preset(image, gray, preset, confidence=0.7):
     confidence используется как порог отбора, но для пресетов все найденные объекты получают confidence = 1.0.
     """
     method = preset.get('method', 'Simple Threshold')
-    params = extract_threshold_params(preset, method)
+    params = preset['params']
 
     # 1. Бинаризация
     binary, _ = apply_threshold_method(gray, method, params)
@@ -261,10 +262,9 @@ def get_detections_from_preset(image, gray, preset, confidence=0.7):
     binary = cv2.bitwise_not(binary)
 
     # 3. Морфология
-    close_factor = preset.get('close_factor', 0.0)
-    open_factor = preset.get('open_factor', 0.0)
-    kernel_shape = preset.get('kernel_shape', 'Rectangle')
-    processed = apply_morphology(binary, close_factor, open_factor, kernel_shape, gray.shape)
+    validate_preset(preset, 'threshold')
+    morphology = preset['morphology']
+    processed = apply_morphology(binary, morphology['operations'], shape=morphology['shape'])
 
     # 4. Опциональная инверсия результата
     if preset.get('invert', False):

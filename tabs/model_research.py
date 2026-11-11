@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 from path_setup import get_project_root
+from utils_new.segmentation.presets import make_preset
 from ui_tabs.model_research_ui import setup_model_research_ui
 from utils.analysis import analyze, global_top_diverse
 from utils.image_io import load_annotations
@@ -46,7 +47,7 @@ from utils.prepare import (
     sample_rows,
     save_unique_params,
 )
-from utils.presets import PresetManager
+from ui.segmentation.preset_bindings import ThresholdPresetManager
 
 
 class ModelResearchApp(QMainWindow):
@@ -779,7 +780,12 @@ class ModelResearchApp(QMainWindow):
         if top5 is None or top5.empty:
             QMessageBox.warning(self, "Нет данных", "Нет данных для добавления в пресеты.")
             return
-        preset_mgr = PresetManager(main_window=None)
+        preset_mgr = ThresholdPresetManager(main_window=None)
+        if any(float(row[key]) != 0 for _, row in top5.iterrows() for key in ('close_factor', 'open_factor')):
+            QMessageBox.warning(self, "Нужны пиксельные настройки",
+                "Отчёт содержит относительную морфологию. Задайте размеры ядер в пикселях "
+                "на вкладке методов и сохраните новый пресет. Перевод отчётов автоподбора — отдельный этап.")
+            return
         added = []
         for _, row in top5.iterrows():
             method = row['method']
@@ -794,15 +800,8 @@ class ModelResearchApp(QMainWindow):
                 name = f"{base_name} ({counter})"
                 counter += 1
             preset_params = self._extract_preset_params(method, params_str)
-            preset_dict = {
-                "method": method,
-                "params": preset_params,
-                "invert": invert,
-                "close_factor": close,
-                "open_factor": open_f,
-                "draw_mode": "Contours (simple)",
-                "use_hull": False
-            }
+            preset_dict = make_preset('threshold', method=method, params=preset_params,
+                                      invert=bool(invert), draw_mode="Segmentation (Polygon)")
             if preset_mgr.add_preset_dict(name, preset_dict):
                 added.append(name)
         if added:

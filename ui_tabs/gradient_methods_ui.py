@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
 from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from ui.morphology_ui import RelativeMorphologyWidget
+from ui.morphology_ui import MorphologyWidget
 from ui.segmentation.histogram import HistogramCanvas
 
 
@@ -222,8 +222,7 @@ def setup_gradient_ui(parent):
     # Морфологические операции
     morph_label = QLabel("Morphological operations (applied after binarization):")
     controls_layout.addWidget(morph_label)
-    parent.morphology_widget = RelativeMorphologyWidget(divisor=200)
-    parent.morphology_widget.bind_legacy_names(parent)
+    parent.morphology_widget = MorphologyWidget(contour_available=False)
     controls_layout.addWidget(parent.morphology_widget)
 
     # Слайдер минимальной площади (0.0-0.1%, шаг 0.001)
@@ -282,6 +281,9 @@ def setup_gradient_ui(parent):
     auto_config_layout = QHBoxLayout()
     parent.auto_enable_checkbox = QCheckBox("Enable auto research")
     parent.configure_auto_button = QPushButton("Configure auto research")
+    for control in (parent.auto_button, parent.auto_enable_checkbox, parent.configure_auto_button):
+        control.setEnabled(False)
+        control.setToolTip("Автоподбор будет переведён на пиксельную морфологию отдельным последним этапом.")
     auto_config_layout.addWidget(parent.auto_enable_checkbox)
     auto_config_layout.addWidget(parent.configure_auto_button)
     controls_layout.addLayout(auto_config_layout)

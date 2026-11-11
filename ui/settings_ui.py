@@ -412,19 +412,14 @@ class SettingsWidget(QWidget):
         new_settings['dataset_class_palette'] = deepcopy(self._draft_palette)  # BGR
         new_settings['font_size_px'] = int(self.font_spin.value())
         new_settings['line_thickness_px'] = int(self.thickness_spin.value())
-        # Старые mode-поля остаются в JSON для совместимости, но теперь px
-        # приоритетнее. Не оставляем старое «large» как ложное состояние UI.
-        new_settings['font_size_mode'] = 'auto'
-        new_settings['line_thickness_mode'] = 'auto'
-        view_options = dict(new_settings.get('annotation_view', {}) or {})
-        view_options['use_class_colors'] = True
-        new_settings['annotation_view'] = view_options
         nav = dict(new_settings.get('navigation_shortcuts', {}) or {})
         nav.update({
             'prev': self.nav_prev_edit.text().strip() or 'Num+4',
             'next': self.nav_next_edit.text().strip() or 'Num+6',
         })
         new_settings['navigation_shortcuts'] = nav
-        settings.save(new_settings)  # emits settings_changed, Qt view обновится
+        if not settings.save(new_settings):
+            QMessageBox.critical(self, 'Настройки', 'Не удалось сохранить настройки. Проверьте путь и параметры файла.')
+            return
         apply_theme(QApplication.instance())
         QMessageBox.information(self, 'Настройки', 'Настройки сохранены.')

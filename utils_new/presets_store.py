@@ -1,28 +1,13 @@
-"""JSON preset persistence independent of widgets and algorithms."""
-import json
-import os
-import tempfile
-from pathlib import Path
+"""Preset collection persistence; method schemas belong to segmentation.presets."""
+
+from utils_new.json_store import read_json_object, write_json_atomic
 
 
 def read_presets(path):
-    with Path(path).open(encoding='utf-8-sig') as stream:
-        value = json.load(stream)
-    if not isinstance(value, dict):
-        raise ValueError('Preset file must contain a JSON object')
-    return value
+    return read_json_object(path)
 
 
 def write_presets(path, presets):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                         suffix='.tmp', delete=False) as stream:
-            temporary = Path(stream.name)
-            json.dump(presets, stream, indent=4)
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    if not isinstance(presets, dict):
+        raise TypeError("Preset collection must be a JSON object")
+    write_json_atomic(path, presets)

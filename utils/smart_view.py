@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QMenu,
 )
 
-from utils.settings import settings  # ← добавить
+from ui.settings_service import settings  # ← добавить
 
 
 class SmartGraphicsView(QGraphicsView):
