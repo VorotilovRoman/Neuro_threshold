@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """Qt интерфейс пороговых методов с четырьмя read-only окнами utils_new."""
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView,
@@ -24,10 +22,11 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
 from ui.morphology_ui import MorphologyWidget
-from utils_new.dataset_review_view import DatasetReviewGraphicsView
+from ui.segmentation.histogram import HistogramCanvas
 
 
 def setup_threshold_ui(parent):
@@ -362,8 +361,8 @@ def setup_threshold_ui(parent):
     central_layout.addWidget(main_splitter, 1)
 
     # ----- Контейнер гистограммы -----
-    parent.hist_canvas = FigureCanvas(Figure(figsize=(5, 2)))
-    parent.hist_ax = parent.hist_canvas.figure.add_subplot(111)
+    parent.hist_canvas = HistogramCanvas()
+    parent.hist_ax = parent.hist_canvas.axes
     parent.hist_container = QWidget()
     hist_layout = QVBoxLayout(parent.hist_container)
     hist_layout.setContentsMargins(0, 0, 0, 0)

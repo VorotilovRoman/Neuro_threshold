@@ -1,4 +1,3 @@
-# interactive_methods_ui.py
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView,
@@ -13,16 +12,20 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from utils.smart_view import SmartGraphicsView
+from ui.morphology_ui import RelativeMorphologyWidget
+
+# interactive_methods_ui.py
+from ui.segmentation.histogram import HistogramCanvas
+from ui.segmentation.interactive_view import SegmentationInputView
 
 
 def setup_interactive_ui(parent):
@@ -53,22 +56,22 @@ def setup_interactive_ui(parent):
     grid = QGridLayout()
     grid.setSpacing(10)
 
-    parent.original_view = SmartGraphicsView()
+    parent.original_view = SegmentationInputView()
     parent.original_view.setMinimumSize(400, 400)
     parent.original_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.original_view, 0, 0)
 
-    parent.segmentation_view = SmartGraphicsView()
+    parent.segmentation_view = DatasetReviewGraphicsView()
     parent.segmentation_view.setMinimumSize(400, 400)
     parent.segmentation_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.segmentation_view, 0, 1)
 
-    parent.morph_view = SmartGraphicsView()
+    parent.morph_view = DatasetReviewGraphicsView()
     parent.morph_view.setMinimumSize(400, 400)
     parent.morph_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.morph_view, 1, 0)
 
-    parent.annotated_view = SmartGraphicsView()
+    parent.annotated_view = DatasetReviewGraphicsView()
     parent.annotated_view.setMinimumSize(400, 400)
     parent.annotated_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.annotated_view, 1, 1)
@@ -169,32 +172,9 @@ def setup_interactive_ui(parent):
     morph_label = QLabel("Morphological operations (applied after segmentation):")
     controls_layout.addWidget(morph_label)
 
-    kernel_shape_layout = QHBoxLayout()
-    kernel_shape_layout.addWidget(QLabel("Kernel shape:"))
-    parent.kernel_shape_combo = QComboBox()
-    parent.kernel_shape_combo.addItems(["Rectangle", "Ellipse", "Cross"])
-    kernel_shape_layout.addWidget(parent.kernel_shape_combo)
-    controls_layout.addLayout(kernel_shape_layout)
-
-    close_layout = QHBoxLayout()
-    close_layout.addWidget(QLabel("Closing factor:"))
-    parent.close_kernel_slider = QSlider(Qt.Horizontal)
-    parent.close_kernel_slider.setRange(0, 10)
-    parent.close_kernel_slider.setValue(0)
-    parent.close_kernel_label = QLabel("0.00")
-    close_layout.addWidget(parent.close_kernel_slider)
-    close_layout.addWidget(parent.close_kernel_label)
-    controls_layout.addLayout(close_layout)
-
-    open_layout = QHBoxLayout()
-    open_layout.addWidget(QLabel("Opening factor:"))
-    parent.open_kernel_slider = QSlider(Qt.Horizontal)
-    parent.open_kernel_slider.setRange(0, 10)
-    parent.open_kernel_slider.setValue(0)
-    parent.open_kernel_label = QLabel("0.00")
-    open_layout.addWidget(parent.open_kernel_slider)
-    open_layout.addWidget(parent.open_kernel_label)
-    controls_layout.addLayout(open_layout)
+    parent.morphology_widget = RelativeMorphologyWidget(divisor=100)
+    parent.morphology_widget.bind_legacy_names(parent)
+    controls_layout.addWidget(parent.morphology_widget)
 
     # Режим отрисовки объектов
     draw_layout = QHBoxLayout()
@@ -243,10 +223,8 @@ def setup_interactive_ui(parent):
     main_layout.addWidget(main_splitter, 1)
 
     # ----- Контейнер гистограммы (изначально скрыт) -----
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.figure import Figure
-    parent.hist_canvas = FigureCanvas(Figure(figsize=(5, 2)))
-    parent.hist_ax = parent.hist_canvas.figure.add_subplot(111)
+    parent.hist_canvas = HistogramCanvas()
+    parent.hist_ax = parent.hist_canvas.axes
 
     parent.hist_container = QWidget()
     hist_layout = QVBoxLayout(parent.hist_container)

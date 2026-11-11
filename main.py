@@ -21,7 +21,7 @@ from PyQt5.QtWidgets import (
 
 from main_ui import StartupDialog
 from ui.image_navigation import NavigationShortcutInstaller
-from utils.settings import apply_theme, settings
+from ui.settings_service import apply_theme, settings
 
 COLLECT_LIBS_INFO = False
 

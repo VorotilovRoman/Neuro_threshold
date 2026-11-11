@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from utils.settings import settings
+from ui.settings_service import settings
 
 
 class ImageNavigationWidget(QWidget):

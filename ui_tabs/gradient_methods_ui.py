@@ -21,9 +21,11 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from utils.smart_view import SmartGraphicsView
+from ui.morphology_ui import RelativeMorphologyWidget
+from ui.segmentation.histogram import HistogramCanvas
 
 
 def setup_gradient_ui(parent):
@@ -51,33 +53,33 @@ def setup_gradient_ui(parent):
     grid.setSpacing(10)
 
     # Ряд 1
-    parent.original_view = SmartGraphicsView()
+    parent.original_view = DatasetReviewGraphicsView()
     parent.original_view.setMinimumSize(400, 300)
     parent.original_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.original_view, 0, 0)
 
-    parent.gradient_view = SmartGraphicsView()
+    parent.gradient_view = DatasetReviewGraphicsView()
     parent.gradient_view.setMinimumSize(400, 300)
     parent.gradient_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.gradient_view, 0, 1)
 
-    parent.binary_view = SmartGraphicsView()
+    parent.binary_view = DatasetReviewGraphicsView()
     parent.binary_view.setMinimumSize(400, 300)
     parent.binary_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.binary_view, 0, 2)
 
     # Ряд 2
-    parent.morph_view = SmartGraphicsView()
+    parent.morph_view = DatasetReviewGraphicsView()
     parent.morph_view.setMinimumSize(400, 300)
     parent.morph_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.morph_view, 1, 0)
 
-    parent.filled_view = SmartGraphicsView()
+    parent.filled_view = DatasetReviewGraphicsView()
     parent.filled_view.setMinimumSize(400, 300)
     parent.filled_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.filled_view, 1, 1)
 
-    parent.annotated_view = SmartGraphicsView()
+    parent.annotated_view = DatasetReviewGraphicsView()
     parent.annotated_view.setMinimumSize(400, 300)
     parent.annotated_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.annotated_view, 1, 2)
@@ -220,36 +222,9 @@ def setup_gradient_ui(parent):
     # Морфологические операции
     morph_label = QLabel("Morphological operations (applied after binarization):")
     controls_layout.addWidget(morph_label)
-    kernel_shape_layout = QHBoxLayout()
-    kernel_shape_layout.addWidget(QLabel("Kernel shape:"))
-    parent.kernel_shape_combo = QComboBox()
-    parent.kernel_shape_combo.addItems(["Rectangle", "Ellipse", "Cross"])
-    kernel_shape_layout.addWidget(parent.kernel_shape_combo)
-    controls_layout.addLayout(kernel_shape_layout)
-
-    # Closing (0-0.05, шаг 0.005)
-    close_layout = QHBoxLayout()
-    close_layout.addWidget(QLabel("Closing factor:"))
-    parent.close_kernel_slider = QSlider(Qt.Horizontal)
-    parent.close_kernel_slider.setRange(0, 10)
-    parent.close_kernel_slider.setSingleStep(1)
-    parent.close_kernel_slider.setValue(0)
-    parent.close_kernel_label = QLabel("0.00")
-    close_layout.addWidget(parent.close_kernel_slider)
-    close_layout.addWidget(parent.close_kernel_label)
-    controls_layout.addLayout(close_layout)
-
-    # Opening (0-0.05, шаг 0.005)
-    open_layout = QHBoxLayout()
-    open_layout.addWidget(QLabel("Opening factor:"))
-    parent.open_kernel_slider = QSlider(Qt.Horizontal)
-    parent.open_kernel_slider.setRange(0, 10)
-    parent.open_kernel_slider.setSingleStep(1)
-    parent.open_kernel_slider.setValue(0)
-    parent.open_kernel_label = QLabel("0.00")
-    open_layout.addWidget(parent.open_kernel_slider)
-    open_layout.addWidget(parent.open_kernel_label)
-    controls_layout.addLayout(open_layout)
+    parent.morphology_widget = RelativeMorphologyWidget(divisor=200)
+    parent.morphology_widget.bind_legacy_names(parent)
+    controls_layout.addWidget(parent.morphology_widget)
 
     # Слайдер минимальной площади (0.0-0.1%, шаг 0.001)
     min_area_layout = QHBoxLayout()
@@ -325,10 +300,8 @@ def setup_gradient_ui(parent):
     main_layout.addWidget(main_splitter, 1)
 
     # ----- Контейнер гистограммы (изначально скрыт) -----
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.figure import Figure
-    parent.hist_canvas = FigureCanvas(Figure(figsize=(5, 2)))
-    parent.hist_ax = parent.hist_canvas.figure.add_subplot(111)
+    parent.hist_canvas = HistogramCanvas()
+    parent.hist_ax = parent.hist_canvas.axes
 
     parent.hist_container = QWidget()
     hist_layout = QVBoxLayout(parent.hist_container)

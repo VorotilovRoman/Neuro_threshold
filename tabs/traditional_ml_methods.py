@@ -23,27 +23,26 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QInputDialog,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QSpinBox,
 )
 from sklearn.preprocessing import StandardScaler
 
+from ui.image_conversion import numpy_to_qpixmap
+from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import export as segmentation_export
+from ui.segmentation import histogram as segmentation_histogram
+from ui.segmentation import image_input as segmentation_input
+from ui.segmentation import navigation as segmentation_navigation
+from ui.segmentation import results as segmentation_results
+from ui.segmentation.preset_bindings import TraditionalMLPresetManager
+from ui.settings_service import settings
 from ui_tabs.traditional_ml_methods_ui import setup_traditional_ml_ui
-from utils.image_io import load_images_universal, numpy_to_qpixmap, save_annotations
-from utils.presets import TraditionalMLPresetManager
-from utils.settings import settings
-from utils_ops.segmentation_ops import (
-    apply_morphology,
-    draw_selected_objects,
-    format_object_for_list,
-    get_display_params,
-    segment_contours,
-    segment_min_area_rect,
-    segment_projections,
+from utils_new.segmentation.postprocessing import (
+    apply_relative_morphology as apply_morphology,
 )
+from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.traditional_ml_ops import (
     compute_elbow_kmeans,
     create_superpixels,
@@ -61,6 +60,8 @@ from utils_ops.traditional_ml_ops import (
 
 
 class TraditionalMLWindow(QMainWindow):
+    segmentation_view_names = ('original_view', 'ml_view', 'morph_view', 'annotated_view')
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Traditional Machine Learning")
@@ -286,32 +287,11 @@ class TraditionalMLWindow(QMainWindow):
     # ----------------------------------------------------------------------
     #  Загрузка / перезагрузка изображений
     # ----------------------------------------------------------------------
+    def _load_images(self, source):
+        segmentation_input.load_eager(self, source, max_side=640)
+
     def reload_current_images(self):
-        if not self.image_paths:
-            self.log("Нет загруженных изображений для перезагрузки.")
-            return
-        self.log("Перезагрузка изображений с новыми настройками ресайза...")
-        resize_enabled = self.nav_widget.is_resize_enabled()
-        paths, imgs, grays, anns = load_images_universal(
-            source=self.image_paths,
-            require_annotations=False,
-            resize_enabled=resize_enabled,
-            max_side=640,
-            parent=self
-        )
-        if not paths:
-            self.log("Ошибка: ни одно изображение не загружено при перезагрузке.")
-            return
-        self.image_paths = paths
-        self.display_images = imgs
-        self.gray_images = grays
-        self.annotations = anns
-        self.current_index = 0
-        self._reset_for_new_image()
-        self.display_current_image()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
-        self.update_navigation_state()
-        self.log(f"Перезагружено {len(paths)} изображений.")
+        segmentation_input.reload_images(self, self._load_images)
 
     def _reset_for_new_image(self):
         self.prediction_mask = None
@@ -329,11 +309,7 @@ class TraditionalMLWindow(QMainWindow):
     #  Логирование и общие утилиты
     # ----------------------------------------------------------------------
     def log(self, message):
-        if hasattr(self, 'log_text'):
-            self.log_text.append(message)
-        elif hasattr(self, 'log_widget'):
-            self.log_widget.log(message)
-        print(message)
+        segmentation_actions.log(self, message)
 
     def on_global_settings_changed(self, new_settings=None):
         self.update_annotated_view()
@@ -345,13 +321,7 @@ class TraditionalMLWindow(QMainWindow):
     #  Пресеты
     # ----------------------------------------------------------------------
     def update_preset_combo(self):
-        self.preset_combo.blockSignals(True)
-        self.preset_combo.clear()
-        self.preset_manager.load_presets()
-        for name in self.preset_manager.get_preset_names():
-            self.preset_combo.addItem(name)
-        self.preset_combo.setCurrentText("default")
-        self.preset_combo.blockSignals(False)
+        segmentation_actions.update_preset_combo(self)
 
     def on_preset_activated(self, index):
         name = self.preset_combo.itemText(index)
@@ -361,35 +331,10 @@ class TraditionalMLWindow(QMainWindow):
             self.schedule_update()
 
     def save_as_preset(self):
-        name, ok = QInputDialog.getText(self, "Сохранить пресет", "Введите имя пресета:")
-        if ok and name:
-            if name in self.preset_manager.get_preset_names():
-                reply = QMessageBox.question(
-                    self, "Перезаписать пресет",
-                    f"Пресет '{name}' уже существует. Перезаписать?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if reply != QMessageBox.Yes:
-                    return
-                self.preset_manager.presets[name] = self.preset_manager.get_current_settings()
-                self.preset_manager.save_presets()
-            else:
-                self.preset_manager.add_preset(name)
-            self.update_preset_combo()
-            self.preset_combo.setCurrentText(name)
-            self.log(f"Сохранён пресет: {name}")
+        segmentation_actions.save_as_preset(self)
 
     def delete_current_preset(self):
-        current = self.preset_combo.currentText()
-        reply = QMessageBox.question(
-            self, "Удалить пресет",
-            f"Удалить пресет '{current}'?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            if self.preset_manager.delete_preset(current):
-                self.update_preset_combo()
-                self.log(f"Удалён пресет: {current}")
+        segmentation_actions.delete_current_preset(self)
 
     # ----------------------------------------------------------------------
     #  Настройки модели
@@ -462,20 +407,10 @@ class TraditionalMLWindow(QMainWindow):
     #  Гистограмма
     # ----------------------------------------------------------------------
     def update_histogram(self, gray_img):
-        self.hist_ax.clear()
-        self.hist_ax.hist(gray_img.ravel(), bins=256, range=(0, 256), color='black', alpha=0.7)
-        self.hist_ax.set_title("Grayscale Histogram")
-        self.hist_ax.set_xlabel("Pixel intensity")
-        self.hist_ax.set_ylabel("Frequency")
-        if self.cluster_means is not None and len(self.cluster_means) > 0:
-            for mean_val in self.cluster_means:
-                self.hist_ax.axvline(x=mean_val, color='red', linestyle='--', linewidth=1)
-        self.hist_canvas.draw()
+        segmentation_histogram.update_histogram(self, gray_img)
 
     def update_current_histogram(self):
-        if self.display_images:
-            gray = self.gray_images[self.current_index]
-            self.update_histogram(gray)
+        segmentation_histogram.update_current(self)
 
     # ----------------------------------------------------------------------
     #  Признаки
@@ -942,6 +877,7 @@ class TraditionalMLWindow(QMainWindow):
         if len(original.shape) == 3 and original.shape[2] == 4:
             original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
         gray = self.gray_images[self.current_index]
+        segmentation_results.prepare_frame(self, gray)
 
         self.update_histogram(gray)
         self.original_view.set_pixmap(numpy_to_qpixmap(original))
@@ -973,192 +909,38 @@ class TraditionalMLWindow(QMainWindow):
     #  Список объектов и аннотации
     # ----------------------------------------------------------------------
     def update_object_list(self):
-        self.object_list.blockSignals(True)
-        self.object_list.clear()
-        self.current_selected_indices = []
-        img = self.display_images[self.current_index]
-        img_h, img_w = img.shape[:2]
-        for i, obj in enumerate(self.current_objects_full):
-            desc = format_object_for_list(i, obj, img_w, img_h)
-            item = QListWidgetItem(desc)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked)
-            self.object_list.addItem(item)
-            self.current_selected_indices.append(i)
-        self.object_list.blockSignals(False)
-        self.update_annotated_view()
+        segmentation_results.update_object_list(self)
 
     def update_annotated_view(self):
-        if self.current_base_image is None:
-            return
-        img = self.current_base_image.copy()
-        if not self.current_selected_indices:
-            self.annotated_view.set_pixmap(numpy_to_qpixmap(img))
-            self.update_coordinates_display()
-            return
-        thickness, font_scale, font_thickness, _ = get_display_params(img.shape)
-        color_rect = settings.get_color('annotation')
-        color_label = settings.get_color('label_text')
-        draw_mode = self.draw_combo.currentText()
-        use_hull = self.hull_checkbox.isChecked()
-        img_annotated = draw_selected_objects(
-            img, self.current_objects_full, self.current_selected_indices,
-            draw_mode, use_hull, color_rect, color_label,
-            thickness, font_scale, font_thickness
-        )
-        self.annotated_view.set_pixmap(numpy_to_qpixmap(img_annotated))
-        self.update_coordinates_display()
+        segmentation_results.update_overlay(self)
 
     def update_coordinates_display(self):
-        self.coord_text.clear()
-        if not self.current_selected_indices:
-            self.coord_text.append("No objects selected.")
-            return
-        img = self.display_images[self.current_index]
-        img_h, img_w = img.shape[:2]
-        for i, idx in enumerate(self.current_selected_indices, 1):
-            obj = self.current_objects_full[idx]
-            if isinstance(obj, tuple) and len(obj) > 0 and obj[0] in ('detect', 'obb', 'segment'):
-                typ = obj[0]
-                if typ == 'detect':
-                    _, cls, cx, cy, w, h = obj
-                    x = int((cx - w/2) * img_w)
-                    y = int((cy - h/2) * img_h)
-                    x2 = x + int(w * img_w)
-                    y2 = y + int(h * img_h)
-                    self.coord_text.append(f"{i}: detect class={cls}, rect=({x},{y},{x2},{y2})")
-                elif typ == 'obb':
-                    _, cls, points = obj
-                    pts_str = ' '.join(f"{p:.3f}" for p in points)
-                    self.coord_text.append(f"{i}: obb class={cls}, YOLO-OBB: {cls} {pts_str}")
-                elif typ == 'segment':
-                    _, cls, points = obj
-                    preview = ' '.join(f"{p:.3f}" for p in points[:6]) + (' ...' if len(points) > 6 else '')
-                    self.coord_text.append(f"{i}: segment class={cls}, YOLO-seg: {cls} {preview}")
-            elif len(obj) == 4:
-                self.coord_text.append(f"{i}: x={obj[0]}, y={obj[1]}, w={obj[2]}, h={obj[3]}")
-            elif len(obj) == 5:
-                self.coord_text.append(f"{i}: center=({obj[0]:.1f},{obj[1]:.1f}), size=({obj[2]:.1f}x{obj[3]:.1f}), angle={obj[4]:.1f}°")
-            else:
-                self.coord_text.append(f"{i}: {obj}")
+        segmentation_results.update_coordinates(self)
 
     # ---------- Сохранение аннотаций (включая пустой файл) ----------
     def save_current_annotations(self):
-        if not self.image_paths or not self.display_images:
-            QMessageBox.warning(self, "Нет изображения", "Нет загруженных изображений.")
-            return
-
-        total_objects = len(self.current_objects_full)
-
-        selected = [
-            self.current_objects_full[i]
-            for i in self.current_selected_indices
-            if 0 <= i < total_objects
-        ]
-
-        img_path = self.image_paths[self.current_index]
-        txt_path = os.path.splitext(img_path)[0] + ".txt"
-        h, w = self.display_images[self.current_index].shape[:2]
-
-        success = save_annotations(selected, txt_path, w, h)
-        if not success:
-            self.log(f"Ошибка сохранения {txt_path}")
-            QMessageBox.critical(self, "Ошибка", "Не удалось сохранить аннотации.")
-            return
-
-        if len(selected) == 0:
-            if total_objects == 0:
-                self.log(f"Сохранён пустой файл аннотаций "
-                         f"(на снимке не найдено объектов) в {txt_path}")
-                QMessageBox.information(
-                    self, "Сохранение",
-                    f"На снимке не найдено объектов.\n"
-                    f"Сохранён пустой файл аннотаций:\n{txt_path}"
-                )
-            else:
-                self.log(f"Сохранён пустой файл аннотаций "
-                         f"(сняты галочки со всех {total_objects} объектов) в {txt_path}")
-                QMessageBox.information(
-                    self, "Сохранение",
-                    f"Сняты галочки со всех объектов.\n"
-                    f"Сохранён пустой файл аннотаций:\n{txt_path}"
-                )
-        else:
-            self.log(f"Сохранено {len(selected)} из {total_objects} "
-                     f"аннотаций в {txt_path}")
-            QMessageBox.information(
-                self, "Сохранение",
-                f"Сохранено {len(selected)} из {total_objects} объектов в {txt_path}"
-            )
+        segmentation_export.save_selected(self)
 
     # ----------------------------------------------------------------------
     #  Навигация и UI
     # ----------------------------------------------------------------------
     def update_navigation_state(self):
-        has_images = len(self.display_images) > 0
-        self.nav_widget.set_prev_enabled(has_images and self.current_index > 0)
-        self.nav_widget.set_next_enabled(has_images and self.current_index < len(self.display_images) - 1)
+        segmentation_navigation.update_state(self)
 
     def prev_image(self):
-        if not self.display_images:
-            return
-        self.current_index = (self.current_index - 1) % len(self.display_images)
-        self._reset_for_new_image()
-        self.display_current_image()
-        self.update_navigation_state()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        segmentation_navigation.step(self, -1, reset=self._reset_for_new_image)
 
     def next_image(self):
-        if not self.display_images:
-            return
-        self.current_index = (self.current_index + 1) % len(self.display_images)
-        self._reset_for_new_image()
-        self.display_current_image()
-        self.update_navigation_state()
-        self.nav_widget.set_current_index(self.current_index, len(self.display_images))
+        segmentation_navigation.step(self, 1, reset=self._reset_for_new_image)
 
     def goto_image(self, page_num):
-        if not self.display_images:
-            return
-        total = len(self.display_images)
-        page_num = max(1, min(page_num, total))
-        self.current_index = page_num - 1
-        self._reset_for_new_image()
-        self.display_current_image()
-        self.update_navigation_state()
-        self.nav_widget.set_current_index(self.current_index, total)
+        segmentation_navigation.navigate(self, page_num-1, reset=self._reset_for_new_image)
 
     def load_images_from_dialog(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Images", "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"
-        )
-        if not file_paths:
-            return
-        self.log(f"Loading {len(file_paths)} images...")
-        paths, imgs, grays, anns = load_images_universal(
-            source=file_paths, require_annotations=False,
-            resize_enabled=self.nav_widget.is_resize_enabled(),
-            max_side=640, parent=self
-        )
-        if not paths:
-            self.log("No images loaded.")
-            return
-        self._update_loaded_data(paths, imgs, grays, anns)
+        segmentation_input.choose_images(self, self._load_images)
 
     def load_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
-        if not folder:
-            return
-        self.log(f"Loading folder: {folder}")
-        paths, imgs, grays, anns = load_images_universal(
-            source=folder, require_annotations=False,
-            resize_enabled=self.nav_widget.is_resize_enabled(),
-            max_side=640, parent=self
-        )
-        if not paths:
-            self.log("No images found.")
-            return
-        self._update_loaded_data(paths, imgs, grays, anns)
+        segmentation_input.choose_folder(self, self._load_images)
 
     def _update_loaded_data(self, paths, imgs, grays, anns):
         self.image_paths = paths
@@ -1186,28 +968,10 @@ class TraditionalMLWindow(QMainWindow):
                 self.log("Resize mode changed, images cleared. Please load images again.")
 
     def clear_images(self):
-        self.display_images = []
-        self.gray_images = []
-        self.image_paths = []
-        self.annotations = []
-        self.current_index = 0
-        self.prediction_mask = None
-        self.current_cluster_labels = None
-        self.current_objects_full = []
-        self.current_selected_indices = []
-        self.current_base_image = None
-        self.original_view.set_pixmap(numpy_to_qpixmap(None))
-        self.ml_view.set_pixmap(numpy_to_qpixmap(None))
-        self.morph_view.set_pixmap(numpy_to_qpixmap(None))
-        self.annotated_view.set_pixmap(numpy_to_qpixmap(None))
-        self.info_label.setText("No images")
-        self.object_list.clear()
-        self.nav_widget.set_current_index(0, 0)
-        self.update_navigation_state()
+        segmentation_input.clear_session(self, empty_fields=('display_images','gray_images','annotations'), none_fields=('prediction_mask','current_cluster_labels'))
 
     def reset_all_zooms(self):
-        for view in (self.original_view, self.ml_view, self.morph_view, self.annotated_view):
-            view.reset_view()
+        segmentation_navigation.reset_zooms(self)
 
     # ----------------------------------------------------------------------
     #  Отслеживание слайдеров и переключателей
@@ -1231,43 +995,22 @@ class TraditionalMLWindow(QMainWindow):
             self.schedule_update()
 
     def on_object_selection_changed(self, item):
-        idx = self.object_list.row(item)
-        if item.checkState() == Qt.Checked:
-            if idx not in self.current_selected_indices:
-                self.current_selected_indices.append(idx)
-        else:
-            if idx in self.current_selected_indices:
-                self.current_selected_indices.remove(idx)
-        self.current_selected_indices.sort()
-        self.update_annotated_view()
+        segmentation_results.on_selection_changed(self, item)
 
     # ----------------------------------------------------------------------
     #  Отрисовка объектов
     # ----------------------------------------------------------------------
     def draw_objects_on_image(self, img, binary, draw=True):
-        mode = self.draw_combo.currentText()
-        use_hull = self.hull_checkbox.isChecked()
-        img_color = img if len(img.shape) == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        if mode == "None":
-            return img_color, []
-        if mode == "Segmentation (Polygon)":
-            return segment_contours(img_color if draw else img, binary, use_hull)
-        if mode == "Bounding Box (Detect)":
-            return segment_projections(img_color if draw else img, binary)
-        if mode == "OBB (Oriented Box)":
-            return segment_min_area_rect(img_color if draw else img, binary, use_hull)
-        return img_color, []
+        return extract_objects(img, binary, self.draw_combo.currentText(), self.hull_checkbox.isChecked())
 
     # ----------------------------------------------------------------------
     #  Лог и гистограмма
     # ----------------------------------------------------------------------
     def toggle_log(self, checked):
-        self.log_widget.setVisible(checked)
-        self.toggle_log_btn.setText("Скрыть лог" if checked else "Показать лог")
+        segmentation_actions.toggle_log(self, checked)
 
     def toggle_histogram(self, checked):
-        self.hist_container.setVisible(checked)
-        self.toggle_hist_btn.setText("Скрыть гистограмму" if checked else "Показать гистограмму")
+        segmentation_actions.toggle_histogram(self, checked)
 
 
 if __name__ == "__main__":

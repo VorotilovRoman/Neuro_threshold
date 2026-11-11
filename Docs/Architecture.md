@@ -50,11 +50,11 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 
 | ID → файл в tabs | UI в ui_tabs | Утилиты и выполнение |
 | --- | --- | --- |
-| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`: бинаризация; `annotation_processing`: объекты; `utils_new.morphology` и MorphologyWidget; `utils.image_io.LazyImageCache`; `AutoResearch`, пресеты |
-| `gradient` → `gradient_methods.py` | `gradient_methods_ui.py` | `utils_ops.gradient_ops`, извлечение объектов из `segmentation_ops`, `GradientAutoResearch`, общий кэш изображений |
-| `interactive` → `interactive_methods.py` | `interactive_methods_ui.py` | `utils_ops.interactive_ops`, старый `SmartGraphicsView`, морфология и экспорт разметки |
-| `traditional_ml` → `traditional_ml_methods.py` | `traditional_ml_methods_ui.py` | `traditional_ml_ops`: признаки, суперпиксели, train/predict; сохранение joblib; общая сегментация |
-| `deep_learning` → `deep_learning_methods.py` | `deep_learning_methods_ui.py` | `deep_learning_ops.create_segmentor`; параметры из `ui.DL_predict_settings`; изображения и маски |
+| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`: бинаризация; `annotation_processing`: объекты; `utils_new.morphology` и MorphologyWidget; новая общая сессия/экспорт; AutoResearch без изменений |
+| `gradient` → `gradient_methods.py` | `gradient_methods_ui.py` | `utils_ops.gradient_ops`; новые общие postprocessing, cache и Qt-сервисы; GradientAutoResearch без изменений |
+| `interactive` → `interactive_methods.py` | `interactive_methods_ui.py` | `utils_ops.interactive_ops`; `ui.segmentation.interactive_view` для ROI/FG/BG; общие морфология/экспорт |
+| `traditional_ml` → `traditional_ml_methods.py` | `traditional_ml_methods_ui.py` | `traditional_ml_ops`: признаки, суперпиксели, train/predict; сохранение joblib; новый eager I/O-адаптер и общие Qt/postprocessing |
+| `deep_learning` → `deep_learning_methods.py` | `deep_learning_methods_ui.py` | `deep_learning_ops.create_segmentor`; параметры из `ui.DL_predict_settings`; новая сессия и общие Qt/postprocessing |
 | `reports` → `model_research.py` | `model_research_ui.py` | `utils.prepare`, `utils.analysis`, `utils.metrics_core`: фильтры, метрики, регрессия, ранжирование пресетов |
 | `labeler` → `layout_dataset.py` | `layout_dataset_ui.py` | Прямые импорты `dataset_files_new`, `dataset_yolo_labels_new`, YAML/UNet/COCO/catalog; `SmartGraphicsViewNew`, обработка аннотаций |
 | `test` → `viewing_dataset.py` | `viewing_dataset_ui.py` | Те же новые файловые службы; `DatasetReviewGraphicsView`, маски, редактирование и постобработка |
@@ -65,7 +65,7 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 | `yolo_demo` → `demo_ensemble_methods.py` | `demo_ensemble_methods_ui.py` | `utils.ensemble_utils`: YOLO + классические пресеты, собственные WBF/NMS и метрики |
 | `yolo_sort` → `yolo_find_img.py` | `yolo_find_img_ui.py` | YOLO, фоновый поиск, список/миниатюры, копирование или перемещение |
 | `yolo_aeb` → `yolo_test_aeb.py` | `yolo_test_aeb_ui.py` | `utils_aeb.yolo_aeb_utils`, `utils_new.annotation_processing`: YOLO-объекты, AE/VAE, кропы и карты ошибок |
-| `settings` | `ui/settings_ui.py`, без ui_tabs | `utils.settings`: тема, палитра классов, размеры и шорткаты |
+| `settings` | `ui/settings_ui.py`, без ui_tabs | `ui.settings_service` (старый путь — алиас): тема, палитра классов, размеры и шорткаты |
 
 ## Новая ветка обработки датасетов
 
@@ -93,9 +93,9 @@ flowchart LR
 
 ## Существующая старая ветка
 
-`utils/image_io.py`, `yaml_io.py`, `annotation_converter.py`, `coco_io.py`, `coco_export.py`, `unet_io.py`, `unet_export.py`, `DatasetGenerator.py`, `dataset_validation.py`, `augmentation_base.py`, `augmentation_random.py`, `aug_utils.py` остаются в дереве и явно импортируются своими потребителями. Они не стали автоматически ненужными после появления `utils_new`: старые вкладки продолжают работать с legacy-форматами. `utils.smart_view` обслуживает классические вкладки; `SmartGraphicsViewNew` и `DatasetReviewGraphicsView` — отдельные виджеты разметки и просмотра; пороговая вкладка также использует read-only `DatasetReviewGraphicsView`. Подмена одного другим без проверки событий и координат недопустима.
+`utils/image_io.py`, `yaml_io.py`, `annotation_converter.py`, `coco_io.py`, `coco_export.py`, `unet_io.py`, `unet_export.py`, `DatasetGenerator.py`, `dataset_validation.py`, `augmentation_base.py`, `augmentation_random.py`, `aug_utils.py` остаются в дереве и явно импортируются своими потребителями. Они не стали автоматически ненужными после появления `utils_new`: старые вкладки продолжают работать с legacy-форматами. Пять вкладок методов используют канонические виды из `ui.image_view` и `ui.annotation_review_view`; интерактивный ввод расширяет их через SegmentationInputView. Старые пути новых видов — совместимые алиасы. `utils.smart_view` оставлен другим старым потребителям. Подмена одного другим без проверки событий и координат недопустима.
 
-`utils_auto_research` содержит два перебора параметров и два диалога диапазонов. `utils.presets` хранит менеджеры пресетов. `utils.metrics_core` объединяет метрики для отчётов; `utils.prepare` готовит таблицы; `utils.analysis` ранжирует параметры. `ui` содержит общие панели навигации, морфологии, логов, настройки моделей и диалог проверки пар.
+`utils_auto_research` содержит два перебора параметров и два диалога диапазонов. `utils.presets` — алиас `ui.segmentation.preset_bindings`; JSON store находится в `utils_new.presets_store`. `utils.metrics_core` объединяет метрики для отчётов; `utils.prepare` готовит таблицы; `utils.analysis` ранжирует параметры. `ui` содержит общие панели навигации, морфологии, логов, настройки моделей и диалог проверки пар.
 
 ## Зависимости вне import-графа
 
@@ -151,9 +151,21 @@ runtime_torch — нижний слой без Qt/NumPy. На Windows main и а
 clicked или QTest.mouseClick(button) обходит перекрывающие виджеты и сама по
 себе не доказывает доступность элемента пользователю.
 
-## План дальнейшей миграции сегментации
+## Общие службы пяти вкладок сегментации
 
-Первые пять вкладок изучены отдельно: [фактический аудит](Segmentation_Tabs_Audit.md)
-и [поэтапный план](Segmentation_Migration_Plan.md). В частности, обнаружена
-несовместимость автоподбора с ленивым кэшем и различия старого/нового I/O.
-Новые документы описывают будущую работу, а не уже выполненный перенос алгоритмов.
+Общие загрузка/навигация, результаты, экспорт, гистограмма, действия пресетов
+и log находятся в `ui/segmentation`. Чтение/resize и postprocessing — в
+`utils_new/segmentation`, без Qt. Политика `legacy-segmentation-v1` сохраняет
+старую яркость; четыре вкладки остаются ленивыми, ML использует eager-адаптер.
+`ui.settings_service` владеет единым settings QObject. Прежние пути settings,
+presets и новых видов указывают на те же модули и сохраняют identity.
+
+Новая общая RelativeMorphologyWidget сохраняет относительные единицы четырёх
+вкладок (/200 у gradient, /100 у остальных); threshold сохраняет пиксельную
+панель. Автоподбор и его специальные адаптеры заморожены до последнего этапа.
+Уникальные алгоритмы в `utils_ops` не переносились.
+
+[Исходный аудит](Segmentation_Tabs_Audit.md) · [Текущий результат](Segmentation_Refactor_Status.md)
+· [Уточнённый план](Segmentation_Migration_Plan.md). `test_segmentation_shared`
+защищает совместимость, ROI/FG/BG, экспорт, отсутствие legacy-import в пяти
+вкладках и отсутствие GUI в новом вычислительном ядре.

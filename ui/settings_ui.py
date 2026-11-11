@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from utils.settings import (
+from ui.settings_service import (
     DEFAULT_DATASET_CLASS_PALETTE_BGR,
     FONT_SIZE_PX_MAX,
     FONT_SIZE_PX_MIN,
