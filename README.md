@@ -16,7 +16,8 @@ python main.py
 ```
 
 В Windows активация: `.venv\Scripts\activate`. Для совместимого GPU явно
-выберите `--torch cu130`; автоматического fallback на CPU нет.
+выберите `--torch cu126` (проверено пользователем на GTX 1650) или `--torch cu130`
+для совместимой системы; автоматического fallback на CPU нет.
 Дополнительные возможности: `--extra training`, `--extra audit`, `--extra sahi`,
 `--extra export` — флаги можно сочетать.
 

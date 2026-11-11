@@ -112,6 +112,44 @@ assert ultralytics.utils.patches.cv2 is original
 """])
         self.assertEqual(status, 0, output)
 
+    def test_embedded_editor_viewer_buttons_load_and_toggle(self):
+        status, output = self.run_python(['-c', """
+from pathlib import Path
+import tempfile
+from unittest.mock import patch
+import cv2, numpy as np
+from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtTest import QTest
+from main import ImagePlayer
+from ui.application import exec_window
+app = QApplication([])
+window = ImagePlayer([('labeler','Editor'), ('test','Viewer')])
+window.show()
+with tempfile.TemporaryDirectory() as directory:
+    image = Path(directory)/'sample.png'
+    cv2.imwrite(str(image), np.zeros((24,32,3), dtype=np.uint8))
+    for index, editor in enumerate(window._tab_widgets):
+        window.tab_widget.setCurrentIndex(index)
+        app.processEvents()
+        with patch.object(QFileDialog, 'getOpenFileNames', return_value=([str(image)], '')) as dialog:
+            QTest.mouseClick(editor.nav_widget._load_images_btn, Qt.LeftButton)
+            app.processEvents()
+            dialog.assert_called_once()
+        assert editor.image_paths == [str(image)]
+        assert (editor.save_button if index == 0 else editor.btn_save).isEnabled()
+        view = editor.image_view if index == 0 else editor.viewer
+        assert view.display_style.show_frames
+        QTest.mouseClick(editor.btn_hide_frames, Qt.LeftButton)
+        assert not view.display_style.show_frames
+        QTest.mouseClick(editor.btn_hide_frames, Qt.LeftButton)
+        assert view.display_style.show_frames
+        if editor._lazy_cache is not None: editor._lazy_cache.shutdown()
+    QTimer.singleShot(10,window.close)
+    assert exec_window(window,app) == 0
+"""])
+        self.assertEqual(status, 0, output)
+
     def test_worker_help_without_qt_or_training(self):
         for name in ('train_yolo_worker.py', 'train_unet_worker.py',
                      'train_unet_worker_рабочий.py', 'train_DeepLabV3_worker.py', 'yolo2voc.py'):

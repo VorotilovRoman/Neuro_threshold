@@ -69,6 +69,14 @@ class InstallationTests(unittest.TestCase):
             with patch.object(dependency_health.metadata, 'version', return_value='2.12.0+cpu'):
                 self.assertEqual(len(dependency_health.direct_requirement_errors(requirements)), 1)
 
+    def test_cu126_profile_is_passed_to_installer(self):
+        with patch.object(install, 'run_pip') as pip, \
+                patch.object(install, 'normalize_opencv'):
+            self.assertEqual(install.main(['--torch', 'cu126', '--dry-run']), 0)
+        self.assertEqual(pip.call_args_list[0].args,
+                         ('install', '-r', str(install.ROOT / 'requirements/torch-cu126.txt')))
+        self.assertTrue(pip.call_args_list[0].kwargs['dry_run'])
+
     def test_cpu_and_gpu_pairs_are_explicit(self):
         for backend in install.TORCH_PROFILES:
             text = (install.ROOT / 'requirements' / f'torch-{backend}.txt').read_text()

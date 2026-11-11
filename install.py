@@ -8,7 +8,7 @@ from pathlib import Path
 from dependency_health import OPENCV_PROVIDERS, SELECTED_OPENCV, installed_opencv
 
 ROOT = Path(__file__).resolve().parent
-TORCH_PROFILES = ('cpu', 'cu130')
+TORCH_PROFILES = ('cpu', 'cu126', 'cu130')
 EXTRAS = ('training', 'audit', 'sahi', 'export')
 
 
