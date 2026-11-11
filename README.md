@@ -37,6 +37,7 @@ python main.py
 - [Windows: ошибка c10.dll / WinError 1114](Docs/Windows_Torch_DLL.md)
 - [Руководство: вкладки, форматы, сохранение](Docs/User_Guide.md)
 - [Архитектура](Docs/Architecture.md) · [Аудит импортов](Docs/Import_Audit.md)
+- [План перехода вкладок сегментации на новые утилиты](Docs/Segmentation_Migration_Plan.md)
 
 ```bash
 python -m unittest discover -s tests -v
