@@ -150,6 +150,60 @@ with tempfile.TemporaryDirectory() as directory:
 """])
         self.assertEqual(status, 0, output)
 
+    def test_method_tabs_keep_visible_window_and_dialog_parent(self):
+        status, output = self.run_python(['-c', """
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+import cv2, numpy as np
+from PyQt5.QtWidgets import QApplication, QFileDialog
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtTest import QTest
+from main import ImagePlayer
+from ui.application import exec_window
+app = QApplication([])
+keys = ['threshold', 'gradient', 'interactive', 'traditional_ml', 'deep_learning']
+window = ImagePlayer([(key,key) for key in keys])
+window.show()
+with tempfile.TemporaryDirectory() as directory:
+    image = Path(directory)/'methods.png'
+    cv2.imwrite(str(image), np.tile(np.arange(64, dtype=np.uint8)*4, (64,1)))
+    for index, method in enumerate(window._tab_widgets):
+        window.tab_widget.setCurrentIndex(index)
+        app.processEvents()
+        assert method.isVisible(), keys[index] + ': controller window is hidden'
+        assert not method.isWindow(), keys[index] + ': detached top-level window'
+        assert method.centralWidget() is not None
+        button = method.nav_widget._load_images_btn
+        point = button.mapToGlobal(button.rect().center())
+        assert app.widgetAt(point) is button, keys[index] + ': another widget covers the button'
+        def select(parent, *args, **kwargs):
+            assert parent.isVisible(), keys[index] + ': file dialog owner is hidden'
+            return [str(image)], ''
+        with patch.object(QFileDialog, 'getOpenFileNames', side_effect=select) as dialog:
+            QTest.mouseClick(window.windowHandle(), Qt.LeftButton,
+                             pos=window.mapFromGlobal(point))
+            dialog.assert_called_once()
+        QTest.qWait(150)
+        gray = method.gray_images[0] if index == 3 else method.current_gray
+        assert gray is not None and gray.shape == (64,64), keys[index] + ': image not loaded'
+        if index == 0:
+            method.method_combo.setCurrentIndex(0)
+            method.threshold_slider.setValue(40)
+            QTest.qWait(150)
+            assert method.current_threshold == 40
+            first = method.current_base_image.copy()
+            method.threshold_slider.setValue(200)
+            QTest.qWait(150)
+            assert method.current_threshold == 200
+            assert not np.array_equal(first, method.current_base_image)
+        cache = getattr(method, '_lazy_cache', None)
+        if cache is not None: cache.shutdown()
+    QTimer.singleShot(10,window.close)
+    assert exec_window(window,app) == 0
+"""])
+        self.assertEqual(status, 0, output)
+
     def test_worker_help_without_qt_or_training(self):
         for name in ('train_yolo_worker.py', 'train_unet_worker.py',
                      'train_unet_worker_рабочий.py', 'train_DeepLabV3_worker.py', 'yolo2voc.py'):

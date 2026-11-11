@@ -509,7 +509,7 @@
 **Объявления:**
 
 - Класс [`ImagePlayer`](../main.py#L29) (`QMainWindow`)
-- [`main()`](../main.py#L282)
+- [`main()`](../main.py#L278)
 
 <a id="main-ui"></a>
 

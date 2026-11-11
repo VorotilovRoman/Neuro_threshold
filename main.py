@@ -74,19 +74,17 @@ class ImagePlayer(QMainWindow):
     #  Инфраструктура добавления вкладок
     # ------------------------------------------------------------------
     def _add_tab(self, widget, title):
-        """Добавляет вкладку, извлекает centralWidget если widget — QMainWindow.
-           Возвращает индекс добавленной вкладки."""
+        """Embed the complete window so dialogs, controls and ownership stay intact."""
         if not hasattr(self, '_tab_widgets'):
             self._tab_widgets = []
         self._tab_widgets.append(widget)
 
         if isinstance(widget, QMainWindow):
-            content = widget.takeCentralWidget()
-            widget.setParent(self)
-            if content is None:
-                content = widget
-        else:
-            content = widget
+            # An emptied QMainWindow parented to self becomes a visible overlay
+            # when the main window is shown and steals clicks from every tab.
+            # Embed the actual window instead of extracting its central widget.
+            widget.setWindowFlags(Qt.Widget)
+        content = widget
 
         index = self.tab_widget.addTab(content, title)
         if widget is self.demo_window:
@@ -99,10 +97,8 @@ class ImagePlayer(QMainWindow):
             NavigationShortcutInstaller(content, prev_cb, next_cb, parent=self)
 
         # --- Ctrl+0..9 — смена класса выделенного объекта ---
-        # Встраиваемый QMainWindow (Labeler, ViewingDataset и др.) теряет
-        # свой keyPressEvent при reparent в QTabWidget, поэтому вешаем
-        # QShortcut на content вкладки. Тогда хоткей работает независимо
-        # от того, какой дочерний виджет сейчас в фокусе.
+        # QShortcut on the embedded window works even when a child control
+        # has focus; keep its context limited to the active tab.
         class_cb = getattr(widget, '_set_class_of_selected', None)
         if callable(class_cb):
             self._install_class_shortcuts(content, class_cb)
