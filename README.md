@@ -37,6 +37,7 @@ python main.py
 - [Windows: ошибка c10.dll / WinError 1114](Docs/Windows_Torch_DLL.md)
 - [Руководство: вкладки, форматы, сохранение](Docs/User_Guide.md)
 - [Архитектура](Docs/Architecture.md) · [Аудит импортов](Docs/Import_Audit.md)
+- [Новый инспектор объектов](Docs/Object_Inspector.md): таблица, поиск, свойства и копирование YOLO; отдельное поле координат удалено.
 - [Пять вкладок сегментации](Docs/Segmentation_Unification_Status.md): единые BBox/OBB/Segment, объекты, состояния масок и фоновые задачи.
 - [Выполненный план](Docs/Segmentation_Unification_Plan.md): общие UI/утилиты, пресеты v3; автоподбор отложен.
 - [Новый просмотрщик демонстрации ансамблей](Docs/Ensemble_View_Migration.md)
@@ -49,5 +50,5 @@ NEURO_RUN_GUI_TESTS=1 python -m unittest discover -s tests -v
 ```
 
 Вторая команда включает GUI offscreen, автономные запуски и небольшие проверки
-классического ML без скачивания весов. Текущий результат — 68 тестов успешно. В PowerShell сначала задайте `$env:NEURO_RUN_GUI_TESTS="1"`.
+классического ML без скачивания весов. Текущий результат — 73 теста успешно. В PowerShell сначала задайте `$env:NEURO_RUN_GUI_TESTS="1"`.
 Отдельная вкладка: `python -m tabs.threshold_methods` из корня проекта.
