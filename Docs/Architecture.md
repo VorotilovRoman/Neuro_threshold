@@ -50,12 +50,12 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 
 | ID → файл в tabs | UI в ui_tabs | Утилиты и выполнение |
 | --- | --- | --- |
-| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`; общий controller/presentation, канонические annotations, MorphologyWidget; AutoResearch заморожен |
+| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`; общий controller/presentation, канонические annotations, MorphologyWidget; новый threshold_search + Qt SearchController |
 | `gradient` → `gradient_methods.py` | `gradient_methods_ui.py` | `utils_ops.gradient_ops`; новые общие postprocessing, cache и Qt-сервисы; GradientAutoResearch без изменений |
 | `interactive` → `interactive_methods.py` | `interactive_methods_ui.py` | `utils_ops.interactive_ops` через numerical operations/worker; SegmentationInputView для ROI/FG/BG; общие маски/объекты |
 | `traditional_ml` → `traditional_ml_methods.py` | `traditional_ml_methods_ui.py` | `utils_ops.traditional_ml_ops` через operations/worker: признаки, train/predict/scaler; joblib; eager I/O и общая presentation |
 | `deep_learning` → `deep_learning_methods.py` | `deep_learning_methods_ui.py` | `utils_ops.deep_learning_ops` через operations/worker: load/predict; параметры из ui.DL_predict_settings; общая presentation |
-| `reports` → `model_research.py` | `model_research_ui.py` | `utils.prepare`, `utils.analysis`, `utils.metrics_core`: фильтры, метрики, регрессия, ранжирование пресетов |
+| `reports` → `model_research.py` | `model_research_ui.py` | `utils_new.autoreseach_utils`: prepare, analysis, metrics_core, reports: фильтры, метрики, регрессия, ранжирование пресетов |
 | `labeler` → `layout_dataset.py` | `layout_dataset_ui.py` | Прямые импорты `dataset_files_new`, `dataset_yolo_labels_new`, YAML/UNet/COCO/catalog; `SmartGraphicsViewNew`, обработка аннотаций |
 | `test` → `viewing_dataset.py` | `viewing_dataset_ui.py` | Те же новые файловые службы; `DatasetReviewGraphicsView`, маски, редактирование и постобработка |
 | `dataset` → `preparing_dataset_yaml.py` | `preparing_dataset_yaml_ui.py` | Агрегатор даёт **новые** `DatasetLoaderMixin`, `PairValidator`, `DatasetGeneratorThread`; bridge приводит пары и классы масок |
@@ -93,9 +93,9 @@ flowchart LR
 
 ## Существующая старая ветка
 
-В `utils` осталось семь модулей с рабочими потребителями: image_io,
-analysis, prepare, metrics_core, ensemble_utils, dataset_analysis_logic
-и dataset_audit_logic. Старый набор генератора/валидации/I/O и алиасы
+В `utils` осталось четыре модуля с рабочими потребителями: image_io,
+ensemble_utils, dataset_analysis_logic и dataset_audit_logic. Анализ/подготовка
+отчётов и метрики перенесены в utils_new/autoreseach_utils. Старый набор генератора/валидации/I/O и алиасы
 settings/presets удалены после проверки графа и строковых экспортов.
 [Подробный аудит удаления](Utils_Removal_Audit.md).
 
@@ -104,8 +104,8 @@ settings/presets удалены после проверки графа и стр
 Демонстрация ансамблей использует четыре DatasetReviewGraphicsView с векторными
 рамками; `utils.smart_view` удалён после перевода единственного потребителя и
 проверки отсутствия строковых экспортов. [Результат и проверки](Ensemble_View_Migration.md).
-`utils_auto_research`
-сохраняет уникальные алгоритмы до последнего этапа; запуск в UI временно отключён.
+`utils_auto_research` сохраняет только градиентный поиск и его окно настроек;
+он остаётся отключённым. Пороговый поиск перенесён в новые папки autoreseach_utils/autoreseach_ui.
 
 ## Зависимости вне import-графа
 
@@ -203,7 +203,9 @@ Preset schema_version=3 проверяет `utils_new.segmentation.presets`; р�
 Настройки schema_version=1 хранит `utils_new.settings_store`, QObject/сигналы —
 `ui.settings_service`. Атомарный JSON I/O — `utils_new.json_store`.
 Старые схемы не конвертируются. Ансамбли и отчёты используют новый формат.
-Автоподбор — последний отдельный этап, его код и настройки заморожены.
+Пороговый автоподбор использует search_space/threshold_search из utils_new/autoreseach_utils;
+окна, кнопки и Qt-контроллер — ui/autoreseach_ui. Только градиентный поиск остаётся
+замороженным. [Новый поиск и отчёты](Threshold_Autoresearch_Status.md).
 
 [Результат, владельцы и проверки](Segmentation_Unification_Status.md) ·
 [Выполненный план](Segmentation_Unification_Plan.md) ·
