@@ -50,8 +50,8 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 
 | ID → файл в tabs | UI в ui_tabs | Утилиты и выполнение |
 | --- | --- | --- |
-| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`; общий controller/presentation, канонические annotations, MorphologyWidget; новый threshold_search + Qt SearchController |
-| `gradient` → `gradient_methods.py` | `gradient_methods_ui.py` | `utils_ops.gradient_ops`; новые общие postprocessing, cache и Qt-сервисы; GradientAutoResearch без изменений |
+| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`; общий controller/presentation, канонические annotations, MorphologyWidget; общий autoreseach_utils.search + Qt SearchController |
+| `gradient` → `gradient_methods.py` | `gradient_methods_ui.py` | `utils_ops.gradient_ops`; новые общие postprocessing, cache и Qt-сервисы; общий search/gradient_processing и Qt SearchController |
 | `interactive` → `interactive_methods.py` | `interactive_methods_ui.py` | `utils_ops.interactive_ops` через numerical operations/worker; SegmentationInputView для ROI/FG/BG; общие маски/объекты |
 | `traditional_ml` → `traditional_ml_methods.py` | `traditional_ml_methods_ui.py` | `utils_ops.traditional_ml_ops` через operations/worker: признаки, train/predict/scaler; joblib; eager I/O и общая presentation |
 | `deep_learning` → `deep_learning_methods.py` | `deep_learning_methods_ui.py` | `utils_ops.deep_learning_ops` через operations/worker: load/predict; параметры из ui.DL_predict_settings; общая presentation |
@@ -104,8 +104,8 @@ settings/presets удалены после проверки графа и стр
 Демонстрация ансамблей использует четыре DatasetReviewGraphicsView с векторными
 рамками; `utils.smart_view` удалён после перевода единственного потребителя и
 проверки отсутствия строковых экспортов. [Результат и проверки](Ensemble_View_Migration.md).
-`utils_auto_research` сохраняет только градиентный поиск и его окно настроек;
-он остаётся отключённым. Пороговый поиск перенесён в новые папки autoreseach_utils/autoreseach_ui.
+`utils_auto_research` удалён: оба поиска используют общее ядро в
+utils_new/autoreseach_utils и UI в ui/autoreseach_ui.
 
 ## Зависимости вне import-графа
 
@@ -203,9 +203,9 @@ Preset schema_version=3 проверяет `utils_new.segmentation.presets`; р�
 Настройки schema_version=1 хранит `utils_new.settings_store`, QObject/сигналы —
 `ui.settings_service`. Атомарный JSON I/O — `utils_new.json_store`.
 Старые схемы не конвертируются. Ансамбли и отчёты используют новый формат.
-Пороговый автоподбор использует search_space/threshold_search из utils_new/autoreseach_utils;
-окна, кнопки и Qt-контроллер — ui/autoreseach_ui. Только градиентный поиск остаётся
-замороженным. [Новый поиск и отчёты](Threshold_Autoresearch_Status.md).
+Оба автоподбора используют search_space/search из utils_new/autoreseach_utils;
+окна, кнопки и Qt-контроллер — ui/autoreseach_ui. Анализ принимает отчёты обоих
+видов и сохраняет пресеты по kind. [Общий поиск и отчёты](Unified_Autoresearch_Status.md).
 
 [Результат, владельцы и проверки](Segmentation_Unification_Status.md) ·
 [Выполненный план](Segmentation_Unification_Plan.md) ·

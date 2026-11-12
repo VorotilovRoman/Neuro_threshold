@@ -46,6 +46,7 @@
 - [tests.test_annotation_objects](#tests-test-annotation-objects)
 - [tests.test_dependency_installation](#tests-test-dependency-installation)
 - [tests.test_ensemble_view](#tests-test-ensemble-view)
+- [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch)
 - [tests.test_import_architecture](#tests-test-import-architecture)
 - [tests.test_label_save_merge](#tests-test-label-save-merge)
 - [tests.test_pixel_morphology](#tests-test-pixel-morphology)
@@ -115,8 +116,6 @@
 - [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet)
 - [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad)
 - [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils)
-- [utils_auto_research.gradient_auto_research](#utils-auto-research-gradient-auto-research)
-- [utils_auto_research.gradient_auto_settings_dialog](#utils-auto-research-gradient-auto-settings-dialog)
 - [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new)
 - [utils_new.annotation_processing](#utils-new-annotation-processing)
 - [utils_new.annotations.__init__](#utils-new-annotations---init--)
@@ -131,11 +130,12 @@
 - [utils_new.annotations.transforms](#utils-new-annotations-transforms)
 - [utils_new.autoreseach_utils.__init__](#utils-new-autoreseach-utils---init--)
 - [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis)
+- [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing)
 - [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core)
 - [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare)
 - [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports)
+- [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search)
 - [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space)
-- [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search)
 - [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new)
 - [utils_new.dataset_coco_new](#utils-new-dataset-coco-new)
 - [utils_new.dataset_files_new](#utils-new-dataset-files-new)
@@ -183,14 +183,14 @@
 | Import | Файлы-потребители (включая условные импорты) |
 | --- | --- |
 | `PIL` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.test_new_image](#cluster-test-new-image), [generate](#generate), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.image_io](#utils-image-io), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий), [utils_training.yolo2voc](#utils-training-yolo2voc) |
-| `PyQt5` | [generate](#generate), [main](#main), [main_ui](#main-ui), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [ui.DL_predict_settings](#ui-DL-predict-settings), [ui.DL_train_settings_base](#ui-DL-train-settings-base), [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model), [ui.annotation_objects](#ui-annotation-objects), [ui.annotation_review_view](#ui-annotation-review-view), [ui.application](#ui-application), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [ui.control_buttons](#ui-control-buttons), [ui.image_conversion](#ui-image-conversion), [ui.image_navigation](#ui-image-navigation), [ui.image_view](#ui-image-view), [ui.interactive_params_ui](#ui-interactive-params-ui), [ui.log_widget](#ui-log-widget), [ui.morphology_ui](#ui-morphology-ui), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.actions](#ui-segmentation-actions), [ui.segmentation.computation](#ui-segmentation-computation), [ui.segmentation.controller](#ui-segmentation-controller), [ui.segmentation.errors](#ui-segmentation-errors), [ui.segmentation.export](#ui-segmentation-export), [ui.segmentation.image_input](#ui-segmentation-image-input), [ui.segmentation.interactive_view](#ui-segmentation-interactive-view), [ui.segmentation.jobs](#ui-segmentation-jobs), [ui.segmentation.panels](#ui-segmentation-panels), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [ui.segmentation.results](#ui-segmentation-results), [ui.settings_service](#ui-settings-service), [ui.settings_ui](#ui-settings-ui), [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui), [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui), [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.slice_dataset_sahi_ui](#ui-tabs-slice-dataset-sahi-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.image_io](#utils-image-io), [utils_auto_research.gradient_auto_research](#utils-auto-research-gradient-auto-research), [utils_auto_research.gradient_auto_settings_dialog](#utils-auto-research-gradient-auto-settings-dialog), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops) |
-| `cv2` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
+| `PyQt5` | [generate](#generate), [main](#main), [main_ui](#main-ui), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [ui.DL_predict_settings](#ui-DL-predict-settings), [ui.DL_train_settings_base](#ui-DL-train-settings-base), [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model), [ui.annotation_objects](#ui-annotation-objects), [ui.annotation_review_view](#ui-annotation-review-view), [ui.application](#ui-application), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [ui.control_buttons](#ui-control-buttons), [ui.image_conversion](#ui-image-conversion), [ui.image_navigation](#ui-image-navigation), [ui.image_view](#ui-image-view), [ui.interactive_params_ui](#ui-interactive-params-ui), [ui.log_widget](#ui-log-widget), [ui.morphology_ui](#ui-morphology-ui), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.actions](#ui-segmentation-actions), [ui.segmentation.computation](#ui-segmentation-computation), [ui.segmentation.controller](#ui-segmentation-controller), [ui.segmentation.errors](#ui-segmentation-errors), [ui.segmentation.export](#ui-segmentation-export), [ui.segmentation.image_input](#ui-segmentation-image-input), [ui.segmentation.interactive_view](#ui-segmentation-interactive-view), [ui.segmentation.jobs](#ui-segmentation-jobs), [ui.segmentation.panels](#ui-segmentation-panels), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [ui.segmentation.results](#ui-segmentation-results), [ui.settings_service](#ui-settings-service), [ui.settings_ui](#ui-settings-ui), [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui), [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui), [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.slice_dataset_sahi_ui](#ui-tabs-slice-dataset-sahi-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.image_io](#utils-image-io), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops) |
+| `cv2` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `hdbscan` | [cluster.cluster_embeddings](#cluster-cluster-embeddings), [utils.dataset_audit_logic](#utils-dataset-audit-logic) |
 | `imagehash` | [utils.dataset_audit_logic](#utils-dataset-audit-logic) |
 | `joblib` | [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.test_new_image](#cluster-test-new-image), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `matplotlib` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [ui.segmentation.histogram](#ui-segmentation-histogram), [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `networkx` | [utils_ops.interactive_ops](#utils-ops-interactive-ops) |
-| `numpy` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_ensemble_view](#tests-test-ensemble-view), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.annotation_objects](#ui-annotation-objects), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.computation](#ui-segmentation-computation), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.augmentation](#utils-new-annotations-augmentation), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.model](#utils-new-annotations-model), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
+| `numpy` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_ensemble_view](#tests-test-ensemble-view), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.annotation_objects](#ui-annotation-objects), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.computation](#ui-segmentation-computation), [utils.dataset_analysis_logic](#utils-dataset-analysis-logic), [utils.dataset_audit_logic](#utils-dataset-audit-logic), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.augmentation](#utils-new-annotations-augmentation), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.model](#utils-new-annotations-model), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing), [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `onnx` | [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker) |
 | `onnxruntime` | [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker) |
 | `open_clip` | [utils.dataset_audit_logic](#utils-dataset-audit-logic) |
@@ -459,8 +459,8 @@
 
 **Объявления:**
 
-- [`__getattr__(name)`](../import_libs_internal.py#L268)
-- [`__dir__()`](../import_libs_internal.py#L282)
+- [`__getattr__(name)`](../import_libs_internal.py#L266)
+- [`__dir__()`](../import_libs_internal.py#L280)
 
 <a id="import-libs-methods-ui"></a>
 
@@ -755,7 +755,8 @@
 - [path_setup](#path-setup): `get_project_root`
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
-- [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls): `GRADIENT_UNAVAILABLE`
+- [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls): `SearchController`
+- [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog): `AutoSettingsDialog`
 - [ui.segmentation.actions](#ui-segmentation-actions): `actions as segmentation_actions`
 - [ui.segmentation.controller](#ui-segmentation-controller): `controller as segmentation_controller`
 - [ui.segmentation.export](#ui-segmentation-export): `export as segmentation_export`
@@ -766,15 +767,17 @@
 - [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings): `GradientPresetManager`
 - [ui.segmentation.results](#ui-segmentation-results): `results as segmentation_results`
 - [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui): `setup_gradient_ui`
-- [utils_auto_research.gradient_auto_settings_dialog](#utils-auto-research-gradient-auto-settings-dialog): `GradientAutoSettingsDialog`
+- [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing): `finalize_gradient_mask`
+- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`, `default_settings`, `search_kind`
+- [utils_new.json_store](#utils-new-json-store): `read_json_object`, `write_json_atomic`
 - [utils_new.segmentation.postprocessing](#utils-new-segmentation-postprocessing): `extract_objects`
 - [utils_ops.gradient_ops](#utils-ops-gradient-ops): `apply_gradient_method`
 
-**Внешние/stdlib импорты:** `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMessageBox`, `cv2`, `json`, `numpy`, `os`, `pathlib.Path`, `sys`.
+**Внешние/stdlib импорты:** `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QMainWindow`, `cv2`, `os`, `pathlib.Path`, `sys`.
 
 **Объявления:**
 
-- Класс [`GradientMethodsWindow`](../tabs/gradient_methods.py#L42) (`QMainWindow`)
+- Класс [`GradientMethodsWindow`](../tabs/gradient_methods.py#L43) (`QMainWindow`)
 
 <a id="tabs-interactive-methods"></a>
 
@@ -852,7 +855,7 @@
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
 - [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui): `setup_model_research_ui`
-- [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings): `ThresholdPresetManager`
+- [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings): `GradientPresetManager`, `ThresholdPresetManager`
 - [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis): `analyze`, `global_top_diverse`
 - [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core): `DEFAULT_IOU_THRESHOLDS`
 - [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare): `add_cluster_labels`, `add_meanap_metrics`, `aggregate_by_params`, `cluster_open_close`, `filter_anomaly_count`, `filter_duplicates`, `filter_full_image_object`, `filter_invalid_params`, `filter_no_true_objects`, `filter_oversegmentation`, `filter_zero_true`, `optimize_invert`, `sample_rows`, `save_unique_params`
@@ -942,7 +945,7 @@
 - [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings): `ThresholdPresetManager`
 - [ui.segmentation.results](#ui-segmentation-results): `results as segmentation_results`
 - [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui): `setup_threshold_ui`
-- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`, `default_settings`
+- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`, `default_settings`, `search_kind`
 - [utils_new.json_store](#utils-new-json-store): `read_json_object`, `write_json_atomic`
 - [utils_new.segmentation.postprocessing](#utils-new-segmentation-postprocessing): `extract_objects`
 - [utils_new.threshold_processing](#utils-new-threshold-processing): `apply_threshold_method`
@@ -1121,6 +1124,31 @@
 - Класс [`EnsembleWorkerDisplayTests`](../tests/test_ensemble_view.py#L17) (`unittest.TestCase`)
 - Класс [`EnsembleViewGuiTests`](../tests/test_ensemble_view.py#L59) (`unittest.TestCase`)
 
+<a id="tests-test-gradient-autoresearch"></a>
+
+## tests.test_gradient_autoresearch
+
+Исходник: [tests/test_gradient_autoresearch.py](../tests/test_gradient_autoresearch.py#L1).
+
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+
+**Прямые локальные импорты:**
+- [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis): `analyze`, `global_top_diverse`
+- [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing): `gradient_processing`
+- [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare): `add_cluster_labels`, `add_meanap_metrics`, `cluster_open_close`, `filter_invalid_params`
+- [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports): `parse_reports`, `preset_from_row`, `read_report`
+- [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search): `RawMaskCache`, `evaluate`, `run_search`, `search`
+- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`, `default_settings`, `iter_presets`, `method_params`
+- [utils_new.morphology](#utils-new-morphology): `apply_morphology`
+- [utils_ops.gradient_ops](#utils-ops-gradient-ops): `apply_gradient_method`
+
+**Внешние/stdlib импорты:** `cv2`, `json`, `numpy`, `os`, `pathlib.Path`, `subprocess`, `sys`, `tempfile`, `threading.Event`, `unittest`, `unittest.mock.patch`.
+
+**Объявления:**
+
+- Класс [`GradientSearchTests`](../tests/test_gradient_autoresearch.py#L31) (`unittest.TestCase`)
+- Класс [`UnifiedSearchGuiTests`](../tests/test_gradient_autoresearch.py#L208) (`unittest.TestCase`)
+
 <a id="tests-test-import-architecture"></a>
 
 ## tests.test_import_architecture
@@ -1237,12 +1265,12 @@
 - [utils_new.segmentation.postprocessing](#utils-new-segmentation-postprocessing): `postprocessing`
 - [utils_ops.segmentation_ops](#utils-ops-segmentation-ops): `segment_contours`, `segment_min_area_rect`, `segment_projections`
 
-**Внешние/stdlib импорты:** `ast`, `cv2`, `hashlib`, `json`, `numpy`, `os`, `pathlib.Path`, `subprocess`, `sys`, `tempfile`, `unittest`, `unittest.mock.patch`.
+**Внешние/stdlib импорты:** `cv2`, `numpy`, `os`, `pathlib.Path`, `subprocess`, `sys`, `tempfile`, `unittest`, `unittest.mock.patch`.
 
 **Объявления:**
 
-- Класс [`SegmentationCommonTests`](../tests/test_segmentation_shared.py#L24) (`unittest.TestCase`)
-- Класс [`SegmentationSharedGuiTests`](../tests/test_segmentation_shared.py#L153) (`unittest.TestCase`)
+- Класс [`SegmentationCommonTests`](../tests/test_segmentation_shared.py#L21) (`unittest.TestCase`)
+- Класс [`SegmentationSharedGuiTests`](../tests/test_segmentation_shared.py#L147) (`unittest.TestCase`)
 
 <a id="tests-test-segmentation-tasks"></a>
 
@@ -1297,8 +1325,8 @@
 - [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis): `analyze`, `global_top_diverse`
 - [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare): `add_meanap_metrics`, `cluster_open_close`, `filter_invalid_params`
 - [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports): `parse_reports`, `preset_from_row`, `read_report`
+- [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search): `evaluate`, `run_search`
 - [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`, `default_settings`, `iter_presets`
-- [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search): `evaluate`, `run_search`
 - [utils_new.morphology](#utils-new-morphology): `apply_morphology`
 - [utils_new.segmentation.postprocessing](#utils-new-segmentation-postprocessing): `extract_objects`
 - [utils_new.threshold_processing](#utils-new-threshold-processing): `apply_threshold_method`
@@ -1308,7 +1336,7 @@
 **Объявления:**
 
 - Класс [`SearchTests`](../tests/test_threshold_autoresearch.py#L29) (`unittest.TestCase`)
-- Класс [`SearchGuiTests`](../tests/test_threshold_autoresearch.py#L171) (`unittest.TestCase`)
+- Класс [`SearchGuiTests`](../tests/test_threshold_autoresearch.py#L172) (`unittest.TestCase`)
 
 <a id="tests-test-torch-runtime"></a>
 
@@ -1472,15 +1500,15 @@
 **Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui).
 
 **Прямые локальные импорты:**
+- [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search): `run_search`
 - [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`
-- [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search): `run_search`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QObject`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `concurrent.futures.ThreadPoolExecutor`, `copy.deepcopy`, `threading.Event`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QObject`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `concurrent.futures.ThreadPoolExecutor`, `copy.deepcopy`, `threading.Event`, `time.monotonic`.
 
 **Объявления:**
 
-- Класс [`AutoResearchPanel`](../ui/autoreseach_ui/controls.py#L24) (`QWidget`)
-- Класс [`SearchController`](../ui/autoreseach_ui/controls.py#L50) (`QObject`)
+- Класс [`AutoResearchPanel`](../ui/autoreseach_ui/controls.py#L21) (`QWidget`)
+- Класс [`SearchController`](../ui/autoreseach_ui/controls.py#L36) (`QObject`)
 
 <a id="ui-autoreseach-ui-model-research-ui"></a>
 
@@ -1500,7 +1528,7 @@
 **Объявления:**
 
 - Класс [`ModelResearchWidget`](../ui/autoreseach_ui/model_research_ui.py#L27) (`QWidget`)
-- [`setup_model_research_ui(parent)`](../ui/autoreseach_ui/model_research_ui.py#L114) — Настройка UI для ModelResearchApp.
+- [`setup_model_research_ui(parent)`](../ui/autoreseach_ui/model_research_ui.py#L116) — Настройка UI для ModelResearchApp.
   Явно импортируют: [tabs.model_research](#tabs-model-research).
 
 <a id="ui-autoreseach-ui-settings-dialog"></a>
@@ -1509,18 +1537,18 @@
 
 Исходник: [ui/autoreseach_ui/settings_dialog.py](../ui/autoreseach_ui/settings_dialog.py#L1).
 
-**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods).
+**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods).
 
 **Прямые локальные импорты:**
 - [ui.morphology_ui](#ui-morphology-ui): `MorphologyWidget`
-- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `SPECS`, `combination_count`, `default_settings`
+- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `POST_SPECS`, `combination_count`, `default_settings`, `search_kind`, `specs_for`
 - [utils_new.morphology](#utils-new-morphology): `SUPPORTED_OPERATIONS`
 
 **Внешние/stdlib импорты:** `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QDialogButtonBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QTabWidget`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `copy.deepcopy`.
 
 **Объявления:**
 
-- Класс [`AutoSettingsDialog`](../ui/autoreseach_ui/settings_dialog.py#L28) (`QDialog`)
+- Класс [`AutoSettingsDialog`](../ui/autoreseach_ui/settings_dialog.py#L30) (`QDialog`)
 
 <a id="ui-control-buttons"></a>
 
@@ -1982,9 +2010,9 @@
 - Класс [`MethodPresetManager`](../ui/segmentation/preset_bindings.py#L144) (`PresetManager`)
 - Класс [`ThresholdPresetManager`](../ui/segmentation/preset_bindings.py#L223) (`MethodPresetManager`)
 - Класс [`GradientPresetManager`](../ui/segmentation/preset_bindings.py#L276) (`MethodPresetManager`)
-- Класс [`InteractivePresetManager`](../ui/segmentation/preset_bindings.py#L303) (`MethodPresetManager`)
-- Класс [`TraditionalMLPresetManager`](../ui/segmentation/preset_bindings.py#L334) (`MethodPresetManager`)
-- Класс [`DeepLearningPresetManager`](../ui/segmentation/preset_bindings.py#L363) (`MethodPresetManager`)
+- Класс [`InteractivePresetManager`](../ui/segmentation/preset_bindings.py#L305) (`MethodPresetManager`)
+- Класс [`TraditionalMLPresetManager`](../ui/segmentation/preset_bindings.py#L336) (`MethodPresetManager`)
+- Класс [`DeepLearningPresetManager`](../ui/segmentation/preset_bindings.py#L365) (`MethodPresetManager`)
 
 <a id="ui-segmentation-results"></a>
 
@@ -2166,7 +2194,7 @@
 **Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods).
 
 **Прямые локальные импорты:**
-- [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls): `AutoResearchPanel`, `GRADIENT_UNAVAILABLE`
+- [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls): `AutoResearchPanel`
 - [ui.morphology_ui](#ui-morphology-ui): `MorphologyWidget`
 - [ui.segmentation.panels](#ui-segmentation-panels): `ResultPanel`, `begin_layout`, `finish_layout`
 
@@ -2872,64 +2900,6 @@
 - [`preprocess_image_for_ae(img_bgr, cfg)`](../utils_aeb/yolo_aeb_utils.py#L712) — Приводит произвольный BGR-снимок к тензору [C, H, W] float32 [0..1],
   Явно импортируют: [tabs.yolo_test_aeb](#tabs-yolo-test-aeb).
 
-<a id="utils-auto-research-gradient-auto-research"></a>
-
-## utils_auto_research.gradient_auto_research
-
-Исходник: [utils_auto_research/gradient_auto_research.py](../utils_auto_research/gradient_auto_research.py#L1).
-
-**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
-
-**Прямые локальные импорты:**
-- нет
-
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QProgressDialog`, `os`.
-
-**Объявления:**
-
-- Класс [`GradientAutoResearch`](../utils_auto_research/gradient_auto_research.py#L7)
-  - [`GradientAutoResearch.__init__(self, parent_window, search_all=False)`](../utils_auto_research/gradient_auto_research.py#L8)
-  - [`GradientAutoResearch.run(self)`](../utils_auto_research/gradient_auto_research.py#L12)
-  - [`GradientAutoResearch._merge_with_defaults(self, settings)`](../utils_auto_research/gradient_auto_research.py#L122)
-  - [`GradientAutoResearch._save_current_ui_state(self)`](../utils_auto_research/gradient_auto_research.py#L138)
-  - [`GradientAutoResearch._restore_ui_state(self, state)`](../utils_auto_research/gradient_auto_research.py#L153)
-  - [`GradientAutoResearch._default_settings(self)`](../utils_auto_research/gradient_auto_research.py#L167)
-  - [`GradientAutoResearch._generate_combinations(self, settings)`](../utils_auto_research/gradient_auto_research.py#L200)
-  - [`GradientAutoResearch._generate_method_params(self, method, method_settings)`](../utils_auto_research/gradient_auto_research.py#L295)
-  - [`GradientAutoResearch._range_values(self, start, end, step)`](../utils_auto_research/gradient_auto_research.py#L317)
-  - [`GradientAutoResearch._params_desc(self, params)`](../utils_auto_research/gradient_auto_research.py#L332)
-  - [`GradientAutoResearch._apply_method_params(self, method, params)`](../utils_auto_research/gradient_auto_research.py#L340)
-
-<a id="utils-auto-research-gradient-auto-settings-dialog"></a>
-
-## utils_auto_research.gradient_auto_settings_dialog
-
-Исходник: [utils_auto_research/gradient_auto_settings_dialog.py](../utils_auto_research/gradient_auto_settings_dialog.py#L1).
-
-**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods).
-
-**Прямые локальные импорты:**
-- нет
-
-**Внешние/stdlib импорты:** `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QDialogButtonBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QTabWidget`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `traceback`.
-
-**Объявления:**
-
-- Класс [`GradientAutoSettingsDialog`](../utils_auto_research/gradient_auto_settings_dialog.py#L20) (`QDialog`)
-  - [`GradientAutoSettingsDialog.__init__(self, parent=None, current_settings=None)`](../utils_auto_research/gradient_auto_settings_dialog.py#L21)
-  - [`GradientAutoSettingsDialog.log(self, message)`](../utils_auto_research/gradient_auto_settings_dialog.py#L73)
-  - [`GradientAutoSettingsDialog._safe_name(self, name)`](../utils_auto_research/gradient_auto_settings_dialog.py#L82)
-  - [`GradientAutoSettingsDialog._default_settings(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L85)
-  - [`GradientAutoSettingsDialog._setup_tabs(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L130)
-  - [`GradientAutoSettingsDialog._add_method_tab(self, method_name)`](../utils_auto_research/gradient_auto_settings_dialog.py#L149)
-  - [`GradientAutoSettingsDialog._create_param_widget(self, value, is_step=False)`](../utils_auto_research/gradient_auto_settings_dialog.py#L192)
-  - [`GradientAutoSettingsDialog._add_binarization_tab(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L212)
-  - [`GradientAutoSettingsDialog._add_object_filtering_tab(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L236)
-  - [`GradientAutoSettingsDialog._add_morphology_tab(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L285)
-  - [`GradientAutoSettingsDialog._add_invert_tab(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L365)
-  - [`GradientAutoSettingsDialog._load_settings(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L383)
-  - [`GradientAutoSettingsDialog.get_settings(self)`](../utils_auto_research/gradient_auto_settings_dialog.py#L452)
-
 <a id="utils-new-DatasetGenerator-new"></a>
 
 ## utils_new.DatasetGenerator_new
@@ -3070,7 +3040,7 @@
 
 Исходник: [utils_new/annotations/__init__.py](../utils_new/annotations/__init__.py#L1).
 
-**Прямые потребители:** [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new).
+**Прямые потребители:** [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.adapters](#utils-new-annotations-adapters): `from_detection_dict`, `from_legacy`, `from_legacy_many`, `from_ultralytics_result`, `legacy_convert_annotations`, `to_detection_dict`, `to_legacy`, `to_legacy_many`
@@ -3149,7 +3119,7 @@
 
 Исходник: [utils_new/annotations/geometry.py](../utils_new/annotations/geometry.py#L1).
 
-**Прямые потребители:** [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new).
+**Прямые потребители:** [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.model](#utils-new-annotations-model): `Annotation`, `ImageSize`
@@ -3163,7 +3133,7 @@
 - [`polygon_area(points)`](../utils_new/annotations/geometry.py#L28)
   Явно импортируют: [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.object_info](#utils-new-annotations-object-info).
 - [`bounds(points)`](../utils_new/annotations/geometry.py#L36)
-  Явно импортируют: [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+  Явно импортируют: [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 - [`rectangle_points(x0, y0, x1, y1)`](../utils_new/annotations/geometry.py#L41)
   Явно импортируют: [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.transforms](#utils-new-annotations-transforms).
 - [`canonical_obb_points(points)`](../utils_new/annotations/geometry.py#L45) — Best-fitting minimum-area rectangle in *pixel* coordinates.
@@ -3377,7 +3347,7 @@
 
 Исходник: [utils_new/autoreseach_utils/analysis.py](../utils_new/autoreseach_utils/analysis.py#L1).
 
-**Прямые потребители:** [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+**Прямые потребители:** [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
 
 **Прямые локальные импорты:**
 - [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare): `add_meanap_metrics`
@@ -3388,11 +3358,31 @@
 **Объявления:**
 
 - [`distance_between_presets(p1, p2)`](../utils_new/autoreseach_utils/analysis.py#L11) — Расстояние между двумя пресетами (Series). Учитывает метод, cluster, cluster_co.
-- [`diverse_top_k(df, k=5, score_col='pred_f1', candidate_pool_size=None)`](../utils_new/autoreseach_utils/analysis.py#L20) — Жадный выбор топ-K разнообразных пресетов.
-- [`analyze(df, output_dir=None, skip_metrics=False, iou_thresholds=None, use_diversity=True, use_iou_penalty=False, penalty_alpha=0.5, per_method=True, cluster_col='cluster', cluster_co_col='cluster_co')`](../utils_new/autoreseach_utils/analysis.py#L48) — Rank exact presets. Never pair a group's best score with another preset.
-  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
-- [`global_top_diverse(df, k=10, score_col='actual_f1', method_col='method', params_col='params', invert_col='invert', close_col='close_px', open_col='open_px')`](../utils_new/autoreseach_utils/analysis.py#L133) — Жадный выбор топ-k разнообразных пресетов из глобального датасета.
-  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+- [`diverse_top_k(df, k=5, score_col='pred_f1', candidate_pool_size=None)`](../utils_new/autoreseach_utils/analysis.py#L25) — Жадный выбор топ-K разнообразных пресетов.
+- [`analyze(df, output_dir=None, skip_metrics=False, iou_thresholds=None, use_diversity=True, use_iou_penalty=False, penalty_alpha=0.5, per_method=True, cluster_col='cluster', cluster_co_col='cluster_co')`](../utils_new/autoreseach_utils/analysis.py#L53) — Rank exact presets. Never pair a group's best score with another preset.
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+- [`global_top_diverse(df, k=10, score_col='actual_f1', method_col='method', params_col='params', invert_col='invert', close_col='close_px', open_col='open_px')`](../utils_new/autoreseach_utils/analysis.py#L143) — Жадный выбор топ-k разнообразных пресетов из глобального датасета.
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+
+<a id="utils-new-autoreseach-utils-gradient-processing"></a>
+
+## utils_new.autoreseach_utils.gradient_processing
+
+Исходник: [utils_new/autoreseach_utils/gradient_processing.py](../utils_new/autoreseach_utils/gradient_processing.py#L1).
+
+**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+
+**Прямые локальные импорты:**
+- [utils_ops.gradient_ops](#utils-ops-gradient-ops): `apply_gradient_method`
+
+**Внешние/stdlib импорты:** `cv2`, `numpy`.
+
+**Объявления:**
+
+- [`gradient_binary(gray, method, params, threshold)`](../utils_new/autoreseach_utils/gradient_processing.py#L8)
+  Явно импортируют: [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+- [`finalize_gradient_mask(processed, min_area_percent, fill_contours)`](../utils_new/autoreseach_utils/gradient_processing.py#L14)
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 <a id="utils-new-autoreseach-utils-metrics-core"></a>
 
@@ -3433,12 +3423,12 @@
 
 Исходник: [utils_new/autoreseach_utils/prepare.py](../utils_new/autoreseach_utils/prepare.py#L1).
 
-**Прямые потребители:** [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core).
+**Прямые потребители:** [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core).
 
 **Прямые локальные импорты:**
 - [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core): `DEFAULT_IOU_THRESHOLDS`, `compute_metrics as compute_metrics_core`, `extract_numeric_params`, `iou`, `parse_objects`
 - [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports): `preset_from_row`
-- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `validate_params`
+- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `validate_search_preset`
 
 **Внешние/stdlib импорты:** `ast.literal_eval`, `matplotlib.pyplot`, `numpy`, `os`, `pandas`, `sklearn.cluster.KMeans`, `sklearn.decomposition.PCA`, `sklearn.preprocessing.StandardScaler`.
 
@@ -3446,7 +3436,7 @@
 
 - [`compute_metrics_detailed(row, iou_thresholds)`](../utils_new/autoreseach_utils/prepare.py#L26) — row: dict-like с ключами 'objects' и 'true_objects'
 - [`add_meanap_metrics(df, iou_thresholds=None)`](../utils_new/autoreseach_utils/prepare.py#L130) — Добавляет в DataFrame колонки:
-  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core).
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.metrics_core](#utils-new-autoreseach-utils-metrics-core).
 - [`compute_f1(df: pd.DataFrame, iou_threshold: float=0.5)`](../utils_new/autoreseach_utils/prepare.py#L193) — Оставлена для обратной совместимости, использует старую метрику.
 - [`filter_by_f1_threshold(df: pd.DataFrame, threshold: float)`](../utils_new/autoreseach_utils/prepare.py#L229)
 - [`sample_rows(df: pd.DataFrame, n: int, random_state: int=42)`](../utils_new/autoreseach_utils/prepare.py#L243)
@@ -3454,7 +3444,7 @@
 - [`filter_full_image_object(df: pd.DataFrame)`](../utils_new/autoreseach_utils/prepare.py#L256) — Удаляет строки, где среди предсказанных объектов есть объект, покрывающий почти всё изображение.
   Явно импортируют: [tabs.model_research](#tabs-model-research).
 - [`filter_invalid_params(df: pd.DataFrame)`](../utils_new/autoreseach_utils/prepare.py#L289)
-  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
 - [`filter_anomaly_count(df: pd.DataFrame, max_objects: int=15)`](../utils_new/autoreseach_utils/prepare.py#L316)
   Явно импортируют: [tabs.model_research](#tabs-model-research).
 - [`filter_zero_true(df: pd.DataFrame)`](../utils_new/autoreseach_utils/prepare.py#L333)
@@ -3469,13 +3459,13 @@
   Явно импортируют: [tabs.model_research](#tabs-model-research).
 - [`save_cluster_report(df, method, cluster_ids, param_names, clusters_dir, method_name)`](../utils_new/autoreseach_utils/prepare.py#L453) — Сохраняет текстовый отчёт о кластерах для одного метода.
 - [`add_cluster_labels(df: pd.DataFrame, output_dir: str=None)`](../utils_new/autoreseach_utils/prepare.py#L493) — Для каждого метода выполняет кластеризацию параметров и добавляет колонку 'cluster'.
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch).
+- [`save_unique_params(df: pd.DataFrame, output_dir: str=None)`](../utils_new/autoreseach_utils/prepare.py#L611) — Для каждого метода сохраняет уникальные значения params в текстовый файл.
   Явно импортируют: [tabs.model_research](#tabs-model-research).
-- [`save_unique_params(df: pd.DataFrame, output_dir: str=None)`](../utils_new/autoreseach_utils/prepare.py#L609) — Для каждого метода сохраняет уникальные значения params в текстовый файл.
+- [`optimize_invert(df: pd.DataFrame)`](../utils_new/autoreseach_utils/prepare.py#L647) — Для каждого метода оставляет только строки с лучшим значением invert (True/False)
   Явно импортируют: [tabs.model_research](#tabs-model-research).
-- [`optimize_invert(df: pd.DataFrame)`](../utils_new/autoreseach_utils/prepare.py#L643) — Для каждого метода оставляет только строки с лучшим значением invert (True/False)
-  Явно импортируют: [tabs.model_research](#tabs-model-research).
-- [`cluster_open_close(df: pd.DataFrame, n_clusters: int=3)`](../utils_new/autoreseach_utils/prepare.py#L683) — Для каждого уникального сочетания (method, cluster) выполняет кластеризацию
-  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+- [`cluster_open_close(df: pd.DataFrame, n_clusters: int=3)`](../utils_new/autoreseach_utils/prepare.py#L689) — Для каждого уникального сочетания (method, cluster) выполняет кластеризацию
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
 
 <a id="utils-new-autoreseach-utils-reports"></a>
 
@@ -3483,63 +3473,38 @@
 
 Исходник: [utils_new/autoreseach_utils/reports.py](../utils_new/autoreseach_utils/reports.py#L1).
 
-**Прямые потребители:** [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare).
+**Прямые потребители:** [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.__init__](#utils-new-annotations---init--): `ImageSize`, `to_legacy`
-- [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search): `metric_boxes`
+- [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search): `metric_boxes`
+- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `method_params`, `validate_search_preset`
 - [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `read_yolo_labels`
-- [utils_new.segmentation.presets](#utils-new-segmentation-presets): `validate_preset`
 
 **Внешние/stdlib импорты:** `json`, `pandas`, `pathlib.Path`.
 
 **Объявления:**
 
 - [`preset_from_row(row)`](../utils_new/autoreseach_utils/reports.py#L10)
-  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare).
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [utils_new.autoreseach_utils.analysis](#utils-new-autoreseach-utils-analysis), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare).
 - [`read_report(path, *, allow_partial=False, log=lambda message: None)`](../utils_new/autoreseach_utils/reports.py#L17)
-  Явно импортируют: [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
-- [`parse_reports(paths, log=lambda message: None)`](../utils_new/autoreseach_utils/reports.py#L86)
-  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+  Явно импортируют: [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+- [`parse_reports(paths, log=lambda message: None)`](../utils_new/autoreseach_utils/reports.py#L99)
+  Явно импортируют: [tabs.model_research](#tabs-model-research), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
 
-<a id="utils-new-autoreseach-utils-search-space"></a>
+<a id="utils-new-autoreseach-utils-search"></a>
 
-## utils_new.autoreseach_utils.search_space
+## utils_new.autoreseach_utils.search
 
-Исходник: [utils_new/autoreseach_utils/search_space.py](../utils_new/autoreseach_utils/search_space.py#L1).
+Исходник: [utils_new/autoreseach_utils/search.py](../utils_new/autoreseach_utils/search.py#L1).
 
-**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
-
-**Прямые локальные импорты:**
-- [utils_new.segmentation.presets](#utils-new-segmentation-presets): `default_morphology`, `make_preset`, `validate_morphology`
-
-**Внешние/stdlib импорты:** `copy.deepcopy`, `decimal.Decimal`, `itertools.product`, `math.isfinite`, `math.prod`.
-
-**Объявления:**
-
-- [`default_settings()`](../utils_new/autoreseach_utils/search_space.py#L45)
-  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog).
-- [`range_values(values, spec)`](../utils_new/autoreseach_utils/search_space.py#L63)
-- [`dimensions(settings)`](../utils_new/autoreseach_utils/search_space.py#L87)
-- [`combination_count(settings)`](../utils_new/autoreseach_utils/search_space.py#L132)
-  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
-- [`iter_presets(settings)`](../utils_new/autoreseach_utils/search_space.py#L141)
-  Явно импортируют: [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
-- [`validate_params(method, params)`](../utils_new/autoreseach_utils/search_space.py#L162)
-  Явно импортируют: [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare).
-
-<a id="utils-new-autoreseach-utils-threshold-search"></a>
-
-## utils_new.autoreseach_utils.threshold_search
-
-Исходник: [utils_new/autoreseach_utils/threshold_search.py](../utils_new/autoreseach_utils/threshold_search.py#L1).
-
-**Прямые потребители:** [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports).
+**Прямые потребители:** [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.__init__](#utils-new-annotations---init--): `ImageSize`, `from_legacy`
 - [utils_new.annotations.geometry](#utils-new-annotations-geometry): `bounds`
-- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`, `iter_presets`
+- [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing): `finalize_gradient_mask`, `gradient_binary`
+- [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`, `iter_presets`, `method_params`, `search_kind`
 - [utils_new.morphology](#utils-new-morphology): `apply_morphology`
 - [utils_new.segmentation.image_session](#utils-new-segmentation-image-session): `load_one_image_item`
 - [utils_new.segmentation.postprocessing](#utils-new-segmentation-postprocessing): `extract_objects`
@@ -3549,12 +3514,51 @@
 
 **Объявления:**
 
-- [`evaluate(gray, image, preset)`](../utils_new/autoreseach_utils/threshold_search.py#L19)
-  Явно импортируют: [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
-- [`metric_boxes(annotations, size)`](../utils_new/autoreseach_utils/threshold_search.py#L32)
+- [`evaluate(gray, image, preset, *, raw_mask=None)`](../utils_new/autoreseach_utils/search.py#L20)
+  Явно импортируют: [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch).
+- Класс [`RawMaskCache`](../utils_new/autoreseach_utils/search.py#L44)
+  - [`RawMaskCache.__init__(self, gray)`](../utils_new/autoreseach_utils/search.py#L47)
+  - [`RawMaskCache.get(self, preset)`](../utils_new/autoreseach_utils/search.py#L52)
+- [`metric_boxes(annotations, size)`](../utils_new/autoreseach_utils/search.py#L71)
   Явно импортируют: [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports).
-- [`run_search(paths, settings, cancel, progress=lambda *args: None, *, resize_enabled=True, max_side=1024)`](../utils_new/autoreseach_utils/threshold_search.py#L49)
-  Явно импортируют: [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls).
+- [`run_search(paths, settings, cancel, progress=lambda *args: None, *, resize_enabled=True, max_side=1024)`](../utils_new/autoreseach_utils/search.py#L88)
+  Явно импортируют: [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls).
+
+<a id="utils-new-autoreseach-utils-search-space"></a>
+
+## utils_new.autoreseach_utils.search_space
+
+Исходник: [utils_new/autoreseach_utils/search_space.py](../utils_new/autoreseach_utils/search_space.py#L1).
+
+**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+
+**Прямые локальные импорты:**
+- [utils_new.segmentation.presets](#utils-new-segmentation-presets): `default_morphology`, `make_preset`, `validate_morphology`, `validate_preset`
+
+**Внешние/stdlib импорты:** `bisect.bisect_left`, `copy.deepcopy`, `decimal.Decimal`, `itertools.product`, `math.isfinite`, `math.prod`.
+
+**Объявления:**
+
+- [`search_kind(settings)`](../utils_new/autoreseach_utils/search_space.py#L70)
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+- [`specs_for(kind)`](../utils_new/autoreseach_utils/search_space.py#L77)
+  Явно импортируют: [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog).
+- [`default_settings(kind='threshold')`](../utils_new/autoreseach_utils/search_space.py#L83)
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog).
+- [`range_values(values, spec)`](../utils_new/autoreseach_utils/search_space.py#L108)
+- [`dimensions(settings)`](../utils_new/autoreseach_utils/search_space.py#L138)
+- [`gradient_axes(settings)`](../utils_new/autoreseach_utils/search_space.py#L186)
+- [`_parameter_count(method, keys, values)`](../utils_new/autoreseach_utils/search_space.py#L204)
+- [`combination_count(settings)`](../utils_new/autoreseach_utils/search_space.py#L213)
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+- [`gradient_preset(method, params, **extras)`](../utils_new/autoreseach_utils/search_space.py#L223)
+- [`method_params(preset)`](../utils_new/autoreseach_utils/search_space.py#L248)
+  Явно импортируют: [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+- [`iter_presets(settings)`](../utils_new/autoreseach_utils/search_space.py#L268)
+  Явно импортируют: [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+- [`validate_params(method, params, kind='threshold')`](../utils_new/autoreseach_utils/search_space.py#L305)
+- [`validate_search_preset(preset)`](../utils_new/autoreseach_utils/search_space.py#L315)
+  Явно импортируют: [utils_new.autoreseach_utils.prepare](#utils-new-autoreseach-utils-prepare), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports).
 
 <a id="utils-new-dataset-catalog-new"></a>
 
@@ -4093,7 +4097,7 @@
 
 Исходник: [utils_new/json_store.py](../utils_new/json_store.py#L1).
 
-**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods), [utils_new.presets_store](#utils-new-presets-store), [utils_new.settings_store](#utils-new-settings-store).
+**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [utils_new.presets_store](#utils-new-presets-store), [utils_new.settings_store](#utils-new-settings-store).
 
 **Прямые локальные импорты:**
 - нет
@@ -4103,9 +4107,9 @@
 **Объявления:**
 
 - [`read_json_object(path)`](../utils_new/json_store.py#L9)
-  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [utils_new.presets_store](#utils-new-presets-store), [utils_new.settings_store](#utils-new-settings-store).
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [utils_new.presets_store](#utils-new-presets-store), [utils_new.settings_store](#utils-new-settings-store).
 - [`write_json_atomic(path, value)`](../utils_new/json_store.py#L17)
-  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [utils_new.presets_store](#utils-new-presets-store), [utils_new.settings_store](#utils-new-settings-store).
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [utils_new.presets_store](#utils-new-presets-store), [utils_new.settings_store](#utils-new-settings-store).
 
 <a id="utils-new-morphology"></a>
 
@@ -4113,7 +4117,7 @@
 
 Исходник: [utils_new/morphology.py](../utils_new/morphology.py#L1).
 
-**Прямые потребители:** [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [ui.morphology_ui](#ui-morphology-ui), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search), [utils_new.segmentation.presets](#utils-new-segmentation-presets).
+**Прямые потребители:** [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [ui.morphology_ui](#ui-morphology-ui), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_new.segmentation.presets](#utils-new-segmentation-presets).
 
 **Прямые локальные импорты:**
 - нет
@@ -4130,7 +4134,7 @@
 - [`_region_mask(mask: np.ndarray, image_shape: tuple)`](../utils_new/morphology.py#L127)
 - [`make_contour_mask(mask: np.ndarray, width_px: int, shape: str='Rectangle')`](../utils_new/morphology.py#L141) — Внутренняя полоса шириной ``width_px`` вдоль границы объекта.
 - [`apply_morphology(image: np.ndarray, operations: Sequence[Union[MorphologyStep, Mapping]], *, shape: str='Rectangle', mask: Optional[np.ndarray]=None, contour_only: bool=False, contour_width_px: Optional[int]=None, contour_shape: Optional[str]=None)`](../utils_new/morphology.py#L162) — Применить операции в указанной последовательности к изображению или ROI.
-  Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+  Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 <a id="utils-new-presets-store"></a>
 
@@ -4176,7 +4180,7 @@
 
 Исходник: [utils_new/segmentation/image_session.py](../utils_new/segmentation/image_session.py#L1).
 
-**Прямые потребители:** [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui.segmentation.image_input](#ui-segmentation-image-input), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+**Прямые потребители:** [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui.segmentation.image_input](#ui-segmentation-image-input), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 **Прямые локальные импорты:**
 - [utils_new.dataset_files_new](#utils-new-dataset-files-new): `HARD_MAX_SIDE`, `LazyImageCache`, `read_image_with_fallback`
@@ -4191,7 +4195,7 @@
 - [`legacy_uint8(image)`](../utils_new/segmentation/image_session.py#L29)
 - [`resize_legacy(image, max_side)`](../utils_new/segmentation/image_session.py#L39)
 - [`load_one_image_item(image_path, resize_enabled=True, max_side=1024, safe_max_side=None, load_annotations_flag=True, format_hint='auto')`](../utils_new/segmentation/image_session.py#L48)
-  Явно импортируют: [ui.segmentation.image_input](#ui-segmentation-image-input), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+  Явно импортируют: [ui.segmentation.image_input](#ui-segmentation-image-input), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 - [`create_cache(source, **loader_options)`](../utils_new/segmentation/image_session.py#L79)
   Явно импортируют: [ui.segmentation.image_input](#ui-segmentation-image-input).
 
@@ -4229,7 +4233,7 @@
 
 Исходник: [utils_new/segmentation/postprocessing.py](../utils_new/segmentation/postprocessing.py#L1).
 
-**Прямые потребители:** [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+**Прямые потребители:** [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 **Прямые локальные импорты:**
 - [utils_new.annotation_processing](#utils-new-annotation-processing): `extract_annotations_from_mask`
@@ -4240,7 +4244,7 @@
 **Объявления:**
 
 - [`extract_objects(image, binary, mode, use_hull=False)`](../utils_new/segmentation/postprocessing.py#L6)
-  Явно импортируют: [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+  Явно импортируют: [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 <a id="utils-new-segmentation-presets"></a>
 
@@ -4248,7 +4252,7 @@
 
 Исходник: [utils_new/segmentation/presets.py](../utils_new/segmentation/presets.py#L1).
 
-**Прямые потребители:** [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports), [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space).
+**Прямые потребители:** [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.modes](#utils-new-annotations-modes): `validate_mode`
@@ -4263,7 +4267,7 @@
 - [`validate_morphology(state)`](../utils_new/segmentation/presets.py#L25)
   Явно импортируют: [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space).
 - [`validate_preset(state, kind=None)`](../utils_new/segmentation/presets.py#L60)
-  Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports).
+  Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [utils.ensemble_utils](#utils-ensemble-utils), [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space).
 - [`make_preset(kind, **parameters)`](../utils_new/segmentation/presets.py#L85)
   Явно импортируют: [tests.test_pixel_morphology](#tests-test-pixel-morphology), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space).
 
@@ -4318,7 +4322,7 @@
 
 Исходник: [utils_new/threshold_processing.py](../utils_new/threshold_processing.py#L1).
 
-**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 **Прямые локальные импорты:**
 - нет
@@ -4337,7 +4341,7 @@
 - [`row_adaptive_threshold(img, window_size=50, k=0.5)`](../utils_new/threshold_processing.py#L95)
 - [`normalize_method_name(method_name)`](../utils_new/threshold_processing.py#L110) — Приводит имя метода к каноническому виду для UI.
 - [`apply_threshold_method(gray_img, method_name, params)`](../utils_new/threshold_processing.py#L135) — Применяет метод бинаризации по имени и параметрам.
-  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search).
+  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 <a id="utils-ops-deep-learning-ops"></a>
 
@@ -4390,7 +4394,7 @@
 
 Исходник: [utils_ops/gradient_ops.py](../utils_ops/gradient_ops.py#L1).
 
-**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_processing_smoke](#tests-test-processing-smoke).
+**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing).
 
 **Прямые локальные импорты:**
 - нет
@@ -4400,7 +4404,7 @@
 **Объявления:**
 
 - [`apply_gradient_method(gray, method, params)`](../utils_ops/gradient_ops.py#L5)
-  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_processing_smoke](#tests-test-processing-smoke).
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing).
 
 <a id="utils-ops-interactive-ops"></a>
 
