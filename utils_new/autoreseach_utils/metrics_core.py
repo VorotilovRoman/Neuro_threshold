@@ -7,6 +7,7 @@ import pandas as pd
 # ========== Константы ==========
 DEFAULT_IOU_THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
+
 # ========== Преобразования координат ==========
 def yolo_to_xyxy(cx, cy, w, h):
     """
@@ -39,14 +40,14 @@ def iou(box1, box2):
     """
     x1, y1, w1, h1 = box1[1], box1[2], box1[3], box1[4]
     x2, y2, w2, h2 = box2[1], box2[2], box2[3], box2[4]
-    x1_min = x1 - w1/2
-    x1_max = x1 + w1/2
-    y1_min = y1 - h1/2
-    y1_max = y1 + h1/2
-    x2_min = x2 - w2/2
-    x2_max = x2 + w2/2
-    y2_min = y2 - h2/2
-    y2_max = y2 + h2/2
+    x1_min = x1 - w1 / 2
+    x1_max = x1 + w1 / 2
+    y1_min = y1 - h1 / 2
+    y1_max = y1 + h1 / 2
+    x2_min = x2 - w2 / 2
+    x2_max = x2 + w2 / 2
+    y2_min = y2 - h2 / 2
+    y2_max = y2 + h2 / 2
     inter_x_min = max(x1_min, x2_min)
     inter_x_max = min(x1_max, x2_max)
     inter_y_min = max(y1_min, y2_min)
@@ -86,7 +87,7 @@ def parse_objects(s):
     Преобразует строковое представление списка объектов в список кортежей.
     Если строка пустая или невалидная, возвращает пустой список.
     """
-    if pd.isna(s) or s == '' or s == '[]':
+    if pd.isna(s) or s == "" or s == "[]":
         return []
     try:
         return literal_eval(s)
@@ -101,7 +102,11 @@ def compute_precision_recall_f1(tp, fp, fn):
     """
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
     return precision, recall, f1
 
 
@@ -168,12 +173,23 @@ def compute_map(df, iou_thresholds=None):
     # Используем существующую функцию add_meanap_metrics из prepare.py
     # Импорт внутри функции для избежания циклических зависимостей
     from .prepare import add_meanap_metrics
+
     df, _ = add_meanap_metrics(df, iou_thresholds)
-    return df['mean_f1'].mean() if 'mean_f1' in df.columns else 0.0
+    return df["mean_f1"].mean() if "mean_f1" in df.columns else 0.0
 
 
 # ========== Извлечение числовых параметров для кластеризации ==========
 def extract_numeric_params(method: str, params_str: str) -> dict:
+    import json
+
+    try:
+        value = json.loads(params_str)
+        if isinstance(value, dict):
+            return {
+                key: float(v) for key, v in value.items() if isinstance(v, (float, int))
+            }
+    except (ValueError, TypeError):
+        pass
     """
     Извлекает числовые параметры из строки params (поддерживает кириллицу и латиницу).
     Используется для кластеризации.
@@ -183,39 +199,51 @@ def extract_numeric_params(method: str, params_str: str) -> dict:
     params_str = params_str.strip()
     result = {}
     if method in ("Adaptive Mean", "Adaptive Gauss"):
-        win_match = re.search(r'(?:окно|window)\s*=\s*([+-]?\d+)', params_str, re.IGNORECASE)
+        win_match = re.search(
+            r"(?:окно|window)\s*=\s*([+-]?\d+)", params_str, re.IGNORECASE
+        )
         if win_match:
-            result['window'] = int(win_match.group(1))
-        c_match = re.search(r'[Cc]\s*=\s*([+-]?\d+)', params_str)
+            result["window"] = int(win_match.group(1))
+        c_match = re.search(r"[Cc]\s*=\s*([+-]?\d+)", params_str)
         if c_match:
-            result['c'] = int(c_match.group(1))
+            result["c"] = int(c_match.group(1))
     elif method == "Background Symmetry":
-        ex_match = re.search(r'excess\s*=\s*([+-]?\d*\.?\d+)', params_str, re.IGNORECASE)
+        ex_match = re.search(
+            r"excess\s*=\s*([+-]?\d*\.?\d+)", params_str, re.IGNORECASE
+        )
         if ex_match:
-            result['excess'] = float(ex_match.group(1))
+            result["excess"] = float(ex_match.group(1))
     elif method == "ISODATA":
-        th_match = re.search(r'(?:начальный порог|init)\s*=\s*([+-]?\d+)', params_str, re.IGNORECASE)
+        th_match = re.search(
+            r"(?:начальный порог|init)\s*=\s*([+-]?\d+)", params_str, re.IGNORECASE
+        )
         if th_match:
-            result['init'] = int(th_match.group(1))
+            result["init"] = int(th_match.group(1))
     elif method in ("Niblack", "Row Adaptive"):
-        win_match = re.search(r'(?:окно|window)\s*=\s*([+-]?\d+)', params_str, re.IGNORECASE)
+        win_match = re.search(
+            r"(?:окно|window)\s*=\s*([+-]?\d+)", params_str, re.IGNORECASE
+        )
         if win_match:
-            result['window'] = int(win_match.group(1))
-        k_match = re.search(r'[kK]\s*=\s*([+-]?\d*\.?\d+)', params_str)
+            result["window"] = int(win_match.group(1))
+        k_match = re.search(r"[kK]\s*=\s*([+-]?\d*\.?\d+)", params_str)
         if k_match:
-            result['k'] = float(k_match.group(1))
+            result["k"] = float(k_match.group(1))
     elif method == "Sauvola":
-        win_match = re.search(r'(?:окно|window)\s*=\s*([+-]?\d+)', params_str, re.IGNORECASE)
+        win_match = re.search(
+            r"(?:окно|window)\s*=\s*([+-]?\d+)", params_str, re.IGNORECASE
+        )
         if win_match:
-            result['window'] = int(win_match.group(1))
-        k_match = re.search(r'[kK]\s*=\s*([+-]?\d*\.?\d+)', params_str)
+            result["window"] = int(win_match.group(1))
+        k_match = re.search(r"[kK]\s*=\s*([+-]?\d*\.?\d+)", params_str)
         if k_match:
-            result['k'] = float(k_match.group(1))
-        r_match = re.search(r'[Rr]\s*=\s*([+-]?\d+)', params_str)
+            result["k"] = float(k_match.group(1))
+        r_match = re.search(r"[Rr]\s*=\s*([+-]?\d+)", params_str)
         if r_match:
-            result['r'] = int(r_match.group(1))
+            result["r"] = int(r_match.group(1))
     elif method == "Simple Threshold":
-        th_match = re.search(r'(?:порог|threshold)\s*=\s*([+-]?\d+)', params_str, re.IGNORECASE)
+        th_match = re.search(
+            r"(?:порог|threshold)\s*=\s*([+-]?\d+)", params_str, re.IGNORECASE
+        )
         if th_match:
-            result['threshold'] = int(th_match.group(1))
+            result["threshold"] = int(th_match.group(1))
     return result

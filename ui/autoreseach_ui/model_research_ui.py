@@ -20,6 +20,8 @@ from PyQt5.QtWidgets import (
 )
 
 from ui.log_widget import LogWidget
+from utils_new.autoreseach_utils.reports import preset_from_row
+from utils_new.annotations.modes import MODE_LABELS
 
 
 class ModelResearchWidget(QWidget):
@@ -45,7 +47,9 @@ class ModelResearchWidget(QWidget):
         btn_layout.addWidget(self.add_btn)
 
         self.save_btn = QPushButton("Сохранить топ-пресеты")
-        self.save_btn.setToolTip("Сохранить текущий список топ-пресетов в файл (CSV или Pickle)")
+        self.save_btn.setToolTip(
+            "Сохранить текущий список топ-пресетов в файл (CSV или Pickle)"
+        )
         self.save_btn.clicked.connect(self.save_top_presets)
         btn_layout.addWidget(self.save_btn)
 
@@ -67,20 +71,29 @@ class ModelResearchWidget(QWidget):
             self.text_edit.append("Нет данных для отображения.")
             return
         text = "=== ТОП пресетов ===\n\n"
-        if 'rank' in df.columns:
-            df = df.sort_values('rank')
+        if "rank" in df.columns:
+            df = df.sort_values("rank")
         for idx, row in df.iterrows():
             text += f"Ранг: {row.get('rank', idx + 1)}\n"
             text += f"Метод: {row['method']}\n"
             text += f"Параметры: {row['params']}\n"
             text += f"Инверсия: {'Да' if row['invert'] else 'Нет'}\n"
-            text += f"Close factor: {row['close_factor']:.2f}\n"
-            text += f"Open factor: {row['open_factor']:.2f}\n"
-            if 'actual_f1' in row and not pd.isna(row['actual_f1']):
+            for op in ("close", "open", "erode", "dilate"):
+                text += f"{op}: {row.get(op + '_px', 0)} px\n"
+            preset = preset_from_row(row)
+            text += (
+                f"Ядро: {preset['morphology']['shape']}; порядок: "
+                + " → ".join(
+                    op["operation"] for op in preset["morphology"]["operations"]
+                )
+                + "\n"
+            )
+            text += f"Разметка: {MODE_LABELS[preset['annotation_mode']]}; оболочка: {preset['use_hull']}\n"
+            if "actual_f1" in row and not pd.isna(row["actual_f1"]):
                 text += f"Реальный F1: {row['actual_f1']:.6f}\n"
-            if 'pred_f1' in row and not pd.isna(row['pred_f1']):
+            if "pred_f1" in row and not pd.isna(row["pred_f1"]):
                 text += f"Предсказанный F1: {row['pred_f1']:.6f}\n"
-            if 'mean_f1' in row and not pd.isna(row['mean_f1']):
+            if "mean_f1" in row and not pd.isna(row["mean_f1"]):
                 text += f"Mean F1: {row['mean_f1']:.6f}\n"
             text += "-" * 50 + "\n"
         self.text_edit.setText(text)
@@ -88,9 +101,11 @@ class ModelResearchWidget(QWidget):
     def add_to_presets(self):
         """Вызывает метод добавления пресетов у родительского окна"""
         if self.top5_df is None or self.top5_df.empty:
-            QMessageBox.warning(self, "Нет данных", "Нет данных для добавления в пресеты.")
+            QMessageBox.warning(
+                self, "Нет данных", "Нет данных для добавления в пресеты."
+            )
             return
-        if self.parent_app and hasattr(self.parent_app, 'add_to_presets'):
+        if self.parent_app and hasattr(self.parent_app, "add_to_presets"):
             self.parent_app.add_to_presets(self.top5_df)
         else:
             print("No parent app or missing add_to_presets method")
@@ -109,7 +124,9 @@ def setup_model_research_ui(parent):
     left_load_group = QGroupBox("Загрузка / сохранение датасета")
     left_load_layout = QHBoxLayout()
     parent.btn_select = QPushButton("Выбрать папку")
-    parent.btn_select.setToolTip("Выбрать папку с отчетами (*_full_report.txt) и аннотациями (*.txt)")
+    parent.btn_select.setToolTip(
+        "Выбрать папку с отчетами (*_full_report.txt) и аннотациями (*.txt)"
+    )
     parent.btn_load = QPushButton("Загрузить датасет")
     parent.btn_load.setToolTip("Загрузить ранее сохраненный датасет (CSV или Pickle)")
     parent.btn_save = QPushButton("Сохранить датасет")
@@ -131,7 +148,9 @@ def setup_model_research_ui(parent):
     parent.btn_random = QPushButton("Случайные 100")
     parent.btn_random.setToolTip("Показать 100 случайных строк датасета")
     parent.btn_save_sample = QPushButton("Сохранить отображаемые")
-    parent.btn_save_sample.setToolTip("Сохранить текущий отображаемый датасет (например, отфильтрованный) в файл")
+    parent.btn_save_sample.setToolTip(
+        "Сохранить текущий отображаемый датасет (например, отфильтрованный) в файл"
+    )
     parent.btn_all = QPushButton("Показать всё")
     parent.btn_all.setToolTip("Показать весь датасет (осторожно, если много строк)")
 
@@ -164,20 +183,29 @@ def setup_model_research_ui(parent):
     filter_grid.setSpacing(10)
 
     parent.btn_filter_zero_true = QPushButton("Удалить: num_objects=0 и true>=1")
-    parent.btn_filter_zero_true.setToolTip("Удалить строки, где нет предсказанных объектов, но есть 1 и более истинных")
+    parent.btn_filter_zero_true.setToolTip(
+        "Удалить строки, где нет предсказанных объектов, но есть 1 и более истинных"
+    )
     parent.btn_filter_overseg = QPushButton("Удалить: pred > 2*true")
     parent.btn_filter_overseg.setToolTip(
-        "Удалить строки с сильной oversegmentation (предсказаний больше чем в 3 раза больше истинных)")
+        "Удалить строки с сильной oversegmentation (предсказаний больше чем в 3 раза больше истинных)"
+    )
     parent.btn_filter_duplicates = QPushButton("Удалить дубликаты строк")
     parent.btn_filter_duplicates.setToolTip("Удалить полностью дублирующиеся строки")
     parent.btn_filter_invalid_params = QPushButton("Удалить некорректные параметры")
-    parent.btn_filter_invalid_params.setToolTip("Удалить строки с некорректными (нечисловыми) параметрами бинаризации")
-    parent.btn_filter_anomaly_count = QPushButton("Удалить: num>15 (объектов или истинных)")
+    parent.btn_filter_invalid_params.setToolTip(
+        "Удалить строки с некорректными (нечисловыми) параметрами бинаризации"
+    )
+    parent.btn_filter_anomaly_count = QPushButton(
+        "Удалить: num>15 (объектов или истинных)"
+    )
     parent.btn_filter_anomaly_count.setToolTip(
-        "Удалить строки, где количество объектов или истинных объектов превышает 15")
+        "Удалить строки, где количество объектов или истинных объектов превышает 15"
+    )
     parent.btn_filter_full_image = QPushButton("Удалить: объект на весь снимок")
     parent.btn_filter_full_image.setToolTip(
-        "Удалить строки, где среди предсказанных объектов есть объект, покрывающий почти всё изображение (центр 0.5,0.5 и размеры 1,1)")
+        "Удалить строки, где среди предсказанных объектов есть объект, покрывающий почти всё изображение (центр 0.5,0.5 и размеры 1,1)"
+    )
 
     # Устанавливаем enabled состояние (по умолчанию выключены)
     parent.btn_filter_zero_true.setEnabled(False)
@@ -198,8 +226,12 @@ def setup_model_research_ui(parent):
     left_filter_layout.addLayout(filter_grid)
 
     # Кнопка удаления строк без истинных объектов (num_true_objects == 0)
-    parent.btn_remove_no_true = QPushButton("Удалить строки без истинных объектов (num_true_objects == 0)")
-    parent.btn_remove_no_true.setToolTip("Удалить все строки, где нет ни одного истинного объекта (пустые изображения)")
+    parent.btn_remove_no_true = QPushButton(
+        "Удалить строки без истинных объектов (num_true_objects == 0)"
+    )
+    parent.btn_remove_no_true.setToolTip(
+        "Удалить все строки, где нет ни одного истинного объекта (пустые изображения)"
+    )
     parent.btn_remove_no_true.setEnabled(False)
     left_filter_layout.addWidget(parent.btn_remove_no_true)
 
@@ -233,13 +265,16 @@ def setup_model_research_ui(parent):
     prepare_row1 = QHBoxLayout()
     parent.btn_save_unique_params = QPushButton("Сохранить уникальные params")
     parent.btn_save_unique_params.setToolTip(
-        "Сохранить все уникальные строки params для каждого метода в текстовый файл")
+        "Сохранить все уникальные строки params для каждого метода в текстовый файл"
+    )
     parent.btn_cluster = QPushButton("Кластеризация параметров")
     parent.btn_cluster.setToolTip(
-        "Добавить колонку 'cluster' с меткой кластера для каждой строки (на основе параметров)")
-    parent.btn_cluster_co = QPushButton("Кластеризация open/close")
+        "Добавить колонку 'cluster' с меткой кластера для каждой строки (на основе параметров)"
+    )
+    parent.btn_cluster_co = QPushButton("Кластеризация морфологии")
     parent.btn_cluster_co.setToolTip(
-        "Добавить колонку 'cluster_co' – кластеризация open_factor и close_factor для каждого cluster каждого метода")
+        "Добавить колонку 'cluster_co' – кластеризация close/open/erode/dilate (px) для каждого cluster каждого метода"
+    )
     parent.btn_save_unique_params.setEnabled(False)
     parent.btn_cluster.setEnabled(False)
     parent.btn_cluster_co.setEnabled(False)
@@ -250,16 +285,20 @@ def setup_model_research_ui(parent):
     prepare_row1.addStretch()
     right_prepare_layout.addLayout(prepare_row1)
 
-    # Вторая строка: расчёт meanAP и фильтр по mean_f1
+    # Вторая строка: расчёт mean F1 по IoU и фильтр по mean_f1
     prepare_row2 = QHBoxLayout()
     parent.iou_label = QLabel("IoU порог (для f1_50):")
     parent.iou_spin = QDoubleSpinBox()
     parent.iou_spin.setRange(0.0, 1.0)
     parent.iou_spin.setSingleStep(0.05)
     parent.iou_spin.setValue(0.5)
-    parent.iou_spin.setToolTip("Порог пересечения для определения TP (используется только для колонки f1_50)")
-    parent.btn_compute_f1 = QPushButton("Расчет meanAP")
-    parent.btn_compute_f1.setToolTip("Добавить колонки: mean_f1 (среднее по порогам 0.1-0.9), avg_iou_tp, f1_50 и др.")
+    parent.iou_spin.setToolTip(
+        "Порог пересечения для определения TP (используется только для колонки f1_50)"
+    )
+    parent.btn_compute_f1 = QPushButton("Расчет mean F1 по IoU")
+    parent.btn_compute_f1.setToolTip(
+        "Добавить колонки: mean_f1 (среднее по порогам 0.1-0.9), avg_iou_tp, f1_50 и др."
+    )
     parent.btn_compute_f1.setEnabled(False)
 
     parent.f1_threshold_label = QLabel("Порог mean_f1:")
@@ -288,9 +327,13 @@ def setup_model_research_ui(parent):
     parent.top_k_spin = QSpinBox()
     parent.top_k_spin.setRange(1, 20)
     parent.top_k_spin.setValue(1)
-    parent.top_k_spin.setToolTip("Сколько лучших строк (по mean_f1) оставлять в каждой группе при агрегации")
+    parent.top_k_spin.setToolTip(
+        "Сколько лучших строк (по mean_f1) оставлять в каждой группе при агрегации"
+    )
     parent.btn_aggregate = QPushButton("Агрегировать по параметрам")
-    parent.btn_aggregate.setToolTip("Сгруппировать строки с одинаковыми параметрами, усреднив метрики")
+    parent.btn_aggregate.setToolTip(
+        "Сгруппировать строки с одинаковыми параметрами, усреднив метрики"
+    )
     parent.btn_aggregate.setEnabled(False)
 
     prepare_row3.addWidget(parent.label_top_k)
@@ -303,7 +346,8 @@ def setup_model_research_ui(parent):
     prepare_row_invert = QHBoxLayout()
     parent.btn_optimize_invert = QPushButton("Оптимизировать инверсию")
     parent.btn_optimize_invert.setToolTip(
-        "Для каждого метода оставить только строки с лучшим значением invert (по среднему mean_f1)")
+        "Для каждого метода оставить только строки с лучшим значением invert (по среднему mean_f1)"
+    )
     parent.btn_optimize_invert.setEnabled(False)
     prepare_row_invert.addWidget(parent.btn_optimize_invert)
     prepare_row_invert.addStretch()
@@ -314,12 +358,18 @@ def setup_model_research_ui(parent):
     parent.chk_use_diversity = QCheckBox("Использовать разнообразие при выборе топ‑5")
     parent.chk_use_diversity.setChecked(True)
     parent.chk_use_diversity.setToolTip(
-        "Включает жадный алгоритм для выбора максимально разных пресетов из всего пула уникальных параметров")
-    parent.chk_iou_penalty = QCheckBox("Штраф за низкое качество TP (mean_f1 * avg_iou_tp^0.5)")
-    parent.chk_iou_penalty.setToolTip("При анализе использовать взвешенный F1 = mean_f1 * sqrt(avg_iou_tp)")
+        "Включает жадный алгоритм для выбора максимально разных пресетов из всего пула уникальных параметров"
+    )
+    parent.chk_iou_penalty = QCheckBox(
+        "Штраф за низкое качество TP (mean_f1 * avg_iou_tp^0.5)"
+    )
+    parent.chk_iou_penalty.setToolTip(
+        "При анализе использовать взвешенный F1 = mean_f1 * sqrt(avg_iou_tp)"
+    )
     parent.btn_analyze = QPushButton("Запустить анализ модели")
     parent.btn_analyze.setToolTip(
-        "Обучить регрессию и выдать топ-5 комбинаций параметров для каждого метода (с учётом diversity и штрафа)")
+        "Обучить регрессию и выдать топ-5 комбинаций параметров для каждого метода (с учётом diversity и штрафа)"
+    )
     parent.btn_analyze.setEnabled(False)
 
     prepare_row5.addWidget(parent.chk_use_diversity)
@@ -332,11 +382,13 @@ def setup_model_research_ui(parent):
     prepare_row6 = QHBoxLayout()
     parent.btn_load_top_methods = QPushButton("Загрузить топ по методам")
     parent.btn_load_top_methods.setToolTip(
-        "Загрузить предварительно сохранённый датасет с топ пресетами для каждого метода")
+        "Загрузить предварительно сохранённый датасет с топ пресетами для каждого метода"
+    )
     parent.btn_load_top_methods.setEnabled(True)
     parent.btn_global_top5 = QPushButton("Глобальный топ методов")
     parent.btn_global_top5.setToolTip(
-        "Выбрать глобальный топ разнообразных пресетов из загруженного датасета (по реальному F1)")
+        "Выбрать глобальный топ разнообразных пресетов из загруженного датасета (по реальному F1)"
+    )
     parent.btn_global_top5.setEnabled(False)
     prepare_row6.addWidget(parent.btn_load_top_methods)
     prepare_row6.addWidget(parent.btn_global_top5)
@@ -350,10 +402,13 @@ def setup_model_research_ui(parent):
     parent.perfect_threshold_spin.setRange(0.0, 1.0)
     parent.perfect_threshold_spin.setSingleStep(0.05)
     parent.perfect_threshold_spin.setValue(1.0)
-    parent.perfect_threshold_spin.setToolTip("Удалить строки, где actual_f1 больше или равно этому порогу")
+    parent.perfect_threshold_spin.setToolTip(
+        "Удалить строки, где actual_f1 больше или равно этому порогу"
+    )
     parent.btn_remove_perfect = QPushButton("Удалить идеальные строки")
     parent.btn_remove_perfect.setToolTip(
-        "Удалить из датасета строки с actual_f1 >= порога (полезно для фильтрации переобученных пресетов)")
+        "Удалить из датасета строки с actual_f1 >= порога (полезно для фильтрации переобученных пресетов)"
+    )
     parent.btn_remove_perfect.setEnabled(False)
     prepare_row7.addWidget(parent.label_perfect_threshold)
     prepare_row7.addWidget(parent.perfect_threshold_spin)

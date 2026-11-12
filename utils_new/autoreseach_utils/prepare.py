@@ -2,12 +2,9 @@
 # Обновлённая версия с использованием общих метрик из metrics_core
 
 # Импорты для кластеризации
-import json
 import os
-import re
 from ast import literal_eval
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
@@ -15,13 +12,14 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 # Импорт общих функций из metrics_core
-from utils.metrics_core import (
+from utils_new.autoreseach_utils.metrics_core import (
     DEFAULT_IOU_THRESHOLDS,
-    compute_precision_recall_f1,
     iou,
     parse_objects,
 )
-from utils.metrics_core import compute_metrics as compute_metrics_core
+from utils_new.autoreseach_utils.metrics_core import (
+    compute_metrics as compute_metrics_core,
+)
 
 
 # ---------- Вспомогательная функция для детального расчёта метрик (несколько порогов) ----------
@@ -34,22 +32,37 @@ def compute_metrics_detailed(row, iou_thresholds):
         tp_list, fp_list, fn_list: аналогично
         avg_iou_tp: средний IoU по всем TP (матчинг при пороге 0.5)
     """
-    pred = row['objects']
-    gt = row['true_objects']
+    pred = row["objects"]
+    gt = row["true_objects"]
     if not pred and not gt:
         # Идеальный случай: нет объектов и нет предсказаний -> F1=1 при любом пороге
-        return [1.0] * len(iou_thresholds), [0] * len(iou_thresholds), [0] * len(iou_thresholds), [0] * len(
-            iou_thresholds), 1.0
+        return (
+            [1.0] * len(iou_thresholds),
+            [0] * len(iou_thresholds),
+            [0] * len(iou_thresholds),
+            [0] * len(iou_thresholds),
+            1.0,
+        )
     if not pred:
         # Пустое предсказание -> все FN
         fn_cnt = len(gt)
-        return [0.0] * len(iou_thresholds), [0] * len(iou_thresholds), [0] * len(iou_thresholds), [fn_cnt] * len(
-            iou_thresholds), 0.0
+        return (
+            [0.0] * len(iou_thresholds),
+            [0] * len(iou_thresholds),
+            [0] * len(iou_thresholds),
+            [fn_cnt] * len(iou_thresholds),
+            0.0,
+        )
     if not gt:
         # Нет истинных объектов -> все FP
         fp_cnt = len(pred)
-        return [0.0] * len(iou_thresholds), [0] * len(iou_thresholds), [fp_cnt] * len(iou_thresholds), [0] * len(
-            iou_thresholds), 0.0
+        return (
+            [0.0] * len(iou_thresholds),
+            [0] * len(iou_thresholds),
+            [fp_cnt] * len(iou_thresholds),
+            [0] * len(iou_thresholds),
+            0.0,
+        )
 
     # Предварительно вычисляем матрицу IoU между всеми pred и gt
     iou_matrix = np.zeros((len(pred), len(gt)))
@@ -102,7 +115,11 @@ def compute_metrics_detailed(row, iou_thresholds):
         fn = len(gt) - sum(used_gt)
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0
+        )
         f1_list.append(f1)
         tp_list.append(tp)
         fp_list.append(fp)
@@ -118,24 +135,33 @@ def add_meanap_metrics(df, iou_thresholds=None):
         avg_iou_tp (средний IoU для TP при пороге 0.5),
         а также для каждого порога f1_{thresh*100}.
     """
+    if df is None or df.empty:
+        return df, "Датасет пуст"
+    if "ground_truth_available" in df and not df["ground_truth_available"].all():
+        raise ValueError(
+            "Есть изображения без истинной разметки. Добавьте TXT, затем загрузите отчёты заново. Пустой TXT допустим."
+        )
     if iou_thresholds is None:
         iou_thresholds = DEFAULT_IOU_THRESHOLDS
     if df is None or df.empty:
         return df, "Датасет пуст"
-    required = ['objects', 'true_objects']
+    required = ["objects", "true_objects"]
     for col in required:
         if col not in df.columns:
             raise ValueError(f"Колонка {col} отсутствует")
     df = df.copy()
     # Парсим объекты один раз
-    df['objects_parsed'] = df['objects'].apply(parse_objects)
-    df['true_objects_parsed'] = df['true_objects'].apply(parse_objects)
+    df["objects_parsed"] = df["objects"].apply(parse_objects)
+    df["true_objects_parsed"] = df["true_objects"].apply(parse_objects)
 
     f1_by_thresh = {th: [] for th in iou_thresholds}
     avg_iou_list = []
 
     for idx, row in df.iterrows():
-        temp_row = {'objects': row['objects_parsed'], 'true_objects': row['true_objects_parsed']}
+        temp_row = {
+            "objects": row["objects_parsed"],
+            "true_objects": row["true_objects_parsed"],
+        }
         f1_list, _, _, _, avg_iou = compute_metrics_detailed(temp_row, iou_thresholds)
         for i, th in enumerate(iou_thresholds):
             f1_by_thresh[th].append(f1_list[i])
@@ -143,36 +169,39 @@ def add_meanap_metrics(df, iou_thresholds=None):
 
     # Заполняем DataFrame
     for th in iou_thresholds:
-        col_name = f'f1_{int(th * 100)}'
+        col_name = f"f1_{int(th * 100)}"
         df[col_name] = f1_by_thresh[th]
     # Для совместимости со старыми фильтрами, которые используют f1_50
     if 0.5 in iou_thresholds:
-        df['f1_50'] = df[f'f1_50']
+        df["f1_50"] = df[f"f1_50"]
     else:
         # Если 0.5 нет в списке, добавим отдельно (но лучше передавать)
         pass
     # Средний F1 по всем порогам
     f1_values = np.array([f1_by_thresh[th] for th in iou_thresholds])
-    df['mean_f1'] = np.mean(f1_values, axis=0)
-    df['avg_iou_tp'] = avg_iou_list
+    df["mean_f1"] = np.mean(f1_values, axis=0)
+    df["avg_iou_tp"] = avg_iou_list
 
-    df.drop(['objects_parsed', 'true_objects_parsed'], axis=1, inplace=True)
+    df.drop(["objects_parsed", "true_objects_parsed"], axis=1, inplace=True)
     msg = f"Добавлены метрики meanAP (по порогам {iou_thresholds[0]}-{iou_thresholds[-1]}). Средний mean_f1 = {df['mean_f1'].mean():.4f}"
     return df, msg
 
 
 # ---------- Остальные функции prepare.py (с использованием общих метрик по возможности) ----------
 
-def compute_f1(df: pd.DataFrame, iou_threshold: float = 0.5) -> tuple[pd.DataFrame, str]:
+
+def compute_f1(
+    df: pd.DataFrame, iou_threshold: float = 0.5
+) -> tuple[pd.DataFrame, str]:
     """Оставлена для обратной совместимости, использует старую метрику."""
     if df is None or df.empty:
         return df, "Датасет пуст, вычисление F1 невозможно."
-    required = ['objects', 'true_objects']
+    required = ["objects", "true_objects"]
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Отсутствуют необходимые колонки: {missing}")
-    df['objects_parsed'] = df['objects'].apply(parse_objects)
-    df['true_objects_parsed'] = df['true_objects'].apply(parse_objects)
+    df["objects_parsed"] = df["objects"].apply(parse_objects)
+    df["true_objects_parsed"] = df["true_objects"].apply(parse_objects)
     total = len(df)
     f1_list = []
     tp_list = []
@@ -180,36 +209,40 @@ def compute_f1(df: pd.DataFrame, iou_threshold: float = 0.5) -> tuple[pd.DataFra
     fn_list = []
     for idx, row in df.iterrows():
         temp_row = {
-            'objects': row['objects_parsed'],
-            'true_objects': row['true_objects_parsed']
+            "objects": row["objects_parsed"],
+            "true_objects": row["true_objects_parsed"],
         }
         f1, tp, fp, fn = compute_metrics_core(temp_row, iou_threshold=iou_threshold)
         f1_list.append(f1)
         tp_list.append(tp)
         fp_list.append(fp)
         fn_list.append(fn)
-    df['f1'] = f1_list
-    df['tp'] = tp_list
-    df['fp'] = fp_list
-    df['fn'] = fn_list
-    df.drop(['objects_parsed', 'true_objects_parsed'], axis=1, inplace=True)
+    df["f1"] = f1_list
+    df["tp"] = tp_list
+    df["fp"] = fp_list
+    df["fn"] = fn_list
+    df.drop(["objects_parsed", "true_objects_parsed"], axis=1, inplace=True)
     msg = f"Вычислен F1 (IoU={iou_threshold}). Средний F1 = {df['f1'].mean():.4f}"
     return df, msg
 
 
-def filter_by_f1_threshold(df: pd.DataFrame, threshold: float) -> tuple[pd.DataFrame, str]:
+def filter_by_f1_threshold(
+    df: pd.DataFrame, threshold: float
+) -> tuple[pd.DataFrame, str]:
     if df is None or df.empty:
         return df, "Датасет пуст."
-    if 'f1' not in df.columns:
+    if "f1" not in df.columns:
         raise ValueError("Колонка 'f1' отсутствует. Сначала выполните compute_f1().")
     before = len(df)
-    df_filtered = df[df['f1'] >= threshold].reset_index(drop=True)
+    df_filtered = df[df["f1"] >= threshold].reset_index(drop=True)
     after = len(df_filtered)
     msg = f"Фильтр по F1 (порог {threshold:.2f}): удалено {before - after} строк. Осталось {after}."
     return df_filtered, msg
 
 
-def sample_rows(df: pd.DataFrame, n: int, random_state: int = 42) -> tuple[pd.DataFrame, str]:
+def sample_rows(
+    df: pd.DataFrame, n: int, random_state: int = 42
+) -> tuple[pd.DataFrame, str]:
     if df is None or df.empty:
         return df, "Датасет пуст."
     total = len(df)
@@ -227,22 +260,26 @@ def filter_full_image_object(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     """
     if df is None or df.empty:
         return df, "Датасет пуст."
-    if 'objects' not in df.columns:
+    if "objects" not in df.columns:
         raise ValueError("Колонка 'objects' отсутствует.")
 
     def has_full_image_object(obj_str):
         try:
             obj_list = literal_eval(obj_str)
             for _, cx, cy, w, h in obj_list:
-                if (abs(cx - 0.5) < 0.01 and abs(cy - 0.5) < 0.01 and
-                        abs(w - 1.0) < 0.01 and abs(h - 1.0) < 0.01):
+                if (
+                    abs(cx - 0.5) < 0.01
+                    and abs(cy - 0.5) < 0.01
+                    and abs(w - 1.0) < 0.01
+                    and abs(h - 1.0) < 0.01
+                ):
                     return True
         except:
             pass
         return False
 
     before = len(df)
-    mask = ~df['objects'].apply(has_full_image_object)
+    mask = ~df["objects"].apply(has_full_image_object)
     df_filtered = df[mask].reset_index(drop=True)
     after = len(df_filtered)
     msg = f"Фильтр 'объект на весь снимок' удалил {before - after} строк. Осталось {after}."
@@ -252,68 +289,21 @@ def filter_full_image_object(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
 def filter_invalid_params(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     if df is None or df.empty:
         return df, "Датасет пуст."
-    required = ['method', 'params']
+    required = ["method", "params"]
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Отсутствуют колонки: {missing}")
 
     def has_valid_params(row):
-        method = row['method']
-        params_str = row['params']
-        if method == 'Simple Threshold':
-            try:
-                int(params_str.split('=')[1])
-                return True
-            except:
-                return False
-        elif method in ['Adaptive Mean', 'Adaptive Gauss']:
-            try:
-                parts = params_str.split(',')
-                int(parts[0].split('=')[1])
-                int(parts[1].split('=')[1])
-                return True
-            except:
-                return False
-        elif method == 'Niblack':
-            try:
-                parts = params_str.split(',')
-                int(parts[0].split('=')[1])
-                float(parts[1].split('=')[1])
-                return True
-            except:
-                return False
-        elif method == 'Sauvola':
-            try:
-                parts = params_str.split(',')
-                int(parts[0].split('=')[1])
-                float(parts[1].split('=')[1])
-                if len(parts) > 2:
-                    int(parts[2].split('=')[1])
-                return True
-            except:
-                return False
-        elif method == 'ISODATA':
-            try:
-                int(params_str.split('=')[1])
-                return True
-            except:
-                return False
-        elif method == 'Background Symmetry':
-            try:
-                float(params_str.split('=')[1])
-                return True
-            except:
-                return False
-        elif method == 'Row Adaptive':
-            try:
-                parts = params_str.split(',')
-                int(parts[0].split('=')[1])
-                float(parts[1].split('=')[1])
-                return True
-            except:
-                return False
-        else:
+        from .reports import preset_from_row
+        from .search_space import validate_params
+
+        try:
+            preset = preset_from_row(row)
+            validate_params(preset["method"], preset["params"])
             return True
+        except (ValueError, TypeError, KeyError):
+            return False
 
     before = len(df)
     mask = df.apply(has_valid_params, axis=1)
@@ -323,15 +313,17 @@ def filter_invalid_params(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     return df_filtered, msg
 
 
-def filter_anomaly_count(df: pd.DataFrame, max_objects: int = 15) -> tuple[pd.DataFrame, str]:
+def filter_anomaly_count(
+    df: pd.DataFrame, max_objects: int = 15
+) -> tuple[pd.DataFrame, str]:
     if df is None or df.empty:
         return df, "Датасет пуст."
-    required = ['num_objects', 'num_true_objects']
+    required = ["num_objects", "num_true_objects"]
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Отсутствуют колонки: {missing}")
     before = len(df)
-    mask = ~((df['num_objects'] > max_objects) | (df['num_true_objects'] > max_objects))
+    mask = ~((df["num_objects"] > max_objects) | (df["num_true_objects"] > max_objects))
     df_filtered = df[mask].reset_index(drop=True)
     after = len(df_filtered)
     msg = f"Фильтр аномального количества объектов (> {max_objects}) удалил {before - after} строк. Осталось {after}."
@@ -341,30 +333,34 @@ def filter_anomaly_count(df: pd.DataFrame, max_objects: int = 15) -> tuple[pd.Da
 def filter_zero_true(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     if df is None or df.empty:
         return df, "Датасет пуст."
-    required = ['num_objects', 'num_true_objects']
+    required = ["num_objects", "num_true_objects"]
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Отсутствуют колонки: {missing}")
     before = len(df)
-    mask = ~((df['num_objects'] == 0) & (df['num_true_objects'] >= 1))
+    mask = ~((df["num_objects"] == 0) & (df["num_true_objects"] >= 1))
     df_filtered = df[mask].reset_index(drop=True)
     after = len(df_filtered)
     msg = f"Фильтр 'num_objects=0 и true>=1' удалил {before - after} строк. Осталось {after}."
     return df_filtered, msg
 
 
-def filter_oversegmentation(df: pd.DataFrame, ratio: float = 2.0) -> tuple[pd.DataFrame, str]:
+def filter_oversegmentation(
+    df: pd.DataFrame, ratio: float = 2.0
+) -> tuple[pd.DataFrame, str]:
     if df is None or df.empty:
         return df, "Датасет пуст."
-    required = ['num_objects', 'num_true_objects']
+    required = ["num_objects", "num_true_objects"]
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Отсутствуют колонки: {missing}")
     before = len(df)
-    mask = ~(df['num_objects'] > ratio * df['num_true_objects'])
+    mask = ~(df["num_objects"] > ratio * df["num_true_objects"])
     df_filtered = df[mask].reset_index(drop=True)
     after = len(df_filtered)
-    msg = f"Фильтр 'pred > {ratio}*true' удалил {before - after} строк. Осталось {after}."
+    msg = (
+        f"Фильтр 'pred > {ratio}*true' удалил {before - after} строк. Осталось {after}."
+    )
     return df_filtered, msg
 
 
@@ -374,7 +370,9 @@ def filter_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     before = len(df)
     df_filtered = df.drop_duplicates().reset_index(drop=True)
     after = len(df_filtered)
-    msg = f"Удаление полных дубликатов удалило {before - after} строк. Осталось {after}."
+    msg = (
+        f"Удаление полных дубликатов удалило {before - after} строк. Осталось {after}."
+    )
     return df_filtered, msg
 
 
@@ -384,20 +382,24 @@ def filter_no_true_objects(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     """
     if df is None or df.empty:
         return df, "Датасет пуст."
-    if 'num_true_objects' not in df.columns:
+    if "num_true_objects" not in df.columns:
         # Создаём колонку, если её нет
-        if 'true_objects' in df.columns:
-            df['num_true_objects'] = df['true_objects'].apply(parse_objects).apply(len)
+        if "true_objects" in df.columns:
+            df["num_true_objects"] = df["true_objects"].apply(parse_objects).apply(len)
         else:
-            raise ValueError("Колонка 'true_objects' или 'num_true_objects' отсутствует")
+            raise ValueError(
+                "Колонка 'true_objects' или 'num_true_objects' отсутствует"
+            )
     before = len(df)
-    df_filtered = df[df['num_true_objects'] > 0].reset_index(drop=True)
+    df_filtered = df[df["num_true_objects"] > 0].reset_index(drop=True)
     after = len(df_filtered)
     msg = f"Удалены строки без истинных объектов (num_true_objects == 0): удалено {before - after} строк. Осталось {after}."
     return df_filtered, msg
 
 
-def aggregate_by_params(df: pd.DataFrame, group_by=None, score_col='mean_f1', top_k=1) -> tuple[pd.DataFrame, str]:
+def aggregate_by_params(
+    df: pd.DataFrame, group_by=None, score_col="mean_f1", top_k=1
+) -> tuple[pd.DataFrame, str]:
     """
     Агрегирует датасет, оставляя топ-K строк с наибольшим score_col в каждой группе.
 
@@ -406,7 +408,7 @@ def aggregate_by_params(df: pd.DataFrame, group_by=None, score_col='mean_f1', to
         group_by: список колонок для группировки. Если None, то автоматически:
                   если есть колонки 'cluster' и 'cluster_co' ->
                      ['method', 'cluster', 'cluster_co', 'invert']
-                  иначе -> ['method', 'params', 'invert', 'close_factor', 'open_factor']
+                  иначе -> ['method', 'params', 'invert', 'close_px', 'open_px']
         score_col: колонка для сортировки (например, 'mean_f1')
         top_k: количество строк, оставляемых из каждой группы
 
@@ -420,10 +422,18 @@ def aggregate_by_params(df: pd.DataFrame, group_by=None, score_col='mean_f1', to
         raise ValueError(f"Колонка '{score_col}' отсутствует.")
 
     if group_by is None:
-        if 'cluster' in df.columns and 'cluster_co' in df.columns:
-            group_by = ['method', 'cluster', 'cluster_co', 'invert']
+        if "cluster" in df.columns and "cluster_co" in df.columns:
+            group_by = (
+                ["preset_json"]
+                if "preset_json" in df
+                else ["method", "cluster", "cluster_co", "invert"]
+            )
         else:
-            group_by = ['method', 'params', 'invert', 'close_factor', 'open_factor']
+            group_by = (
+                ["preset_json"]
+                if "preset_json" in df
+                else ["method", "params", "invert", "close_px", "open_px"]
+            )
 
     missing = [c for c in group_by if c not in df.columns]
     if missing:
@@ -431,25 +441,31 @@ def aggregate_by_params(df: pd.DataFrame, group_by=None, score_col='mean_f1', to
 
     before = len(df)
     df_sorted = df.sort_values(score_col, ascending=False)
-    df_agg = df_sorted.groupby(group_by, group_keys=False).head(top_k).reset_index(drop=True)
+    df_agg = (
+        df_sorted.groupby(group_by, group_keys=False).head(top_k).reset_index(drop=True)
+    )
     after = len(df_agg)
 
     msg = f"Агрегация по параметрам (группировка: {group_by}, топ-{top_k} по {score_col}): {before} -> {after} строк"
     return df_agg, msg
 
 
-def save_cluster_report(df, method, cluster_ids, param_names, clusters_dir, method_name):
+def save_cluster_report(
+    df, method, cluster_ids, param_names, clusters_dir, method_name
+):
     """Сохраняет текстовый отчёт о кластерах для одного метода."""
-    report_path = os.path.join(clusters_dir, f"clusters_{method_name.replace(' ', '_')}_report.txt")
-    with open(report_path, 'w', encoding='utf-8') as f:
+    report_path = os.path.join(
+        clusters_dir, f"clusters_{method_name.replace(' ', '_')}_report.txt"
+    )
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(f"Отчёт о кластерах для метода: {method}\n")
         f.write("=" * 60 + "\n\n")
-        grouped = df[df['cluster'] != -1].groupby('cluster')
+        grouped = df[df["cluster"] != -1].groupby("cluster")
         for cluster_id in sorted(grouped.groups.keys()):
             cluster_df = grouped.get_group(cluster_id)
             f.write(f"Кластер {cluster_id}:\n")
             f.write(f"  Количество строк: {len(cluster_df)}\n")
-            if 'mean_f1' in cluster_df.columns:
+            if "mean_f1" in cluster_df.columns:
                 f.write(f"  Средний mean_f1: {cluster_df['mean_f1'].mean():.4f}\n")
                 f.write(f"  Медианный mean_f1: {cluster_df['mean_f1'].median():.4f}\n")
                 f.write(f"  Максимальный mean_f1: {cluster_df['mean_f1'].max():.4f}\n")
@@ -464,48 +480,53 @@ def save_cluster_report(df, method, cluster_ids, param_names, clusters_dir, meth
             first_row = cluster_df.iloc[0]
             f.write(f"  Пример параметров: {first_row.get('params', 'N/A')}\n")
             f.write("\n")
-        unclustered = df[df['cluster'] == -1]
+        unclustered = df[df["cluster"] == -1]
         if len(unclustered) > 0:
             f.write("Строки без кластера (не удалось извлечь параметры):\n")
             f.write(f"  Количество: {len(unclustered)}\n")
-            if 'mean_f1' in unclustered.columns:
+            if "mean_f1" in unclustered.columns:
                 f.write(f"  Средний mean_f1: {unclustered['mean_f1'].mean():.4f}\n")
             f.write("\n")
     return report_path
 
 
-def add_cluster_labels(df: pd.DataFrame, output_dir: str = None) -> tuple[pd.DataFrame, str]:
+def add_cluster_labels(
+    df: pd.DataFrame, output_dir: str = None
+) -> tuple[pd.DataFrame, str]:
     """
     Для каждого метода выполняет кластеризацию параметров и добавляет колонку 'cluster'.
     Строки, для которых не удалось извлечь числовые параметры, получают cluster = -1.
     Визуализации кластеров и текстовые отчёты сохраняются в output_dir/clusters/.
     """
+    from matplotlib import pyplot as plt
+
     if df is None or df.empty:
         return df, "Датасет пуст."
-    if 'method' not in df.columns or 'params' not in df.columns:
+    if "method" not in df.columns or "params" not in df.columns:
         raise ValueError("Для кластеризации необходимы колонки 'method' и 'params'")
     if output_dir is None:
         output_dir = "."
     clusters_dir = os.path.join(output_dir, "clusters")
     os.makedirs(clusters_dir, exist_ok=True)
     df = df.copy()
-    df['cluster'] = -1
+    df["cluster"] = -1
     cluster_log = []
-    grouped = df.groupby('method')
+    grouped = df.groupby("method")
     for method, group in grouped:
         print(f"Обработка метода: {method}, строк: {len(group)}")
         param_list = []
         valid_indices = []
         param_names = set()
         for idx, row in group.iterrows():
-            params_dict = extract_numeric_params(method, row['params'])
+            params_dict = extract_numeric_params(method, row["params"])
             if params_dict:
                 param_list.append(params_dict)
                 valid_indices.append(idx)
                 param_names.update(params_dict.keys())
         if len(param_list) < 2:
             cluster_log.append(
-                f"{method}: недостаточно данных для кластеризации (строк с параметрами: {len(param_list)}), все строки помечены cluster=-1")
+                f"{method}: недостаточно данных для кластеризации (строк с параметрами: {len(param_list)}), все строки помечены cluster=-1"
+            )
             continue
         features_df = pd.DataFrame(param_list)
         features_df = features_df.fillna(0)
@@ -518,15 +539,17 @@ def add_cluster_labels(df: pd.DataFrame, output_dir: str = None) -> tuple[pd.Dat
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         labels = kmeans.fit_predict(X_scaled)
         for i, idx in enumerate(valid_indices):
-            df.loc[idx, 'cluster'] = labels[i]
+            df.loc[idx, "cluster"] = labels[i]
         # Визуализация
         if X_scaled.shape[1] == 1:
             plt.figure(figsize=(8, 4))
             x_vals = X_scaled.flatten()
-            plt.scatter(x_vals, np.zeros_like(x_vals), c=labels, cmap='tab10', alpha=0.7)
+            plt.scatter(
+                x_vals, np.zeros_like(x_vals), c=labels, cmap="tab10", alpha=0.7
+            )
             centers_1d = scaler.inverse_transform(kmeans.cluster_centers_)
             for c in centers_1d:
-                plt.axvline(x=c[0], color='red', linestyle='--', alpha=0.7)
+                plt.axvline(x=c[0], color="red", linestyle="--", alpha=0.7)
             plt.yticks([])
             plt.title(f"{method} – кластеры (1D)")
         else:
@@ -538,14 +561,25 @@ def add_cluster_labels(df: pd.DataFrame, output_dir: str = None) -> tuple[pd.Dat
                 X_2d = pca.fit_transform(X_scaled)
                 centers_2d = pca.transform(kmeans.cluster_centers_)
             plt.figure(figsize=(8, 6))
-            scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=labels, cmap='tab10', alpha=0.7)
-            plt.scatter(centers_2d[:, 0], centers_2d[:, 1], marker='X', color='red', s=200, edgecolors='black')
-            plt.colorbar(scatter, label='Cluster')
+            scatter = plt.scatter(
+                X_2d[:, 0], X_2d[:, 1], c=labels, cmap="tab10", alpha=0.7
+            )
+            plt.scatter(
+                centers_2d[:, 0],
+                centers_2d[:, 1],
+                marker="X",
+                color="red",
+                s=200,
+                edgecolors="black",
+            )
+            plt.colorbar(scatter, label="Cluster")
             plt.title(f"{method} – кластеры (PCA проекция)")
         plt.xlabel("Component 1")
         plt.ylabel("Component 2")
         plt.tight_layout()
-        plot_path = os.path.join(clusters_dir, f"clusters_{method.replace(' ', '_')}.png")
+        plot_path = os.path.join(
+            clusters_dir, f"clusters_{method.replace(' ', '_')}.png"
+        )
         plt.savefig(plot_path)
         plt.close()
         # Подготовка DataFrame для отчёта с извлечёнными параметрами
@@ -555,12 +589,15 @@ def add_cluster_labels(df: pd.DataFrame, output_dir: str = None) -> tuple[pd.Dat
         for idx, params_dict in zip(valid_indices, param_list):
             for pname, pval in params_dict.items():
                 temp_df.loc[idx, pname] = pval
-        temp_df['cluster'] = -1
+        temp_df["cluster"] = -1
         for i, idx in enumerate(valid_indices):
-            temp_df.loc[idx, 'cluster'] = labels[i]
-        report_path = save_cluster_report(temp_df, method, range(n_clusters), param_names, clusters_dir, method)
+            temp_df.loc[idx, "cluster"] = labels[i]
+        report_path = save_cluster_report(
+            temp_df, method, range(n_clusters), param_names, clusters_dir, method
+        )
         cluster_log.append(
-            f"{method}: {len(param_list)} строк → {n_clusters} кластеров. Отчёт: {os.path.basename(report_path)}")
+            f"{method}: {len(param_list)} строк → {n_clusters} кластеров. Отчёт: {os.path.basename(report_path)}"
+        )
     msg = "Кластеризация завершена.\n" + "\n".join(cluster_log)
     if cluster_log:
         msg += f"\nГрафики и отчёты сохранены в: {clusters_dir}"
@@ -569,24 +606,29 @@ def add_cluster_labels(df: pd.DataFrame, output_dir: str = None) -> tuple[pd.Dat
     return df, msg
 
 
-def save_unique_params(df: pd.DataFrame, output_dir: str = None) -> tuple[pd.DataFrame, str]:
+def save_unique_params(
+    df: pd.DataFrame, output_dir: str = None
+) -> tuple[pd.DataFrame, str]:
     """
     Для каждого метода сохраняет уникальные значения params в текстовый файл.
     """
+
     if df is None or df.empty:
         return df, "Датасет пуст."
-    if 'method' not in df.columns or 'params' not in df.columns:
+    if "method" not in df.columns or "params" not in df.columns:
         raise ValueError("Необходимы колонки 'method' и 'params'")
     if output_dir is None:
         output_dir = "."
     params_dir = os.path.join(output_dir, "unique_params")
     os.makedirs(params_dir, exist_ok=True)
-    grouped = df.groupby('method')
+    grouped = df.groupby("method")
     saved_files = []
     for method, group in grouped:
-        unique_params = group['params'].dropna().unique()
-        file_path = os.path.join(params_dir, f"{method.replace(' ', '_')}_unique_params.txt")
-        with open(file_path, 'w', encoding='utf-8') as f:
+        unique_params = group["params"].dropna().unique()
+        file_path = os.path.join(
+            params_dir, f"{method.replace(' ', '_')}_unique_params.txt"
+        )
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(f"Уникальные параметры для метода: {method}\n")
             f.write(f"Всего строк в методе: {len(group)}\n")
             f.write(f"Уникальных комбинаций параметров: {len(unique_params)}\n")
@@ -605,27 +647,32 @@ def optimize_invert(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     """
     if df is None or df.empty:
         return df, "Датасет пуст."
-    if 'mean_f1' not in df.columns:
-        raise ValueError("Колонка 'mean_f1' отсутствует. Сначала выполните add_meanap_metrics().")
-    if 'method' not in df.columns or 'invert' not in df.columns:
+    if "mean_f1" not in df.columns:
+        raise ValueError(
+            "Колонка 'mean_f1' отсутствует. Сначала выполните add_meanap_metrics()."
+        )
+    if "method" not in df.columns or "invert" not in df.columns:
         raise ValueError("Необходимы колонки 'method' и 'invert'.")
 
     before = len(df)
     rows_to_keep = []
 
-    for method, group in df.groupby('method'):
-        invert_values = group['invert'].unique()
+    for method, group in df.groupby("method"):
+        invert_values = group["invert"].unique()
         if len(invert_values) == 1:
             rows_to_keep.append(group)
             continue
 
-        invert_stats = group.groupby('invert')['mean_f1'].agg(['mean', 'count'])
-        best_invert = invert_stats['mean'].idxmax()
+        invert_stats = group.groupby("invert")["mean_f1"].agg(["mean", "count"])
+        best_invert = invert_stats["mean"].idxmax()
         # Если средние равны, выбираем более частый
-        if len(invert_stats) == 2 and abs(invert_stats.iloc[0]['mean'] - invert_stats.iloc[1]['mean']) < 1e-6:
-            best_invert = invert_stats['count'].idxmax()
+        if (
+            len(invert_stats) == 2
+            and abs(invert_stats.iloc[0]["mean"] - invert_stats.iloc[1]["mean"]) < 1e-6
+        ):
+            best_invert = invert_stats["count"].idxmax()
 
-        rows_to_keep.append(group[group['invert'] == best_invert])
+        rows_to_keep.append(group[group["invert"] == best_invert])
 
     new_df = pd.concat(rows_to_keep, ignore_index=True)
     after = len(new_df)
@@ -633,42 +680,52 @@ def optimize_invert(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     return new_df, msg
 
 
-def cluster_open_close(df: pd.DataFrame, n_clusters: int = 3) -> tuple[pd.DataFrame, str]:
+def cluster_open_close(
+    df: pd.DataFrame, n_clusters: int = 3
+) -> tuple[pd.DataFrame, str]:
     """
     Для каждого уникального сочетания (method, cluster) выполняет кластеризацию
-    параметров close_factor и open_factor с помощью KMeans.
+    параметров close_px и open_px с помощью KMeans.
     Добавляет колонку 'cluster_co' с меткой кластера (0..n_clusters-1).
     Если в группе меньше n_clusters строк, каждой строке присваивается уникальный индекс (0..len-1).
     """
     if df is None or df.empty:
         return df, "Датасет пуст."
-    if 'cluster' not in df.columns:
-        raise ValueError("Колонка 'cluster' отсутствует. Сначала выполните add_cluster_labels().")
-    required = ['method', 'close_factor', 'open_factor']
+    if "cluster" not in df.columns:
+        raise ValueError(
+            "Колонка 'cluster' отсутствует. Сначала выполните add_cluster_labels()."
+        )
+    required = ["method", "close_px", "open_px"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Отсутствуют необходимые колонки: {missing}")
 
     df = df.copy()
-    df['cluster_co'] = -1  # временное значение
+    df["cluster_co"] = -1  # временное значение
 
-    grouped = df.groupby(['method', 'cluster'])
+    grouped = df.groupby(["method", "cluster"])
     for (method, cl), group in grouped:
-        coords = group[['close_factor', 'open_factor']].values
+        coords = group[
+            [c for c in ("close_px", "open_px", "erode_px", "dilate_px") if c in group]
+        ].values
         if len(coords) < n_clusters:
             # Каждой строке даём уникальный индекс
             for idx, original_idx in enumerate(group.index):
-                df.loc[original_idx, 'cluster_co'] = idx
+                df.loc[original_idx, "cluster_co"] = idx
             continue
 
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(coords)
+        labels = KMeans(
+            n_clusters=min(n_clusters, len(np.unique(coords, axis=0))),
+            random_state=42,
+            n_init=10,
+        ).fit_predict(coords)
         for original_idx, label in zip(group.index, labels):
-            df.loc[original_idx, 'cluster_co'] = label
+            df.loc[original_idx, "cluster_co"] = label
 
     msg = f"Кластеризация open/close завершена. Добавлена колонка 'cluster_co' (n_clusters={n_clusters} для каждой группы)."
     return df, msg
 
 
 # ---------- Импорт вспомогательной функции extract_numeric_params из metrics_core ----------
-from utils.metrics_core import extract_numeric_params
+from utils_new.autoreseach_utils.metrics_core import extract_numeric_params

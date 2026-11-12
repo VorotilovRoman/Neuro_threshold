@@ -1,17 +1,9 @@
 {
   "files": {
     "utils_auto_research/gradient_auto_research.py": "45dae03635caad7000d956fa332a7c1f2a786beb214d7421ab79bbfcdaac9c89",
-    "utils_auto_research/gradient_auto_settings_dialog.py": "e644e0004081a6ccd35b31c4cf3e97d9be6322855f8002b88dc5eaf724dda637",
-    "utils_auto_research/threshold_auto_research.py": "ede541e3a03bc968830616cfbc245488498a194788d2bcadd00e9d17025e6e22",
-    "utils_auto_research/threshold_auto_settings_dialog.py": "7d563ea300dfdf3b410d5866072e4c5b5326a2d4341027c4e8ac955e6e8f5ac1"
+    "utils_auto_research/gradient_auto_settings_dialog.py": "e644e0004081a6ccd35b31c4cf3e97d9be6322855f8002b88dc5eaf724dda637"
   },
   "methods": {
-    "tabs/threshold_methods.py": {
-      "load_auto_settings": "50539862ae62ffcccd8b3c3e23a5e6da68d8f54a4bd9833c846f43c8186d13d3",
-      "save_auto_settings": "9f75c9827dbb875c5a1a22a187fed3853c0c4cc9c19488ab638f00361f218d7e",
-      "open_auto_settings": "b61a4c5a8a676330255bce4221a7b6be890054ee4be1e388fc7507542df01891",
-      "run_auto_optimization": "bcd6bf22f84839ec3b4f519b7e2d0483010f82cc24251117ac39bf98a876a7f7"
-    },
     "tabs/gradient_methods.py": {
       "load_auto_settings": "a888f3cb5af779c12c6d1fee45b3e54a67e8479341084166063237aec1619d7d",
       "save_auto_settings": "eb98c9d4e320f9a79b301657ded1a85c35057f34a43258663c022cd64e35ae26",

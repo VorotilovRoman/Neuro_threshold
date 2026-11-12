@@ -11,7 +11,6 @@ from runtime_torch import prepare_windows_torch
 prepare_windows_torch()
 
 import os
-import re
 import sys
 from ast import literal_eval
 
@@ -26,12 +25,11 @@ from PyQt5.QtWidgets import (
 )
 
 from path_setup import get_project_root
-from utils_new.segmentation.presets import make_preset
-from ui_tabs.model_research_ui import setup_model_research_ui
-from utils.analysis import analyze, global_top_diverse
-from utils.image_io import load_annotations
-from utils.metrics_core import DEFAULT_IOU_THRESHOLDS
-from utils.prepare import (
+from ui.autoreseach_ui.model_research_ui import setup_model_research_ui
+from utils_new.autoreseach_utils.analysis import analyze, global_top_diverse
+from utils_new.autoreseach_utils.reports import parse_reports, preset_from_row
+from utils_new.autoreseach_utils.metrics_core import DEFAULT_IOU_THRESHOLDS
+from utils_new.autoreseach_utils.prepare import (
     add_cluster_labels,
     add_meanap_metrics,
     aggregate_by_params,
@@ -86,7 +84,7 @@ class ModelResearchApp(QMainWindow):
         # Новая кнопка удаления строк без истинных объектов
         self.btn_remove_no_true.clicked.connect(self.filter_no_true_objects)
 
-        # Кнопка meanAP
+        # Кнопка mean F1 по IoU
         self.btn_compute_f1.clicked.connect(self.compute_meanap)
         self.btn_sample_n.clicked.connect(self.sample_n_rows)
         self.btn_filter_f1.clicked.connect(self.filter_by_meanf1_threshold)
@@ -182,7 +180,7 @@ class ModelResearchApp(QMainWindow):
         """Удаляет строки, в которых нет истинных объектов (num_true_objects == 0)"""
         self._apply_prepare_operation(filter_no_true_objects)
 
-    # ---------- Расчёт meanAP ----------
+    # ---------- Расчёт mean F1 по IoU ----------
     def compute_meanap(self):
         if self.is_aggregated:
             QMessageBox.warning(self, "Операция недоступна", "Для агрегированного датасета пересчёт метрик невозможен.")
@@ -199,9 +197,9 @@ class ModelResearchApp(QMainWindow):
                 self._update_aggregate_button_state()
                 self._update_buttons_by_aggregated_flag()
             else:
-                self.log_msg("Не удалось рассчитать meanAP")
+                self.log_msg("Не удалось рассчитать mean F1 по IoU")
         except Exception as e:
-            self.log_msg(f"Ошибка при расчёте meanAP: {e}")
+            self.log_msg(f"Ошибка при расчёте mean F1 по IoU: {e}")
             QMessageBox.critical(self, "Ошибка", str(e))
         finally:
             self.btn_compute_f1.setEnabled(True)
@@ -212,7 +210,7 @@ class ModelResearchApp(QMainWindow):
         if self.df_full is None:
             return
         if 'mean_f1' not in self.df_full.columns:
-            QMessageBox.warning(self, "Нет данных", "Сначала выполните 'Расчет meanAP'.")
+            QMessageBox.warning(self, "Нет данных", "Сначала выполните 'Расчет mean F1 по IoU'.")
             return
         before = len(self.df_full)
         self.df_full = self.df_full[self.df_full['mean_f1'] >= threshold].reset_index(drop=True)
@@ -288,7 +286,7 @@ class ModelResearchApp(QMainWindow):
             QMessageBox.warning(self, "Нет данных", "Сначала загрузите датасет.")
             return
         if 'mean_f1' not in self.df_full.columns:
-            QMessageBox.warning(self, "Нет метрики", "Сначала выполните 'Расчет meanAP'.")
+            QMessageBox.warning(self, "Нет метрики", "Сначала выполните 'Расчет mean F1 по IoU'.")
             return
         try:
             new_df, msg = optimize_invert(self.df_full)
@@ -344,7 +342,7 @@ class ModelResearchApp(QMainWindow):
                 df = pd.read_pickle(file_path)
             else:
                 df = pd.read_csv(file_path)
-            required = ['method', 'rank', 'params', 'invert', 'close_factor', 'open_factor', 'actual_f1', 'pred_f1', 'cluster', 'cluster_co']
+            required = ['preset_json', 'erode_px', 'dilate_px', 'morphology_key', 'method', 'rank', 'params', 'invert', 'close_px', 'open_px', 'actual_f1', 'pred_f1', 'cluster', 'cluster_co']
             missing = [c for c in required if c not in df.columns]
             if missing:
                 raise ValueError(f"Файл не содержит необходимых колонок: {missing}")
@@ -428,7 +426,7 @@ class ModelResearchApp(QMainWindow):
             else:
                 df = pd.read_csv(file_path)
 
-            required = ['objects', 'true_objects', 'method', 'params', 'invert', 'close_factor', 'open_factor']
+            required = ['preset_json', 'erode_px', 'dilate_px', 'morphology_key', 'ground_truth_available', 'objects', 'true_objects', 'method', 'params', 'invert', 'close_px', 'open_px']
             missing = [c for c in required if c not in df.columns]
             if missing:
                 self.log_msg(f"Warning: missing columns: {missing}")
@@ -483,102 +481,7 @@ class ModelResearchApp(QMainWindow):
 
     # ---------- Парсинг отчётов ----------
     def parse_reports(self, report_files):
-        rows = []
-        for file_path in report_files:
-            self.log_msg(f"Processing {os.path.basename(file_path)}")
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                blocks = self.split_blocks(content)
-                true_objects = self.load_true_annotations(file_path)
-                for block in blocks:
-                    row = self.parse_block(block, file_path)
-                    if row:
-                        row['true_objects'] = str(true_objects) if true_objects else ''
-                        rows.append(row)
-            except Exception as e:
-                self.log_msg(f"Error processing {file_path}: {e}")
-        if not rows:
-            return None
-        return pd.DataFrame(rows)
-
-    def load_true_annotations(self, report_path):
-        base = os.path.basename(report_path)
-        if base.endswith('_full_report.txt'):
-            base_name = base[:-16]
-        else:
-            base_name = os.path.splitext(base)[0]
-        annotations_path = os.path.join(os.path.dirname(report_path), base_name + '.txt')
-        if not os.path.exists(annotations_path):
-            self.log_msg(f"  Annotation file not found: {annotations_path}")
-            return None
-        objects = load_annotations(annotations_path, img_w=1, img_h=1)
-        return objects if objects else None
-
-    def split_blocks(self, content):
-        pattern = r'(===.*?===)(.*?)(?=\n===|$)'
-        matches = re.findall(pattern, content, re.DOTALL)
-        return [(h.strip(), b.strip()) for h, b in matches]
-
-    def parse_block(self, block, file_path):
-        header, body = block
-        try:
-            header = header.strip('=')
-            parts = header.split('|')
-            left_part = parts[0].strip()
-            right_part = parts[1].strip() if len(parts) > 1 else ''
-
-            method_match = re.search(r'Метод:\s*([^,]+)', left_part)
-            method = method_match.group(1).strip() if method_match else ''
-
-            if 'инверсия=' in left_part:
-                params_str = left_part.split('инверсия=')[0].replace(f"Метод: {method},", '').strip().rstrip(',')
-            else:
-                params_str = ''
-
-            invert_match = re.search(r'инверсия=([^,]+)', left_part)
-            invert = invert_match.group(1).strip() if invert_match else ''
-            invert_bool = invert == 'Да'
-
-            close_match = re.search(r'close=([\d.]+)', left_part)
-            close_factor = float(close_match.group(1)) if close_match else 0.0
-            open_match = re.search(r'open=([\d.]+)', left_part)
-            open_factor = float(open_match.group(1)) if open_match else 0.0
-
-            num_objects = 0
-            if 'Количество объектов:' in right_part:
-                num_match = re.search(r'Количество объектов:\s*(\d+)', right_part)
-                if num_match:
-                    num_objects = int(num_match.group(1))
-
-            objects_list = []
-            if body.strip():
-                for line in body.strip().split('\n'):
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    parts = line.split()
-                    if len(parts) == 5:
-                        try:
-                            cls = int(parts[0])
-                            cx, cy, w, h = map(float, parts[1:5])
-                            objects_list.append((cls, cx, cy, w, h))
-                        except:
-                            pass
-
-            return {
-                'image_path': file_path,
-                'method': method,
-                'params': params_str,
-                'invert': invert_bool,
-                'close_factor': close_factor,
-                'open_factor': open_factor,
-                'num_objects': num_objects,
-                'objects': str(objects_list)
-            }
-        except Exception as e:
-            self.log_msg(f"Error parsing header: {e}\nHeader: {header}")
-            return None
+        return parse_reports(report_files, self.log_msg)
 
     # ---------- Отображение и сохранение ----------
     def display_dataframe(self, df):
@@ -591,18 +494,23 @@ class ModelResearchApp(QMainWindow):
         self.table.setRowCount(len(df))
         self.table.setColumnCount(len(df.columns))
         self.table.setHorizontalHeaderLabels(df.columns)
+        for column in range(len(df.columns)):
+            self.table.setColumnHidden(column, False)
         self.current_display_df = df
 
         for i, (_, row) in enumerate(df.iterrows()):
             for j, col in enumerate(df.columns):
                 val = row[col]
-                if col in ('objects', 'true_objects') and isinstance(val, str) and len(val) > 100:
+                if col in ('objects', 'true_objects', 'preset_json', 'morphology_key') and isinstance(val, str) and len(val) > 100:
                     val = val[:100] + '...'
                 item = QTableWidgetItem(str(val))
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.table.setItem(i, j, item)
 
         self.table.resizeColumnsToContents()
+        for col in ('preset_json', 'morphology_key'):
+            if col in df.columns:
+                self.table.setColumnHidden(df.columns.get_loc(col), True)
 
     def save_dataset(self):
         if self.df_full is None or self.df_full.empty:
@@ -676,17 +584,10 @@ class ModelResearchApp(QMainWindow):
             QMessageBox.warning(self, "Нет данных", "Сначала загрузите датасет.")
             return
 
-        required = ['method', 'params', 'invert', 'close_factor', 'open_factor']
+        required = ['method', 'params', 'invert', 'close_px', 'open_px']
         missing = [c for c in required if c not in self.df_full.columns]
         if missing:
             QMessageBox.critical(self, "Отсутствуют колонки", f"Отсутствуют необходимые колонки: {missing}")
-            return
-
-        if 'cluster' not in self.df_full.columns:
-            QMessageBox.critical(self, "Ошибка", "Колонка 'cluster' отсутствует. Сначала выполните 'Кластеризация параметров'.")
-            return
-        if 'cluster_co' not in self.df_full.columns:
-            QMessageBox.critical(self, "Ошибка", "Колонка 'cluster_co' отсутствует. Сначала выполните 'Кластеризация open/close'.")
             return
 
         has_mean_f1 = 'mean_f1' in self.df_full.columns
@@ -697,7 +598,7 @@ class ModelResearchApp(QMainWindow):
             QMessageBox.critical(self, "Нет данных", "Нет ни объектов, ни mean_f1. Невозможно выполнить анализ.")
             return
 
-        self.log_msg("Запуск анализа модели (для каждого метода, с использованием кластеров)...")
+        self.log_msg("Запуск анализа полных пресетов для каждого метода...")
         self.btn_analyze.setEnabled(False)
 
         result_dir = os.path.join(self.project_root, "result")
@@ -733,9 +634,6 @@ class ModelResearchApp(QMainWindow):
     def run_global_top5(self):
         if self.df_full is None or self.df_full.empty:
             QMessageBox.warning(self, "Нет данных", "Сначала загрузите датасет.")
-            return
-        if 'cluster' not in self.df_full.columns or 'cluster_co' not in self.df_full.columns:
-            QMessageBox.critical(self, "Ошибка", "Колонки 'cluster' и/или 'cluster_co' отсутствуют.")
             return
         if 'actual_f1' not in self.df_full.columns and 'mean_f1' not in self.df_full.columns:
             QMessageBox.warning(self, "Нет метрики", "Нет колонок actual_f1 или mean_f1.")
@@ -781,87 +679,29 @@ class ModelResearchApp(QMainWindow):
             QMessageBox.warning(self, "Нет данных", "Нет данных для добавления в пресеты.")
             return
         preset_mgr = ThresholdPresetManager(main_window=None)
-        if any(float(row[key]) != 0 for _, row in top5.iterrows() for key in ('close_factor', 'open_factor')):
-            QMessageBox.warning(self, "Нужны пиксельные настройки",
-                "Отчёт содержит относительную морфологию. Задайте размеры ядер в пикселях "
-                "на вкладке методов и сохраните новый пресет. Перевод отчётов автоподбора — отдельный этап.")
-            return
         added = []
         for _, row in top5.iterrows():
             method = row['method']
             params_str = row['params']
             invert = row['invert']
-            close = row['close_factor']
-            open_f = row['open_factor']
+            close = row['close_px']
+            open_f = row['open_px']
             base_name = f"{method} {params_str} inv={invert} c={close} o={open_f}"
             name = base_name
             counter = 1
             while name in preset_mgr.presets:
                 name = f"{base_name} ({counter})"
                 counter += 1
-            preset_params = self._extract_preset_params(method, params_str)
-            preset_dict = make_preset('threshold', method=method, params=preset_params,
-                                      invert=bool(invert), annotation_mode='segment')
+            try:
+                preset_dict = preset_from_row(row)
+            except (ValueError, KeyError, TypeError) as exc:
+                QMessageBox.warning(self, "Пресет отчёта", str(exc))
+                return
             if preset_mgr.add_preset_dict(name, preset_dict):
                 added.append(name)
         if added:
             self.log_msg(f"Добавлены пресеты: {', '.join(added)}")
             QMessageBox.information(self, "Успех", f"Добавлено {len(added)} пресетов.")
-
-    def _extract_preset_params(self, method, params_str):
-        if method == "Simple Threshold":
-            try:
-                thresh = int(params_str.split('=')[1])
-            except:
-                thresh = 127
-            return {"threshold": thresh}
-        elif method in ["Adaptive Mean", "Adaptive Gauss"]:
-            try:
-                parts = params_str.split(',')
-                ws = int(parts[0].split('=')[1])
-                c = int(parts[1].split('=')[1])
-            except:
-                ws, c = 25, 3
-            return {"window": ws, "c": c}
-        elif method == "Niblack":
-            try:
-                parts = params_str.split(',')
-                ws = int(parts[0].split('=')[1])
-                k = float(parts[1].split('=')[1])
-            except:
-                ws, k = 25, 0.2
-            return {"window": ws, "k": k}
-        elif method == "Sauvola":
-            try:
-                parts = params_str.split(',')
-                ws = int(parts[0].split('=')[1])
-                k = float(parts[1].split('=')[1])
-                r = int(parts[2].split('=')[1]) if len(parts) > 2 else 128
-            except:
-                ws, k, r = 25, 0.2, 128
-            return {"window": ws, "k": k, "r": r}
-        elif method == "ISODATA":
-            try:
-                init = int(params_str.split('=')[1])
-            except:
-                init = 128
-            return {"init": init}
-        elif method == "Background Symmetry":
-            try:
-                excess = float(params_str.split('=')[1])
-            except:
-                excess = 0.2
-            return {"excess": excess}
-        elif method == "Row Adaptive":
-            try:
-                parts = params_str.split(',')
-                ws = int(parts[0].split('=')[1])
-                k = float(parts[1].split('=')[1])
-            except:
-                ws, k = 50, 0.5
-            return {"window": ws, "k": k}
-        else:
-            return {}
 
     def _update_buttons_state(self):
         """Обновляет доступность кнопок в зависимости от типа загруженных данных."""

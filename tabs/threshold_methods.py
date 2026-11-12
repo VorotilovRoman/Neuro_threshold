@@ -16,7 +16,6 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
-import json
 import os
 import sys
 
@@ -24,7 +23,6 @@ import cv2
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
-    QMessageBox,
 )
 
 from path_setup import get_project_root
@@ -38,8 +36,10 @@ from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import ThresholdPresetManager
 from ui_tabs.threshold_methods_ui import setup_threshold_ui
-from utils_auto_research.threshold_auto_research import AutoResearch
-from utils_auto_research.threshold_auto_settings_dialog import AutoSettingsDialog
+from ui.autoreseach_ui.controls import SearchController
+from utils_new.autoreseach_utils.search_space import default_settings, combination_count
+from utils_new.json_store import read_json_object, write_json_atomic
+from ui.autoreseach_ui.settings_dialog import AutoSettingsDialog
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_new.threshold_processing import apply_threshold_method
 
@@ -74,10 +74,10 @@ class ThresholdWindow(QMainWindow):
         auto_settings_dir = os.path.join(_root, "settings", "auto_settings")
         os.makedirs(auto_settings_dir, exist_ok=True)
         self.settings_file = os.path.join(auto_settings_dir, "auto_settings.json")
-        self.auto_settings = None
+        self.auto_settings = default_settings()
         self.load_auto_settings()
 
-        self.auto_enable_checkbox.setChecked(False)
+        self.auto_search = SearchController(self)
         self.configure_auto_button.clicked.connect(self.open_auto_settings)
         self.auto_button.clicked.connect(self.run_auto_optimization)
 
@@ -126,27 +126,24 @@ class ThresholdWindow(QMainWindow):
 
     # ---------- Загрузка/сохранение настроек автоподбора ----------
     def load_auto_settings(self):
-        if not os.path.exists(self.settings_file):
-            self.log("Файл настроек автоподбора не найден, будут использованы настройки по умолчанию.")
-            return
         try:
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                self.auto_settings = json.load(f)
-            self.log(f"Настройки автоподбора загружены из {self.settings_file}")
-        except Exception as e:
-            self.log(f"Ошибка загрузки настроек автоподбора: {e}")
+            value = read_json_object(self.settings_file)
+            combination_count(value)
+            self.auto_settings = value
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            self.log(f"Настройки автоподбора отклонены: {exc}")
 
     def save_auto_settings(self):
-        if self.auto_settings is None:
-            return
         try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(self.auto_settings, f, indent=4, ensure_ascii=False)
-            self.log(f"Настройки автоподбора сохранены в {self.settings_file}")
-        except Exception as e:
-            self.log(f"Ошибка сохранения настроек автоподбора: {e}")
+            combination_count(self.auto_settings)
+            write_json_atomic(self.settings_file, self.auto_settings)
+        except Exception as exc:
+            self.log(f"Не удалось сохранить настройки автоподбора: {exc}")
 
     def closeEvent(self, event):
+        self.auto_search.close()
         segmentation_controller.close(self)
         self.save_auto_settings()
         event.accept()
@@ -161,18 +158,7 @@ class ThresholdWindow(QMainWindow):
             self.log("Настройки автоподбора не изменены")
 
     def run_auto_optimization(self):
-        if not self.auto_enable_checkbox.isChecked():
-            self.log("Автоподбор не включён. Установите галочку Enable auto research.")
-            QMessageBox.warning(self, "Автоподбор", "Включите автоподбор галочкой Enable auto research.")
-            return
-        if not self.auto_settings:
-            self.log("Нет настроек автоподбора. Нажмите Configure auto research для настройки.")
-            QMessageBox.warning(self, "Автоподбор", "Сначала настройте параметры автоподбора (Configure auto research).")
-            return
-        self.log("Запуск автоподбора параметров...")
-        search_all = self.search_all_checkbox.isChecked()
-        research = AutoResearch(self, search_all)
-        research.run()
+        self.auto_search.start()
 
     # ---------- Гистограмма ----------
     def update_histogram(self, gray_img, threshold=None):

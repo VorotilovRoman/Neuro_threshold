@@ -8,7 +8,6 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -203,22 +202,7 @@ def setup_threshold_ui(parent):
     # ----- Режим отрисовки объектов -----
     controls_layout.addWidget(ResultPanel(parent))
 
-    buttons_layout = QHBoxLayout()
-    parent.auto_button = QPushButton("Запустить автоподбор")
-    buttons_layout.addWidget(parent.auto_button)
-    controls_layout.addLayout(buttons_layout)
-
-    auto_config_layout = QHBoxLayout()
-    parent.auto_enable_checkbox = QCheckBox("Enable auto research")
-    parent.configure_auto_button = QPushButton("Configure auto research")
-    for control in (parent.auto_button, parent.auto_enable_checkbox, parent.configure_auto_button):
-        control.setEnabled(False)
-        control.setToolTip("Автоподбор будет переведён на пиксельную морфологию отдельным последним этапом.")
-    auto_config_layout.addWidget(parent.auto_enable_checkbox)
-    auto_config_layout.addWidget(parent.configure_auto_button)
-    controls_layout.addLayout(auto_config_layout)
-
-    parent.search_all_checkbox = QCheckBox("Search all images")
-    controls_layout.addWidget(parent.search_all_checkbox)
+    from ui.autoreseach_ui.controls import AutoResearchPanel
+    controls_layout.addWidget(AutoResearchPanel(parent))
 
     finish_layout(parent)

@@ -16,7 +16,7 @@ _EXPORTS = {
     'setup_gradient_ui': ('ui_tabs.gradient_methods_ui', 'setup_gradient_ui'),
     'setup_interactive_ui': ('ui_tabs.interactive_methods_ui', 'setup_interactive_ui'),
     'setup_layout_dataset_ui': ('ui_tabs.layout_dataset_ui', 'setup_layout_dataset_ui'),
-    'setup_model_research_ui': ('ui_tabs.model_research_ui', 'setup_model_research_ui'),
+    'setup_model_research_ui': ('ui.autoreseach_ui.model_research_ui', 'setup_model_research_ui'),
     'setup_preparing_dataset_yaml_ui': ('ui_tabs.preparing_dataset_yaml_ui', 'setup_preparing_dataset_yaml_ui'),
     'setup_sahi_slicer_ui': ('ui_tabs.slice_dataset_sahi_ui', 'setup_sahi_slicer_ui'),
     'setup_threshold_ui': ('ui_tabs.threshold_methods_ui', 'setup_threshold_ui'),
