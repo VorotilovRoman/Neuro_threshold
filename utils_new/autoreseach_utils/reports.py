@@ -3,14 +3,14 @@
 import json
 from pathlib import Path
 import pandas as pd
-from utils_new.segmentation.presets import validate_preset
-from .threshold_search import metric_boxes
+from .search_space import validate_search_preset, method_params
+from .search import metric_boxes
 
 
 def preset_from_row(row):
     value = row["preset_json"]
     preset = json.loads(value) if isinstance(value, str) else value
-    validate_preset(preset, "threshold")
+    validate_search_preset(preset)
     return preset
 
 
@@ -18,13 +18,16 @@ def read_report(path, *, allow_partial=False, log=lambda message: None):
     with Path(path).open(encoding="utf-8") as stream:
         header = json.loads(next(stream))
         records = [json.loads(line) for line in stream if line.strip()]
-    if header.get("schema_version") != 1 or header.get("kind") != "threshold_search":
+    if header.get("schema_version") != 1 or header.get("kind") not in (
+        "threshold_search",
+        "gradient_search",
+    ):
         raise ValueError("Неподдерживаемый формат автоотчёта.")
     footer = records[-1] if records else {}
     if footer.get("record") != "footer":
         raise ValueError("Отчёт не завершён корректно.")
     if not footer["complete"] and not allow_partial:
-        raise ValueError("Неполный отчёт: используйте готовый *_full_report.txt.")
+        raise ValueError("Неполный отчёт: используйте готовый отчёт.")
     results = [r for r in records if r.get("record") == "result"]
     if footer["complete"] and header["planned"] != len(results):
         raise ValueError("Готовый отчёт содержит не все запланированные вычисления.")
@@ -53,7 +56,16 @@ def read_report(path, *, allow_partial=False, log=lambda message: None):
         if record["status"] != "ok":
             continue
         preset = record["preset"]
-        validate_preset(preset, "threshold")
+        validate_search_preset(preset)
+        if header["kind"] != preset["kind"] + "_search":
+            raise ValueError("Тип пресета не совпадает с отчётом.")
+        params = dict(method_params(preset))
+        if preset["kind"] == "gradient":
+            params.update(
+                threshold=preset["threshold"],
+                fill_contours=preset["fill_contours"],
+                min_area_percent=preset["min_area_percent"],
+            )
         ops = {
             op["operation"]: op["kernel_px"]
             for op in preset["morphology"]["operations"]
@@ -62,8 +74,9 @@ def read_report(path, *, allow_partial=False, log=lambda message: None):
             {
                 "image_path": header["image_path"],
                 "report_path": str(path),
+                "kind": preset["kind"],
                 "method": preset["method"],
-                "params": json.dumps(preset["params"], sort_keys=True),
+                "params": json.dumps(params, sort_keys=True),
                 "invert": preset["invert"],
                 **{op + "_px": v for op, v in ops.items()},
                 "kernel_shape": preset["morphology"]["shape"],

@@ -183,7 +183,7 @@ def add_meanap_metrics(df, iou_thresholds=None):
     df["avg_iou_tp"] = avg_iou_list
 
     df.drop(["objects_parsed", "true_objects_parsed"], axis=1, inplace=True)
-    msg = f"Добавлены метрики meanAP (по порогам {iou_thresholds[0]}-{iou_thresholds[-1]}). Средний mean_f1 = {df['mean_f1'].mean():.4f}"
+    msg = f"Добавлены метрики mean F1 по IoU (по порогам {iou_thresholds[0]}-{iou_thresholds[-1]}). Средний mean_f1 = {df['mean_f1'].mean():.4f}"
     return df, msg
 
 
@@ -296,11 +296,11 @@ def filter_invalid_params(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
 
     def has_valid_params(row):
         from .reports import preset_from_row
-        from .search_space import validate_params
+        from .search_space import validate_search_preset
 
         try:
             preset = preset_from_row(row)
-            validate_params(preset["method"], preset["params"])
+            validate_search_preset(preset)
             return True
         except (ValueError, TypeError, KeyError):
             return False
@@ -511,8 +511,10 @@ def add_cluster_labels(
     df = df.copy()
     df["cluster"] = -1
     cluster_log = []
-    grouped = df.groupby("method")
-    for method, group in grouped:
+    grouped = df.groupby(["kind", "method"]) if "kind" in df else df.groupby("method")
+    for key, group in grouped:
+        method = key[1] if isinstance(key, tuple) else key
+        group_name = "_".join(key) if isinstance(key, tuple) else key
         print(f"Обработка метода: {method}, строк: {len(group)}")
         param_list = []
         valid_indices = []
@@ -578,7 +580,7 @@ def add_cluster_labels(
         plt.ylabel("Component 2")
         plt.tight_layout()
         plot_path = os.path.join(
-            clusters_dir, f"clusters_{method.replace(' ', '_')}.png"
+            clusters_dir, f"clusters_{group_name.replace(' ', '_')}.png"
         )
         plt.savefig(plot_path)
         plt.close()
@@ -621,12 +623,14 @@ def save_unique_params(
         output_dir = "."
     params_dir = os.path.join(output_dir, "unique_params")
     os.makedirs(params_dir, exist_ok=True)
-    grouped = df.groupby("method")
+    grouped = df.groupby(["kind", "method"]) if "kind" in df else df.groupby("method")
     saved_files = []
-    for method, group in grouped:
+    for key, group in grouped:
+        method = key[1] if isinstance(key, tuple) else key
+        group_name = "_".join(key) if isinstance(key, tuple) else key
         unique_params = group["params"].dropna().unique()
         file_path = os.path.join(
-            params_dir, f"{method.replace(' ', '_')}_unique_params.txt"
+            params_dir, f"{group_name.replace(' ', '_')}_unique_params.txt"
         )
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(f"Уникальные параметры для метода: {method}\n")
@@ -657,7 +661,9 @@ def optimize_invert(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     before = len(df)
     rows_to_keep = []
 
-    for method, group in df.groupby("method"):
+    for _, group in (
+        df.groupby(["kind", "method"]) if "kind" in df else df.groupby("method")
+    ):
         invert_values = group["invert"].unique()
         if len(invert_values) == 1:
             rows_to_keep.append(group)
@@ -703,8 +709,8 @@ def cluster_open_close(
     df = df.copy()
     df["cluster_co"] = -1  # временное значение
 
-    grouped = df.groupby(["method", "cluster"])
-    for (method, cl), group in grouped:
+    grouped = df.groupby((["kind"] if "kind" in df else []) + ["method", "cluster"])
+    for _, group in grouped:
         coords = group[
             [c for c in ("close_px", "open_px", "erode_px", "dilate_px") if c in group]
         ].values

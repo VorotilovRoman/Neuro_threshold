@@ -1,7 +1,4 @@
 """Common-service migration contracts; unique auto research is explicitly frozen."""
-import ast
-import hashlib
-import json
 import os
 import subprocess
 import sys
@@ -22,16 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SegmentationCommonTests(unittest.TestCase):
-    def test_auto_research_sources_and_special_interfaces_unchanged(self):
-        frozen = json.loads((ROOT/'tests/fixtures/segmentation_auto_freeze.json').read_text())
-        for name, digest in frozen['files'].items():
-            self.assertEqual(hashlib.sha256((ROOT/name).read_bytes()).hexdigest(), digest, name)
-        for name, methods in frozen['methods'].items():
-            nodes = {n.name:n for n in ast.walk(ast.parse((ROOT/name).read_text()))
-                     if isinstance(n, ast.FunctionDef)}
-            for method, digest in methods.items():
-                self.assertEqual(hashlib.sha256(ast.dump(nodes[method], include_attributes=False).encode()).hexdigest(),
-                                 digest, name+':'+method)
+    def test_autoresearch_uses_new_owners_without_legacy_sources(self):
+        self.assertFalse((ROOT/'utils_auto_research/gradient_auto_research.py').exists())
+        self.assertFalse((ROOT/'utils_auto_research/gradient_auto_settings_dialog.py').exists())
+        for name in ('threshold','gradient'):
+            source=(ROOT/f'tabs/{name}_methods.py').read_text()
+            self.assertNotIn('utils_auto_research',source)
+            self.assertIn('SearchController(self)',source)
 
     def test_legacy_normalization_and_nonzero_floor_resize(self):
         np.testing.assert_array_equal(image_session.legacy_uint8(np.array([[0.,2.,5.,10.]],np.float32)),

@@ -37,7 +37,7 @@ from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import ThresholdPresetManager
 from ui_tabs.threshold_methods_ui import setup_threshold_ui
 from ui.autoreseach_ui.controls import SearchController
-from utils_new.autoreseach_utils.search_space import default_settings, combination_count
+from utils_new.autoreseach_utils.search_space import default_settings, combination_count, search_kind
 from utils_new.json_store import read_json_object, write_json_atomic
 from ui.autoreseach_ui.settings_dialog import AutoSettingsDialog
 from utils_new.segmentation.postprocessing import extract_objects
@@ -128,6 +128,7 @@ class ThresholdWindow(QMainWindow):
     def load_auto_settings(self):
         try:
             value = read_json_object(self.settings_file)
+            if search_kind(value)!="threshold":raise ValueError("Нужны настройки порогового поиска.")
             combination_count(value)
             self.auto_settings = value
         except FileNotFoundError:

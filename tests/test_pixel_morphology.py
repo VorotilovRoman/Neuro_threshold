@@ -214,9 +214,7 @@ with tempfile.TemporaryDirectory() as directory:
         # 13 px stays 13 px after a frame-size change, not a percentage of the frame.
         larger=Path(directory)/'larger.png';cv2.imwrite(str(larger),np.zeros((180,360,3),np.uint8))
         owner._load_images([str(larger)]);assert panel.get_settings()==state
-        if key=='gradient':
-            assert not owner.auto_button.isEnabled() and owner.auto_button.toolTip()
-        if key=='threshold':
+        if key in ('threshold','gradient'):
             assert owner.auto_button.isEnabled() and owner.configure_auto_button.isEnabled()
         cache=getattr(owner,'_lazy_cache',None)
         if cache:cache.shutdown()

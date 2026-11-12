@@ -124,11 +124,11 @@ def setup_gradient_ui(parent):
 
     # Слайдер минимальной площади (0.0-0.1%, шаг 0.001)
     min_area_layout = QHBoxLayout()
-    min_area_layout.addWidget(QLabel("Min contour area (% of image, 0 = off, 0.0-0.1%):"))
+    min_area_layout.addWidget(QLabel("Min contour area (% of image, 0 = off, 0-100%):"))
     parent.min_area_spinbox = QDoubleSpinBox()
-    parent.min_area_spinbox.setRange(0.0, 0.1)
+    parent.min_area_spinbox.setRange(0.0, 100.0)
     parent.min_area_spinbox.setSingleStep(0.002)
-    parent.min_area_spinbox.setDecimals(3)
+    parent.min_area_spinbox.setDecimals(6)
     parent.min_area_spinbox.setValue(0.0)
     parent.min_area_spinbox.setSuffix("%")
     min_area_layout.addWidget(parent.min_area_spinbox)
@@ -147,7 +147,7 @@ def setup_gradient_ui(parent):
     # Режим отрисовки объектов
     controls_layout.addWidget(ResultPanel(parent))
 
-    from ui.autoreseach_ui.controls import AutoResearchPanel, GRADIENT_UNAVAILABLE
-    controls_layout.addWidget(AutoResearchPanel(parent, available=False, reason=GRADIENT_UNAVAILABLE))
+    from ui.autoreseach_ui.controls import AutoResearchPanel
+    controls_layout.addWidget(AutoResearchPanel(parent))
 
     finish_layout(parent)

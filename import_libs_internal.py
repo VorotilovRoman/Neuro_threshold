@@ -31,8 +31,6 @@ _EXPORTS = {
     'Figure': ('matplotlib.figure', 'Figure'),
     'FigureCanvas': ('matplotlib.backends.backend_qt5agg', 'FigureCanvasQTAgg'),
     'FilterParams': ('utils.dataset_analysis_logic', 'FilterParams'),
-    'GradientAutoResearch': ('utils_auto_research.gradient_auto_research', 'GradientAutoResearch'),
-    'GradientAutoSettingsDialog': ('utils_auto_research.gradient_auto_settings_dialog', 'GradientAutoSettingsDialog'),
     'GradientPresetManager': ('ui.segmentation.preset_bindings', 'GradientPresetManager'),
     'ImageNavigationWidget': ('ui.image_navigation', 'ImageNavigationWidget'),
     'ImageStats': ('utils_new.dataset_validation_new', 'ImageStats'),

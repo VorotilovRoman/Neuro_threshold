@@ -295,6 +295,8 @@ class GradientPresetManager(MethodPresetManager):
     )
 
     def _after_apply(self, state):
+        self.main.canny_label1.setText(str(self.main.canny_thresh1.value()))
+        self.main.canny_label2.setText(str(self.main.canny_thresh2.value()))
         self.main.threshold_label.setText(str(self.main.threshold_slider.value()))
         self.main.on_method_changed(self.main.method_combo.currentIndex())
         self.main.schedule_update()

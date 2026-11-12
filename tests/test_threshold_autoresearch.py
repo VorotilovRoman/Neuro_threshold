@@ -10,7 +10,7 @@ from utils_new.autoreseach_utils.search_space import (
     combination_count,
     iter_presets,
 )
-from utils_new.autoreseach_utils.threshold_search import evaluate, run_search
+from utils_new.autoreseach_utils.search import evaluate, run_search
 from utils_new.autoreseach_utils.reports import (
     read_report,
     parse_reports,
@@ -135,7 +135,7 @@ class SearchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_report(report)
             with patch(
-                "utils_new.autoreseach_utils.threshold_search.evaluate",
+                "utils_new.autoreseach_utils.search.evaluate",
                 side_effect=RuntimeError("compute failed"),
             ):
                 failed = run_search([str(path)], self.settings(), Event())
@@ -157,10 +157,11 @@ class SearchTests(unittest.TestCase):
             result = analyze(df, skip_metrics=True)
             self.assertEqual(len(result), 5)
             import pandas as pd
-            combined = pd.concat([df,df],ignore_index=True)
-            global_top = global_top_diverse(combined,k=10,score_col='mean_f1')
-            self.assertEqual(len(global_top),10)
-            self.assertEqual(global_top.preset_json.nunique(),10)
+
+            combined = pd.concat([df, df], ignore_index=True)
+            global_top = global_top_diverse(combined, k=10, score_col="mean_f1")
+            self.assertEqual(len(global_top), 10)
+            self.assertEqual(global_top.preset_json.nunique(), 10)
             for _, row in result.iterrows():
                 self.assertEqual(
                     preset_from_row(row)["params"], json.loads(row["params"])
@@ -186,17 +187,13 @@ with tempfile.TemporaryDirectory() as directory:
  path=Path(directory)/'frame.png';image=np.full((80,160),230,np.uint8);image[20:60,40:120]=40;cv2.imwrite(str(path),image);path.with_suffix('.txt').write_text('0 .5 .5 .5 .5\\n')
  owner._load_images([str(path)]);owner.draw_combo.setCurrentIndex(1);owner.update_timer.stop();owner.display_current_image();owner.objects_widget.focus_object(0)
  from tabs.gradient_methods import GradientMethodsWindow
- from ui.autoreseach_ui.controls import AutoResearchPanel, GRADIENT_UNAVAILABLE
+ from ui.autoreseach_ui.controls import AutoResearchPanel
  gradient=GradientMethodsWindow();gradient.settings_file=str(Path(directory)/'gradient-settings.json')
  assert type(owner.auto_research_panel) is AutoResearchPanel and type(gradient.auto_research_panel) is AutoResearchPanel
  assert not hasattr(owner,'auto_enable_checkbox') and not hasattr(gradient,'auto_enable_checkbox')
  for attr in ('auto_button','configure_auto_button','search_all_checkbox'):
   assert getattr(owner,attr).text()==getattr(gradient,attr).text()
-  assert getattr(owner,attr).isEnabled() and not getattr(gradient,attr).isEnabled()
-  assert getattr(gradient,attr).toolTip()==GRADIENT_UNAVAILABLE
- assert gradient.auto_research_panel.status_label.text()==GRADIENT_UNAVAILABLE
- with patch.object(QMessageBox,'information') as info:
-  gradient.run_auto_optimization();info.assert_called_once_with(gradient,'Автоподбор',GRADIENT_UNAVAILABLE)
+  assert getattr(owner,attr).isEnabled() and getattr(gradient,attr).isEnabled()
  gradient.close()
  with patch('tabs.threshold_methods.AutoSettingsDialog') as settings_dialog:
   settings_dialog.return_value.exec_.return_value=0

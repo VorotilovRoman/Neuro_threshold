@@ -75,6 +75,8 @@ class ModelResearchWidget(QWidget):
             df = df.sort_values("rank")
         for idx, row in df.iterrows():
             text += f"Ранг: {row.get('rank', idx + 1)}\n"
+            preset = preset_from_row(row)
+            text += f"Вид: {'Пороговые' if preset['kind'] == 'threshold' else 'Градиентные'}\n"
             text += f"Метод: {row['method']}\n"
             text += f"Параметры: {row['params']}\n"
             text += f"Инверсия: {'Да' if row['invert'] else 'Нет'}\n"

@@ -11,16 +11,13 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
-import json
 import os
 import sys
 
 import cv2
-import numpy as np
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
-    QMessageBox,
 )
 
 from path_setup import get_project_root
@@ -34,7 +31,11 @@ from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import GradientPresetManager
 from ui_tabs.gradient_methods_ui import setup_gradient_ui
-from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog
+from ui.autoreseach_ui.settings_dialog import AutoSettingsDialog
+from ui.autoreseach_ui.controls import SearchController
+from utils_new.autoreseach_utils.search_space import default_settings, combination_count, search_kind
+from utils_new.autoreseach_utils.gradient_processing import finalize_gradient_mask
+from utils_new.json_store import read_json_object, write_json_atomic
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.gradient_ops import apply_gradient_method
 
@@ -68,8 +69,9 @@ class GradientMethodsWindow(QMainWindow):
         os.makedirs(auto_settings_dir, exist_ok=True)
         self.settings_file = os.path.join(auto_settings_dir, "auto_settings_gradient.json")
 
-        self.auto_settings = None
+        self.auto_settings = default_settings("gradient")
         self.load_auto_settings()
+        self.auto_search = SearchController(self)
         # Пресеты
         self.preset_manager = GradientPresetManager(self, preset_file="presets_gradient.json")
         self.update_preset_combo()
@@ -118,53 +120,37 @@ class GradientMethodsWindow(QMainWindow):
         segmentation_actions.delete_current_preset(self)
 
     def load_auto_settings(self):
-        if not os.path.exists(self.settings_file):
-            self.auto_settings = None
-            self.log("Файл настроек автоподбора для градиентов не найден, будут использованы настройки по умолчанию.")
-            return
         try:
-            with open(self.settings_file, 'r', encoding='utf-8-sig') as f:
-                content = f.read().strip()
-                if not content:
-                    raise ValueError("Empty file")
-                self.auto_settings = json.loads(content)
-            self.log(f"Настройки автоподбора загружены из {self.settings_file}")
-        except Exception as e:
-            self.log(f"Ошибка загрузки настроек автоподбора: {e}. Будет создан файл с настройками по умолчанию.")
-            self.auto_settings = None
-            self.save_auto_settings()
+            value=read_json_object(self.settings_file)
+            if search_kind(value)!='gradient':raise ValueError('Нужны настройки градиентного поиска.')
+            combination_count(value)
+            self.auto_settings=value
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            self.log(f'Настройки автоподбора отклонены: {exc}')
 
     def save_auto_settings(self):
-        if self.auto_settings is None:
-            from utils_auto_research.gradient_auto_settings_dialog import (
-                GradientAutoSettingsDialog,
-            )
-            self.auto_settings = GradientAutoSettingsDialog._default_settings(None)
         try:
-            os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(self.auto_settings, f, indent=4, ensure_ascii=False)
-            self.log(f"Настройки автоподбора сохранены в {self.settings_file}")
-        except Exception as e:
-            self.log(f"Ошибка сохранения настроек автоподбора: {e}")
+            combination_count(self.auto_settings)
+            write_json_atomic(self.settings_file,self.auto_settings)
+        except Exception as exc:
+            self.log(f'Не удалось сохранить настройки автоподбора: {exc}')
 
-    def closeEvent(self, event):
+    def closeEvent(self,event):
+        self.auto_search.close()
         segmentation_controller.close(self)
         self.save_auto_settings()
         event.accept()
 
     def open_auto_settings(self):
-        dlg = GradientAutoSettingsDialog(self, self.auto_settings)
-        if dlg.exec_():
-            self.auto_settings = dlg.get_settings()
+        dialog=AutoSettingsDialog(self,self.auto_settings)
+        if dialog.exec_():
+            self.auto_settings=dialog.get_settings()
             self.save_auto_settings()
-            self.log("Настройки автоподбора для градиентов обновлены и сохранены")
-        else:
-            self.log("Настройки автоподбора не изменены")
 
     def run_auto_optimization(self):
-        from ui.autoreseach_ui.controls import GRADIENT_UNAVAILABLE
-        QMessageBox.information(self, "Автоподбор", GRADIENT_UNAVAILABLE)
+        self.auto_search.start()
 
     # ---------- Гистограмма ----------
     def update_histogram(self, gray_img, threshold=None):
@@ -212,19 +198,7 @@ class GradientMethodsWindow(QMainWindow):
         return binary, {'gradient_view': gradient, 'binary_view': binary}
 
     def _finalize_mask(self, processed, frame):
-        min_area = self.min_area_spinbox.value() / 100.0 * frame.gray.size
-        if min_area > 0:
-            contours, _ = cv2.findContours(processed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            for contour in contours:
-                if cv2.contourArea(contour) < min_area:
-                    cv2.drawContours(processed, [contour], -1, 0, thickness=cv2.FILLED)
-        if not self.fill_contours_checkbox.isChecked():
-            return processed
-        contours, _ = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        filled = np.zeros_like(processed)
-        for contour in contours:
-            cv2.drawContours(filled, [contour], -1, 255, thickness=cv2.FILLED)
-        return filled
+        return finalize_gradient_mask(processed,self.min_area_spinbox.value(),self.fill_contours_checkbox.isChecked())
 
     def display_current_image(self):
         segmentation_presentation.display(self)

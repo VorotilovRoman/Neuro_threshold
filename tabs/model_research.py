@@ -45,7 +45,7 @@ from utils_new.autoreseach_utils.prepare import (
     sample_rows,
     save_unique_params,
 )
-from ui.segmentation.preset_bindings import ThresholdPresetManager
+from ui.segmentation.preset_bindings import ThresholdPresetManager, GradientPresetManager
 
 
 class ModelResearchApp(QMainWindow):
@@ -385,9 +385,9 @@ class ModelResearchApp(QMainWindow):
         self.current_folder = folder
         self.log_msg(f"Selected folder: {folder}")
 
-        report_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith("_full_report.txt")]
+        report_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(("_full_report.txt","_gradient_report.txt"))]
         if not report_files:
-            self.log_msg("No report files (*_full_report.txt) found.")
+            self.log_msg("Нет готовых пороговых или градиентных отчётов.")
             return
 
         self.log_msg(f"Found {len(report_files)} report files.")
@@ -678,27 +678,24 @@ class ModelResearchApp(QMainWindow):
         if top5 is None or top5.empty:
             QMessageBox.warning(self, "Нет данных", "Нет данных для добавления в пресеты.")
             return
-        preset_mgr = ThresholdPresetManager(main_window=None)
-        added = []
-        for _, row in top5.iterrows():
-            method = row['method']
-            params_str = row['params']
-            invert = row['invert']
-            close = row['close_px']
-            open_f = row['open_px']
-            base_name = f"{method} {params_str} inv={invert} c={close} o={open_f}"
-            name = base_name
-            counter = 1
+        try:
+            presets=[preset_from_row(row) for _,row in top5.iterrows()]
+        except (ValueError,KeyError,TypeError) as exc:
+            QMessageBox.warning(self,"Пресет отчёта",str(exc))
+            return
+        managers={}
+        added=[]
+        for preset in presets:
+            kind=preset['kind']
+            if kind not in managers:
+                managers[kind]=(ThresholdPresetManager if kind=='threshold' else GradientPresetManager)(main_window=None)
+            preset_mgr=managers[kind]
+            method=preset['method']
+            base_name=f"{kind}: {method} auto"
+            name=base_name;counter=1
             while name in preset_mgr.presets:
-                name = f"{base_name} ({counter})"
-                counter += 1
-            try:
-                preset_dict = preset_from_row(row)
-            except (ValueError, KeyError, TypeError) as exc:
-                QMessageBox.warning(self, "Пресет отчёта", str(exc))
-                return
-            if preset_mgr.add_preset_dict(name, preset_dict):
-                added.append(name)
+                name=f"{base_name} ({counter})";counter+=1
+            if preset_mgr.add_preset_dict(name,preset):added.append(name)
         if added:
             self.log_msg(f"Добавлены пресеты: {', '.join(added)}")
             QMessageBox.information(self, "Успех", f"Добавлено {len(added)} пресетов.")

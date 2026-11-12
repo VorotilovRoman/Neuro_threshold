@@ -10,7 +10,12 @@ from utils_new.autoreseach_utils.prepare import add_meanap_metrics
 
 def distance_between_presets(p1, p2):
     """Расстояние между двумя пресетами (Series). Учитывает метод, cluster, cluster_co."""
-    method_dist = 0 if p1["method"] == p2["method"] else 1.0
+    method_dist = (
+        0
+        if (p1.get("kind", "threshold"), p1["method"])
+        == (p2.get("kind", "threshold"), p2["method"])
+        else 1.0
+    )
     cluster_dist = 0 if p1["cluster"] == p2["cluster"] else 1.0
     cluster_co_dist = 0 if p1["cluster_co"] == p2["cluster_co"] else 1.0
     total = 0.4 * method_dist + 0.3 * cluster_dist + 0.3 * cluster_co_dist
@@ -66,6 +71,8 @@ def analyze(
         df, _ = add_meanap_metrics(df, iou_thresholds=iou_thresholds)
     for _, row in df.iterrows():
         preset_from_row(row)
+    df = df.copy()
+    df["kind"] = [preset_from_row(row)["kind"] for _, row in df.iterrows()]
     # Mean performance across images for exactly the same preset.
     representatives = df.drop_duplicates("preset_json").set_index("preset_json").copy()
     scores = df.groupby("preset_json")["mean_f1"].mean()
@@ -92,6 +99,7 @@ def analyze(
                     dilate_px=row["dilate_px"],
                     invert=int(row["invert"]),
                     method=row["method"],
+                    kind=row["kind"],
                     shape=json.loads(row["preset_json"])["morphology"]["shape"],
                     order=",".join(
                         op["operation"]
@@ -118,7 +126,9 @@ def analyze(
         representatives["pred_f1"] = predicted
     representatives = representatives.reset_index()
     groups = (
-        representatives.groupby("method") if per_method else [("all", representatives)]
+        representatives.groupby(["kind", "method"])
+        if per_method
+        else [("all", representatives)]
     )
     results = []
     for _, group in groups:

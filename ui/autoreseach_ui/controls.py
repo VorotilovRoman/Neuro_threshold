@@ -3,11 +3,11 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from threading import Event
+from time import monotonic
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
-    QLabel,
     QMessageBox,
     QProgressDialog,
     QPushButton,
@@ -15,14 +15,11 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 from utils_new.autoreseach_utils.search_space import combination_count
-from utils_new.autoreseach_utils.threshold_search import run_search
-
-
-GRADIENT_UNAVAILABLE = "Градиентный автоподбор пока недоступен: его перенос на новую схему ещё не завершён."
+from utils_new.autoreseach_utils.search import run_search
 
 
 class AutoResearchPanel(QWidget):
-    def __init__(self, owner, *, available=True, reason=""):
+    def __init__(self, owner):
         super().__init__()
         owner.auto_research_panel = self
         layout = QVBoxLayout(self)
@@ -34,17 +31,6 @@ class AutoResearchPanel(QWidget):
         layout.addLayout(row)
         owner.search_all_checkbox = QCheckBox("Все загруженные изображения")
         layout.addWidget(owner.search_all_checkbox)
-        self.status_label = QLabel(reason)
-        self.status_label.setWordWrap(True)
-        self.status_label.setVisible(not available)
-        layout.addWidget(self.status_label)
-        for control in (
-            owner.auto_button,
-            owner.configure_auto_button,
-            owner.search_all_checkbox,
-        ):
-            control.setEnabled(available)
-            control.setToolTip(reason if not available else "")
 
 
 class SearchController(QObject):
@@ -59,7 +45,7 @@ class SearchController(QObject):
         self.closed = False
         self.cancel = Event()
         self.executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="threshold-search"
+            max_workers=1, thread_name_prefix="segmentation-search"
         )
         self.dialog = None
         self.progress.connect(self._progress, Qt.QueuedConnection)
@@ -108,8 +94,13 @@ class SearchController(QObject):
         resize = owner.nav_widget.is_resize_enabled()
         cancel = self.cancel
 
+        last_progress = 0.0
+
         def report(done, total, name):
-            if not self.closed:
+            nonlocal last_progress
+            now = monotonic()
+            if not self.closed and (done == total or now - last_progress >= 0.05):
+                last_progress = now
                 try:
                     self.progress.emit(done, total, name)
                 except RuntimeError:

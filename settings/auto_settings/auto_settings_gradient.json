@@ -1,80 +1,145 @@
 {
-    "Sobel": {
-        "enabled": true,
-        "ksize_start": 3,
-        "ksize_end": 5,
-        "ksize_step": 2,
-        "scale_start": 1,
-        "scale_end": 2,
-        "scale_step": 1
+    "schema_version": 1,
+    "kind": "gradient",
+    "methods": {
+        "Sobel": {
+            "enabled": true,
+            "ranges": {
+                "ksize": [
+                    3,
+                    7,
+                    2
+                ],
+                "scale": [
+                    1,
+                    3,
+                    1
+                ]
+            }
+        },
+        "Scharr": {
+            "enabled": false,
+            "ranges": {
+                "scale": [
+                    1,
+                    3,
+                    1
+                ]
+            }
+        },
+        "Laplacian": {
+            "enabled": false,
+            "ranges": {
+                "ksize": [
+                    3,
+                    7,
+                    2
+                ],
+                "scale": [
+                    1,
+                    3,
+                    1
+                ]
+            }
+        },
+        "Canny": {
+            "enabled": false,
+            "ranges": {
+                "threshold1": [
+                    50,
+                    50,
+                    1
+                ],
+                "threshold2": [
+                    150,
+                    150,
+                    1
+                ],
+                "aperture": [
+                    3,
+                    7,
+                    2
+                ]
+            }
+        },
+        "Prewitt": {
+            "enabled": false,
+            "ranges": {}
+        },
+        "Roberts": {
+            "enabled": false,
+            "ranges": {}
+        },
+        "Kirsch": {
+            "enabled": false,
+            "ranges": {}
+        }
     },
-    "Scharr": {
-        "enabled": false,
-        "scale_start": 1,
-        "scale_end": 3,
-        "scale_step": 1
-    },
-    "Laplacian": {
-        "enabled": false,
-        "ksize_start": 3,
-        "ksize_end": 7,
-        "ksize_step": 2,
-        "scale_start": 1,
-        "scale_end": 3,
-        "scale_step": 1
-    },
-    "Canny": {
-        "enabled": true,
-        "thresh1_start": 30,
-        "thresh1_end": 150,
-        "thresh1_step": 20,
-        "thresh2_start": 100,
-        "thresh2_end": 250,
-        "thresh2_step": 30,
-        "aperture_start": 3,
-        "aperture_end": 5,
-        "aperture_step": 2
-    },
-    "Prewitt": {
-        "enabled": false
-    },
-    "Roberts": {
-        "enabled": false
-    },
-    "Kirsch": {
-        "enabled": true
-    },
-    "Binarization": {
-        "enabled": false,
-        "threshold_start": 0,
-        "threshold_end": 255,
-        "threshold_step": 10
-    },
-    "ObjectFiltering": {
-        "enabled": true,
-        "fill_contours": [
-            false
+    "morphology": {
+        "version": 1,
+        "units": "px",
+        "shape": "Rectangle",
+        "operations": [
+            {
+                "operation": "close",
+                "kernel_px": 0
+            },
+            {
+                "operation": "open",
+                "kernel_px": 0
+            },
+            {
+                "operation": "erode",
+                "kernel_px": 0
+            },
+            {
+                "operation": "dilate",
+                "kernel_px": 0
+            }
         ],
-        "min_area_percent_start": 0.0,
-        "min_area_percent_end": 0.1,
-        "min_area_percent_step": 0.01
+        "contour_only": false,
+        "contour_width_px": null
     },
-    "Morphology": {
-        "enabled": true,
-        "close_enabled": false,
-        "close_start": 0.0,
-        "close_end": 0.05,
-        "close_step": 0.01,
-        "open_enabled": false,
-        "open_start": 0.0,
-        "open_end": 0.05,
-        "open_step": 0.01,
-        "kernel_shapes": [
-            "Rectangle"
+    "kernel_ranges": {
+        "close": [
+            0,
+            0,
+            1
+        ],
+        "open": [
+            0,
+            0,
+            1
+        ],
+        "erode": [
+            0,
+            0,
+            1
+        ],
+        "dilate": [
+            0,
+            0,
+            1
         ]
     },
-    "Invert": [
-        false,
+    "inversions": [
+        false
+    ],
+    "annotation_mode": "detect",
+    "use_hull": false,
+    "post_ranges": {
+        "threshold": [
+            127,
+            127,
+            1
+        ],
+        "min_area_percent": [
+            0,
+            0,
+            1
+        ]
+    },
+    "fill_contours": [
         true
     ]
 }

@@ -13,20 +13,59 @@ from utils_new.morphology import apply_morphology
 from utils_new.segmentation.image_session import load_one_image_item
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_new.threshold_processing import apply_threshold_method
-from .search_space import combination_count, iter_presets
+from .search_space import combination_count, iter_presets, search_kind, method_params
+from .gradient_processing import gradient_binary, finalize_gradient_mask
 
 
-def evaluate(gray, image, preset):
-    mask, _ = apply_threshold_method(gray, preset["method"], preset["params"])
-    mask = cv2.bitwise_not(mask)
+def evaluate(gray, image, preset, *, raw_mask=None):
+    if raw_mask is not None:
+        mask = raw_mask
+    elif preset["kind"] == "threshold":
+        mask, _ = apply_threshold_method(gray, preset["method"], preset["params"])
+        mask = cv2.bitwise_not(mask)
+    else:
+        _, mask = gradient_binary(
+            gray, preset["method"], method_params(preset), preset["threshold"]
+        )
     morphology = preset["morphology"]
     mask = apply_morphology(mask, morphology["operations"], shape=morphology["shape"])
+    if preset["kind"] == "gradient":
+        mask = finalize_gradient_mask(
+            mask, preset["min_area_percent"], preset["fill_contours"]
+        )
     if preset["invert"]:
         mask = cv2.bitwise_not(mask)
     objects = extract_objects(
         image, mask, preset["annotation_mode"], preset["use_hull"]
     )[1]
     return mask, objects
+
+
+class RawMaskCache:
+    """One base array per current method/parameters, not a mask per combination."""
+
+    def __init__(self, gray):
+        self.gray = gray
+        self.key = None
+        self.base = None
+
+    def get(self, preset):
+        params = method_params(preset)
+        key = (preset["kind"], preset["method"], tuple(sorted(params.items())))
+        if key != self.key:
+            if preset["kind"] == "threshold":
+                binary, _ = apply_threshold_method(self.gray, preset["method"], params)
+                base = cv2.bitwise_not(binary)
+            else:
+                base, _ = gradient_binary(
+                    self.gray, preset["method"], params, preset["threshold"]
+                )
+            self.key, self.base = key, base
+        if preset["kind"] == "gradient":
+            return cv2.threshold(
+                self.base, preset["threshold"], 255, cv2.THRESH_BINARY
+            )[1]
+        return self.base
 
 
 def metric_boxes(annotations, size):
@@ -55,13 +94,12 @@ def run_search(
     resize_enabled=True,
     max_side=1024,
 ):
+    kind = search_kind(settings)
+    suffix = "_full_report.txt" if kind == "threshold" else "_gradient_report.txt"
     count = combination_count(settings)
     if not count:
         raise ValueError("Нет включённых методов.")
-    targets = [
-        str(Path(p).with_name(Path(p).stem + "_full_report.txt").resolve())
-        for p in paths
-    ]
+    targets = [str(Path(p).with_name(Path(p).stem + suffix).resolve()) for p in paths]
     if len(set(map(os.path.normcase, targets))) != len(targets):
         raise ValueError(
             "У изображений совпадают пути отчётов. Используйте разные имена снимков."
@@ -73,7 +111,7 @@ def run_search(
     for path in paths:
         if cancel.is_set():
             break
-        destination = Path(path).with_name(Path(path).stem + "_full_report.txt")
+        destination = Path(path).with_name(Path(path).stem + suffix)
         partial = destination.with_name(destination.stem + ".partial.txt")
         temporary = None
         try:
@@ -87,6 +125,7 @@ def run_search(
                 raise ValueError("Не удалось прочитать изображение.")
             image, gray = record["image"], record["gray"]
             h, w = gray.shape
+            raw_cache = RawMaskCache(gray)
             with tempfile.NamedTemporaryFile(
                 "w",
                 encoding="utf-8",
@@ -105,7 +144,7 @@ def run_search(
                     {
                         "record": "header",
                         "schema_version": 1,
-                        "kind": "threshold_search",
+                        "kind": kind + "_search",
                         "image_path": str(path),
                         "source_size": record["source_size"],
                         "working_size": [w, h],
@@ -117,7 +156,9 @@ def run_search(
                     if cancel.is_set():
                         break
                     try:
-                        _, annotations = evaluate(gray, image, preset)
+                        _, annotations = evaluate(
+                            gray, image, preset, raw_mask=raw_cache.get(preset)
+                        )
                         write(
                             {
                                 "record": "result",
