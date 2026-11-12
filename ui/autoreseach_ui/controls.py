@@ -7,6 +7,7 @@ from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
+    QLabel,
     QMessageBox,
     QProgressDialog,
     QPushButton,
@@ -17,9 +18,13 @@ from utils_new.autoreseach_utils.search_space import combination_count
 from utils_new.autoreseach_utils.threshold_search import run_search
 
 
+GRADIENT_UNAVAILABLE = "Градиентный автоподбор пока недоступен: его перенос на новую схему ещё не завершён."
+
+
 class AutoResearchPanel(QWidget):
-    def __init__(self, owner):
+    def __init__(self, owner, *, available=True, reason=""):
         super().__init__()
+        owner.auto_research_panel = self
         layout = QVBoxLayout(self)
         row = QHBoxLayout()
         owner.auto_button = QPushButton("Запустить автоподбор")
@@ -29,6 +34,17 @@ class AutoResearchPanel(QWidget):
         layout.addLayout(row)
         owner.search_all_checkbox = QCheckBox("Все загруженные изображения")
         layout.addWidget(owner.search_all_checkbox)
+        self.status_label = QLabel(reason)
+        self.status_label.setWordWrap(True)
+        self.status_label.setVisible(not available)
+        layout.addWidget(self.status_label)
+        for control in (
+            owner.auto_button,
+            owner.configure_auto_button,
+            owner.search_all_checkbox,
+        ):
+            control.setEnabled(available)
+            control.setToolTip(reason if not available else "")
 
 
 class SearchController(QObject):

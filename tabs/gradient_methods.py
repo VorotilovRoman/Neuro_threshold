@@ -34,7 +34,6 @@ from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import GradientPresetManager
 from ui_tabs.gradient_methods_ui import setup_gradient_ui
-from utils_auto_research.gradient_auto_research import GradientAutoResearch
 from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.gradient_ops import apply_gradient_method
@@ -92,7 +91,6 @@ class GradientMethodsWindow(QMainWindow):
 
         # Замена сохранения на универсальное
 
-        self.auto_enable_checkbox.setChecked(False)
         self.configure_auto_button.clicked.connect(self.open_auto_settings)
         self.auto_button.clicked.connect(self.run_auto_optimization)
 
@@ -165,18 +163,8 @@ class GradientMethodsWindow(QMainWindow):
             self.log("Настройки автоподбора не изменены")
 
     def run_auto_optimization(self):
-        if not self.auto_enable_checkbox.isChecked():
-            self.log("Автоподбор не включён. Установите галочку Enable auto research.")
-            QMessageBox.warning(self, "Автоподбор", "Включите автоподбор галочкой Enable auto research.")
-            return
-        if not self.auto_settings:
-            self.log("Нет настроек автоподбора. Нажмите Configure auto research для настройки.")
-            QMessageBox.warning(self, "Автоподбор", "Сначала настройте параметры автоподбора (Configure auto research).")
-            return
-        self.log("Запуск автоподбора параметров для градиентных методов...")
-        search_all = self.search_all_checkbox.isChecked()
-        research = GradientAutoResearch(self, search_all)
-        research.run()
+        from ui.autoreseach_ui.controls import GRADIENT_UNAVAILABLE
+        QMessageBox.information(self, "Автоподбор", GRADIENT_UNAVAILABLE)
 
     # ---------- Гистограмма ----------
     def update_histogram(self, gray_img, threshold=None):

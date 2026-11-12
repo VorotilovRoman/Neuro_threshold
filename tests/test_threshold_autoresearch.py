@@ -185,6 +185,22 @@ app=QApplication([]);owner=ThresholdWindow();owner.show()
 with tempfile.TemporaryDirectory() as directory:
  path=Path(directory)/'frame.png';image=np.full((80,160),230,np.uint8);image[20:60,40:120]=40;cv2.imwrite(str(path),image);path.with_suffix('.txt').write_text('0 .5 .5 .5 .5\\n')
  owner._load_images([str(path)]);owner.draw_combo.setCurrentIndex(1);owner.update_timer.stop();owner.display_current_image();owner.objects_widget.focus_object(0)
+ from tabs.gradient_methods import GradientMethodsWindow
+ from ui.autoreseach_ui.controls import AutoResearchPanel, GRADIENT_UNAVAILABLE
+ gradient=GradientMethodsWindow();gradient.settings_file=str(Path(directory)/'gradient-settings.json')
+ assert type(owner.auto_research_panel) is AutoResearchPanel and type(gradient.auto_research_panel) is AutoResearchPanel
+ assert not hasattr(owner,'auto_enable_checkbox') and not hasattr(gradient,'auto_enable_checkbox')
+ for attr in ('auto_button','configure_auto_button','search_all_checkbox'):
+  assert getattr(owner,attr).text()==getattr(gradient,attr).text()
+  assert getattr(owner,attr).isEnabled() and not getattr(gradient,attr).isEnabled()
+  assert getattr(gradient,attr).toolTip()==GRADIENT_UNAVAILABLE
+ assert gradient.auto_research_panel.status_label.text()==GRADIENT_UNAVAILABLE
+ with patch.object(QMessageBox,'information') as info:
+  gradient.run_auto_optimization();info.assert_called_once_with(gradient,'Автоподбор',GRADIENT_UNAVAILABLE)
+ gradient.close()
+ with patch('tabs.threshold_methods.AutoSettingsDialog') as settings_dialog:
+  settings_dialog.return_value.exec_.return_value=0
+  owner.configure_auto_button.click();settings_dialog.assert_called_once_with(owner,owner.auto_settings)
  owner.settings_file=str(Path(directory)/'settings.json');owner.auto_settings=default_settings();owner.auto_settings['methods']['Simple Threshold']['ranges']['threshold']=[70,90,20]
  dlg=AutoSettingsDialog(owner,owner.auto_settings);assert dlg.get_settings()==owner.auto_settings;dlg.close()
  before=(owner.get_current_threshold_params(),owner.current_index,owner.objects_widget.checked_indices,owner.objects_widget.focused_index,owner.current_base_image.copy())

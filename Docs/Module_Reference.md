@@ -755,6 +755,7 @@
 - [path_setup](#path-setup): `get_project_root`
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
+- [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls): `GRADIENT_UNAVAILABLE`
 - [ui.segmentation.actions](#ui-segmentation-actions): `actions as segmentation_actions`
 - [ui.segmentation.controller](#ui-segmentation-controller): `controller as segmentation_controller`
 - [ui.segmentation.export](#ui-segmentation-export): `export as segmentation_export`
@@ -765,7 +766,6 @@
 - [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings): `GradientPresetManager`
 - [ui.segmentation.results](#ui-segmentation-results): `results as segmentation_results`
 - [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui): `setup_gradient_ui`
-- [utils_auto_research.gradient_auto_research](#utils-auto-research-gradient-auto-research): `GradientAutoResearch`
 - [utils_auto_research.gradient_auto_settings_dialog](#utils-auto-research-gradient-auto-settings-dialog): `GradientAutoSettingsDialog`
 - [utils_new.segmentation.postprocessing](#utils-new-segmentation-postprocessing): `extract_objects`
 - [utils_ops.gradient_ops](#utils-ops-gradient-ops): `apply_gradient_method`
@@ -774,7 +774,7 @@
 
 **Объявления:**
 
-- Класс [`GradientMethodsWindow`](../tabs/gradient_methods.py#L43) (`QMainWindow`)
+- Класс [`GradientMethodsWindow`](../tabs/gradient_methods.py#L42) (`QMainWindow`)
 
 <a id="tabs-interactive-methods"></a>
 
@@ -1469,18 +1469,18 @@
 
 Исходник: [ui/autoreseach_ui/controls.py](../ui/autoreseach_ui/controls.py#L1).
 
-**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui).
+**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tabs.threshold_methods](#tabs-threshold-methods), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui).
 
 **Прямые локальные импорты:**
 - [utils_new.autoreseach_utils.search_space](#utils-new-autoreseach-utils-search-space): `combination_count`
 - [utils_new.autoreseach_utils.threshold_search](#utils-new-autoreseach-utils-threshold-search): `run_search`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QObject`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `concurrent.futures.ThreadPoolExecutor`, `copy.deepcopy`, `threading.Event`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QObject`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `concurrent.futures.ThreadPoolExecutor`, `copy.deepcopy`, `threading.Event`.
 
 **Объявления:**
 
-- Класс [`AutoResearchPanel`](../ui/autoreseach_ui/controls.py#L20) (`QWidget`)
-- Класс [`SearchController`](../ui/autoreseach_ui/controls.py#L34) (`QObject`)
+- Класс [`AutoResearchPanel`](../ui/autoreseach_ui/controls.py#L24) (`QWidget`)
+- Класс [`SearchController`](../ui/autoreseach_ui/controls.py#L50) (`QObject`)
 
 <a id="ui-autoreseach-ui-model-research-ui"></a>
 
@@ -2166,14 +2166,15 @@
 **Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods).
 
 **Прямые локальные импорты:**
+- [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls): `AutoResearchPanel`, `GRADIENT_UNAVAILABLE`
 - [ui.morphology_ui](#ui-morphology-ui): `MorphologyWidget`
 - [ui.segmentation.panels](#ui-segmentation-panels): `ResultPanel`, `begin_layout`, `finish_layout`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QSlider`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QWidget`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QSlider`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- [`setup_gradient_ui(parent)`](../ui_tabs/gradient_methods_ui.py#L19)
+- [`setup_gradient_ui(parent)`](../ui_tabs/gradient_methods_ui.py#L18)
   Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods).
 
 <a id="ui-tabs-interactive-methods-ui"></a>
@@ -2877,7 +2878,7 @@
 
 Исходник: [utils_auto_research/gradient_auto_research.py](../utils_auto_research/gradient_auto_research.py#L1).
 
-**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods).
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
 
 **Прямые локальные импорты:**
 - нет
