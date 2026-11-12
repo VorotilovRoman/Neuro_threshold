@@ -19,11 +19,11 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
-    QMessageBox,
 )
 
 from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import computation as segmentation_computation
 from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
@@ -34,15 +34,6 @@ from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import InteractivePresetManager
 from ui_tabs.interactive_methods_ui import setup_interactive_ui
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_ops.interactive_ops import (
-    active_contour_segmentation,
-    grabcut_segmentation,
-    lazy_snapping,
-    onecut_segmentation,
-    random_walker_segmentation,
-    supercut_segmentation,
-    watershed_segmentation,
-)
 
 
 class InteractiveMethodsWindow(QMainWindow):
@@ -121,6 +112,9 @@ class InteractiveMethodsWindow(QMainWindow):
         self.update_input_ui()
         self.update_params_visibility()
         self.params_widget.grabcut_mode.currentIndexChanged.connect(self.update_input_ui)
+        for widget in self.preset_manager._parameter_controls().values():
+            signal = widget.currentIndexChanged if hasattr(widget, 'currentIndexChanged') else widget.toggled if hasattr(widget, 'toggled') else widget.valueChanged
+            signal.connect(self.on_segmentation_parameters_changed)
         self.setMinimumSize(0, 0)
 
     # ----------------------------------------------------------------------
@@ -194,6 +188,7 @@ class InteractiveMethodsWindow(QMainWindow):
     # ----------------------------------------------------------------------
     def on_rect_drawn(self, rect):
         self.rect = rect
+        self.on_segmentation_parameters_changed()
         self.log(f"Прямоугольник задан: {self.rect}")
         self.update_input_ui()
         self.activate_pan_zoom()
@@ -208,6 +203,7 @@ class InteractiveMethodsWindow(QMainWindow):
             if self.bg_scribbles is None:
                 self.bg_scribbles = np.zeros((self.current_img_h, self.current_img_w), dtype=np.uint8)
             cv2.circle(self.bg_scribbles, (x, y), 5, 255, -1)
+        self.on_segmentation_parameters_changed()
         self.update_input_ui()
         self.update_scribble_display()
 
@@ -329,7 +325,12 @@ class InteractiveMethodsWindow(QMainWindow):
     # ----------------------------------------------------------------------
     #  Параметры методов
     # ----------------------------------------------------------------------
+    def on_segmentation_parameters_changed(self, *_):
+        segmentation_controller.invalidate_prediction(self)
+        self.schedule_update()
+
     def on_method_changed(self, idx):
+        self.on_segmentation_parameters_changed()
         method = self.method_combo.currentText()
         self.update_params_visibility()
         self.update_input_ui()
@@ -365,114 +366,7 @@ class InteractiveMethodsWindow(QMainWindow):
     #  Запуск сегментации
     # ----------------------------------------------------------------------
     def run_segmentation(self):
-        if self.original_image is None:
-            QMessageBox.warning(self, "Нет изображения", "Загрузите изображение.")
-            return
-
-        self.run_seg_btn.setEnabled(False)
-        original_text = self.run_seg_btn.text()
-        self.run_seg_btn.setText("Сегментация...")
-        self.run_seg_btn.setStyleSheet("background-color: orange; color: black;")
-        QApplication.processEvents()
-
-        method = self.method_combo.currentText()
-        img = self.original_image
-        gray = self.current_gray
-
-        if self.fg_scribbles is None:
-            self.fg_scribbles = np.zeros(gray.shape, dtype=np.uint8)
-        if self.bg_scribbles is None:
-            self.bg_scribbles = np.zeros(gray.shape, dtype=np.uint8)
-
-        self.log(f"Запуск сегментации методом {method}...")
-        try:
-            if method == "GrabCut":
-                params = self.params_widget.get_grabcut_params()
-                iters = params['iterations']
-                mode = params['mode']
-                self.mask = grabcut_segmentation(img, self.rect, None, self.fg_scribbles, self.bg_scribbles,
-                                                 iterations=iters, mode=mode)
-            elif method == "Watershed (marker)":
-                params = self.params_widget.get_watershed_params()
-                thresh = params['threshold']
-                min_distance = params['min_distance']
-                self.mask = watershed_segmentation(gray, distance_threshold=thresh, min_area=min_distance)
-            elif method == "Lazy Snapping":
-                params = self.params_widget.get_superpixel_params()
-                self.mask = lazy_snapping(
-                    img, self.fg_scribbles, self.bg_scribbles,
-                    superpixel_size=params['superpixel_size'],
-                    compactness=params['compactness'],
-                    sigma=params['sigma'],
-                    color_sigma=params['color_sigma']
-                )
-            elif method == "SuperCut":
-                if self.rect is None:
-                    QMessageBox.warning(self, "Нет рамки", "Для SuperCut необходимо нарисовать прямоугольник.")
-                    return
-                params = self.params_widget.get_supercut_params()
-                self.mask = supercut_segmentation(
-                    img, self.rect,
-                    superpixel_size=params['superpixel_size'],
-                    compactness=params['compactness'],
-                    sigma=params['sigma'],
-                    lambda_val=params['lambda_val'],
-                    sigma_color=params['sigma_color']
-                )
-            elif method == "OneCut":
-                if self.rect is None:
-                    QMessageBox.warning(self, "Нет рамки", "Для OneCut необходимо нарисовать прямоугольник.")
-                    return
-                params = self.params_widget.get_onecut_params()
-                self.mask = onecut_segmentation(
-                    img, self.rect,
-                    superpixel_size=params['superpixel_size'],
-                    compactness=params['compactness'],
-                    sigma=params['sigma'],
-                    spatial_weight=params['spatial_weight'],
-                    data_weight=params['data_weight'],
-                    color_sigma=params['color_sigma']
-                )
-            elif method == "Random Walker":
-                params = self.params_widget.get_random_walker_params()
-                markers = np.zeros(gray.shape, dtype=np.int32)
-                markers[self.fg_scribbles == 255] = 1
-                markers[self.bg_scribbles == 255] = 2
-                if np.sum(markers == 1) == 0 or np.sum(markers == 2) == 0:
-                    QMessageBox.warning(self, "Недостаточно меток", "Нанесите штрихи переднего и фонового плана.")
-                    return
-                self.mask = random_walker_segmentation(img, markers, beta=params['beta'], mode=params['mode'])
-            elif method == "Active Contours":
-                if self.rect is None:
-                    QMessageBox.warning(self, "Нет рамки", "Для Active Contours нарисуйте прямоугольник.")
-                    return
-                params = self.params_widget.get_active_contour_params()
-                self.mask = active_contour_segmentation(
-                    gray, self.rect,
-                    alpha=params['alpha'],
-                    beta=params['beta'],
-                    gamma=params['gamma'],
-                    max_iter=params['max_iter'],
-                    convergence=params['convergence'],
-                    smooth=params['smooth'],
-                    init_type=params['init_type']
-                )
-            else:
-                self.log(f"Метод {method} не реализован")
-                return
-
-            self.schedule_update()
-            self.log("Сегментация завершена.")
-        except Exception as e:
-            self.log(f"Ошибка при сегментации: {e}")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить сегментацию:\n{e}")
-        finally:
-            self.run_seg_btn.setEnabled(True)
-            self.run_seg_btn.setText(original_text)
-            self.run_seg_btn.setStyleSheet("")
-            QApplication.processEvents()
+        segmentation_computation.run_interactive(self)
 
     def reset_mask(self):
         self.mask = None

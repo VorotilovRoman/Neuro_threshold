@@ -14,14 +14,13 @@ prepare_windows_torch()
 import os
 import sys
 
-import numpy as np
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
-    QMessageBox,
 )
 
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import computation as segmentation_computation
 from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
@@ -32,7 +31,6 @@ from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import DeepLearningPresetManager
 from ui_tabs.deep_learning_methods_ui import setup_deep_learning_methods_ui
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_ops.deep_learning_ops import create_segmentor
 
 # Дополнительные Qt-виджеты (на случай, если не подтянуты из import_libs_internal)
 try:
@@ -134,94 +132,7 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- Загрузка модели из виджета ----------
     def load_model_from_widget(self, model_name):
-        if model_name == "U-Net":
-            file_path = self.unet_settings._model_path.text().strip()
-        elif model_name in ("DeepLabV3+", "DeepLabV3"):
-            file_path = self.deeplab_settings._model_path.text().strip()
-        elif model_name == "SegFormer":
-            file_path = self.segformer_settings._model_path.text().strip()
-        elif model_name == "SAM":
-            file_path = self.sam_settings._model_path.text().strip()
-        elif model_name == "YOLO-seg":
-            file_path = self.yolo_settings._model_path.text().strip()
-        elif model_name == "Custom ONNX":
-            file_path = self.custom_settings._model_path.text().strip()
-        else:
-            return
-
-        if not file_path:
-            QMessageBox.warning(self, "Ошибка", "Не выбран файл модели.")
-            return
-        if not os.path.exists(file_path):
-            QMessageBox.warning(self, "Ошибка", f"Файл не найден:\n{file_path}")
-            return
-
-        if model_name in ["SegFormer", "SAM"]:
-            QMessageBox.information(self, "Информация",
-                                    f"Модель {model_name} пока не реализована.\n"
-                                    "Функциональность будет добавлена в следующих версиях.")
-            self.segmentor = None
-            self.model_metadata = None
-            self.prediction_mask = None
-            self.log(f"Попытка загрузить модель {model_name} – не реализована.")
-            self._update_segment_button_color()
-            self.display_current_image()
-            return
-
-        try:
-            self.segmentor = create_segmentor(model_name, device=self.device)
-
-            if model_name == "U-Net":
-                try:
-                    self.segmentor.load(weights_path=file_path)
-                    if hasattr(self.segmentor, 'metadata') and self.segmentor.metadata:
-                        self._update_unet_ui_from_metadata(self.segmentor.metadata)
-                    else:
-                        self.log("Предупреждение: метаданные модели не загружены, UI не обновлён.")
-                except Exception as e:
-                    self.log(f"Ошибка загрузки U-Net: {e}")
-                    QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить модель U-Net:\n{e}")
-                    self.segmentor = None
-                    self._update_segment_button_color()
-                    self.display_current_image()
-                    return
-
-
-            elif model_name in ("DeepLabV3+", "DeepLabV3"):
-                try:
-                    self.segmentor.load(weights_path=file_path)
-                    if hasattr(self.segmentor, 'metadata') and self.segmentor.metadata:
-                        self._update_deeplab_ui_from_metadata(self.segmentor.metadata)
-                    else:
-                        self.log("Предупреждение: метаданные DeepLab не загружены.")
-                except Exception as e:
-                    self.log(f"Ошибка загрузки DeepLab: {e}")
-                    QMessageBox.critical(self, "Ошибка",
-                                         f"Не удалось загрузить модель DeepLab:\n{e}")
-                    self.segmentor = None
-                    self._update_segment_button_color()
-                    self.display_current_image()
-                    return
-
-            elif model_name == "YOLO-seg":
-                self.segmentor.load(model_path=file_path)
-
-            elif model_name == "Custom ONNX":
-                self.segmentor.load(model_path=file_path)
-
-            else:
-                self.segmentor.load()
-
-            self.log(f"Модель {model_name} загружена из {file_path}")
-            self.prediction_mask = None
-            self._update_segment_button_color()  # зелёный
-            self.display_current_image()
-        except Exception as e:
-            self.log(f"Ошибка загрузки модели: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить модель:\n{e}")
-            self.segmentor = None
-            self._update_segment_button_color()  # красный
-            self.display_current_image()
+        segmentation_computation.load_dl(self, model_name)
 
     def _update_unet_ui_from_metadata(self, metadata):
         """
@@ -366,11 +277,9 @@ class DeepLearningWindow(QMainWindow):
                 w.stateChanged.connect(self.on_any_setting_changed)
 
     def on_any_setting_changed(self, *args):
-        if self.ignore_ui_changes:
-            return
-        if self.segmentor is not None:
-            self.prediction_mask = None
-        self.schedule_update()
+        if not self.ignore_ui_changes:
+            segmentation_controller.invalidate_prediction(self)
+            self.schedule_update()
 
     # ---------- Логирование ----------
     def log(self, message):
@@ -394,6 +303,8 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- Выбор модели ----------
     def on_model_changed(self, idx):
+        if not self.ignore_ui_changes and not getattr(self, '_loading_model', False):
+            segmentation_controller.invalidate_prediction(self)
         model_name = self.model_combo.currentText()
         for cont in [self.unet_settings, self.deeplab_settings, self.segformer_settings,
                      self.sam_settings, self.yolo_settings, self.custom_settings]:
@@ -503,100 +414,7 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- DL операции ----------
     def run_segmentation(self):
-        if self.original_image is None:
-            QMessageBox.warning(self, "Нет изображения", "Загрузите изображение.")
-            return
-        if self.segmentor is None:
-            QMessageBox.warning(self, "Нет модели", "Сначала загрузите модель.")
-            return
-
-        model_name = self.model_combo.currentText()
-        if model_name in ["SegFormer", "SAM"]:
-            QMessageBox.information(self, "Информация",
-                                    f"Модель {model_name} не реализована, сегментация невозможна.")
-            from ui.segmentation.errors import report
-            report(self, 'Сегментация', ValueError(f'Модель {model_name} не реализована'))
-            return
-
-        self.progress_bar.setValue(0)
-        self.segment_button.setEnabled(False)
-        QApplication.processEvents()
-
-        try:
-            img = self.original_image
-            kwargs = {}
-            self.log(f"=== Запуск сегментации (модель: {model_name}) ===")
-            self.log(f"Изображение: {img.shape}, dtype={img.dtype}, диапазон [{img.min()}, {img.max()}]")
-
-            if model_name == "YOLO-seg":
-                kwargs['conf'] = self.yolo_settings._conf.value()
-                kwargs['iou'] = self.yolo_settings._iou.value()
-                kwargs['imgsz'] = self.yolo_settings._imgsz.value()
-                kwargs['save'] = self.yolo_settings._save.isChecked()
-                self.log(f"Параметры YOLO: conf={kwargs['conf']}, iou={kwargs['iou']}, "
-                         f"imgsz={kwargs['imgsz']}, save={kwargs['save']}")
-
-            if model_name == "U-Net":
-                kwargs['threshold'] = self.unet_settings._threshold.value()
-                self.log(f"Порог U‑Net: {kwargs['threshold']}")
-
-                # Валидация перед запуском
-                ok, err = self.unet_settings.validate_for_prediction()
-                if not ok:
-                    QMessageBox.warning(self, "Ошибка", err)
-                    self.log(f"❌ {err}")
-                    self.segment_button.setEnabled(True)
-                    return
-
-                # Применяем override к metadata (если модель загружена)
-                if self.segmentor is not None and self.segmentor.metadata is not None:
-                    md = self.segmentor.metadata
-                    overrides = self.unet_settings.get_override_params()
-                    for k, v in overrides.items():
-                        md[k] = v
-                        self.log(f"  Override {k} = {v}")
-
-
-            if model_name in ("DeepLabV3+", "DeepLabV3"):
-                kwargs['threshold'] = self.deeplab_settings._threshold.value()
-                self.log(f"Порог DeepLab: {kwargs['threshold']}")
-
-                ok, err = self.deeplab_settings.validate_for_prediction()
-                if not ok:
-                    QMessageBox.warning(self, "Ошибка", err)
-                    self.log(f"❌ {err}")
-                    self.segment_button.setEnabled(True)
-                    return
-
-                if self.segmentor is not None and self.segmentor.metadata is not None:
-                    md = self.segmentor.metadata
-                    overrides = self.deeplab_settings.get_override_params()
-                    for k, v in overrides.items():
-                        md[k] = v
-                        self.log(f"  Override {k} = {v}")
-
-            mask = self.segmentor.predict(img, **kwargs)
-
-            self.log(f"Маска после модели: {mask.shape}, dtype={mask.dtype}, "
-                     f"мин={mask.min()}, макс={mask.max()}, среднее={mask.mean():.3f}")
-
-            if mask.dtype == np.uint8 and mask.max() <= 1:
-                object_pixels = np.sum(mask > 0)
-                self.log(f"Количество пикселей объекта: {object_pixels} ({100*object_pixels/mask.size:.2f}%)")
-            else:
-                object_pixels = np.sum(mask > 127)
-                self.log(f"Количество пикселей объекта (порог 128): {object_pixels} ({100*object_pixels/mask.size:.2f}%)")
-
-            self.prediction_mask = mask
-            self.progress_bar.setValue(100)
-            self.schedule_update()
-
-        except Exception as e:
-            self.log(f"Ошибка сегментации: {e}")
-            from ui.segmentation.errors import report
-            report(self, 'Сегментация', e)
-        finally:
-            self.segment_button.setEnabled(True)
+        segmentation_computation.run_dl(self)
 
     # ---------- Отображение ----------
 

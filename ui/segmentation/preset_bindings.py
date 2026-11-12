@@ -340,6 +340,7 @@ class TraditionalMLPresetManager(MethodPresetManager):
         svm_c="svm_c",
         rf_trees="rf_trees",
         xgb_trees="xgb_trees",
+        normalize_features="normalize_features",
         color_feature="color_feature",
         texture_feature="texture_feature",
         spatial_feature="spatial_feature",

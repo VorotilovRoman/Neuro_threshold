@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory() as directory:
         with patch.object(QMessageBox,'critical'):
             owner.goto_image(2)
         owner.update_timer.stop()
-        assert owner.result_state.status==ResultStatus.ERROR and owner.original_image is None
+        assert owner.result_state.status==ResultStatus.ERROR and owner.original_image is None and owner._current_frame is None
         for name in owner.segmentation_view_names:
             view=getattr(owner,name);assert view.pixmap_item.pixmap().isNull() and not view.annotations
         assert not owner.hist_ax.patches and not owner.coord_text.toPlainText()

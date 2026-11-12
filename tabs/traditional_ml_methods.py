@@ -16,7 +16,6 @@ prepare_windows_torch()
 import os
 import sys
 
-import cv2
 import joblib
 import numpy as np
 from PyQt5.QtCore import Qt
@@ -29,9 +28,9 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QSpinBox,
 )
-from sklearn.preprocessing import StandardScaler
 
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import computation as segmentation_computation
 from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
@@ -43,18 +42,9 @@ from ui.segmentation.preset_bindings import TraditionalMLPresetManager
 from ui_tabs.traditional_ml_methods_ui import setup_traditional_ml_ui
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.traditional_ml_ops import (
-    compute_elbow_kmeans,
     create_superpixels,
     extract_pixel_features,
     extract_superpixel_features,
-    find_optimal_k_elbow,
-    predict_superpixel,
-    train_decision_tree,
-    train_kmeans,
-    train_meanshift,
-    train_random_forest,
-    train_svm,
-    train_xgboost,
 )
 
 
@@ -164,58 +154,12 @@ class TraditionalMLWindow(QMainWindow):
         return reverse_map.get(class_name, None)
 
     def _auto_load_model_for_current_type(self):
-        model_name = self.model_combo.currentText()
-        path = self.model_paths.get(model_name, "")
-        if path and os.path.exists(path):
-            self.log(f"Автозагрузка модели для {model_name} из {path}")
-            try:
-                data = joblib.load(path)
-                if isinstance(data, dict) and 'model' in data:
-                    model = data['model']
-                    metadata = data.get('metadata', {})
-                else:
-                    model = data
-                    metadata = None
-                # Проверяем соответствие типа
-                actual_type = self._get_model_type_from_class(model)
-                if actual_type != model_name:
-                    self.log(f"Предупреждение: модель типа {actual_type} загружена, но выбран {model_name}. Будет выполнено переключение.")
-                    idx = self.model_combo.findText(actual_type)
-                    if idx >= 0:
-                        self.model_combo.blockSignals(True)
-                        self.model_combo.setCurrentIndex(idx)
-                        self.model_combo.blockSignals(False)
-                    model_name = actual_type
-                self.model = model
-                self.model_metadata = metadata
-                if metadata:
-                    self._apply_model_metadata(metadata)
-                self.log(f"Модель {model_name} успешно загружена")
-                self._update_apply_button_status()
-                if self.display_images:
-                    if model_name in ("K-Means Clustering", "MeanShift"):
-                        self._prepare_cluster_selection_for_current_image()
-                    else:
-                        self.apply_model()
-                # Убеждаемся, что путь в словаре соответствует
-                self.model_paths[model_name] = path
-                self._update_model_path_display()
-            except Exception as e:
-                self.log(f"Ошибка автозагрузки модели {path}: {e}")
-                self.model_paths[model_name] = ""
-                self.model = None
-                self.model_metadata = None
-                self._update_model_path_display()
-                self._update_apply_button_status()
-        else:
-            # Проверяем, не загружена ли модель другого типа (несовместимость)
-            if self.model is not None:
-                expected = self._get_expected_type_name(model_name)
-                if expected and type(self.model).__name__ != expected:
-                    self.model = None
-                    self.model_metadata = None
-                    self.cluster_combo.setEnabled(False)
-                    self._update_apply_button_status()
+        if getattr(self, '_loading_model', False) or self.jobs.busy:
+            return
+        name = self.model_combo.currentText()
+        path = self.model_paths.get(name, '')
+        if path and os.path.isfile(path) and (self.model is None or getattr(self, '_loaded_model_path', None) != (name,path)):
+            segmentation_computation.load_ml(self,path)
 
     def _apply_model_metadata(self, metadata):
         """Обновляет UI в соответствии с метаданными модели."""
@@ -269,10 +213,14 @@ class TraditionalMLWindow(QMainWindow):
         segmentation_input.reload_images(self, self._load_images)
 
     def _reset_for_new_image(self):
+        self._pending_apply = False
         self.prediction_mask = None
         self.current_cluster_labels = None
         if self.model is None:
             self.cluster_combo.setEnabled(False)
+            return
+        if self.jobs.busy:
+            self._pending_apply = True
             return
         model_name = self.model_combo.currentText()
         if model_name in ("K-Means Clustering", "MeanShift"):
@@ -312,7 +260,7 @@ class TraditionalMLWindow(QMainWindow):
     # ----------------------------------------------------------------------
     def _connect_settings_widgets(self):
         widgets = [
-            self.color_feature, self.texture_feature, self.spatial_feature,
+            self.normalize_features, self.color_feature, self.texture_feature, self.spatial_feature,
             self.use_superpixels, self.superpixel_size,
             self.kmeans_clusters, self.svm_kernel_combo, self.svm_c,
             self.rf_trees, self.xgb_trees, self.model_combo
@@ -326,11 +274,14 @@ class TraditionalMLWindow(QMainWindow):
                 w.currentIndexChanged.connect(self.on_any_model_setting_changed)
 
     def on_any_model_setting_changed(self, *args):
-        if self.ignore_ui_changes:
-            return
-        self.check_settings_match_model()
+        if not self.ignore_ui_changes:
+            self.check_settings_match_model()
+            segmentation_controller.invalidate_prediction(self)
+            self.schedule_update()
 
     def on_model_changed(self, idx):
+        if not self.ignore_ui_changes and not getattr(self, '_loading_model', False):
+            segmentation_controller.invalidate_prediction(self)
         model_name = self.model_combo.currentText()
         self.kmeans_container.setVisible(model_name == "K-Means Clustering")
         self.svm_container.setVisible(model_name == "SVM (pixel-wise)")
@@ -402,66 +353,7 @@ class TraditionalMLWindow(QMainWindow):
     #  Подготовка кластеров (K‑Means / MeanShift)
     # ----------------------------------------------------------------------
     def _prepare_cluster_selection_for_current_image(self):
-
-        if self.model is None or not self.display_images:
-            return
-        model_name = self.model_combo.currentText()
-        if model_name not in ("K-Means Clustering", "MeanShift"):
-            return
-        if not hasattr(self.model, "cluster_centers_"):
-            return
-
-        img = self.display_images[self.current_index]
-        gray = self.gray_images[self.current_index]
-        use_superpixels = self.use_superpixels.isChecked()
-        superpixel_size = self.superpixel_size.value()
-
-        X, segments = self.get_features(img, use_superpixels, superpixel_size)
-
-        # Применяем нормализацию, если модель обучена с ней
-        if self.model_metadata and 'scaler' in self.model_metadata:
-            X = self.model_metadata['scaler'].transform(X)
-        labels = self.model.predict(X)
-
-        if use_superpixels:
-            mask_labels = np.zeros_like(segments, dtype=np.int32)
-            for seg_id, label in enumerate(labels):
-                mask_labels[segments == seg_id] = label
-            self.current_cluster_labels = mask_labels
-        else:
-            mask_labels = labels.reshape(gray.shape)
-            self.current_cluster_labels = mask_labels
-
-        unique_labels = np.unique(mask_labels)
-        means = []
-        for lbl in unique_labels:
-            pixels = gray[mask_labels == lbl]
-            means.append(np.mean(pixels) if len(pixels) > 0 else 0)
-
-        self.cluster_means = means
-        self.cluster_combo.blockSignals(True)
-        self.cluster_combo.clear()
-        for lbl, mean_val in zip(unique_labels, means):
-            self.cluster_combo.addItem(f"Cluster {lbl} (mean intensity = {mean_val:.1f})", userData=int(lbl))
-        self.cluster_combo.setEnabled(True)
-
-        # Пытаемся восстановить ранее выбранный label кластера.
-        # Если его нет на текущем снимке (например, кластер исчез после
-        # переобучения или на этом снимке такой метки не встретилось) —
-        # откатываемся к кластеру с минимальной средней интенсивностью.
-        unique_labels_list = [int(x) for x in unique_labels]
-        if (self._last_selected_cluster_label is not None
-                and self._last_selected_cluster_label in unique_labels_list):
-            chosen_idx = unique_labels_list.index(self._last_selected_cluster_label)
-        else:
-            chosen_idx = int(np.argmin(means))
-            self._last_selected_cluster_label = unique_labels_list[chosen_idx]
-
-        self.cluster_combo.setCurrentIndex(chosen_idx)
-        self.cluster_combo.blockSignals(False)
-
-        selected_label = unique_labels[chosen_idx]
-        self.prediction_mask = (mask_labels == selected_label).astype(np.uint8) * 255
+        segmentation_computation.predict_ml(self, cluster=True)
 
     def _apply_kmeans_cluster(self, idx):
         if self.current_cluster_labels is None:
@@ -481,165 +373,13 @@ class TraditionalMLWindow(QMainWindow):
     #  Обучение модели
     # ----------------------------------------------------------------------
     def train_model(self):
-        if not self.display_images:
-            QMessageBox.warning(self, "Нет изображений", "Загрузите хотя бы одно изображение для обучения.")
-            return
-
-        model_name = self.model_combo.currentText()
-        use_superpixels = self.use_superpixels.isChecked()
-        superpixel_size = self.superpixel_size.value()
-
-        self.train_button.setEnabled(False)
-        original_text = self.train_button.text()
-        self.train_button.setText("Обучение...")
-        self.train_button.setStyleSheet("background-color: green; color: white;")
-        QApplication.processEvents()
-
-        try:
-            all_X, all_y = [], []
-            for idx, img in enumerate(self.display_images):
-                if img is None:
-                    continue
-                X, segments = self.get_features(img, use_superpixels, superpixel_size)
-                gray = self.gray_images[idx]
-                _, pseudo_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                if use_superpixels:
-                    y = np.zeros(len(np.unique(segments)), dtype=np.int32)
-                    for seg_id in np.unique(segments):
-                        mask = (segments == seg_id)
-                        y[seg_id] = 1 if np.mean(pseudo_mask[mask]) > 127 else 0
-                else:
-                    y = (pseudo_mask.ravel() > 127).astype(np.int32)
-                all_X.append(X)
-                all_y.append(y)
-
-            X_train = np.vstack(all_X)
-            y_train = np.hstack(all_y)
-            n_samples = X_train.shape[0]
-            if n_samples > 500000:
-                reply = QMessageBox.question(
-                    self, "Большой объём данных",
-                    f"Обучение на {n_samples} пикселях может занять очень много времени и памяти.\n"
-                    "Рекомендуется использовать суперпиксели или уменьшить количество изображений.\n"
-                    "Продолжить?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if reply != QMessageBox.Yes:
-                    return
-
-            if self.normalize_features.isChecked():
-                scaler = StandardScaler()
-                X_train = scaler.fit_transform(X_train)
-                if self.model_metadata is None:
-                    self.model_metadata = {}
-                self.model_metadata['scaler'] = scaler
-            else:
-                if self.model_metadata and 'scaler' in self.model_metadata:
-                    del self.model_metadata['scaler']
-
-            if model_name == "K-Means Clustering":
-                n_clusters = self.kmeans_clusters.value()
-                self.model = train_kmeans(X_train, n_clusters)
-                self.log(f"K-Means (K={n_clusters}) обучена на {X_train.shape[0]} пикселях.")
-                self._last_selected_cluster_label = None   # новый набор кластеров
-                self._prepare_cluster_selection_for_current_image()
-                if self.model_metadata is None:
-                    self.model_metadata = {}
-                self.model_metadata.update(self._get_current_settings_dict())
-            elif model_name == "MeanShift":
-                if not use_superpixels and X_train.shape[0] > 50000:
-                    reply = QMessageBox.question(
-                        self, "Большой объём данных",
-                        "MeanShift на полном изображении может выполняться очень долго.\n"
-                        "Рекомендуется включить суперпиксели.\nПродолжить?",
-                        QMessageBox.Yes | QMessageBox.No
-                    )
-                    if reply != QMessageBox.Yes:
-                        return
-                self.model = train_meanshift(X_train)
-                self.log(f"MeanShift обучен на {X_train.shape[0]} пикселях.")
-                self._last_selected_cluster_label = None   # новый набор кластеров
-                self._prepare_cluster_selection_for_current_image()
-                if self.model_metadata is None:
-                    self.model_metadata = {}
-                self.model_metadata.update(self._get_current_settings_dict())
-            else:
-                if model_name == "SVM (pixel-wise)":
-                    kernel = self.svm_kernel_combo.currentText()
-                    C = self.svm_c.value()
-                    self.model = train_svm(X_train, y_train, kernel, C)
-                elif model_name == "Random Forest":
-                    n_trees = self.rf_trees.value()
-                    self.model = train_random_forest(X_train, y_train, n_trees)
-                elif model_name == "XGBoost":
-                    n_trees = self.xgb_trees.value()
-                    self.model = train_xgboost(X_train, y_train, n_trees)
-                elif model_name == "Decision Tree":
-                    self.model = train_decision_tree(X_train, y_train)
-                else:
-                    self.log(f"Модель {model_name} не поддерживается")
-                    return
-                self.log(f"{model_name} обучена на {X_train.shape[0]} пикселях.")
-                self.cluster_combo.setEnabled(False)
-                if self.model_metadata is None:
-                    self.model_metadata = {}
-                self.model_metadata.update(self._get_current_settings_dict())
-                self.apply_model()
-
-            # Обучение завершено – модель не сохранена, путь сбрасываем
-            self.model_paths[model_name] = ""
-            self._update_model_path_display()
-            self._update_apply_button_status()
-            self.check_settings_match_model()
-            QMessageBox.information(self, "Обучение завершено", f"Модель {model_name} успешно обучена.")
-            self.schedule_update()
-        except Exception as e:
-            self.log(f"Ошибка при обучении: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось обучить модель:\n{e}")
-        finally:
-            self.train_button.setEnabled(True)
-            self.train_button.setText(original_text)
-            self.train_button.setStyleSheet("")
-            QApplication.processEvents()
+        segmentation_computation.train_ml(self)
 
     # ----------------------------------------------------------------------
     #  Поиск оптимального K
     # ----------------------------------------------------------------------
     def find_best_k(self):
-        if not self.display_images:
-            QMessageBox.warning(self, "Нет изображений", "Загрузите изображения для оценки.")
-            return
-        if self.model_combo.currentText() != "K-Means Clustering":
-            QMessageBox.warning(self, "Не K-Means", "Метод применим только для K-Means.")
-            return
-
-        self.find_best_k_btn.setEnabled(False)
-        original_text = self.find_best_k_btn.text()
-        self.find_best_k_btn.setText("Вычисление локтя...")
-        self.find_best_k_btn.setStyleSheet("background-color: orange; color: black;")
-        QApplication.processEvents()
-
-        try:
-            use_superpixels = self.use_superpixels.isChecked()
-            superpixel_size = self.superpixel_size.value()
-            all_X = []
-            for img in self.display_images:
-                X, _ = self.get_features(img, use_superpixels, superpixel_size)
-                all_X.append(X)
-            X_total = np.vstack(all_X)
-            inertias = compute_elbow_kmeans(X_total, max_k=10)
-            optimal_k = find_optimal_k_elbow(inertias)
-            self.log(f"Оптимальное K по методу локтя: {optimal_k}")
-            self.kmeans_clusters.setValue(optimal_k)
-            self.train_model()
-        except Exception as e:
-            self.log(f"Ошибка поиска K: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось найти оптимальное K:\n{e}")
-        finally:
-            self.find_best_k_btn.setEnabled(True)
-            self.find_best_k_btn.setText(original_text)
-            self.find_best_k_btn.setStyleSheet("")
-            QApplication.processEvents()
+        segmentation_computation.find_k(self)
 
     # ----------------------------------------------------------------------
     #  Сохранение / загрузка модели
@@ -666,61 +406,7 @@ class TraditionalMLWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить модель:\n{e}")
 
     def load_model(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Загрузить модель", "", "Model files (*.pkl *.joblib)")
-        if not file_path:
-            return
-        try:
-            data = joblib.load(file_path)
-            if isinstance(data, dict) and 'model' in data:
-                model = data['model']
-                metadata = data.get('metadata', {})
-            else:
-                model = data
-                metadata = None
-
-            actual_type = self._get_model_type_from_class(model)
-            if actual_type is None:
-                self.log("Не удалось определить тип загруженной модели.")
-                QMessageBox.warning(self, "Неизвестная модель", "Не удалось определить тип модели.")
-                return
-
-            current_type = self.model_combo.currentText()
-            if actual_type != current_type:
-                self.log(f"Загружена модель типа {actual_type}, переключаем интерфейс.")
-                idx = self.model_combo.findText(actual_type)
-                if idx >= 0:
-                    self.model_combo.blockSignals(True)
-                    self.model_combo.setCurrentIndex(idx)
-                    self.model_combo.blockSignals(False)
-                else:
-                    self.log(f"Тип {actual_type} отсутствует в списке.")
-                    QMessageBox.warning(self, "Неизвестная модель", f"Тип модели {actual_type} не поддерживается.")
-                    return
-
-            self.model = model
-            self.model_metadata = metadata
-            if metadata:
-                self._apply_model_metadata(metadata)
-
-            self.model_paths[actual_type] = file_path
-            self._update_model_path_display()
-            self._update_apply_button_status()
-
-            self.log(f"Модель загружена из {file_path}")
-            QMessageBox.information(self, "Загрузка", "Модель успешно загружена.")
-
-            if self.display_images:
-                if actual_type in ("K-Means Clustering", "MeanShift"):
-                    self._last_selected_cluster_label = None   # новая модель — метки другие
-                    self._prepare_cluster_selection_for_current_image()
-                else:
-                    self.apply_model()
-            else:
-                self.cluster_combo.setEnabled(False)
-            self.check_settings_match_model()
-        except Exception as e:
-            self.log(f"Ошибка загрузки модели: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить модель:\n{e}")
+        segmentation_computation.load_ml(self)
 
     # ----------------------------------------------------------------------
     #  Проверка соответствия настроек и кнопка сброса
@@ -777,49 +463,7 @@ class TraditionalMLWindow(QMainWindow):
     #  Применение модели
     # ----------------------------------------------------------------------
     def apply_model(self):
-        if not self.display_images:
-            QMessageBox.warning(self, "Нет изображения", "Загрузите изображение.")
-            return
-        if self.model is None:
-            QMessageBox.warning(self, "Нет модели", "Сначала обучите или загрузите модель.")
-            return
-
-        model_name = self.model_combo.currentText()
-        use_superpixels = self.use_superpixels.isChecked()
-        superpixel_size = self.superpixel_size.value()
-        img = self.display_images[self.current_index]
-        gray = self.gray_images[self.current_index]
-
-        self.apply_button.setEnabled(False)
-        original_text = self.apply_button.text()
-        self.apply_button.setText("Применение...")
-        self.apply_button.setStyleSheet("background-color: orange; color: black;")
-        QApplication.processEvents()
-
-
-
-        try:
-            X, segments = self.get_features(img, use_superpixels, superpixel_size)
-            if self.model_metadata and 'scaler' in self.model_metadata:
-                X = self.model_metadata['scaler'].transform(X)
-            if model_name in ("K-Means Clustering", "MeanShift"):
-                self._prepare_cluster_selection_for_current_image()
-            else:
-                if use_superpixels:
-                    self.prediction_mask = predict_superpixel(self.model, segments, X)
-                else:
-                    labels = self.model.predict(X)
-                    self.prediction_mask = labels.reshape(gray.shape).astype(np.uint8) * 255
-            self.schedule_update()
-            self.log("Применение модели завершено.")
-        except Exception as e:
-            self.log(f"Ошибка при применении модели: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось применить модель:\n{e}")
-        finally:
-            self.apply_button.setEnabled(True)
-            self.apply_button.setText(original_text)
-            self.apply_button.setStyleSheet("")
-            QApplication.processEvents()
+        segmentation_computation.predict_ml(self)
 
     # ----------------------------------------------------------------------
     #  Отображение текущего изображения
@@ -829,6 +473,8 @@ class TraditionalMLWindow(QMainWindow):
         return frame.key, id(self.prediction_mask)
 
     def _compute_mask(self, frame):
+        if getattr(self, '_pending_apply', False) and self.model is not None and not self.jobs.busy:
+            self._reset_for_new_image()
         return self.prediction_mask, {'ml_view': self.prediction_mask}
 
     def display_current_image(self):

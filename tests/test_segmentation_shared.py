@@ -137,6 +137,9 @@ import utils_new.segmentation.postprocessing
 import utils_new.segmentation.export
 import utils_new.presets_store
 import utils_new.segmentation.presets
+import utils_new.segmentation.result
+import utils_new.segmentation.operations
+import utils_new.annotations.modes
 import utils_new.settings_store
 assert not any(n.startswith(('PyQt5','torch','ultralytics','matplotlib')) for n in sys.modules)
 '''
@@ -280,7 +283,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert owner.fg_scribbles[30,50]>0 and owner.bg_scribbles[5,5]>0
     assert owner.fg_scribbles.shape==(64,128)
     with patch.object(QMessageBox,'warning') as warning,patch.object(QMessageBox,'critical') as error:
-        owner.run_segmentation();warning.assert_not_called();error.assert_not_called()
+        from PyQt5.QtTest import QSignalSpy
+        finished=QSignalSpy(owner.jobs.settled)
+        owner.run_segmentation();assert finished.wait(5000)
+        warning.assert_not_called();error.assert_not_called()
     assert owner.mask is not None and owner.mask.shape==(64,128) and owner.mask.max()>0
     owner._lazy_cache.shutdown()
     QTimer.singleShot(10,host.close);exec_window(host,app)

@@ -43,7 +43,8 @@
         "model_paths": {
             "XGBoost": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/xgboost.pkl"
         },
-        "annotation_mode": "none"
+        "annotation_mode": "none",
+        "normalize_features": false
     },
     "321": {
         "schema_version": 3,
@@ -89,6 +90,7 @@
         "model_paths": {
             "MeanShift": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/mean-shift.pkl"
         },
-        "annotation_mode": "none"
+        "annotation_mode": "none",
+        "normalize_features": false
     }
 }
