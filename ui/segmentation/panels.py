@@ -110,3 +110,6 @@ def finish_layout(owner):
     root.addLayout(row)
     owner.log_widget=LogWidget(show_clear_btn=True,show_progress=False);owner.log_text=owner.log_widget.text
     owner.log_widget.hide();root.addWidget(owner.log_widget)
+    from ui.segmentation.controller import initialize
+    initialize(owner)
+

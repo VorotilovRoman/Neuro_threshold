@@ -11,12 +11,11 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
-import os
 import sys
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -25,15 +24,15 @@ from PyQt5.QtWidgets import (
 
 from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
 from ui.segmentation import image_input as segmentation_input
 from ui.segmentation import navigation as segmentation_navigation
+from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import InteractivePresetManager
-from ui.settings_service import settings
 from ui_tabs.interactive_methods_ui import setup_interactive_ui
-from utils_new.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.interactive_ops import (
     active_contour_segmentation,
@@ -89,27 +88,13 @@ class InteractiveMethodsWindow(QMainWindow):
             on_reset_tool=self.activate_pan_zoom
         )
 
-        self.toggle_log_btn.clicked.connect(self.toggle_log)
-        self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
 
         # Пресеты
         self.preset_manager = InteractivePresetManager(self, preset_file="presets_interactive.json")
         self.update_preset_combo()
-        self.preset_combo.activated.connect(self.on_preset_activated)
-        self.save_preset_btn.clicked.connect(self.save_as_preset)
-        self.delete_preset_btn.clicked.connect(self.delete_current_preset)
 
-        self.update_timer = QTimer()
-        self.update_timer.setSingleShot(True)
-        self.update_timer.timeout.connect(self.display_current_image)
 
         # Навигация
-        self.nav_widget.load_images.connect(self.load_images_from_dialog)
-        self.nav_widget.load_folder.connect(self.load_folder)
-        self.nav_widget.prev.connect(self.prev_image)
-        self.nav_widget.next.connect(self.next_image)
-        self.nav_widget.resize_toggled.connect(self.on_resize_mode_changed)
-        self.nav_widget.goto_page.connect(self.goto_image)
 
         # Кнопки инструментов
         self.rect_mode_btn.clicked.connect(self.activate_rect_tool)
@@ -123,18 +108,10 @@ class InteractiveMethodsWindow(QMainWindow):
         self.method_combo.currentIndexChanged.connect(self.on_method_changed)
 
         # Морфология и отрисовка
-        self.invert_checkbox.stateChanged.connect(self.schedule_update)
-        self.morphology_widget.parameters_changed.connect(self.schedule_update)
-        self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
-        self.hull_checkbox.stateChanged.connect(self.on_hull_changed)
-        self.object_list.itemChanged.connect(self.on_object_selection_changed)
-        self.draw_combo.currentIndexChanged.connect(self.on_draw_mode_changed)
 
         # Универсальное сохранение аннотаций
-        self.save_button.clicked.connect(self.save_current_annotations)
 
-        settings.settings_changed.connect(self.on_global_settings_changed)
 
         self.image_view.setFocusPolicy(Qt.StrongFocus)
 
@@ -512,93 +489,20 @@ class InteractiveMethodsWindow(QMainWindow):
     # ----------------------------------------------------------------------
     #  Отображение маски и результатов
     # ----------------------------------------------------------------------
-    def display_current_image(self):
-        if self._lazy_cache is None or len(self._lazy_cache) == 0:
-            self.update_current_histogram()
-            for v in (self.original_view, self.segmentation_view,
-                      self.morph_view, self.annotated_view):
-                v.set_pixmap(numpy_to_qpixmap(None))
-            self.info_label.setText("No images loaded")
-            self.object_list.clear()
-            return
 
-        idx = self.current_index
-        total = len(self._lazy_cache)
+    def _mask_signature(self, frame):
+        return frame.key, id(self.mask)
 
-        self.info_label.setText(f"Image {idx + 1} of {total}")
-        current_file = os.path.basename(self.image_paths[idx])
-        base_name = os.path.splitext(current_file)[0]
-        self.log(f"Отображён снимок: {current_file}")
+    def _compute_mask(self, frame):
+        return self.mask, {'segmentation_view': self.mask}
 
-        self.original_view.set_suggested_save_name(f"inter_original_{base_name}")
-        self.segmentation_view.set_suggested_save_name(f"inter_seg_{base_name}")
-        self.morph_view.set_suggested_save_name(f"inter_morph_{base_name}")
-        self.annotated_view.set_suggested_save_name(f"inter_annotated_{base_name}")
-
-        # --- Синхронно получаем элемент ---
-        item = self._lazy_cache.get(idx)
-        if item is None:
-            self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
-            return
-
-        original = item["image"]
-        if len(original.shape) == 3 and original.shape[2] == 4:
-            original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        gray = item["gray"]
-        segmentation_results.prepare_frame(self, gray)
-
-        self.original_image = original
-        self.current_gray = gray
-        self.current_img_h, self.current_img_w = gray.shape
-
-        self.image_view.set_image_data(self.current_img_w, self.current_img_h,
-                                       self.fg_scribbles, self.bg_scribbles)
-
-        self.update_histogram(gray)
+    def _present_input_frame(self, frame):
+        self.current_img_h, self.current_img_w = frame.gray.shape
+        self.image_view.set_image_data(self.current_img_w, self.current_img_h, self.fg_scribbles, self.bg_scribbles)
         self.update_scribble_display()
 
-        if self.mask is not None:
-            self.segmentation_view.set_pixmap(numpy_to_qpixmap(self.mask))
-        else:
-            self.segmentation_view.set_pixmap(numpy_to_qpixmap(np.zeros_like(gray)))
-
-        if self.mask is not None:
-            processed = apply_morphology(self.mask, self.morphology_widget.get_steps(),
-                                         shape=self.morphology_widget.kernel_shape())
-            if self.invert_checkbox.isChecked():
-                processed = cv2.bitwise_not(processed)
-        else:
-            processed = np.zeros_like(gray)
-        self.morph_view.set_pixmap(numpy_to_qpixmap(processed))
-
-        if self.mask is not None:
-            if len(original.shape) == 2:
-                result = original.copy()
-                result[processed == 0] = 255
-            else:
-                result = original.copy()
-                result[processed == 0] = [255, 255, 255]
-        else:
-            result = original.copy()
-        if len(result.shape) == 2:
-            display_img = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
-        else:
-            display_img = result.copy()
-
-        self.current_base_image = display_img.copy()
-        if self.mask is not None and self.draw_combo.currentData() != 'none':
-            _, self.current_objects_full = self.draw_objects_on_image(display_img, processed, draw=False)
-        else:
-            self.current_objects_full = []
-        self.update_object_list()
-
-        # Синхронизация спинбокса
-        self.nav_widget.set_current_index(idx, total)
-
-        # --- Префетч следующего окна + вытеснение дальних ---
-        ahead = self._lazy_cache.prefetch_ahead
-        self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
-        self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
+    def display_current_image(self):
+        segmentation_presentation.display(self)
 
     # ----------------------------------------------------------------------
     #  Список объектов (универсальный)
@@ -649,18 +553,7 @@ class InteractiveMethodsWindow(QMainWindow):
         segmentation_input.load_cached(self, source, self.segmentation_view_names, max_side=1024, reset=self._reset_interactive_state)
 
     def on_resize_mode_changed(self, enabled):
-        if self.image_paths:
-            reply = QMessageBox.question(
-                self, "Resize Mode Changed",
-                "Resize mode changed. To apply, you need to reload images.\n"
-                "Do you want to reload images now?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-            )
-            if reply == QMessageBox.Yes:
-                self.reload_current_images()
-            else:
-                self.clear_images()
-                self.log("Resize mode changed, images cleared. Please load images again.")
+        segmentation_controller.resize_changed(self, enabled)
 
     def clear_images(self):
         segmentation_input.clear_session(self, reset=self._reset_interactive_state)
@@ -672,22 +565,15 @@ class InteractiveMethodsWindow(QMainWindow):
         segmentation_navigation.reset_zooms(self)
 
     def schedule_update(self):
-        self.update_timer.start(50)
+        segmentation_controller.schedule(self)
 
 
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentData()
-        if mode in ['segment', 'obb']:
-            self.hull_checkbox.setVisible(True)
-        else:
-            self.hull_checkbox.setVisible(False)
-        if self.original_image is not None:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_hull_changed(self, state):
-        if self.original_image is not None:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_object_selection_changed(self, item):
         segmentation_results.on_selection_changed(self, item)
@@ -711,14 +597,7 @@ class InteractiveMethodsWindow(QMainWindow):
     #  Завершение работы
     # ----------------------------------------------------------------------
     def closeEvent(self, event):
-        # Аккуратно останавливаем фоновый пул, чтобы процесс не висел
-        # на незавершённых задачах загрузки.
-        if self._lazy_cache is not None:
-            try:
-                self._lazy_cache.shutdown()
-            except Exception:
-                pass
-            self._lazy_cache = None
+        segmentation_controller.close(self)
         super().closeEvent(event)
 
 

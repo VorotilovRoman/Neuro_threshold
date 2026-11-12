@@ -1,5 +1,7 @@
 
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
+
+
 if __name__ == "__main__" and not __package__:
     import sys as _bootstrap_sys
     from pathlib import Path as _BootstrapPath
@@ -17,7 +19,7 @@ import sys
 import cv2
 import joblib
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -29,17 +31,16 @@ from PyQt5.QtWidgets import (
 )
 from sklearn.preprocessing import StandardScaler
 
-from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
 from ui.segmentation import image_input as segmentation_input
 from ui.segmentation import navigation as segmentation_navigation
+from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import TraditionalMLPresetManager
-from ui.settings_service import settings
 from ui_tabs.traditional_ml_methods_ui import setup_traditional_ml_ui
-from utils_new.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.traditional_ml_ops import (
     compute_elbow_kmeans,
@@ -91,23 +92,9 @@ class TraditionalMLWindow(QMainWindow):
         # Пресеты
         self.preset_manager = TraditionalMLPresetManager(self, preset_file="presets_traditional_ml.json")
         self.update_preset_combo()
-        self.preset_combo.activated.connect(self.on_preset_activated)
-        self.save_preset_btn.clicked.connect(self.save_as_preset)
-        self.delete_preset_btn.clicked.connect(self.delete_current_preset)
-        self.toggle_log_btn.clicked.connect(self.toggle_log)
-        self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
 
-        self.update_timer = QTimer()
-        self.update_timer.setSingleShot(True)
-        self.update_timer.timeout.connect(self.display_current_image)
 
         # Навигация
-        self.nav_widget.load_images.connect(self.load_images_from_dialog)
-        self.nav_widget.load_folder.connect(self.load_folder)
-        self.nav_widget.prev.connect(self.prev_image)
-        self.nav_widget.next.connect(self.next_image)
-        self.nav_widget.resize_toggled.connect(self.on_resize_mode_changed)
-        self.nav_widget.goto_page.connect(self.goto_image)
 
         # Кнопки ML
         self.train_button.clicked.connect(self.train_model)
@@ -127,16 +114,8 @@ class TraditionalMLWindow(QMainWindow):
         self._connect_settings_widgets()
 
         # Морфология и отрисовка
-        self.invert_checkbox.stateChanged.connect(self.schedule_update)
-        self.morphology_widget.parameters_changed.connect(self.schedule_update)
-        self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
-        self.hull_checkbox.stateChanged.connect(self.on_hull_changed)
-        self.object_list.itemChanged.connect(self.on_object_selection_changed)
-        self.draw_combo.currentIndexChanged.connect(self.on_draw_mode_changed)
 
-        self.save_button.clicked.connect(self.save_current_annotations)
-        settings.settings_changed.connect(self.on_global_settings_changed)
 
         # Инициализация состояния
         self.update_navigation_state()
@@ -311,7 +290,7 @@ class TraditionalMLWindow(QMainWindow):
         segmentation_results.refresh_styles(self)
 
     def schedule_update(self):
-        self.update_timer.start(50)
+        segmentation_controller.schedule(self)
 
     # ----------------------------------------------------------------------
     #  Пресеты
@@ -519,6 +498,8 @@ class TraditionalMLWindow(QMainWindow):
         try:
             all_X, all_y = [], []
             for idx, img in enumerate(self.display_images):
+                if img is None:
+                    continue
                 X, segments = self.get_features(img, use_superpixels, superpixel_size)
                 gray = self.gray_images[idx]
                 _, pseudo_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -843,57 +824,15 @@ class TraditionalMLWindow(QMainWindow):
     # ----------------------------------------------------------------------
     #  Отображение текущего изображения
     # ----------------------------------------------------------------------
+
+    def _mask_signature(self, frame):
+        return frame.key, id(self.prediction_mask)
+
+    def _compute_mask(self, frame):
+        return self.prediction_mask, {'ml_view': self.prediction_mask}
+
     def display_current_image(self):
-        if not self.display_images:
-            self.update_current_histogram()
-            self.original_view.set_pixmap(numpy_to_qpixmap(None))
-            self.ml_view.set_pixmap(numpy_to_qpixmap(None))
-            self.morph_view.set_pixmap(numpy_to_qpixmap(None))
-            self.annotated_view.set_pixmap(numpy_to_qpixmap(None))
-            self.info_label.setText("No images loaded")
-            self.object_list.clear()
-            self.annotations = []
-            return
-
-        self.info_label.setText(f"Image {self.current_index+1} of {len(self.display_images)}")
-        current_file = os.path.basename(self.image_paths[self.current_index])
-        base_name = os.path.splitext(current_file)[0]
-        self.log(f"Отображён снимок: {current_file}")
-
-        self.original_view.set_suggested_save_name(f"ml_original_{base_name}")
-        self.ml_view.set_suggested_save_name(f"ml_mask_{base_name}")
-        self.morph_view.set_suggested_save_name(f"ml_morph_{base_name}")
-        self.annotated_view.set_suggested_save_name(f"ml_annotated_{base_name}")
-
-        original = self.display_images[self.current_index]
-        if len(original.shape) == 3 and original.shape[2] == 4:
-            original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        gray = self.gray_images[self.current_index]
-        segmentation_results.prepare_frame(self, gray)
-
-        self.update_histogram(gray)
-        self.original_view.set_pixmap(numpy_to_qpixmap(original))
-
-        mask = self.prediction_mask if self.prediction_mask is not None else np.zeros(gray.shape, dtype=np.uint8)
-        self.ml_view.set_pixmap(numpy_to_qpixmap(mask))
-
-        processed = apply_morphology(mask, self.morphology_widget.get_steps(),
-                                         shape=self.morphology_widget.kernel_shape())
-        if self.invert_checkbox.isChecked():
-            processed = cv2.bitwise_not(processed)
-        self.morph_view.set_pixmap(numpy_to_qpixmap(processed))
-
-        if len(original.shape) == 2:
-            result = original.copy()
-            result[processed == 0] = 255
-        else:
-            result = original.copy()
-            result[processed == 0] = [255, 255, 255]
-
-        display_img = result if len(result.shape) == 3 else cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
-        self.current_base_image = display_img.copy()
-        _, self.current_objects_full = self.draw_objects_on_image(display_img, processed, draw=False)
-        self.update_object_list()
+        segmentation_presentation.display(self)
 
     # ----------------------------------------------------------------------
     #  Список объектов и аннотации
@@ -944,18 +883,7 @@ class TraditionalMLWindow(QMainWindow):
         self.update_navigation_state()
 
     def on_resize_mode_changed(self, enabled):
-        if self.display_images:
-            reply = QMessageBox.question(
-                self, "Resize Mode Changed",
-                "Resize mode changed. To apply, you need to reload images.\n"
-                "Do you want to reload images now?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-            )
-            if reply == QMessageBox.Yes:
-                self.reload_current_images()
-            else:
-                self.clear_images()
-                self.log("Resize mode changed, images cleared. Please load images again.")
+        segmentation_controller.resize_changed(self, enabled)
 
     def clear_images(self):
         segmentation_input.clear_session(self, empty_fields=('display_images','gray_images','annotations'), none_fields=('prediction_mask','current_cluster_labels'))
@@ -969,14 +897,10 @@ class TraditionalMLWindow(QMainWindow):
 
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentData()
-        self.hull_checkbox.setVisible(mode in ("Segmentation (Polygon)", "OBB (Oriented Box)"))
-        if self.display_images:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_hull_changed(self, state):
-        if self.display_images:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_object_selection_changed(self, item):
         segmentation_results.on_selection_changed(self, item)
@@ -995,6 +919,11 @@ class TraditionalMLWindow(QMainWindow):
 
     def toggle_histogram(self, checked):
         segmentation_actions.toggle_histogram(self, checked)
+
+
+    def closeEvent(self, event):
+        segmentation_controller.close(self)
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":

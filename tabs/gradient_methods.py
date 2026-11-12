@@ -17,7 +17,6 @@ import sys
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -25,19 +24,18 @@ from PyQt5.QtWidgets import (
 )
 
 from path_setup import get_project_root
-from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
 from ui.segmentation import image_input as segmentation_input
 from ui.segmentation import navigation as segmentation_navigation
+from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import GradientPresetManager
-from ui.settings_service import settings
 from ui_tabs.gradient_methods_ui import setup_gradient_ui
 from utils_auto_research.gradient_auto_research import GradientAutoResearch
 from utils_auto_research.gradient_auto_settings_dialog import GradientAutoSettingsDialog
-from utils_new.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.gradient_ops import apply_gradient_method
 
@@ -73,26 +71,12 @@ class GradientMethodsWindow(QMainWindow):
 
         self.auto_settings = None
         self.load_auto_settings()
-        self.toggle_log_btn.clicked.connect(self.toggle_log)
-        self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
         # Пресеты
         self.preset_manager = GradientPresetManager(self, preset_file="presets_gradient.json")
         self.update_preset_combo()
-        self.preset_combo.activated.connect(self.on_preset_activated)
-        self.save_preset_btn.clicked.connect(self.save_as_preset)
-        self.delete_preset_btn.clicked.connect(self.delete_current_preset)
 
-        self.update_timer = QTimer()
-        self.update_timer.setSingleShot(True)
-        self.update_timer.timeout.connect(self.display_current_image)
 
         # Сигналы
-        self.nav_widget.load_images.connect(self.load_images_from_dialog)
-        self.nav_widget.load_folder.connect(self.load_folder)
-        self.nav_widget.prev.connect(self.prev_image)
-        self.nav_widget.next.connect(self.next_image)
-        self.nav_widget.resize_toggled.connect(self.on_resize_mode_changed)
-        self.nav_widget.goto_page.connect(self.goto_image)
 
         self.method_combo.currentIndexChanged.connect(self.on_method_changed)
         self.sobel_kernel.valueChanged.connect(self.schedule_update)
@@ -105,21 +89,13 @@ class GradientMethodsWindow(QMainWindow):
         self.threshold_slider.valueChanged.connect(self.on_threshold_changed)
         self.fill_contours_checkbox.stateChanged.connect(self.schedule_update)
         self.min_area_spinbox.valueChanged.connect(self.on_min_area_changed)
-        self.invert_checkbox.stateChanged.connect(self.schedule_update)
-        self.morphology_widget.parameters_changed.connect(self.schedule_update)
-        self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
-        self.hull_checkbox.stateChanged.connect(self.on_hull_changed)
-        self.object_list.itemChanged.connect(self.on_object_selection_changed)
-        self.draw_combo.currentIndexChanged.connect(self.on_draw_mode_changed)
         # Замена сохранения на универсальное
-        self.save_button.clicked.connect(self.save_current_annotations)
 
         self.auto_enable_checkbox.setChecked(False)
         self.configure_auto_button.clicked.connect(self.open_auto_settings)
         self.auto_button.clicked.connect(self.run_auto_optimization)
 
-        settings.settings_changed.connect(self.on_global_settings_changed)
 
         self.on_method_changed(self.method_combo.currentIndex())
         self.update_navigation_state()
@@ -175,14 +151,7 @@ class GradientMethodsWindow(QMainWindow):
             self.log(f"Ошибка сохранения настроек автоподбора: {e}")
 
     def closeEvent(self, event):
-        # Аккуратно останавливаем фоновый пул, чтобы процесс не висел
-        # на незавершённых задачах загрузки.
-        if self._lazy_cache is not None:
-            try:
-                self._lazy_cache.shutdown()
-            except Exception:
-                pass
-            self._lazy_cache = None
+        segmentation_controller.close(self)
         self.save_auto_settings()
         event.accept()
 
@@ -244,119 +213,33 @@ class GradientMethodsWindow(QMainWindow):
 
 
     # ---------- Основная логика ----------
-    def display_current_image(self):
-        if self._lazy_cache is None or len(self._lazy_cache) == 0:
-            self.update_current_histogram()
-            for v in (self.original_view, self.gradient_view, self.binary_view,
-                      self.morph_view, self.filled_view, self.annotated_view):
-                v.set_pixmap(numpy_to_qpixmap(None))
-            self.info_label.setText("No images loaded")
-            self.object_list.clear()
-            return
 
-        idx = self.current_index
-        total = len(self._lazy_cache)
+    def _mask_signature(self, frame):
+        return frame.key, self.method_combo.currentText(), repr(self.get_current_gradient_params()), self.threshold_slider.value()
 
-        self.info_label.setText(f"Image {idx + 1} of {total}")
-        current_file = os.path.basename(self.image_paths[idx])
-        base_name = os.path.splitext(current_file)[0]
-        self.log(f"Отображён снимок: {current_file}")
-
-        self.original_view.set_suggested_save_name(f"grad_original_{base_name}")
-        self.gradient_view.set_suggested_save_name(f"grad_edges_{base_name}")
-        self.binary_view.set_suggested_save_name(f"grad_binary_{base_name}")
-        self.morph_view.set_suggested_save_name(f"grad_morph_{base_name}")
-        self.filled_view.set_suggested_save_name(f"grad_filled_{base_name}")
-        self.annotated_view.set_suggested_save_name(f"grad_annotated_{base_name}")
-
-        # --- Синхронно получаем элемент (LRU-кэш вернёт готовый или загрузит) ---
-        item = self._lazy_cache.get(idx)
-        if item is None:
-            self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
-            return
-
-        original = item["image"]
-        if len(original.shape) == 3 and original.shape[2] == 4:
-            original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        gray = item["gray"]
-        segmentation_results.prepare_frame(self, gray)
-
-        self.original_image = original
-        self.current_gray = gray
-
-        self.update_histogram(gray)
-        # 1. Градиентная маска
-        method = self.method_combo.currentText()
-        params = self.get_current_gradient_params()
-
-        gray = cv2.bitwise_not(gray)
-        gradient = apply_gradient_method(gray, method, params)
+    def _compute_mask(self, frame):
+        gradient = apply_gradient_method(cv2.bitwise_not(frame.gray), self.method_combo.currentText(), self.get_current_gradient_params())
         self.current_gradient_mask = gradient
-        self.original_view.set_pixmap(numpy_to_qpixmap(original))
-        self.gradient_view.set_pixmap(numpy_to_qpixmap(gradient))
+        _, binary = cv2.threshold(gradient, self.threshold_slider.value(), 255, cv2.THRESH_BINARY)
+        return binary, {'gradient_view': gradient, 'binary_view': binary}
 
-        # 2. Бинаризация
-        thresh_val = self.threshold_slider.value()
-        _, binary = cv2.threshold(gradient, thresh_val, 255, cv2.THRESH_BINARY)
-        self.binary_view.set_pixmap(numpy_to_qpixmap(binary))
+    def _finalize_mask(self, processed, frame):
+        min_area = self.min_area_spinbox.value() / 100.0 * frame.gray.size
+        if min_area > 0:
+            contours, _ = cv2.findContours(processed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                if cv2.contourArea(contour) < min_area:
+                    cv2.drawContours(processed, [contour], -1, 0, thickness=cv2.FILLED)
+        if not self.fill_contours_checkbox.isChecked():
+            return processed
+        contours, _ = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filled = np.zeros_like(processed)
+        for contour in contours:
+            cv2.drawContours(filled, [contour], -1, 255, thickness=cv2.FILLED)
+        return filled
 
-        # 3. Морфология: четыре операции в пикселях в порядке панели
-        processed = apply_morphology(binary, self.morphology_widget.get_steps(),
-                                     shape=self.morphology_widget.kernel_shape())
-        self.morph_view.set_pixmap(numpy_to_qpixmap(processed))
-
-        # 4. Удаление мелких контуров (по проценту от площади изображения)
-        min_area_percent = self.min_area_spinbox.value()
-        fill_enabled = self.fill_contours_checkbox.isChecked()
-
-        if min_area_percent > 0:
-            total_area = gray.shape[0] * gray.shape[1]
-            min_area_abs = (min_area_percent / 100.0) * total_area
-            contours, hierarchy = cv2.findContours(processed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in contours:
-                if cv2.contourArea(cnt) < min_area_abs:
-                    cv2.drawContours(processed, [cnt], -1, 0, thickness=cv2.FILLED)
-
-        # 5. Заливка контуров
-        if fill_enabled:
-            contours, _ = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            mask_for_objects = np.zeros_like(processed)
-            for cnt in contours:
-                cv2.drawContours(mask_for_objects, [cnt], -1, 255, thickness=cv2.FILLED)
-        else:
-            mask_for_objects = processed
-
-        # 6. Инверсия маски
-        if self.invert_checkbox.isChecked():
-            mask_for_objects = cv2.bitwise_not(mask_for_objects)
-
-        self.filled_view.set_pixmap(numpy_to_qpixmap(mask_for_objects))
-
-        # 7. Создание изображения для аннотаций (фон белый)
-        if len(original.shape) == 2:
-            result = original.copy()
-            result[mask_for_objects == 0] = 255
-        else:
-            result = original.copy()
-            result[mask_for_objects == 0] = [255, 255, 255]
-
-        if len(result.shape) == 2:
-            display_img = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
-        else:
-            display_img = result.copy()
-
-        self.current_base_image = display_img.copy()
-
-        # 8. Выделение объектов в унифицированном формате через draw_objects_on_image
-        _, self.current_objects_full = self.draw_objects_on_image(display_img, mask_for_objects, draw=False)
-
-        self.update_object_list()
-        self.nav_widget.set_current_index(idx, total)
-
-        # --- Префетч следующего окна + вытеснение дальних ---
-        ahead = self._lazy_cache.prefetch_ahead
-        self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
-        self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
+    def display_current_image(self):
+        segmentation_presentation.display(self)
 
     # ---------- Работа со списком объектов ----------
     def update_object_list(self):
@@ -398,24 +281,13 @@ class GradientMethodsWindow(QMainWindow):
         segmentation_navigation.reset_zooms(self)
 
     def on_resize_mode_changed(self, enabled):
-        if self.image_paths:
-            reply = QMessageBox.question(
-                self, "Resize Mode Changed",
-                "Resize mode changed. To apply, you need to reload images.\n"
-                "Do you want to reload images now?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-            )
-            if reply == QMessageBox.Yes:
-                self.reload_current_images()
-            else:
-                self.clear_images()
-                self.log("Resize mode changed, images cleared. Please load images again.")
+        segmentation_controller.resize_changed(self, enabled)
 
     def clear_images(self):
         segmentation_input.clear_session(self)
 
     def schedule_update(self):
-        self.update_timer.start(50)
+        segmentation_controller.schedule(self)
 
     def on_method_changed(self, idx):
         method = self.method_combo.currentText()
@@ -455,17 +327,10 @@ class GradientMethodsWindow(QMainWindow):
         self.schedule_update()
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentData()
-        if mode in ['segment', 'obb']:
-            self.hull_checkbox.setVisible(True)
-        else:
-            self.hull_checkbox.setVisible(False)
-        if self.original_image is not None:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_hull_changed(self, state):
-        if self.original_image is not None:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_object_selection_changed(self, item):
         segmentation_results.on_selection_changed(self, item)

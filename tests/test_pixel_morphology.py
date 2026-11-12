@@ -196,7 +196,7 @@ with tempfile.TemporaryDirectory() as directory:
             shape_code={'Rectangle':cv2.MORPH_RECT,'Ellipse':cv2.MORPH_ELLIPSE,'Cross':cv2.MORPH_CROSS}[shape]
             for operation in codes:
                 for step in codes:panel.set_operation_size(step,13 if step==operation else 0)
-                owner.mask=mask.copy();owner.prediction_mask=mask.copy()
+                owner.mask=mask.copy();owner.prediction_mask=mask.copy();owner._raw_signature=None
                 with patch.object(module,'apply_threshold_method',return_value=(cv2.bitwise_not(mask),128),create=True),patch.object(module,'apply_gradient_method',return_value=mask,create=True):
                     owner.display_current_image()
                 expected=cv2.morphologyEx(mask,codes[operation],cv2.getStructuringElement(shape_code,(13,13)))

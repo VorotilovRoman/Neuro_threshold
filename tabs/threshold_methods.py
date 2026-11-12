@@ -21,7 +21,6 @@ import os
 import sys
 
 import cv2
-from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -29,19 +28,18 @@ from PyQt5.QtWidgets import (
 )
 
 from path_setup import get_project_root
-from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
 from ui.segmentation import image_input as segmentation_input
 from ui.segmentation import navigation as segmentation_navigation
+from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import ThresholdPresetManager
-from ui.settings_service import settings
 from ui_tabs.threshold_methods_ui import setup_threshold_ui
 from utils_auto_research.threshold_auto_research import AutoResearch
 from utils_auto_research.threshold_auto_settings_dialog import AutoSettingsDialog
-from utils_new.morphology import apply_morphology as apply_shared_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_new.threshold_processing import apply_threshold_method
 
@@ -83,29 +81,14 @@ class ThresholdWindow(QMainWindow):
         self.configure_auto_button.clicked.connect(self.open_auto_settings)
         self.auto_button.clicked.connect(self.run_auto_optimization)
 
-        self.update_timer = QTimer()
-        self.update_timer.setSingleShot(True)
-        self.update_timer.timeout.connect(self.display_current_image)
 
         # Пресеты
         self.preset_manager = ThresholdPresetManager(self)
         self.update_preset_combo()
-        self.preset_combo.activated.connect(self.on_preset_activated)
-        self.save_preset_btn.clicked.connect(self.save_as_preset)
-        self.delete_preset_btn.clicked.connect(self.delete_current_preset)
 
         # Подключение сигналов
-        self.nav_widget.load_images.connect(self.load_images_from_dialog)
-        self.nav_widget.load_folder.connect(self.load_folder)
-        self.nav_widget.prev.connect(self.prev_image)
-        self.nav_widget.next.connect(self.next_image)
-        self.nav_widget.resize_toggled.connect(self.on_resize_mode_changed)
-        self.nav_widget.goto_page.connect(self.goto_image)
 
         self.threshold_slider.valueChanged.connect(self.on_simple_threshold_changed)
-        self.invert_checkbox.stateChanged.connect(self.on_invert_changed)
-        self.morphology_widget.parameters_changed.connect(self.on_morphology_changed)
-        self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
         self.adaptive_win.valueChanged.connect(self.on_param_changed)
         self.adaptive_c.valueChanged.connect(self.on_param_changed)
@@ -119,20 +102,13 @@ class ThresholdWindow(QMainWindow):
         self.row_k.valueChanged.connect(self.on_row_k_changed)
         self.bg_excess.valueChanged.connect(self.on_bg_excess_changed)
 
-        self.hull_checkbox.stateChanged.connect(self.on_hull_changed)
-        self.object_list.itemChanged.connect(self.on_object_selection_changed)
-        self.draw_combo.currentIndexChanged.connect(self.on_draw_mode_changed)
         # Замена save_coordinates на универсальное сохранение
-        self.save_button.clicked.connect(self.save_current_annotations)
 
         self.method_combo.currentIndexChanged.connect(self.on_method_changed)
 
         self.on_method_changed(self.method_combo.currentIndex())
         self.update_navigation_state()
 
-        self.toggle_log_btn.clicked.connect(self.toggle_log)
-        self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
-        settings.settings_changed.connect(self.on_global_settings_changed)
 
         # Применить пресет по умолчанию (если есть)
         preset_names = self.preset_manager.get_preset_names()
@@ -171,14 +147,7 @@ class ThresholdWindow(QMainWindow):
             self.log(f"Ошибка сохранения настроек автоподбора: {e}")
 
     def closeEvent(self, event):
-        # Аккуратно останавливаем фоновый пул, чтобы процесс не висел
-        # на незавершённых задачах загрузки.
-        if self._lazy_cache is not None:
-            try:
-                self._lazy_cache.shutdown()
-            except Exception:
-                pass
-            self._lazy_cache = None
+        segmentation_controller.close(self)
         self.save_auto_settings()
         event.accept()
 
@@ -238,105 +207,19 @@ class ThresholdWindow(QMainWindow):
         return params
 
     # ---------- Отображение через Qt (utils_new) ----------
-    @staticmethod
-    def _show_image_in_view(view, image):
-        """Чистый снимок + корректная система координат пикселей изображения.
-
-        Если numpy_to_qpixmap уменьшит изображение для ограничения памяти,
-        аннотации останутся привязанными к исходным координатам пикселей.
-        """
-        if image is None:
-            view.set_annotations([], 0, 0)
-            view.set_pixmap(numpy_to_qpixmap(None))
-            return
-        h, w = image.shape[:2]
-        view.set_annotations([], w, h)
-        view.set_pixmap(numpy_to_qpixmap(image))
 
     # ---------- Отображение текущего изображения ----------
-    def display_current_image(self):
-        if self._lazy_cache is None or len(self._lazy_cache) == 0:
-            self.update_current_histogram()
-            for view in (self.original_view, self.binary_view,
-                         self.morph_view, self.annotated_view):
-                self._show_image_in_view(view, None)
-            self.info_label.setText("No images loaded")
-            self.object_list.clear()
-            return
 
-        idx = self.current_index
-        total = len(self._lazy_cache)
+    def _mask_signature(self, frame):
+        return frame.key, self.method_combo.currentText(), repr(self.get_current_threshold_params())
 
-        self.info_label.setText(f"Image {idx + 1} of {total}")
-
-        # --- Синхронно получаем элемент (LRU-кэш вернёт готовый или загрузит) ---
-        item = self._lazy_cache.get(idx)
-        if item is None:
-            self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
-            return
-
-        original = item["image"]
-        if len(original.shape) == 3 and original.shape[2] == 4:
-            original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        gray = item["gray"]
-        segmentation_results.prepare_frame(self, gray)
-
-        self.original_image = original
-        self.current_gray = gray
-        method = self.method_combo.currentText()
-        params = self.get_current_threshold_params()
-        binary, thresh = apply_threshold_method(gray, method, params)
-        self.current_threshold = thresh
+    def _compute_mask(self, frame):
+        binary, self.current_threshold = apply_threshold_method(frame.gray, self.method_combo.currentText(), self.get_current_threshold_params())
         binary = cv2.bitwise_not(binary)
+        return binary, {'binary_view': binary}
 
-        current_file = os.path.basename(self.image_paths[idx])
-        base_name = os.path.splitext(current_file)[0]
-        self.log(f"Отображён снимок: {current_file}")
-
-        self.original_view.set_suggested_save_name(f"thresh_original_{base_name}")
-        self.binary_view.set_suggested_save_name(f"thresh_binary_{base_name}")
-        self.morph_view.set_suggested_save_name(f"thresh_morph_{base_name}")
-        self.annotated_view.set_suggested_save_name(f"thresh_annotated_{base_name}")
-
-        self.update_histogram(gray, self.current_threshold)
-        self._show_image_in_view(self.original_view, original)
-        self._show_image_in_view(self.binary_view, binary)
-
-        processed = apply_shared_morphology(
-            binary, self.morphology_widget.get_steps(),
-            shape=self.morphology_widget.kernel_shape(),
-        )
-        if self.invert_checkbox.isChecked():
-            processed = cv2.bitwise_not(processed)
-
-        self._show_image_in_view(self.morph_view, processed)
-
-        if len(original.shape) == 2 or (len(original.shape) == 3 and original.shape[2] == 1):
-            result = original.copy()
-            result[processed == 0] = 255
-        else:
-            result = original.copy()
-            mask = processed == 0
-            result[mask] = [255, 255, 255]
-
-        if len(result.shape) == 2:
-            display_img = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
-        else:
-            display_img = result.copy()
-        self.current_base_image = display_img.copy()
-        # На 4-м виде базовый снимок устанавливаем один раз.
-        # Далее галочки объектов обновляют только векторный слой, без
-        # повторного преобразования изображения в QPixmap.
-        self._show_image_in_view(self.annotated_view, self.current_base_image)
-        # Геометрию объектов теперь вычисляет общий utils_new.annotation_processing.
-        _, self.current_objects_full = self.draw_objects_on_image(
-            display_img, processed, draw=False)
-        self.update_object_list()
-
-        # --- Префетч следующего окна + вытеснение дальних ---
-        ahead = self._lazy_cache.prefetch_ahead
-        self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
-        self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
+    def display_current_image(self):
+        segmentation_presentation.display(self)
 
     # ---------- Работа со списком объектов (универсальная) ----------
     def update_object_list(self):
@@ -385,18 +268,7 @@ class ThresholdWindow(QMainWindow):
         segmentation_navigation.reset_zooms(self)
 
     def on_resize_mode_changed(self, enabled):
-        if self.image_paths:
-            reply = QMessageBox.question(
-                self, "Resize Mode Changed",
-                "Resize mode changed. To apply, you need to reload images.\n"
-                "Do you want to reload images now?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-            )
-            if reply == QMessageBox.Yes:
-                self.reload_current_images()
-            else:
-                self.clear_images()
-                self.log("Resize mode changed, images cleared. Please load images again.")
+        segmentation_controller.resize_changed(self, enabled)
 
     def clear_images(self):
         segmentation_input.clear_session(self, none_fields=('current_threshold',))
@@ -458,7 +330,7 @@ class ThresholdWindow(QMainWindow):
             self.schedule_update()
 
     def schedule_update(self):
-        self.update_timer.start(50)
+        segmentation_controller.schedule(self)
 
 
 
@@ -500,17 +372,10 @@ class ThresholdWindow(QMainWindow):
             self.schedule_update()
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentData()
-        if mode in ['segment', 'obb']:
-            self.hull_checkbox.setVisible(True)
-        else:
-            self.hull_checkbox.setVisible(False)
-        if self.original_image is not None:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_hull_changed(self, state):
-        if self.original_image is not None:
-            self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_object_selection_changed(self, item):
         segmentation_results.on_selection_changed(self, item)

@@ -14,26 +14,23 @@ prepare_windows_torch()
 import os
 import sys
 
-import cv2
 import numpy as np
-from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QMessageBox,
 )
 
-from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import actions as segmentation_actions
+from ui.segmentation import controller as segmentation_controller
 from ui.segmentation import export as segmentation_export
 from ui.segmentation import histogram as segmentation_histogram
 from ui.segmentation import image_input as segmentation_input
 from ui.segmentation import navigation as segmentation_navigation
+from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import DeepLearningPresetManager
-from ui.settings_service import settings
 from ui_tabs.deep_learning_methods_ui import setup_deep_learning_methods_ui
-from utils_new.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_ops.deep_learning_ops import create_segmentor
 
@@ -89,27 +86,12 @@ class DeepLearningWindow(QMainWindow):
         # Пресеты
         self.preset_manager = DeepLearningPresetManager(self, preset_file="presets_deep_learning.json")
         self.update_preset_combo()
-        self.preset_combo.activated.connect(self.on_preset_activated)
-        self.save_preset_btn.clicked.connect(self.save_as_preset)
-        self.delete_preset_btn.clicked.connect(self.delete_current_preset)
-        self.toggle_log_btn.clicked.connect(self.toggle_log)
-        self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
 
-        self.update_timer = QTimer()
-        self.update_timer.setSingleShot(True)
-        self.update_timer.timeout.connect(self.display_current_image)
 
         # Навигация
-        self.nav_widget.load_images.connect(self.load_images_from_dialog)
-        self.nav_widget.load_folder.connect(self.load_folder)
-        self.nav_widget.prev.connect(self.prev_image)
-        self.nav_widget.next.connect(self.next_image)
-        self.nav_widget.goto_page.connect(self.goto_image)
-        self.nav_widget.resize_toggled.connect(self.on_resize_mode_changed)
 
         # Кнопки
         self.segment_button.clicked.connect(self.run_segmentation)
-        self.save_button.clicked.connect(self.save_current_annotations)
 
         # Подключение кнопок "Обзор" в виджетах
         self.unet_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("U-Net"))
@@ -125,15 +107,8 @@ class DeepLearningWindow(QMainWindow):
         self._connect_settings_widgets()
 
         # Морфология
-        self.invert_checkbox.stateChanged.connect(self.schedule_update)
-        self.morphology_widget.parameters_changed.connect(self.schedule_update)
-        self.reset_zoom_button.clicked.connect(self.reset_all_zooms)
 
-        self.hull_checkbox.stateChanged.connect(self.schedule_update)
-        self.object_list.itemChanged.connect(self.on_object_selection_changed)
-        self.draw_combo.currentIndexChanged.connect(self.on_draw_mode_changed)
 
-        settings.settings_changed.connect(self.on_global_settings_changed)
 
         self.update_navigation_state()
         self.on_model_changed(0)
@@ -539,7 +514,8 @@ class DeepLearningWindow(QMainWindow):
         if model_name in ["SegFormer", "SAM"]:
             QMessageBox.information(self, "Информация",
                                     f"Модель {model_name} не реализована, сегментация невозможна.")
-            self.prediction_mask = np.zeros(self.current_gray.shape, dtype=np.uint8)
+            from ui.segmentation.errors import report
+            report(self, 'Сегментация', ValueError(f'Модель {model_name} не реализована'))
             return
 
         self.progress_bar.setValue(0)
@@ -613,132 +589,29 @@ class DeepLearningWindow(QMainWindow):
 
             self.prediction_mask = mask
             self.progress_bar.setValue(100)
+            self.schedule_update()
 
         except Exception as e:
             self.log(f"Ошибка сегментации: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить сегментацию:\n{e}")
-            self.prediction_mask = np.zeros(self.current_gray.shape, dtype=np.uint8)
+            from ui.segmentation.errors import report
+            report(self, 'Сегментация', e)
         finally:
             self.segment_button.setEnabled(True)
 
     # ---------- Отображение ----------
-    def display_current_image(self):
-        if self._lazy_cache is None or len(self._lazy_cache) == 0:
-            self.update_current_histogram()
-            for view in (self.original_view, self.dl_view,
-                         self.morph_view, self.annotated_view):
-                view.set_pixmap(numpy_to_qpixmap(None))
-            self.info_label.setText("No images loaded")
-            self.object_list.clear()
-            return
 
-        idx = self.current_index
-        total = len(self._lazy_cache)
+    def _mask_signature(self, frame):
+        return frame.key, id(self.segmentor), id(self.prediction_mask)
 
-        self.info_label.setText(f"Image {idx + 1} of {total}")
-        current_file = os.path.basename(self.image_paths[idx])
-        base_name = os.path.splitext(current_file)[0]
-        self.log(f"Отображён снимок: {current_file}")
-
-        self.original_view.set_suggested_save_name(f"dl_original_{base_name}")
-        self.dl_view.set_suggested_save_name(f"dl_mask_{base_name}")
-        self.morph_view.set_suggested_save_name(f"dl_morph_{base_name}")
-        self.annotated_view.set_suggested_save_name(f"dl_annotated_{base_name}")
-
-        # --- Синхронно получаем элемент (LRU-кэш вернёт готовый или загрузит) ---
-        item = self._lazy_cache.get(idx)
-        if item is None:
-            self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
-            return
-
-        original = item["image"]
-        if len(original.shape) == 3 and original.shape[2] == 4:
-            original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        gray = item["gray"]
-        segmentation_results.prepare_frame(self, gray)
-
-        self.original_image = original
-        self.current_gray = gray
-
-        self.update_histogram(gray)
-        self.original_view.set_pixmap(numpy_to_qpixmap(original))
-
-        if self.segmentor is not None and self.prediction_mask is None:
+    def _compute_mask(self, frame):
+        from utils_new.segmentation.result import ResultStatus
+        if self.segmentor is not None and self.prediction_mask is None and self.result_state.status not in (ResultStatus.ERROR, ResultStatus.RUNNING):
             self.run_segmentation()
+        return self.prediction_mask, {'dl_view': self.prediction_mask}
 
-        mask = self.prediction_mask if self.prediction_mask is not None else np.zeros(gray.shape, dtype=np.uint8)
-        self._apply_morphology_and_draw(mask, gray, original)
-        self.update_navigation_state()
+    def display_current_image(self):
+        segmentation_presentation.display(self)
 
-        # --- Префетч следующего окна + вытеснение дальних ---
-        ahead = self._lazy_cache.prefetch_ahead
-        self._lazy_cache.prefetch(range(idx + 1, min(idx + 1 + ahead + 1, total)))
-        self._lazy_cache.trim_around(idx, keep_behind=3, keep_ahead=ahead + 4)
-
-    def _apply_morphology_and_draw(self, mask, gray, original):
-
-        self.log(f"=== Постобработка морфологией ===")
-        self.log(f"Входная маска (DL): {mask.shape}, dtype={mask.dtype}, "
-                 f"мин={mask.min()}, макс={mask.max()}, среднее={mask.mean():.3f}")
-        self.log(f"Морфология, px: {self.morphology_widget.get_settings()}")
-
-        processed = apply_morphology(mask, self.morphology_widget.get_steps(),
-                                         shape=self.morphology_widget.kernel_shape())
-
-        self.log(f"Маска после морфологии: {processed.shape}, dtype={processed.dtype}, "
-                 f"мин={processed.min()}, макс={processed.max()}, среднее={processed.mean():.3f}")
-
-        if self.invert_checkbox.isChecked():
-            self.log("Инверсия маски применена")
-            processed = cv2.bitwise_not(processed)
-
-        self.dl_view.set_pixmap(numpy_to_qpixmap(mask))
-        self.morph_view.set_pixmap(numpy_to_qpixmap(processed))
-
-        # Подготовка изображения для аннотаций (фон делаем белым)
-        if len(original.shape) == 2:
-            result = original.copy()
-            result[processed == 0] = 255
-        else:
-            result = original.copy()
-            mask_bool = processed == 0
-            result[mask_bool] = [255, 255, 255]
-
-        if len(result.shape) == 2:
-            display_img = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
-        else:
-            display_img = result.copy()
-
-        draw_mode = self.draw_combo.currentData()
-        self.log(f"=== Отрисовка объектов (режим: {draw_mode}) ===")
-
-        self.current_base_image = display_img.copy()
-        _, self.current_objects_full = self.draw_objects_on_image(display_img, processed, draw=False)
-
-        if self.current_objects_full:
-            self.log(f"Обнаружено объектов: {len(self.current_objects_full)}")
-            for i, obj in enumerate(self.current_objects_full[:5]):
-                if isinstance(obj, tuple) and len(obj) > 0 and obj[0] in ('detect', 'obb', 'segment'):
-                    typ = obj[0]
-                    if typ == 'detect':
-                        _, cls, cx, cy, w, h = obj
-                        self.log(f"  Объект {i+1}: detect (class {cls})")
-                    elif typ == 'obb':
-                        _, cls, pts = obj
-                        self.log(f"  Объект {i+1}: OBB (class {cls})")
-                    else:
-                        _, cls, pts = obj
-                        self.log(f"  Объект {i+1}: polygon (class {cls})")
-                elif len(obj) == 4:
-                    self.log(f"  Объект {i+1}: прямоугольник x={obj[0]}, y={obj[1]}, w={obj[2]}, h={obj[3]}")
-                elif len(obj) == 5:
-                    self.log(f"  Объект {i+1}: центр=({obj[0]:.1f},{obj[1]:.1f}), размер=({obj[2]:.1f}x{obj[3]:.1f}), angle={obj[4]:.1f}°")
-            if len(self.current_objects_full) > 5:
-                self.log(f"  ... и ещё {len(self.current_objects_full)-5} объектов")
-        else:
-            self.log("Объектов не обнаружено")
-
-        self.update_object_list()
 
     # ---------- Работа со списком объектов ----------
     def update_object_list(self):
@@ -786,35 +659,21 @@ class DeepLearningWindow(QMainWindow):
         segmentation_navigation.reset_zooms(self)
 
     def on_resize_mode_changed(self, enabled):
-        if self.image_paths:
-            reply = QMessageBox.question(
-                self, "Resize Mode Changed",
-                "Resize mode changed. Reload images?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-            )
-            if reply == QMessageBox.Yes:
-                self.reload_current_images()
-            else:
-                self.clear_images()
+        segmentation_controller.resize_changed(self, enabled)
 
     def clear_images(self):
         segmentation_input.clear_session(self, none_fields=('prediction_mask',))
 
     def schedule_update(self):
-        self.update_timer.start(50)
+        segmentation_controller.schedule(self)
 
 
 
     def on_draw_mode_changed(self, idx):
-        mode = self.draw_combo.currentData()
-        if mode in ['segment', 'obb']:
-            self.hull_checkbox.setVisible(True)
-        else:
-            self.hull_checkbox.setVisible(False)
-        self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_hull_changed(self, state):
-        self.schedule_update()
+        segmentation_presentation.geometry_changed(self)
 
     def on_object_selection_changed(self, item):
         segmentation_results.on_selection_changed(self, item)
@@ -830,14 +689,7 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- Завершение работы ----------
     def closeEvent(self, event):
-        # Аккуратно останавливаем фоновый пул, чтобы процесс не висел
-        # на незавершённых задачах загрузки.
-        if self._lazy_cache is not None:
-            try:
-                self._lazy_cache.shutdown()
-            except Exception:
-                pass
-            self._lazy_cache = None
+        segmentation_controller.close(self)
         super().closeEvent(event)
 
 

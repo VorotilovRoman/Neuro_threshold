@@ -15,6 +15,10 @@ def save_selected(owner):
     if not owner.image_paths:
         QMessageBox.warning(owner, 'Нет изображения', 'Нет загруженных изображений.')
         return
+    from utils_new.segmentation.result import ResultStatus
+    if owner.result_state.status != ResultStatus.READY:
+        QMessageBox.warning(owner, 'Нет результата', 'Сначала получите успешный результат сегментации.')
+        return
     objects = owner.current_objects_full
     selected = [objects[i] for i in owner.current_selected_indices if 0 <= i < len(objects)]
     image = owner.image_paths[owner.current_index]

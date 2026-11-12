@@ -230,6 +230,8 @@ with tempfile.TemporaryDirectory() as directory:
             owner.load_images_from_dialog()
         owner.current_objects_full=[('segment',2,[.1,.2,.8,.2,.8,.7,.1,.7])]
         owner.current_selected_indices=[0]
+        from utils_new.segmentation.result import SegmentationResult,ResultStatus
+        owner.result_state=SegmentationResult(ResultStatus.READY)
         with patch.object(QMessageBox,'question',return_value=QMessageBox.No) as question:
             owner.save_current_annotations()
             assert question.call_args.args[-1]==QMessageBox.No

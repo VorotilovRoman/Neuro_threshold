@@ -28,6 +28,8 @@ def choose_folder(owner, load):
 
 
 def load_cached(owner, source, view_names, *, max_side=1024, reset=None):
+    owner._data_revision += 1
+    owner.update_timer.stop()
     paths = image_paths(source)
     if not paths:
         owner.log('No images loaded.')
@@ -48,20 +50,6 @@ def load_cached(owner, source, view_names, *, max_side=1024, reset=None):
         view.set_pixmap(numpy_to_qpixmap(None))
         view.set_annotations([], 0, 0)
     owner.object_list.clear()
-    try:
-        first = owner._lazy_cache.get(0)
-    except (OSError, ValueError, TypeError) as exc:
-        owner.log(f'Ошибка чтения изображения: {exc}')
-        first = None
-    if first is None:
-        owner.log('Не удалось загрузить первое изображение.')
-        owner._lazy_cache.shutdown()
-        owner._lazy_cache = None
-        owner.image_paths = []
-        owner.nav_widget.set_current_index(0, 0)
-        owner.update_navigation_state()
-        QMessageBox.warning(owner, 'Ошибка чтения', 'Не удалось загрузить первое изображение.')
-        return
     total = len(paths)
     owner._lazy_cache.prefetch(range(1, min(1+owner._lazy_cache.prefetch_ahead+1, total)))
     owner.log(f'Загружено {total} изображений (первое — сразу, остальное в фоне).')
@@ -72,7 +60,7 @@ def load_cached(owner, source, view_names, *, max_side=1024, reset=None):
 
 def load_images_universal(source, require_annotations=False, resize_enabled=True,
                           max_side=1024, progress_callback=None, parent=None,
-                          format_hint='auto'):
+                          format_hint='auto', record_callback=None, keep_invalid=False):
     """Temporary eager adapter for ML training; no Qt in the actual reader."""
     paths = image_paths(source)
     progress = None
@@ -92,7 +80,11 @@ def load_images_universal(source, require_annotations=False, resize_enabled=True
             if require_annotations and not Path(path).with_suffix('.txt').exists():
                 continue
             frame = load_one_image_item(path, resize_enabled, max_side, format_hint=format_hint)
+            if frame is None and keep_invalid:
+                if record_callback is not None:record_callback(None)
+                for target,value in zip(output,(path,None,None,[])):target.append(value)
             if frame is not None:
+                if record_callback is not None:record_callback(frame)
                 for target, value in zip(output, (path, frame['image'], frame['gray'], frame['annotations'])):
                     target.append(value)
     finally:
@@ -102,9 +94,13 @@ def load_images_universal(source, require_annotations=False, resize_enabled=True
 
 
 def load_eager(owner, source, *, max_side=640):
+    owner._data_revision += 1
+    owner.update_timer.stop()
+    records=[]
     values = load_images_universal(source, resize_enabled=owner.nav_widget.is_resize_enabled(),
-                                   max_side=max_side, parent=owner)
+                                   max_side=max_side, parent=owner, record_callback=records.append, keep_invalid=True)
     if values[0]:
+        owner._eager_records=records
         owner._update_loaded_data(*values)
         return True
     owner.log('No images loaded.')
@@ -121,6 +117,9 @@ def reload_images(owner, load):
 
 def clear_session(owner, *, reset=None, empty_fields=(), none_fields=()):
     from ui.segmentation.results import clear_views
+    owner.update_timer.stop()
+    owner._data_revision += 1
+    owner._eager_records=[]
     cache = getattr(owner, '_lazy_cache', None)
     if cache is not None:
         cache.shutdown()
@@ -145,3 +144,6 @@ def clear_session(owner, *, reset=None, empty_fields=(), none_fields=()):
     owner.coord_text.clear()
     owner.nav_widget.set_current_index(0,0)
     owner.update_navigation_state()
+    from ui.segmentation.presentation import no_frame
+    no_frame(owner)
+
