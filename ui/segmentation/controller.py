@@ -37,7 +37,11 @@ def initialize(owner):
     owner.toggle_hist_btn.clicked.connect(owner.toggle_histogram)
     owner.reset_zoom_button.clicked.connect(owner.reset_all_zooms)
     owner.save_button.clicked.connect(owner.save_current_annotations)
-    owner.object_list.itemChanged.connect(owner.on_object_selection_changed)
+    from ui.segmentation import results
+
+    owner.objects_widget.checked_changed.connect(
+        lambda indices: results.on_checks_changed(owner, indices)
+    )
     owner.draw_combo.currentIndexChanged.connect(owner.on_draw_mode_changed)
     owner.hull_checkbox.stateChanged.connect(owner.on_hull_changed)
     owner.morphology_widget.parameters_changed.connect(

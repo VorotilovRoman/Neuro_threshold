@@ -60,8 +60,7 @@ def show_unavailable(owner, status, error=None):
                 h, w = owner.current_base_image.shape[:2]
                 view.set_image_data(w, h)
     show_image(owner.annotated_view, owner.current_base_image)
-    owner.object_list.clear()
-    owner.coord_text.clear()
+    owner.objects_widget.clear()
     set_status(owner, status, error)
 
 

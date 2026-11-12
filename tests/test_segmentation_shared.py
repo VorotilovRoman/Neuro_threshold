@@ -186,7 +186,7 @@ with tempfile.TemporaryDirectory() as directory:
         owner.current_objects_full=[('detect',0,.3,.5,.2,.3),('detect',1,.7,.5,.2,.3)]
         owner.update_object_list()
         assert owner.current_selected_indices==[0,1]
-        owner.object_list.item(0).setCheckState(Qt.Unchecked)
+        owner.objects_widget.set_checked_indices([1])
         assert owner.current_selected_indices==[1]
         assert len(owner.annotated_view.annotations)==1
         assert np.array_equal(owner.current_base_image,before)

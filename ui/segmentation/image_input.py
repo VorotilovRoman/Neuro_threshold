@@ -56,7 +56,7 @@ def load_cached(owner, source, view_names, *, max_side=1024, reset=None):
         view = getattr(owner, name)
         view.set_pixmap(numpy_to_qpixmap(None))
         view.set_annotations([], 0, 0)
-    owner.object_list.clear()
+    owner.objects_widget.clear()
     total = len(paths)
     owner._lazy_cache.prefetch(
         range(1, min(1 + owner._lazy_cache.prefetch_ahead + 1, total))
@@ -177,8 +177,7 @@ def clear_session(owner, *, reset=None, empty_fields=(), none_fields=()):
         reset()
     clear_views(owner)
     owner.info_label.setText("No images")
-    owner.object_list.clear()
-    owner.coord_text.clear()
+    owner.objects_widget.clear()
     owner.nav_widget.set_current_index(0, 0)
     owner.update_navigation_state()
     from ui.segmentation.presentation import no_frame

@@ -228,9 +228,6 @@ class ThresholdWindow(QMainWindow):
     def update_annotated_view(self):
         segmentation_results.update_overlay(self)
 
-    def update_coordinates_display(self):
-        segmentation_results.update_coordinates(self)
-
     # ---------- Навигация ----------
     def update_navigation_state(self):
         segmentation_navigation.update_state(self)
@@ -376,9 +373,6 @@ class ThresholdWindow(QMainWindow):
 
     def on_hull_changed(self, state):
         segmentation_presentation.geometry_changed(self)
-
-    def on_object_selection_changed(self, item):
-        segmentation_results.on_selection_changed(self, item)
 
     # ---------- Извлечение аннотаций из бинарной маски ----------
     def draw_objects_on_image(self, img, binary, draw=True):

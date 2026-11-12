@@ -489,9 +489,6 @@ class TraditionalMLWindow(QMainWindow):
     def update_annotated_view(self):
         segmentation_results.update_overlay(self)
 
-    def update_coordinates_display(self):
-        segmentation_results.update_coordinates(self)
-
     # ---------- Сохранение аннотаций (включая пустой файл) ----------
     def save_current_annotations(self):
         segmentation_export.save_selected(self)
@@ -547,9 +544,6 @@ class TraditionalMLWindow(QMainWindow):
 
     def on_hull_changed(self, state):
         segmentation_presentation.geometry_changed(self)
-
-    def on_object_selection_changed(self, item):
-        segmentation_results.on_selection_changed(self, item)
 
     # ----------------------------------------------------------------------
     #  Отрисовка объектов

@@ -2,24 +2,22 @@
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSplitter,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.annotation_review_view import DatasetReviewGraphicsView
+from ui.annotation_objects import AnnotationObjectsWidget
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
 from ui.segmentation.histogram import HistogramCanvas
@@ -65,19 +63,20 @@ STAGES = {
 class PresetPanel(QWidget):
     def __init__(self, owner):
         super().__init__()
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        layout.addLayout(row)
         row.addWidget(QLabel("Пресеты:"))
         owner.preset_combo = QComboBox()
         owner.preset_combo.setMinimumWidth(150)
         owner.save_preset_btn = QPushButton("Сохранить как пресет")
         owner.delete_preset_btn = QPushButton("Удалить пресет")
-        for widget in (
-            owner.preset_combo,
-            owner.save_preset_btn,
-            owner.delete_preset_btn,
-        ):
-            row.addWidget(widget)
+        row.addWidget(owner.preset_combo, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(owner.save_preset_btn)
+        actions.addWidget(owner.delete_preset_btn)
+        layout.addLayout(actions)
 
 
 class ResultPanel(QWidget):
@@ -95,15 +94,8 @@ class ResultPanel(QWidget):
         owner.hull_checkbox = QCheckBox("Выпуклая оболочка (OBB / Segment)")
         owner.hull_checkbox.setVisible(False)
         layout.addWidget(owner.hull_checkbox)
-        layout.addWidget(QLabel("Объекты — галочки задают сохранение и видимость:"))
-        owner.object_list = QListWidget()
-        owner.object_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        layout.addWidget(owner.object_list)
-        layout.addWidget(QLabel("Координаты отмеченных объектов:"))
-        owner.coord_text = QTextEdit()
-        owner.coord_text.setReadOnly(True)
-        owner.coord_text.setMaximumHeight(150)
-        layout.addWidget(owner.coord_text)
+        owner.objects_widget = AnnotationObjectsWidget()
+        layout.addWidget(owner.objects_widget)
         owner.save_button = QPushButton("Сохранить разметку")
         layout.addWidget(owner.save_button)
 
@@ -172,8 +164,11 @@ def begin_layout(owner, kind):
 def finish_layout(owner):
     from ui.segmentation import results
 
-    owner.object_list.currentRowChanged.connect(
-        lambda row: results.focus_row(owner, row)
+    owner.objects_widget.focused_changed.connect(
+        lambda index: results.focus_row(owner, index)
+    )
+    owner.objects_widget.zoom_requested.connect(
+        lambda index: results.zoom_object(owner, index)
     )
     owner.annotated_view.set_callbacks(
         on_selection_changed=lambda index: results.focus_annotation(owner, index)

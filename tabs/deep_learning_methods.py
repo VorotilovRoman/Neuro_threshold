@@ -439,9 +439,6 @@ class DeepLearningWindow(QMainWindow):
         segmentation_results.update_overlay(self)
 
     # ---------- Универсальное отображение координат ----------
-    def update_coordinates_display(self):
-        segmentation_results.update_coordinates(self)
-
     # ---------- Навигация ----------
     def update_navigation_state(self):
         segmentation_navigation.update_state(self)
@@ -492,9 +489,6 @@ class DeepLearningWindow(QMainWindow):
 
     def on_hull_changed(self, state):
         segmentation_presentation.geometry_changed(self)
-
-    def on_object_selection_changed(self, item):
-        segmentation_results.on_selection_changed(self, item)
 
     def draw_objects_on_image(self, img, binary, draw=True):
         return extract_objects(img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked())

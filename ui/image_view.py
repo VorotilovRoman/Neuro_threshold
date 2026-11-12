@@ -230,6 +230,7 @@ class SmartGraphicsViewNew(QGraphicsView):
         self.img_width = 0
         self.img_height = 0
         self.annotations = []
+        self._annotation_labels = None
         self.selected_index = -1
 
         self.cursor_scene_pos = None
@@ -355,6 +356,7 @@ class SmartGraphicsViewNew(QGraphicsView):
         # Нормализуем только classless записи; корректные аннотации не
         # копируем, чтобы не менять типичный путь передачи между view и tab.
         source = annotations if annotations is not None else []
+        self._annotation_labels = None
         normalized = [self._normalize_classless_annotation(a) for a in source]
         self.annotations = (source if all(x is y for x, y in zip(normalized, source))
                             else normalized)
@@ -2028,7 +2030,16 @@ class SmartGraphicsViewNew(QGraphicsView):
             return self._color_from_bgr(settings.get_color('selected'))
         return self._color_from_bgr(settings.get_dataset_class_color(cls_id))
 
-    def _annotation_label(self, cls_id):
+    def set_annotation_labels(self, labels):
+        """Optional per-object captions; reset when annotations are replaced."""
+        if labels is not None and len(labels) != len(self.annotations):
+            raise ValueError('Expected one caption per annotation')
+        self._annotation_labels = None if labels is None else tuple(map(str, labels))
+        self.viewport().update()
+
+    def _annotation_label(self, cls_id, index=None):
+        if self._annotation_labels is not None and index is not None:
+            return self._annotation_labels[index]
         if self._class_name_provider is not None:
             try:
                 return str(self._class_name_provider(cls_id))
@@ -2103,13 +2114,13 @@ class SmartGraphicsViewNew(QGraphicsView):
                 cls_id = 0
             if cls_id < 0:
                 cls_id = 0
-            visible.append((ann[0], poly, bounds, cls_id, selected))
+            visible.append((ann[0], poly, bounds, cls_id, selected, idx))
 
         # 1. Заливаем геометрию выбранным непрозрачным цветом.
         # Qt-перерисовка не затрагивает QPixmap / оригинальные пиксели.
         if style.fill_white or style.fill_annotations:
             painter.setPen(Qt.NoPen)
-            for typ, poly, bounds, cls_id, selected in visible:
+            for typ, poly, bounds, cls_id, selected, idx in visible:
                 if style.fill_white:
                     fill = QColor(style.fill_color)
                     fill.setAlpha(255)
@@ -2125,7 +2136,7 @@ class SmartGraphicsViewNew(QGraphicsView):
         # 2. Рамки и контуры отключаются независимо от заливки и меток.
         if style.show_frames:
             painter.setBrush(Qt.NoBrush)
-            for typ, poly, bounds, cls_id, selected in visible:
+            for typ, poly, bounds, cls_id, selected, idx in visible:
                 color = self._annotation_color(cls_id, selected)
                 width = (style.selected_line_width_px if selected
                          else style.line_width_px)
@@ -2138,10 +2149,10 @@ class SmartGraphicsViewNew(QGraphicsView):
         # 3. Метки всегда поверх заливок/контуров. Дополнительно применяется
         # существующий label_mode (auto / all / selected / none).
         if style.show_labels:
-            for typ, poly, bounds, cls_id, selected in visible:
+            for typ, poly, bounds, cls_id, selected, idx in visible:
                 if self._label_is_visible(bounds, selected):
                     self._paint_screen_label(
-                        painter, self._annotation_label(cls_id), bounds,
+                        painter, self._annotation_label(cls_id, idx), bounds,
                         self._color_from_bgr(settings.get_color('label_text')),
                         self._annotation_color(cls_id, selected=False),
                     )

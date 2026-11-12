@@ -135,11 +135,10 @@ def _normalized_xywhr(ann, size):
             width_px/size.width, height_px/size.height, angle]
 
 
-def write_yolo_labels(path, annotations, size: ImageSize, *, obb_format='corners'):
+def serialize_yolo_labels(annotations, size: ImageSize, *, obb_format='corners'):
+    """Return exactly the TXT contents used by the writer, without filesystem I/O."""
     if obb_format not in ('corners', 'xywhr'):
         raise ValueError('obb_format must be corners/xywhr')
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     for ann in annotations:
         if not isinstance(ann, Annotation):
@@ -161,7 +160,14 @@ def write_yolo_labels(path, annotations, size: ImageSize, *, obb_format='corners
                         (float(coords[1])+float(coords[3]))/2]
             coords = coords[:2] + midpoint + coords[2:]
         rows.append(f'{ann.class_id} ' + ' '.join(f'{float(v):.6f}' for v in coords))
-    path.write_text(('\n'.join(rows) + '\n') if rows else '', encoding='utf-8')
+    return ('\n'.join(rows) + '\n') if rows else ''
+
+
+def write_yolo_labels(path, annotations, size: ImageSize, *, obb_format='corners'):
+    text = serialize_yolo_labels(annotations, size, obb_format=obb_format)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8')
 
 
 

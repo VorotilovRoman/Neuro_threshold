@@ -69,18 +69,18 @@ with tempfile.TemporaryDirectory() as directory:
         owner._load_images([str(path)])
         assert [owner.draw_combo.itemText(i) for i in range(4)]==['Нет','BBox','OBB','Segment']
         assert [owner.draw_combo.itemData(i) for i in range(4)]==['none','detect','obb','segment']
-        assert owner.object_list.selectionMode()==QAbstractItemView.SingleSelection
+        assert owner.objects_widget.table.selectionMode()==QAbstractItemView.SingleSelection
         owner.current_base_image=np.zeros((80,160,3),np.uint8)
         owner.current_objects_full=[('detect',0,.3,.5,.2,.3),('detect',1,.7,.5,.2,.3)]
-        owner.update_object_list();owner.object_list.item(0).setCheckState(Qt.Unchecked)
-        owner.object_list.setCurrentRow(1)
+        owner.update_object_list();owner.objects_widget.set_checked_indices([1])
+        owner.objects_widget.focus_object(1)
         assert owner.current_selected_indices==[1] and owner.annotated_view.selected_index==0
-        text=owner.coord_text.toPlainText();base=owner.current_base_image
+        text=owner.objects_widget.properties.text();base=owner.current_base_image
         with patch.object(owner,'display_current_image') as predict,patch.object(owner,'update_object_list') as rebuild:
             owner.on_global_settings_changed({})
             predict.assert_not_called();rebuild.assert_not_called()
         assert owner.current_selected_indices==[1] and owner.annotated_view.selected_index==0
-        assert owner.coord_text.toPlainText()==text and owner.current_base_image is base
+        assert owner.objects_widget.properties.text()==text and owner.current_base_image is base
         if getattr(owner,'_lazy_cache',None):owner._lazy_cache.shutdown()
 QTimer.singleShot(10,w.close);assert exec_window(w,app)==0
 ''')
@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory() as directory:
             owner.display_current_image()
         assert owner.result_state.status==ResultStatus.NOT_RUN and owner.final_mask is None
         np.testing.assert_array_equal(owner.current_base_image,image)
-        assert not owner.save_button.isEnabled() and owner.object_list.count()==0
+        assert not owner.save_button.isEnabled() and owner.objects_widget.model.rowCount()==0
         with patch.object(QMessageBox,'warning') as warning:
             owner.save_current_annotations();warning.assert_called_once()
         owner._raw_signature=None
@@ -129,7 +129,7 @@ with tempfile.TemporaryDirectory() as directory:
         assert owner.result_state.status==ResultStatus.ERROR and owner.original_image is None and owner._current_frame is None
         for name in owner.segmentation_view_names:
             view=getattr(owner,name);assert view.pixmap_item.pixmap().isNull() and not view.annotations
-        assert not owner.hist_ax.patches and not owner.coord_text.toPlainText()
+        assert not owner.hist_ax.patches and owner.objects_widget.vertices.rowCount()==0
         owner.clear_images();assert owner.result_state.status==ResultStatus.NO_IMAGE
 QTimer.singleShot(10,w.close);assert exec_window(w,app)==0
 """)
