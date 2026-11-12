@@ -50,11 +50,11 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 
 | ID → файл в tabs | UI в ui_tabs | Утилиты и выполнение |
 | --- | --- | --- |
-| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`: бинаризация; `annotation_processing`: объекты; `utils_new.morphology` и MorphologyWidget; новая общая сессия/экспорт; AutoResearch без изменений |
+| `threshold` → `threshold_methods.py` | `threshold_methods_ui.py` | `utils_new.threshold_processing`; общий controller/presentation, канонические annotations, MorphologyWidget; AutoResearch заморожен |
 | `gradient` → `gradient_methods.py` | `gradient_methods_ui.py` | `utils_ops.gradient_ops`; новые общие postprocessing, cache и Qt-сервисы; GradientAutoResearch без изменений |
-| `interactive` → `interactive_methods.py` | `interactive_methods_ui.py` | `utils_ops.interactive_ops`; `ui.segmentation.interactive_view` для ROI/FG/BG; общие морфология/экспорт |
-| `traditional_ml` → `traditional_ml_methods.py` | `traditional_ml_methods_ui.py` | `traditional_ml_ops`: признаки, суперпиксели, train/predict; сохранение joblib; новый eager I/O-адаптер и общие Qt/postprocessing |
-| `deep_learning` → `deep_learning_methods.py` | `deep_learning_methods_ui.py` | `deep_learning_ops.create_segmentor`; параметры из `ui.DL_predict_settings`; новая сессия и общие Qt/postprocessing |
+| `interactive` → `interactive_methods.py` | `interactive_methods_ui.py` | `utils_ops.interactive_ops` через numerical operations/worker; SegmentationInputView для ROI/FG/BG; общие маски/объекты |
+| `traditional_ml` → `traditional_ml_methods.py` | `traditional_ml_methods_ui.py` | `utils_ops.traditional_ml_ops` через operations/worker: признаки, train/predict/scaler; joblib; eager I/O и общая presentation |
+| `deep_learning` → `deep_learning_methods.py` | `deep_learning_methods_ui.py` | `utils_ops.deep_learning_ops` через operations/worker: load/predict; параметры из ui.DL_predict_settings; общая presentation |
 | `reports` → `model_research.py` | `model_research_ui.py` | `utils.prepare`, `utils.analysis`, `utils.metrics_core`: фильтры, метрики, регрессия, ранжирование пресетов |
 | `labeler` → `layout_dataset.py` | `layout_dataset_ui.py` | Прямые импорты `dataset_files_new`, `dataset_yolo_labels_new`, YAML/UNet/COCO/catalog; `SmartGraphicsViewNew`, обработка аннотаций |
 | `test` → `viewing_dataset.py` | `viewing_dataset_ui.py` | Те же новые файловые службы; `DatasetReviewGraphicsView`, маски, редактирование и постобработка |
@@ -163,24 +163,46 @@ clicked или QTest.mouseClick(button) обходит перекрывающи�
 
 ## Общие службы пяти вкладок сегментации
 
-Общие загрузка/навигация, результаты, экспорт, гистограмма, действия пресетов
-и log находятся в `ui/segmentation`. Чтение/resize и извлечение объектов — в
-`utils_new/segmentation`, без Qt. Политика яркости `legacy-segmentation-v1`
-сохраняется независимо от отмены старых форматов пресетов; четыре вкладки
-остаются ленивыми, ML использует eager-адаптер.
+Общие панели пресетов/результатов, сетка стадий и оболочка собираются
+`ui.segmentation.panels`; `ui_tabs` задаёт индивидуальные параметры алгоритма.
+`controller` один раз подключает общие сигналы, debounce и lifecycle.
+`session.current_frame` возвращает ImageFrame и для lazy, и для eager ML.
+`presentation` владеет показом кадра, кэшем raw mask, постобработкой, состоянием
+результата и стадиями. Контроллеры вкладок предоставляют уникальные hooks.
+
+Режимы Нет/BBox/OBB/Segment имеют `none/detect/obb/segment`; извлечение
+использует то же ядро, что редактор датасета. Список разделяет фокус строки
+и галочки экспорта/видимости. Глобальные настройки только перерисовывают Qt-слой;
+морфология не повторяет predict, режим/hull меняет только геометрию.
+
+Чистый `utils_new.segmentation.result` определяет ImageFrame, ResultStatus,
+валидацию/нормализацию маски и белый фон. Нет изображения, не вычислено, running,
+ready и error различаются; готовая нулевая маска допускает отрицательный пример,
+отсутствующий/ошибочный результат не экспортируется. `errors` единообразно
+сбрасывает неверный результат и сообщает причину.
+
+`computation` создаёт снимки входов и принимает ответы в GUI. `jobs.TaskController`
+сериализует тяжёлые операции на окно, проверяет ревизию/кадр и отмену, доставляет
+ответ через queued Qt signal. `utils_new.segmentation.operations` выполняет
+интерактивные методы, ML и DL без Qt, используя прежние backend из `utils_ops`.
+Нативный вызов не прерывается принудительно; после close поздний ответ игнорируется.
+Четыре вкладки остаются lazy, ML хранит eager train-массивы. Порядок стадий
+4/6/4/4/4, пределы 1024/1024/1024/640/640 и политика яркости сохранены.
 
 Все пять используют `ui.morphology_ui.MorphologyWidget` и
 `utils_new.morphology.apply_morphology`: close/open/erode/dilate в пикселях,
 общая форма и изменяемый порядок. Нет процентных регуляторов и повторного
-скрытого closing градиентного fill. Уникальные backend остаются в `utils_ops`.
+скрытого closing градиентного fill.
 
-Preset schema_version=2 проверяет `utils_new.segmentation.presets`; Qt binding
-находится в `ui.segmentation.preset_bindings`. Настройки schema_version=1 хранит
-`utils_new.settings_store`, QObject/сигналы — `ui.settings_service`.
-Атомарный JSON I/O — `utils_new.json_store`. Старые схемы не конвертируются.
-Ансамбли исполняют новую морфологию; относительный отчёт не может незаметно
-создать старый пресет обратно. Автоподбор — последний отдельный этап.
+Preset schema_version=3 проверяет `utils_new.segmentation.presets`; режим хранится
+в annotation_mode, Qt binding — `ui.segmentation.preset_bindings`.
+Настройки schema_version=1 хранит `utils_new.settings_store`, QObject/сигналы —
+`ui.settings_service`. Атомарный JSON I/O — `utils_new.json_store`.
+Старые схемы не конвертируются. Ансамбли и отчёты используют новый формат.
+Автоподбор — последний отдельный этап, его код и настройки заморожены.
 
-[Пиксельный этап и проверки](Pixel_Morphology_Plan.md) · [Удаление утилит](Utils_Removal_Audit.md)
-· [Общий план](Segmentation_Migration_Plan.md). `test_segmentation_shared` и
-`test_pixel_morphology` защищают общие службы, маски/пресеты и новые границы.
+[Результат, владельцы и проверки](Segmentation_Unification_Status.md) ·
+[Выполненный план](Segmentation_Unification_Plan.md) ·
+[Удаление утилит](Utils_Removal_Audit.md).
+Тесты test_segmentation_shared, test_pixel_morphology, test_segmentation_unification
+и test_segmentation_tasks защищают эти контракты и границы импортов.

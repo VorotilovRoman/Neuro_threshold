@@ -4,7 +4,7 @@
 
 Автоматическое приложение: одинаковые AST функций/методов в разных файлах, от 9 строк исходника. Имя функции, docstring и номера строк игнорируются; аргументы и тело сохраняются. Сигнатуры и окружающие импорты проверяйте перед объединением. Это не поиск похожих алгоритмов и не доказательство взаимозаменяемости классов.
 
-Групп совпадений: **61**.
+Групп совпадений: **58**.
 
 ## 1. main
 
@@ -191,74 +191,62 @@
 - [cluster/canonicalize_crops.py:109](../cluster/canonicalize_crops.py#L109) — `collect_images`, 13 строк
 - [cluster/canonicalize_crops_method2.py:126](../cluster/canonicalize_crops_method2.py#L126) — `collect_images`, 13 строк
 
-## 37. on_resize_mode_changed
-
-- [tabs/gradient_methods.py:400](../tabs/gradient_methods.py#L400) — `on_resize_mode_changed`, 13 строк
-- [tabs/interactive_methods.py:651](../tabs/interactive_methods.py#L651) — `on_resize_mode_changed`, 13 строк
-- [tabs/layout_dataset.py:523](../tabs/layout_dataset.py#L523) — `on_resize_mode_changed`, 13 строк
-- [tabs/threshold_methods.py:387](../tabs/threshold_methods.py#L387) — `on_resize_mode_changed`, 13 строк
-
-## 38. _log_exception
+## 37. _log_exception
 
 - [tabs/layout_dataset.py:641](../tabs/layout_dataset.py#L641) — `_log_exception`, 13 строк
 - [tabs/viewing_dataset.py:319](../tabs/viewing_dataset.py#L319) — `_log_exception`, 13 строк
 
-## 39. __getattr__
+## 38. __getattr__
 
 - [import_libs_external.py:138](../import_libs_external.py#L138) — `__getattr__`, 12 строк
 - [import_libs_internal.py:269](../import_libs_internal.py#L269) — `__getattr__`, 12 строк
 
-## 40. __init__
+## 39. __init__
 
 - [utils_aeb/auto-aeb_def.py:175](../utils_aeb/auto-aeb_def.py#L175) — `__init__`, 12 строк
 - [utils_aeb/auto-aeb_old.py:177](../utils_aeb/auto-aeb_old.py#L177) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:39](../utils_aeb/yolo_aeb_utils.py#L39) — `__init__`, 12 строк
 
-## 41. __init__
+## 40. __init__
 
 - [utils_aeb/auto-aeb_def.py:193](../utils_aeb/auto-aeb_def.py#L193) — `__init__`, 12 строк
 - [utils_aeb/auto-aeb_old.py:195](../utils_aeb/auto-aeb_old.py#L195) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:57](../utils_aeb/yolo_aeb_utils.py#L57) — `__init__`, 12 строк
 
-## 42. __init__
+## 41. __init__
 
 - [utils_aeb/auto-aeb_def_new.py:198](../utils_aeb/auto-aeb_def_new.py#L198) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:134](../utils_aeb/yolo_aeb_utils.py#L134) — `__init__`, 12 строк
 
-## 43. __init__
+## 42. __init__
 
 - [utils_aeb/auto-aeb_def_new.py:216](../utils_aeb/auto-aeb_def_new.py#L216) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:152](../utils_aeb/yolo_aeb_utils.py#L152) — `__init__`, 12 строк
 
-## 44. __init__
+## 43. __init__
 
 - [utils_aeb/auto-aeb_unet.py:309](../utils_aeb/auto-aeb_unet.py#L309) — `__init__`, 12 строк
 - [utils_aeb/yolo_aeb_utils.py:322](../utils_aeb/yolo_aeb_utils.py#L322) — `__init__`, 12 строк
 
-## 45. get_optimizer
+## 44. get_optimizer
 
 - [utils_training/train_unet_worker.py:371](../utils_training/train_unet_worker.py#L371) — `get_optimizer`, 12 строк
 - [utils_training/train_unet_worker_рабочий.py:376](../utils_training/train_unet_worker_рабочий.py#L376) — `get_optimizer`, 12 строк
 
-## 46. closeEvent
-
-- [tabs/gradient_methods.py:177](../tabs/gradient_methods.py#L177) — `closeEvent`, 11 строк
-- [tabs/threshold_methods.py:173](../tabs/threshold_methods.py#L173) — `closeEvent`, 11 строк
-
-## 47. __getitem__
+## 45. __getitem__
 
 - [utils_aeb/auto-aeb_def.py:149](../utils_aeb/auto-aeb_def.py#L149) — `__getitem__`, 11 строк
 - [utils_aeb/auto-aeb_def_new.py:162](../utils_aeb/auto-aeb_def_new.py#L162) — `__getitem__`, 11 строк
 - [utils_aeb/auto-aeb_old.py:151](../utils_aeb/auto-aeb_old.py#L151) — `__getitem__`, 11 строк
 - [utils_aeb/auto-aeb_unet.py:180](../utils_aeb/auto-aeb_unet.py#L180) — `__getitem__`, 11 строк
 
-## 48. __init__
+## 46. __init__
 
 - [utils_aeb/auto-aeb_def.py:230](../utils_aeb/auto-aeb_def.py#L230) — `__init__`, 11 строк
 - [utils_aeb/auto-aeb_old.py:232](../utils_aeb/auto-aeb_old.py#L232) — `__init__`, 11 строк
 - [utils_aeb/yolo_aeb_utils.py:94](../utils_aeb/yolo_aeb_utils.py#L94) — `__init__`, 11 строк
 
-## 49. _fit
+## 47. _fit
 
 - [utils_aeb/auto-aeb_def.py:134](../utils_aeb/auto-aeb_def.py#L134) — `_fit`, 11 строк
 - [utils_aeb/auto-aeb_def_new.py:147](../utils_aeb/auto-aeb_def_new.py#L147) — `_fit`, 11 строк
@@ -266,53 +254,48 @@
 - [utils_aeb/auto-aeb_unet.py:165](../utils_aeb/auto-aeb_unet.py#L165) — `_fit`, 11 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:258](../utils_aeb/auto-aeb_unet_with_grad.py#L258) — `_fit`, 11 строк
 
-## 50. __init__
+## 48. __init__
 
 - [utils_aeb/auto-aeb_unet.py:288](../utils_aeb/auto-aeb_unet.py#L288) — `__init__`, 11 строк
 - [utils_aeb/yolo_aeb_utils.py:301](../utils_aeb/yolo_aeb_utils.py#L301) — `__init__`, 11 строк
 
-## 51. imwrite_safe
+## 49. imwrite_safe
 
 - [cluster/canonicalize_crops.py:97](../cluster/canonicalize_crops.py#L97) — `imwrite_safe`, 10 строк
 - [cluster/canonicalize_crops_method2.py:114](../cluster/canonicalize_crops_method2.py#L114) — `imwrite_safe`, 10 строк
 
-## 52. closeEvent
-
-- [tabs/deep_learning_methods.py:832](../tabs/deep_learning_methods.py#L832) — `closeEvent`, 10 строк
-- [tabs/interactive_methods.py:713](../tabs/interactive_methods.py#L713) — `closeEvent`, 10 строк
-
-## 53. _resolve_save_path_for_img
+## 50. _resolve_save_path_for_img
 
 - [tabs/layout_dataset.py:2063](../tabs/layout_dataset.py#L2063) — `_resolve_save_path_for_img`, 10 строк
 - [tabs/viewing_dataset.py:977](../tabs/viewing_dataset.py#L977) — `_resolve_save_path_for_img`, 10 строк
 
-## 54. get_scheduler
+## 51. get_scheduler
 
 - [utils_training/train_unet_worker.py:386](../utils_training/train_unet_worker.py#L386) — `get_scheduler`, 10 строк
 - [utils_training/train_unet_worker_рабочий.py:391](../utils_training/train_unet_worker_рабочий.py#L391) — `get_scheduler`, 10 строк
 
-## 55. save_args_yaml
+## 52. save_args_yaml
 
 - [utils_training/train_unet_worker.py:517](../utils_training/train_unet_worker.py#L517) — `save_args_yaml`, 10 строк
 - [utils_training/train_unet_worker_рабочий.py:503](../utils_training/train_unet_worker_рабочий.py#L503) — `save_args_yaml`, 10 строк
 
-## 56. apply_transform
+## 53. apply_transform
 
 - [cluster/canonicalize_crops.py:143](../cluster/canonicalize_crops.py#L143) — `apply_transform`, 9 строк
 - [cluster/canonicalize_crops_method2.py:163](../cluster/canonicalize_crops_method2.py#L163) — `apply_transform`, 9 строк
 
-## 57. apply_transform
+## 54. apply_transform
 
 - [cluster/extract_embeddings.py:113](../cluster/extract_embeddings.py#L113) — `apply_transform`, 9 строк
 - [cluster/test_new_image.py:197](../cluster/test_new_image.py#L197) — `apply_transform`, 9 строк
 
-## 58. __init__
+## 55. __init__
 
 - [utils_aeb/auto-aeb_def.py:211](../utils_aeb/auto-aeb_def.py#L211) — `__init__`, 9 строк
 - [utils_aeb/auto-aeb_old.py:213](../utils_aeb/auto-aeb_old.py#L213) — `__init__`, 9 строк
 - [utils_aeb/yolo_aeb_utils.py:75](../utils_aeb/yolo_aeb_utils.py#L75) — `__init__`, 9 строк
 
-## 59. collect_images
+## 56. collect_images
 
 - [utils_aeb/auto-aeb_def.py:162](../utils_aeb/auto-aeb_def.py#L162) — `collect_images`, 9 строк
 - [utils_aeb/auto-aeb_def_new.py:175](../utils_aeb/auto-aeb_def_new.py#L175) — `collect_images`, 9 строк
@@ -320,12 +303,12 @@
 - [utils_aeb/auto-aeb_unet.py:193](../utils_aeb/auto-aeb_unet.py#L193) — `collect_images`, 9 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:382](../utils_aeb/auto-aeb_unet_with_grad.py#L382) — `collect_images`, 9 строк
 
-## 60. forward
+## 57. forward
 
 - [utils_aeb/auto-aeb_unet.py:122](../utils_aeb/auto-aeb_unet.py#L122) — `forward`, 9 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:211](../utils_aeb/auto-aeb_unet_with_grad.py#L211) — `forward`, 9 строк
 
-## 61. median_blur
+## 58. median_blur
 
 - [utils_aeb/auto-aeb_unet_with_grad.py:120](../utils_aeb/auto-aeb_unet_with_grad.py#L120) — `median_blur`, 9 строк
 - [utils_aeb/yolo_aeb_utils.py:537](../utils_aeb/yolo_aeb_utils.py#L537) — `_median_blur_torch`, 9 строк
