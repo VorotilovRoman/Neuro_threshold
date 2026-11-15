@@ -1,5 +1,7 @@
-# Пороговый автоподбор и новый анализ отчётов
+# Пороговый автоподбор: исторический этап
 
+> Действующая инструкция: [четыре шага анализа](Report_Workflow.md). Старые
+> утилиты analysis/prepare/metrics_core позднее удалены после проверки потребителей.
 > Дополнение 15 ноября 2026: оценка отчётов по ручному эталону, геометрия,
 > покрытие и рейтинг обновлены. [Текущий сценарий](Report_Evaluation.md).
 
@@ -36,9 +38,9 @@
    По умолчанию включён только Simple Threshold, 1…254.
 5. Прогресс и отмена доступны в отдельном окне. Параметры, текущий снимок, готовая
    маска, отметки и фокус основной вкладки не изменяются перебором.
-6. Откройте папку отчётов во вкладке анализа. Рассчитайте mean F1 по IoU,
-   примените фильтры/кластеризацию и анализ. Полные параметры выбранного результата
-   можно добавить в пресеты пороговой вкладки.
+6. В действующем интерфейсе выберите ручной эталон, добавьте отчёты и нажмите
+   «Сравнить методы». Выберите проверенную настройку и добавьте её в пресеты.
+   Старые фильтры/кластеризация рабочей таблицы больше не используются.
 
 Сохраняются имена `*_full_report.txt`, но содержимое теперь **JSONL schema_version=1**:
 заголовок, записи вычислений и завершающая запись. Старый текстовый формат и
@@ -53,9 +55,9 @@
 | Диапазоны, валидация, счёт, ленивые комбинации | `utils_new/autoreseach_utils/search_space.py` |
 | Численная цепочка, чтение по одному кадру, запись отчётов | `utils_new/autoreseach_utils/threshold_search.py` |
 | Reader, истинная разметка, восстановление пресета | `utils_new/autoreseach_utils/reports.py` |
-| Фильтры, кластеризация, подготовка метрик | `utils_new/autoreseach_utils/prepare.py` |
-| Метрики и численные параметры | `utils_new/autoreseach_utils/metrics_core.py` |
-| Регрессионная оценка и ранжирование точных пресетов | `utils_new/autoreseach_utils/analysis.py` |
+| Фильтры, кластеризация, подготовка метрик | [исторический prepare.py](https://github.com/VorotilovRoman/Neuro_threshold/blob/6532de8/utils_new/autoreseach_utils/prepare.py) |
+| Метрики и численные параметры | [исторический metrics_core.py](https://github.com/VorotilovRoman/Neuro_threshold/blob/6532de8/utils_new/autoreseach_utils/metrics_core.py) |
+| Регрессионная оценка и ранжирование точных пресетов | [исторический analysis.py](https://github.com/VorotilovRoman/Neuro_threshold/blob/6532de8/utils_new/autoreseach_utils/analysis.py) |
 | Диалог диапазонов | `ui/autoreseach_ui/settings_dialog.py` |
 | Виджет кнопок, Qt-контроллер, прогресс/отмена | `ui/autoreseach_ui/controls.py` |
 | UI вкладки анализа и результатов | `ui/autoreseach_ui/model_research_ui.py` |

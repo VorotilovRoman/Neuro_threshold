@@ -189,7 +189,7 @@
 ## 36. __getattr__
 
 - [import_libs_external.py:138](../import_libs_external.py#L138) — `__getattr__`, 12 строк
-- [import_libs_internal.py:266](../import_libs_internal.py#L266) — `__getattr__`, 12 строк
+- [import_libs_internal.py:249](../import_libs_internal.py#L249) — `__getattr__`, 12 строк
 
 ## 37. __init__
 
