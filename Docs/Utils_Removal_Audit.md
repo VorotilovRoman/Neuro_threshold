@@ -4,6 +4,11 @@
 > [utils_new/autoreseach_utils](Threshold_Autoresearch_Status.md), все потребители
 > и строковые экспорты обновлены. Ниже — аудит предыдущего этапа.
 
+> 15 ноября 2026: `dataset_analysis_logic.py` и `dataset_audit_logic.py` также
+> удалены после обновления вкладки и реестра и поиска Python-потребителей.
+> Их функции теперь в [utils_new/dataset_audit и ui/dataset_audit](Dataset_Audit_Refactor_Status.md).
+> Текущее содержимое utils — только image_io.py и ensemble_utils.py.
+
 [Пиксельная морфология и план](Pixel_Morphology_Plan.md) · [Документация](README.md)
 
 Проверка выполнена перед удалением, затем повторена тестом отсутствия ссылок.
@@ -46,7 +51,7 @@
 | `analysis.py`, `prepare.py` | Анализ и подготовка таблиц отчётов |
 | `metrics_core.py` | Общие метрики для отчётов/анализа/ансамблей |
 | `ensemble_utils.py` | Рабочий YOLO+классический ансамбль; чтение морфологии обновлено под новую схему |
-| `dataset_analysis_logic.py`, `dataset_audit_logic.py` | Рабочая вкладка анализа датасета |
+| `dataset_analysis_logic.py`, `dataset_audit_logic.py` | На этом этапе сохранялись; впоследствии перенесены и удалены, см. дополнение выше |
 
 Отдельные старые адаптеры, у которых остаётся реальный потребитель, не считаются
 неиспользуемыми. Например, set_legacy_yolo пока вызывает специальная вкладка

@@ -59,7 +59,7 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 | `labeler` → `layout_dataset.py` | `layout_dataset_ui.py` | Прямые импорты `dataset_files_new`, `dataset_yolo_labels_new`, YAML/UNet/COCO/catalog; `SmartGraphicsViewNew`, обработка аннотаций |
 | `test` → `viewing_dataset.py` | `viewing_dataset_ui.py` | Те же новые файловые службы; `DatasetReviewGraphicsView`, маски, редактирование и постобработка |
 | `dataset` → `preparing_dataset_yaml.py` | `preparing_dataset_yaml_ui.py` | Агрегатор даёт **новые** `DatasetLoaderMixin`, `PairValidator`, `DatasetGeneratorThread`; bridge приводит пары и классы масок |
-| `dataset_analysis` → `dataset_analysis.py` | `dataset_analysis_ui.py` | `dataset_analysis_logic`: статистика и фильтры; `dataset_audit_logic`: дубликаты, утечки, YOLO-аудит, эмбеддинги, отчёт |
+| `dataset_analysis` → `dataset_analysis.py` | `dataset_analysis_ui.py` | `utils_new.dataset_audit`: чтение объектов, статистика, экспорт, split и ML-задачи; `ui.dataset_audit`: таблицы/графики, workers и lifecycle |
 | `sahi` → `slice_dataset_sahi.py` | `slice_dataset_sahi_ui.py` | Локальный `SliceWorker`, `sahi.slicing.slice_coco`, работа с файлами и split |
 | `yolo_train` → `deep_learning_training.py` | `deep_learning_training_ui.py` | Виджеты `ui.DL_train_settings_*`; отдельные процессы YOLO, UNet, DeepLab |
 | `yolo_demo` → `demo_ensemble_methods.py` | `demo_ensemble_methods_ui.py` | `utils.ensemble_utils`: YOLO + классические пресеты, WBF/NMS и метрики; четыре новых read-only Qt-вида |
@@ -91,10 +91,19 @@ flowchart LR
 
 `annotation_processing.py` — отдельный конвейер legacy-аннотаций: кропы, смещения, повороты, пересечения и маскирование; используется просмотрщиками и YOLO+AE/VAE. `morphology.py` — общий движок операций с явными размерами в пикселях. `threshold_processing.py` — выделенные пороговые алгоритмы, напрямую используемые пороговой вкладкой; при этом в `utils_ops.segmentation_ops` всё ещё есть параллельная реализация.
 
+Анализ использует `dataset_audit.objects` для общей геометрии TXT и компонент
+PNG-масок. `analysis`, `checks`, `splits`, `export`, `matching`, `jobs` и `atomic`
+не зависят от Qt. `ui.dataset_audit` отделяет представление, доставку сигналов
+и lifecycle от вычислений. При загрузке сохраняется путь исходного YAML;
+явное членство split используется для проверки утечек и безопасного экспорта.
+ML-задачи получают снимок входных данных; смена ревизии прекращает доставку
+устаревших результатов. Остановка нативного backend остаётся кооперативной.
+
 ## Существующая старая ветка
 
-В `utils` осталось четыре модуля с рабочими потребителями: image_io,
-ensemble_utils, dataset_analysis_logic и dataset_audit_logic. Анализ/подготовка
+В `utils` осталось два модуля с рабочими потребителями: image_io и
+ensemble_utils. Анализ/аудит датасета перенесён в utils_new/dataset_audit,
+Qt-обёртки — в ui/dataset_audit. [Результат и контракты](Dataset_Audit_Refactor_Status.md). Анализ/подготовка
 отчётов и метрики перенесены в utils_new/autoreseach_utils. Старый набор генератора/валидации/I/O и алиасы
 settings/presets удалены после проверки графа и строковых экспортов.
 [Подробный аудит удаления](Utils_Removal_Audit.md).
