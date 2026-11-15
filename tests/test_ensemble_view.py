@@ -147,6 +147,15 @@ with tempfile.TemporaryDirectory() as directory:
     for view in owner.view_widgets.values():
         assert view.pixmap_item.pixmap().isNull() and not view.annotations
         assert (view.img_width,view.img_height)==(0,0)
+    # Rebuilding twice must detach the previous rows, including the no-presets label.
+    with patch.object(owner.preset_manager,'get_preset_names',return_value=[]):
+        owner.update_ensemble_weights_ui();owner.update_ensemble_weights_ui()
+        assert owner.preset_weights_container.count()==1
+        app.processEvents()
+    with patch.object(owner.preset_manager,'get_preset_names',return_value=['pixels']):
+        owner.update_ensemble_weights_ui();owner.update_ensemble_weights_ui()
+        assert owner.preset_weights_container.count()==1 and len(owner.preset_weight_spins)==1
+        app.processEvents()
 QTimer.singleShot(10,window.close);assert exec_window(window,app)==0
 """)
 

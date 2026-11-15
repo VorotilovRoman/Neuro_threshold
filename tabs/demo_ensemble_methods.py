@@ -785,9 +785,9 @@ class YoloDemoWindow(QMainWindow):
 
     # ---------- Пресеты и прочее ----------
     def update_ensemble_weights_ui(self):
-        for layout in self.preset_weight_layouts:
-            self._clear_layout(layout)
-            layout.deleteLater()
+        # Detach layout items before deleting their widgets/layouts. Otherwise
+        # Qt may visit a destroyed row during the next layout/paint pass.
+        self._clear_layout(self.preset_weights_container)
         self.preset_weight_layouts.clear()
         self.preset_weight_spins.clear()
 
@@ -842,6 +842,7 @@ class YoloDemoWindow(QMainWindow):
                 sub_layout = item.layout()
                 if sub_layout:
                     self._clear_layout(sub_layout)
+                    sub_layout.deleteLater()
 
     def update_preset_combo(self):
         self.preset_combo.blockSignals(True)
