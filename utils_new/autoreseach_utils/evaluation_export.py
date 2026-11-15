@@ -6,6 +6,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from .reports import preset_from_row
+from utils_new.annotations.modes import MODE_LABELS
 
 
 def recommendation_text(result):
@@ -35,13 +36,39 @@ def recommendation_text(result):
             "",
             "Лучшие настройки каждого метода:",
         ]
+        if (valid["score"] == best["score"]).sum() > 1:
+            lines.insert(
+                -2,
+                "Есть несколько пресетов с одинаковым F1; порядок уточнён средним F1 по снимкам и IoU, затем качеством локализации.",
+            )
         for _, row in result.methods.iterrows():
-            preset = preset_from_row(row)
+            state = preset_from_row(row)
+            names = {"threshold": "Пороговые", "gradient": "Градиентные"}
+            operations = " → ".join(
+                f"{op['operation']}: {op['kernel_px']} px"
+                for op in state["morphology"]["operations"]
+            )
+            parameters = (
+                "; ".join(
+                    f"{key}={value}" for key, value in json.loads(row["params"]).items()
+                )
+                or "без параметров метода"
+            )
+            processing = json.loads(row.get("processing_json", "{}"))
+            if type(processing.get("resize_enabled")) is bool:
+                resize = (
+                    f"до {processing['max_side']} px"
+                    if processing["resize_enabled"]
+                    else "исходное разрешение"
+                )
+            else:
+                resize = "режим уменьшения в отчёте не указан"
             lines += [
-                f"• {row['kind']} / {row['method']}: F1={row.micro_f1:.4f}; P={row.precision:.4f}; R={row.recall:.4f}; FP={row.fp}; FN={row.fn}",
-                f"  params={row['params']}; invert={preset['invert']}; mode={preset['annotation_mode']}; hull={preset['use_hull']}",
-                f"  morphology={json.dumps(preset['morphology'], ensure_ascii=False)}",
-                f"  processing={row.get('processing_json', 'не указано')}",
+                f"• {names[row['kind']]} / {row['method']}: F1={row.micro_f1:.4f}; Precision={row.precision:.4f}; Recall={row.recall:.4f}; FP={row.fp}; FN={row.fn}",
+                f"  Средний F1 по IoU 0.50–0.95: {row.mean_f1:.4f}; средний IoU совпавших объектов: {row.avg_iou_tp:.4f}",
+                f"  {parameters}; инверсия: {'да' if state['invert'] else 'нет'}; разметка: {MODE_LABELS[state['annotation_mode']]}; оболочка: {'да' if state['use_hull'] else 'нет'}",
+                f"  Морфология: {operations}; форма: {state['morphology']['shape']}",
+                f"  Обработка: {resize}.",
             ]
     lines += [
         "",

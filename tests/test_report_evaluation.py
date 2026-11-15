@@ -276,6 +276,18 @@ class ReportEvaluationTests(unittest.TestCase):
         self.assertEqual(result.rankings.iloc[0].failed_images, 1)
         self.assertIn("Содержимое", result.details.iloc[0]["error"])
 
+    def test_displayed_parameters_come_from_recipe_not_stale_csv_columns(self):
+        paths = [self.report(i, [(preset(), [BOX] if i < 2 else [])]) for i in range(3)]
+        frame = self.frame(paths)
+        frame["params"] = '{"threshold": 254}'
+        frame["method"] = "wrong"
+        frame["kind"] = "gradient"
+        result = evaluate_dataset(frame, self.dataset)
+        best = result.rankings.iloc[0]
+        self.assertEqual(best.method, "Simple Threshold")
+        self.assertEqual(json.loads(best.params)["threshold"], 80)
+        self.assertEqual(set(result.details.method), {"Simple Threshold"})
+
     def test_no_in_sample_regression_can_override_measured_scores(self):
         paths = [
             self.report(

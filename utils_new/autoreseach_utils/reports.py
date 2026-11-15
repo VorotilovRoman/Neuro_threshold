@@ -15,6 +15,32 @@ def preset_from_row(row):
     return preset
 
 
+def describe_preset(preset):
+    """Derive display/export parameters from the actual recipe, never a sample row."""
+    validate_search_preset(preset)
+    params = dict(method_params(preset))
+    if preset["kind"] == "gradient":
+        params.update(
+            threshold=preset["threshold"],
+            fill_contours=preset["fill_contours"],
+            min_area_percent=preset["min_area_percent"],
+        )
+    operations = preset["morphology"]["operations"]
+    return dict(
+        kind=preset["kind"],
+        method=preset["method"],
+        params=json.dumps(params, sort_keys=True),
+        invert=preset["invert"],
+        **{op["operation"] + "_px": op["kernel_px"] for op in operations},
+        kernel_shape=preset["morphology"]["shape"],
+        operation_order=" → ".join(op["operation"] for op in operations),
+        annotation_mode=preset["annotation_mode"],
+        use_hull=preset["use_hull"],
+        morphology_key=json.dumps(preset["morphology"], sort_keys=True),
+        preset_json=json.dumps(preset, sort_keys=True),
+    )
+
+
 def _size(value):
     if (
         not isinstance(value, (list, tuple))
@@ -119,34 +145,11 @@ def read_report(
                 objects = None
                 if not include_failures:
                     continue
-            params = dict(method_params(preset))
-            if preset["kind"] == "gradient":
-                params.update(
-                    threshold=preset["threshold"],
-                    fill_contours=preset["fill_contours"],
-                    min_area_percent=preset["min_area_percent"],
-                )
-            ops = {
-                op["operation"]: op["kernel_px"]
-                for op in preset["morphology"]["operations"]
-            }
             rows.append(
                 dict(
                     image_path=header["image_path"],
                     report_path=str(Path(path).resolve()),
-                    kind=preset["kind"],
-                    method=preset["method"],
-                    params=json.dumps(params, sort_keys=True),
-                    invert=preset["invert"],
-                    **{op + "_px": v for op, v in ops.items()},
-                    kernel_shape=preset["morphology"]["shape"],
-                    operation_order=" → ".join(
-                        op["operation"] for op in preset["morphology"]["operations"]
-                    ),
-                    annotation_mode=preset["annotation_mode"],
-                    use_hull=preset["use_hull"],
-                    morphology_key=json.dumps(preset["morphology"], sort_keys=True),
-                    preset_json=preset_json,
+                    **describe_preset(preset),
                     num_objects=len(objects) if success else None,
                     objects=json.dumps(objects) if success else None,
                     annotations_json=json.dumps(record["annotations"])

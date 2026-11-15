@@ -120,8 +120,10 @@ class ModelResearchWidget(QWidget):
             "rank",
             "kind",
             "method",
+            "params",
             "annotation_mode",
             "micro_f1",
+            "avg_iou_tp",
             "precision",
             "recall",
             "tp",
@@ -136,14 +138,16 @@ class ModelResearchWidget(QWidget):
             "Ранг",
             "Вид",
             "Метод",
+            "Параметры",
             "Разметка",
             "F1",
+            "IoU TP",
             "Precision",
             "Recall",
             "TP",
             "FP",
             "FN",
-            "Покрытие",
+            "Покрытие, %",
             "Ошибки",
             "Нет расчёта",
             "Ограничение",
@@ -156,6 +160,12 @@ class ModelResearchWidget(QWidget):
         for index, row in result.rankings.iterrows():
             for column, key in enumerate(columns):
                 value = row[key]
+                if key == "coverage":
+                    value = value * 100
+                if key == "kind":
+                    value = {"threshold": "Пороговые", "gradient": "Градиентные"}[value]
+                if key == "annotation_mode":
+                    value = MODE_LABELS[value]
                 item = QTableWidgetItem()
                 if pd.isna(value):
                     item.setText("—")
@@ -170,7 +180,8 @@ class ModelResearchWidget(QWidget):
                     item.setData(
                         Qt.DisplayRole,
                         float(value)
-                        if key in ("micro_f1", "precision", "recall", "coverage")
+                        if key
+                        in ("micro_f1", "precision", "recall", "coverage", "avg_iou_tp")
                         else int(value),
                     )
                 else:

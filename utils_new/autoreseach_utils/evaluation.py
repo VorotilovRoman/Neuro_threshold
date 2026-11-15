@@ -3,11 +3,12 @@
 from dataclasses import dataclass
 from pathlib import Path
 import json
+import hashlib
 import math
 import pandas as pd
 from .geometry_metrics import normalize_annotations, evaluate_image, count_metrics
 from .ground_truth import load_ground_truth, match_sample, digest_file
-from .reports import preset_from_row
+from .reports import preset_from_row, describe_preset
 
 
 @dataclass
@@ -57,13 +58,23 @@ def evaluate_dataset(
     diagnostics = []
     groups = {}
     extra_images = set()
+    duplicates = 0
     for _, row in reports.iterrows():
         if cancel_check():
             raise InterruptedError("Оценка отменена.")
         preset = preset_from_row(row)
         preset_json = json.dumps(preset, sort_keys=True)
         processing = json.loads(row.get("processing_json", "{}"))
-        recipe = json.dumps([preset, processing], sort_keys=True)
+        if (
+            preset.get("preprocessing") is not None
+            and preset["preprocessing"] != processing
+        ):
+            raise ValueError(
+                "Пресет и условия обработки расходятся. Загрузите исходный отчёт."
+            )
+        recipe = hashlib.sha256(
+            json.dumps([preset, processing], sort_keys=True).encode()
+        ).hexdigest()
         if recipe not in groups:
             groups[recipe] = {"row": row.to_dict(), "records": {}}
         image_path = str(row["image_path"])
@@ -100,6 +111,7 @@ def evaluate_dataset(
         )
         existing = groups[recipe]["records"].get(sample.key)
         if existing:
+            duplicates += 1
             keys = ("status", "error", "annotations", "working_size")
             if any(existing[key] != record[key] for key in keys):
                 raise ValueError(
@@ -107,6 +119,10 @@ def evaluate_dataset(
                 )
         else:
             groups[recipe]["records"][sample.key] = record
+    if duplicates:
+        diagnostics.append(
+            f"Одинаковых повторных вычислений: {duplicates}; повторно не учитываются."
+        )
     if extra_images:
         diagnostics.append(
             f"Вне эталона: {len(extra_images)} изображений отчётов; в оценку не входят."
@@ -119,11 +135,14 @@ def evaluate_dataset(
     done = 0
     for recipe, group in groups.items():
         items = []
+        description = describe_preset(preset_from_row(group["row"]))
         for key, sample in sample_lookup.items():
             if cancel_check():
                 raise InterruptedError("Оценка отменена.")
             record = group["records"].get(key)
             item = dict(
+                kind=description["kind"],
+                method=description["method"],
                 recipe_key=recipe,
                 image_id=key,
                 image_path=sample.image_path,
@@ -164,24 +183,8 @@ def evaluate_dataset(
             else dict(precision=math.nan, recall=math.nan, f1=math.nan)
         )
         eligible = len(success) == len(items)
-        columns = (
-            "kind",
-            "method",
-            "params",
-            "invert",
-            "close_px",
-            "open_px",
-            "erode_px",
-            "dilate_px",
-            "kernel_shape",
-            "operation_order",
-            "annotation_mode",
-            "use_hull",
-            "morphology_key",
-            "preset_json",
-            "processing_json",
-        )
-        row = {key: group["row"][key] for key in columns if key in group["row"]}
+        row = describe_preset(preset_from_row(group["row"]))
+        row["processing_json"] = group["row"].get("processing_json", "{}")
         negative = [item for item in success if item["true_objects"] == 0]
         all_negative = sum(not ground[sample.key] for sample in truth.samples)
         clean = sum(item["predicted_objects"] == 0 for item in negative)
@@ -224,8 +227,8 @@ def evaluate_dataset(
     ranked = (
         pd.DataFrame(rankings)
         .sort_values(
-            ["eligible", "score", "macro_f1", "avg_iou_tp", "recipe_key"],
-            ascending=[False, False, False, False, True],
+            ["eligible", "score", "macro_f1", "mean_f1", "avg_iou_tp", "recipe_key"],
+            ascending=[False, False, False, False, False, True],
             na_position="last",
         )
         .reset_index(drop=True)
