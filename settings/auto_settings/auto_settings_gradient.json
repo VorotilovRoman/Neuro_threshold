@@ -18,7 +18,7 @@
             }
         },
         "Scharr": {
-            "enabled": false,
+            "enabled": true,
             "ranges": {
                 "scale": [
                     1,
@@ -28,7 +28,7 @@
             }
         },
         "Laplacian": {
-            "enabled": false,
+            "enabled": true,
             "ranges": {
                 "ksize": [
                     3,
@@ -43,7 +43,7 @@
             }
         },
         "Canny": {
-            "enabled": false,
+            "enabled": true,
             "ranges": {
                 "threshold1": [
                     50,
@@ -63,15 +63,15 @@
             }
         },
         "Prewitt": {
-            "enabled": false,
+            "enabled": true,
             "ranges": {}
         },
         "Roberts": {
-            "enabled": false,
+            "enabled": true,
             "ranges": {}
         },
         "Kirsch": {
-            "enabled": false,
+            "enabled": true,
             "ranges": {}
         }
     },
@@ -134,12 +134,13 @@
             1
         ],
         "min_area_percent": [
-            0,
-            0,
-            1
+            0.0,
+            0.0,
+            1.0
         ]
     },
     "fill_contours": [
+        false,
         true
     ]
 }
