@@ -221,6 +221,9 @@ class ImagePlayer(QMainWindow):
     def closeEvent(self, event):
         scanning = False
         for tab in getattr(self, '_tab_widgets', []):
+            stop_analysis = getattr(tab, 'shutdown_analysis', None)
+            if stop_analysis is not None:
+                stop_analysis()
             shutdown = getattr(tab, 'shutdown_audit', None)
             if shutdown is not None:
                 shutdown()

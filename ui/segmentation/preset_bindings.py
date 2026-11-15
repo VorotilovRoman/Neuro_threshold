@@ -149,8 +149,7 @@ class MethodPresetManager(PresetManager):
         validate_preset(state, self.kind)
         missing = self.fields.keys() - state.keys()
         if missing:
-            raise ValueError(f'В пресете отсутствуют параметры: {sorted(missing)}')
-
+            raise ValueError(f"В пресете отсутствуют параметры: {sorted(missing)}")
 
     def _controls(self):
         result = {}
@@ -173,6 +172,12 @@ class MethodPresetManager(PresetManager):
             annotation_mode=main.draw_combo.currentData(),
             use_hull=main.hull_checkbox.isChecked(),
         )
+        if self.kind in ("threshold", "gradient"):
+            state["preprocessing"] = dict(
+                resize_enabled=main.nav_widget.is_resize_enabled(),
+                max_side=1024,
+                pipeline_version=1,
+            )
         self._capture_extra(state)
         self._validate(state)
         return state
@@ -195,6 +200,15 @@ class MethodPresetManager(PresetManager):
         state = self.presets[name]
         self._validate(state)
         main = self.main
+        processing = state.get("preprocessing")
+        if (
+            processing is not None
+            and main.nav_widget.is_resize_enabled() != processing["resize_enabled"]
+        ):
+            with blocked_signals([main.nav_widget]):
+                main.nav_widget.set_resize_checked(processing["resize_enabled"])
+            if main.image_paths:
+                main.reload_current_images()
         controls = self._controls()
         values = {key: state[key] for key in controls if key in state}
         extra = self._extra_controls(state)
@@ -208,13 +222,21 @@ class MethodPresetManager(PresetManager):
         for widget, value in updates:
             validate_control(widget, value)
         with blocked_signals(
-            [*(widget for widget, _ in updates), main.morphology_widget, main.draw_combo]
+            [
+                *(widget for widget, _ in updates),
+                main.morphology_widget,
+                main.draw_combo,
+            ]
         ):
             self._before_apply(state)
             for widget, value in updates:
                 set_control_value(widget, value)
-            main.draw_combo.setCurrentIndex(main.draw_combo.findData(state['annotation_mode']))
-            main.hull_checkbox.setVisible(state['annotation_mode'] in ('obb','segment'))
+            main.draw_combo.setCurrentIndex(
+                main.draw_combo.findData(state["annotation_mode"])
+            )
+            main.hull_checkbox.setVisible(
+                state["annotation_mode"] in ("obb", "segment")
+            )
             main.morphology_widget.set_settings(state["morphology"])
         self._after_apply(state)
         return True
@@ -325,7 +347,9 @@ class InteractivePresetManager(MethodPresetManager):
         controls = self._parameter_controls()
         values = state.get("method_params")
         if not isinstance(values, dict) or values.keys() != controls.keys():
-            raise ValueError('Пресет должен содержать полный набор параметров интерактивных методов.')
+            raise ValueError(
+                "Пресет должен содержать полный набор параметров интерактивных методов."
+            )
         return {controls[name]: value for name, value in values.items()}
 
     def _after_apply(self, state):

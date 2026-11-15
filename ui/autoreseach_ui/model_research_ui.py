@@ -2,6 +2,7 @@ import pandas as pd
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QDoubleSpinBox,
     QGridLayout,
@@ -14,12 +15,15 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QSplitter,
     QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.log_widget import LogWidget
+from ui.autoreseach_ui.evaluation_controls import setup_evaluation_controls
+from utils_new.autoreseach_utils.evaluation_export import recommendation_text
 from utils_new.autoreseach_utils.reports import preset_from_row
 from utils_new.annotations.modes import MODE_LABELS
 
@@ -41,7 +45,15 @@ class ModelResearchWidget(QWidget):
         layout.addWidget(self.text_edit)
 
         btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("Добавить в пресеты")
+        self.rank_table = QTableWidget()
+        self.rank_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.rank_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.rank_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.rank_table.setSortingEnabled(True)
+        self.rank_table.setVisible(False)
+        self._ranking_df = None
+        layout.addWidget(self.rank_table)
+        self.add_btn = QPushButton("Добавить выбранные пресеты")
         self.add_btn.setToolTip("Добавить выбранные топ комбинаций в список пресетов")
         self.add_btn.clicked.connect(self.add_to_presets)
         btn_layout.addWidget(self.add_btn)
@@ -66,6 +78,8 @@ class ModelResearchWidget(QWidget):
 
     def display_results(self, df):
         self.top5_df = df
+        self._ranking_df = None
+        self.rank_table.setVisible(False)
         if df is None or df.empty:
             self.text_edit.clear()
             self.text_edit.append("Нет данных для отображения.")
@@ -93,15 +107,111 @@ class ModelResearchWidget(QWidget):
             text += f"Разметка: {MODE_LABELS[preset['annotation_mode']]}; оболочка: {preset['use_hull']}\n"
             if "actual_f1" in row and not pd.isna(row["actual_f1"]):
                 text += f"Реальный F1: {row['actual_f1']:.6f}\n"
-            if "pred_f1" in row and not pd.isna(row["pred_f1"]):
-                text += f"Предсказанный F1: {row['pred_f1']:.6f}\n"
             if "mean_f1" in row and not pd.isna(row["mean_f1"]):
                 text += f"Mean F1: {row['mean_f1']:.6f}\n"
             text += "-" * 50 + "\n"
         self.text_edit.setText(text)
 
+    def display_evaluation(self, result):
+        self._ranking_df = result.rankings
+        self.top5_df = result.rankings[result.rankings.eligible].head(10)
+        self.text_edit.setPlainText(recommendation_text(result))
+        columns = [
+            "rank",
+            "kind",
+            "method",
+            "annotation_mode",
+            "micro_f1",
+            "precision",
+            "recall",
+            "tp",
+            "fp",
+            "fn",
+            "coverage",
+            "failed_images",
+            "missing_images",
+            "exclusion_reason",
+        ]
+        labels = [
+            "Ранг",
+            "Вид",
+            "Метод",
+            "Разметка",
+            "F1",
+            "Precision",
+            "Recall",
+            "TP",
+            "FP",
+            "FN",
+            "Покрытие",
+            "Ошибки",
+            "Нет расчёта",
+            "Ограничение",
+        ]
+        table = self.rank_table
+        table.setSortingEnabled(False)
+        table.setRowCount(len(result.rankings))
+        table.setColumnCount(len(columns))
+        table.setHorizontalHeaderLabels(labels)
+        for index, row in result.rankings.iterrows():
+            for column, key in enumerate(columns):
+                value = row[key]
+                item = QTableWidgetItem()
+                if pd.isna(value):
+                    item.setText("—")
+                elif isinstance(value, (int, float)) or key in (
+                    "rank",
+                    "tp",
+                    "fp",
+                    "fn",
+                    "failed_images",
+                    "missing_images",
+                ):
+                    item.setData(
+                        Qt.DisplayRole,
+                        float(value)
+                        if key in ("micro_f1", "precision", "recall", "coverage")
+                        else int(value),
+                    )
+                else:
+                    item.setText(str(value))
+                item.setData(Qt.UserRole, index)
+                item.setToolTip(
+                    str(row.get("exclusion_reason", ""))
+                    + "\n"
+                    + str(row["preset_json"])
+                )
+                table.setItem(index, column, item)
+        table.setSortingEnabled(True)
+        table.sortItems(0, Qt.AscendingOrder)
+        table.resizeColumnsToContents()
+        table.setVisible(True)
+        if not self.top5_df.empty:
+            for index in range(table.rowCount()):
+                if table.item(index, 0).data(Qt.UserRole) == self.top5_df.index[0]:
+                    table.selectRow(index)
+                    break
+
     def add_to_presets(self):
         """Вызывает метод добавления пресетов у родительского окна"""
+        if self._ranking_df is not None:
+            indices = [
+                self.rank_table.item(index.row(), 0).data(Qt.UserRole)
+                for index in self.rank_table.selectionModel().selectedRows()
+            ]
+            if not indices:
+                QMessageBox.warning(self, "Пресеты", "Выберите строки рейтинга.")
+                return
+            selected = self._ranking_df.loc[indices]
+            if not selected.eligible.all():
+                QMessageBox.warning(
+                    self,
+                    "Пресеты",
+                    "Для добавления выберите пресеты с успешным покрытием всего эталона.",
+                )
+                return
+            self.parent_app.add_to_presets(selected)
+            return
         if self.top5_df is None or self.top5_df.empty:
             QMessageBox.warning(
                 self, "Нет данных", "Нет данных для добавления в пресеты."
@@ -125,9 +235,9 @@ def setup_model_research_ui(parent):
     # ---- Левый блок: загрузка и сохранение датасета ----
     left_load_group = QGroupBox("Загрузка / сохранение датасета")
     left_load_layout = QHBoxLayout()
-    parent.btn_select = QPushButton("Выбрать папку")
+    parent.btn_select = QPushButton("2. Папка отчётов")
     parent.btn_select.setToolTip(
-        "Выбрать папку с отчетами (*_full_report.txt) и аннотациями (*.txt)"
+        "Добавить пороговые и градиентные отчёты из папки и вложенных каталогов"
     )
     parent.btn_load = QPushButton("Загрузить датасет")
     parent.btn_load.setToolTip("Загрузить ранее сохраненный датасет (CSV или Pickle)")
@@ -172,6 +282,7 @@ def setup_model_research_ui(parent):
     top_row_layout.addWidget(left_load_group)
     top_row_layout.addWidget(right_view_group)
     main_layout.addLayout(top_row_layout)
+    setup_evaluation_controls(parent, main_layout)
 
     # ========== ВТОРОЙ ГОРИЗОНТАЛЬНЫЙ БЛОК (фильтрация и подготовка) ==========
     second_row_layout = QHBoxLayout()
@@ -289,7 +400,7 @@ def setup_model_research_ui(parent):
 
     # Вторая строка: расчёт mean F1 по IoU и фильтр по mean_f1
     prepare_row2 = QHBoxLayout()
-    parent.iou_label = QLabel("IoU порог (для f1_50):")
+    parent.iou_label = QLabel("Вспомогательные метрики BBox:")
     parent.iou_spin = QDoubleSpinBox()
     parent.iou_spin.setRange(0.0, 1.0)
     parent.iou_spin.setSingleStep(0.05)
@@ -314,7 +425,7 @@ def setup_model_research_ui(parent):
     parent.btn_filter_f1.setEnabled(False)
 
     prepare_row2.addWidget(parent.iou_label)
-    prepare_row2.addWidget(parent.iou_spin)
+    parent.iou_spin.setVisible(False)
     prepare_row2.addWidget(parent.btn_compute_f1)
     prepare_row2.addSpacing(20)
     prepare_row2.addWidget(parent.f1_threshold_label)
@@ -368,9 +479,9 @@ def setup_model_research_ui(parent):
     parent.chk_iou_penalty.setToolTip(
         "При анализе использовать взвешенный F1 = mean_f1 * sqrt(avg_iou_tp)"
     )
-    parent.btn_analyze = QPushButton("Запустить анализ модели")
+    parent.btn_analyze = QPushButton("3. Оценить методы по эталону")
     parent.btn_analyze.setToolTip(
-        "Обучить регрессию и выдать топ-5 комбинаций параметров для каждого метода (с учётом diversity и штрафа)"
+        "Сравнить все полные пресеты на всём ручном эталоне по измеренным TP/FP/FN"
     )
     parent.btn_analyze.setEnabled(False)
 
@@ -422,7 +533,22 @@ def setup_model_research_ui(parent):
 
     second_row_layout.addWidget(left_filter_group, 40)  # 40% ширины
     second_row_layout.addWidget(right_prepare_group, 60)  # 60% ширины
-    main_layout.addLayout(second_row_layout)
+    prepare_row5.removeWidget(parent.btn_analyze)
+    prepare_row6.removeWidget(parent.btn_global_top5)
+    parent.btn_global_top5.setText("Показать рейтинг")
+    parent.evaluation_grid.addWidget(parent.btn_analyze, 4, 0, 1, 2)
+    parent.evaluation_grid.addWidget(parent.btn_global_top5, 4, 2)
+    parent.chk_use_diversity.setVisible(False)
+    parent.chk_iou_penalty.setVisible(False)
+    parent.explore_toggle = QCheckBox(
+        "Исследовать строки отчётов: фильтры и выборки (не меняют оценку всего эталона)"
+    )
+    main_layout.addWidget(parent.explore_toggle)
+    exploration = QWidget()
+    exploration.setLayout(second_row_layout)
+    exploration.setVisible(False)
+    parent.explore_toggle.toggled.connect(exploration.setVisible)
+    main_layout.addWidget(exploration)
 
     # ========== Таблица и результаты ==========
     main_splitter = QSplitter(Qt.Vertical)
@@ -431,6 +557,8 @@ def setup_model_research_ui(parent):
     parent.table.setSortingEnabled(True)
     parent.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     main_splitter.addWidget(parent.table)
+    parent.table.setVisible(False)
+    parent.explore_toggle.toggled.connect(parent.table.setVisible)
 
     bottom_splitter = QSplitter(Qt.Horizontal)
     parent.results_widget = ModelResearchWidget(parent)

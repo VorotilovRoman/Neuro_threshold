@@ -1,4 +1,3 @@
-
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
 if __name__ == "__main__" and not __package__:
     import sys as _bootstrap_sys
@@ -12,6 +11,7 @@ prepare_windows_torch()
 
 import os
 import sys
+from pathlib import Path
 from ast import literal_eval
 
 import pandas as pd
@@ -26,7 +26,8 @@ from PyQt5.QtWidgets import (
 
 from path_setup import get_project_root
 from ui.autoreseach_ui.model_research_ui import setup_model_research_ui
-from utils_new.autoreseach_utils.analysis import analyze, global_top_diverse
+from ui.autoreseach_ui.evaluation_controller import EvaluationController
+from utils_new.autoreseach_utils.evaluation_export import export_evaluation
 from utils_new.autoreseach_utils.reports import parse_reports, preset_from_row
 from utils_new.autoreseach_utils.metrics_core import DEFAULT_IOU_THRESHOLDS
 from utils_new.autoreseach_utils.prepare import (
@@ -45,7 +46,10 @@ from utils_new.autoreseach_utils.prepare import (
     sample_rows,
     save_unique_params,
 )
-from ui.segmentation.preset_bindings import ThresholdPresetManager, GradientPresetManager
+from ui.segmentation.preset_bindings import (
+    ThresholdPresetManager,
+    GradientPresetManager,
+)
 
 
 class ModelResearchApp(QMainWindow):
@@ -54,15 +58,30 @@ class ModelResearchApp(QMainWindow):
         self.setWindowTitle("Model Research")
         self.setGeometry(200, 200, 1200, 700)
 
+        self._report_source = None
+        self._report_paths = []
+        self.ground_truth_path = None
+        self._evaluation_revision = 0
+        self._evaluation_result = None
         self.df_full = None
         self.current_folder = ""
         self.current_display_df = None
         self.is_aggregated = False
-        self.is_top_methods = False   # флаг, что загружен датасет с топ-пресетами
+        self.is_top_methods = False  # флаг, что загружен датасет с топ-пресетами
 
         setup_model_research_ui(self)
 
         self.project_root = get_project_root()
+        self.evaluation_controller = EvaluationController(self)
+        self.btn_truth_yaml.clicked.connect(self.select_truth_yaml)
+        self.btn_truth_folder.clicked.connect(self.select_truth_folder)
+        self.btn_report_files.clicked.connect(self.select_report_files)
+        self.btn_clear_reports.clicked.connect(self.clear_report_inputs)
+        self.btn_stop_evaluation.clicked.connect(self.evaluation_controller.stop)
+        self.btn_export_evaluation.clicked.connect(self.save_evaluation)
+        self.truth_format.currentIndexChanged.connect(self._invalidate_evaluation)
+        self.evaluation_iou.valueChanged.connect(self._invalidate_evaluation)
+        self.class_aware.toggled.connect(self._invalidate_evaluation)
 
         self.btn_select.clicked.connect(self.select_folder)
         self.btn_load.clicked.connect(self.load_dataset)
@@ -99,6 +118,130 @@ class ModelResearchApp(QMainWindow):
         # Кнопка удаления идеальных строк (только для топ-пресетов)
         self.btn_remove_perfect.clicked.connect(self.filter_perfect_rows)
 
+    def _invalidate_evaluation(self, *args):
+        self._evaluation_revision += 1
+        self.evaluation_controller.stop()
+        self._evaluation_result = None
+        self.results_widget.display_results(pd.DataFrame())
+        self.btn_export_evaluation.setEnabled(False)
+        self.lbl_evaluation_status.setText(
+            "Входы или условия изменены. Запустите оценку по эталону."
+        )
+
+    def set_ground_truth_source(self, path):
+        self.ground_truth_path = str(Path(path).resolve())
+        self._invalidate_evaluation()
+        self.lbl_truth.setText("Эталон: " + self.ground_truth_path)
+
+    def select_truth_yaml(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Ручная разметка: YOLO YAML", "", "YOLO YAML (*.yaml *.yml)"
+        )
+        if path:
+            self.set_ground_truth_source(path)
+
+    def select_truth_folder(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Папка эталонного датасета или только TXT"
+        )
+        if path:
+            self.set_ground_truth_source(path)
+
+    def select_report_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Добавить пороговые и градиентные отчёты", "", "Отчёты (*.txt)"
+        )
+        if paths:
+            self._load_report_paths(paths)
+
+    def _load_report_paths(self, paths):
+        paths = sorted(
+            set([*self._report_paths, *(str(Path(path).resolve()) for path in paths)])
+        )
+        try:
+            frame = parse_reports(
+                paths,
+                self.log_msg,
+                strict=True,
+                include_failures=True,
+                load_adjacent_truth=False,
+            )
+            if frame is None or frame.empty:
+                raise ValueError("В отчётах нет вычислений.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Отчёты", str(exc))
+            return False
+        self._invalidate_evaluation()
+        self._report_paths = paths
+        self._report_source = frame.copy(deep=True)
+        self.df_full = frame.copy(deep=True)
+        self.is_aggregated = self.is_top_methods = False
+        self.display_dataframe(self.df_full.head(100))
+        self._enable_buttons()
+        self.update_row_count_display()
+        self.lbl_evaluation_status.setText(
+            f"Загружено {len(paths)} отчётов, {len(frame)} вычислений. Оценка использует весь исходный набор независимо от фильтров таблицы."
+        )
+        self.log_msg(self.lbl_evaluation_status.text())
+        return True
+
+    def clear_report_inputs(self):
+        self._invalidate_evaluation()
+        self._report_paths = []
+        self._report_source = None
+        self.df_full = None
+        self.is_aggregated = self.is_top_methods = False
+        self.display_dataframe(None)
+        self.update_row_count_display()
+        self._update_buttons_state()
+
+    def _evaluation_finished(self, result, error):
+        if isinstance(error, InterruptedError):
+            self.lbl_evaluation_status.setText(
+                "Оценка отменена. Победитель не определён."
+            )
+            return
+        if error:
+            self.log_msg(f"Ошибка оценки: {error}")
+            self.lbl_evaluation_status.setText(f"Ошибка оценки: {error}")
+            QMessageBox.critical(self, "Оценка", str(error))
+            return
+        self._evaluation_result = result
+        self.results_widget.display_evaluation(result)
+        self.btn_export_evaluation.setEnabled(True)
+        valid = int(result.rankings.eligible.sum())
+        self.lbl_evaluation_status.setText(
+            f"Эталон: {result.reference_images} снимков / {result.reference_objects} объектов. Полностью проверено пресетов: {valid}/{len(result.rankings)}. Рейтинг — фактический F1 по всему эталону."
+        )
+        self.log_msg(self.lbl_evaluation_status.text())
+        for message in result.diagnostics:
+            self.log_msg(message)
+
+    def save_evaluation(self):
+        if self._evaluation_result is None:
+            return
+        path = QFileDialog.getExistingDirectory(
+            self, "Отдельная пустая папка для оценки"
+        )
+        if not path:
+            return
+        try:
+            export_evaluation(self._evaluation_result, path)
+            QMessageBox.information(
+                self,
+                "Оценка сохранена",
+                f"{path}\nsummary.md, rankings.csv, best_methods.csv, image_details.csv, evaluation.json",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Экспорт оценки", str(exc))
+
+    def shutdown_analysis(self):
+        self.evaluation_controller.close()
+
+    def closeEvent(self, event):
+        self.shutdown_analysis()
+        event.accept()
+
     def log_msg(self, msg):
         self.log_widget.log(msg)
         print(msg)
@@ -108,13 +251,17 @@ class ModelResearchApp(QMainWindow):
         self.lbl_row_count.setText(f"Строк в датасете: {count}")
 
     def _update_f1_filter_button_state(self):
-        if self.df_full is not None and 'mean_f1' in self.df_full.columns:
+        if self.df_full is not None and "mean_f1" in self.df_full.columns:
             self.btn_filter_f1.setEnabled(True)
         else:
             self.btn_filter_f1.setEnabled(False)
 
     def _update_aggregate_button_state(self):
-        if self.df_full is not None and 'mean_f1' in self.df_full.columns and not self.is_aggregated:
+        if (
+            self.df_full is not None
+            and "mean_f1" in self.df_full.columns
+            and not self.is_aggregated
+        ):
             self.btn_aggregate.setEnabled(True)
         else:
             self.btn_aggregate.setEnabled(False)
@@ -126,12 +273,31 @@ class ModelResearchApp(QMainWindow):
             self.btn_aggregate.setEnabled(False)
             self.btn_cluster.setEnabled(False)
         else:
-            if self.df_full is not None and 'objects' in self.df_full.columns:
+            if self.df_full is not None and "objects" in self.df_full.columns:
                 self.btn_filter_full_image.setEnabled(True)
                 self.btn_compute_f1.setEnabled(True)
             self._update_aggregate_button_state()
             if self.df_full is not None:
                 self.btn_cluster.setEnabled(True)
+        self._guard_exploration_buttons()
+
+    def _guard_exploration_buttons(self):
+        frame = self.df_full
+        truth_available = (
+            frame is not None
+            and not frame.empty
+            and "ground_truth_available" in frame
+            and frame["ground_truth_available"].isin([True, "True"]).all()
+        )
+        has_counts = truth_available and "num_true_objects" in frame
+        for button in (
+            self.btn_filter_zero_true,
+            self.btn_filter_overseg,
+            self.btn_filter_anomaly_count,
+            self.btn_remove_no_true,
+        ):
+            button.setEnabled(bool(has_counts and not self.is_aggregated))
+        self.btn_compute_f1.setEnabled(bool(truth_available and not self.is_aggregated))
 
     def _apply_prepare_operation(self, operation_func, *args, **kwargs):
         if self.df_full is None:
@@ -183,11 +349,17 @@ class ModelResearchApp(QMainWindow):
     # ---------- Расчёт mean F1 по IoU ----------
     def compute_meanap(self):
         if self.is_aggregated:
-            QMessageBox.warning(self, "Операция недоступна", "Для агрегированного датасета пересчёт метрик невозможен.")
+            QMessageBox.warning(
+                self,
+                "Операция недоступна",
+                "Для агрегированного датасета пересчёт метрик невозможен.",
+            )
             return
         self.btn_compute_f1.setEnabled(False)
         try:
-            new_df, msg = add_meanap_metrics(self.df_full, iou_thresholds=DEFAULT_IOU_THRESHOLDS)
+            new_df, msg = add_meanap_metrics(
+                self.df_full, iou_thresholds=DEFAULT_IOU_THRESHOLDS
+            )
             if new_df is not None:
                 self.df_full = new_df
                 self.log_msg(msg)
@@ -209,13 +381,19 @@ class ModelResearchApp(QMainWindow):
         threshold = self.f1_threshold_spin.value()
         if self.df_full is None:
             return
-        if 'mean_f1' not in self.df_full.columns:
-            QMessageBox.warning(self, "Нет данных", "Сначала выполните 'Расчет mean F1 по IoU'.")
+        if "mean_f1" not in self.df_full.columns:
+            QMessageBox.warning(
+                self, "Нет данных", "Сначала выполните 'Расчет mean F1 по IoU'."
+            )
             return
         before = len(self.df_full)
-        self.df_full = self.df_full[self.df_full['mean_f1'] >= threshold].reset_index(drop=True)
+        self.df_full = self.df_full[self.df_full["mean_f1"] >= threshold].reset_index(
+            drop=True
+        )
         after = len(self.df_full)
-        self.log_msg(f"Фильтр по mean_f1 (порог {threshold:.2f}): удалено {before - after} строк. Осталось {after}.")
+        self.log_msg(
+            f"Фильтр по mean_f1 (порог {threshold:.2f}): удалено {before - after} строк. Осталось {after}."
+        )
         self.update_row_count_display()
         self.display_dataframe(self.df_full.head(100))
         self._update_f1_filter_button_state()
@@ -252,7 +430,11 @@ class ModelResearchApp(QMainWindow):
                 self.log_msg(msg)
                 self.update_row_count_display()
                 self.display_dataframe(self.df_full.head(100))
-                QMessageBox.information(self, "Готово", f"Кластеризация завершена. Добавлена колонка 'cluster'.\n{msg}")
+                QMessageBox.information(
+                    self,
+                    "Готово",
+                    f"Кластеризация завершена. Добавлена колонка 'cluster'.\n{msg}",
+                )
             else:
                 self.log_msg(msg)
                 QMessageBox.warning(self, "Ошибка", msg)
@@ -274,7 +456,9 @@ class ModelResearchApp(QMainWindow):
             self.btn_save_unique_params.setEnabled(False)
             _, msg = save_unique_params(self.df_full, result_dir)
             self.log_msg(msg)
-            QMessageBox.information(self, "Готово", f"Уникальные параметры сохранены.\n{msg}")
+            QMessageBox.information(
+                self, "Готово", f"Уникальные параметры сохранены.\n{msg}"
+            )
         except Exception as e:
             self.log_msg(f"Ошибка сохранения: {e}")
             QMessageBox.critical(self, "Ошибка", str(e))
@@ -285,8 +469,10 @@ class ModelResearchApp(QMainWindow):
         if self.df_full is None:
             QMessageBox.warning(self, "Нет данных", "Сначала загрузите датасет.")
             return
-        if 'mean_f1' not in self.df_full.columns:
-            QMessageBox.warning(self, "Нет метрики", "Сначала выполните 'Расчет mean F1 по IoU'.")
+        if "mean_f1" not in self.df_full.columns:
+            QMessageBox.warning(
+                self, "Нет метрики", "Сначала выполните 'Расчет mean F1 по IoU'."
+            )
             return
         try:
             new_df, msg = optimize_invert(self.df_full)
@@ -308,8 +494,12 @@ class ModelResearchApp(QMainWindow):
         if self.df_full is None:
             QMessageBox.warning(self, "Нет данных", "Сначала загрузите датасет.")
             return
-        if 'cluster' not in self.df_full.columns:
-            QMessageBox.warning(self, "Нет кластеров", "Сначала выполните 'Кластеризация параметров' (добавьте колонку 'cluster').")
+        if "cluster" not in self.df_full.columns:
+            QMessageBox.warning(
+                self,
+                "Нет кластеров",
+                "Сначала выполните 'Кластеризация параметров' (добавьте колонку 'cluster').",
+            )
             return
         n_clusters = 3
         try:
@@ -331,21 +521,44 @@ class ModelResearchApp(QMainWindow):
     # ---------- Работа с топ-пресетами ----------
     def load_top_methods(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Загрузить топ-пресеты по методам", "", "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)"
+            self,
+            "Загрузить топ-пресеты по методам",
+            "",
+            "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)",
         )
         if not file_path:
             return
         try:
-            if file_path.endswith('.csv'):
+            if file_path.endswith(".csv"):
                 df = pd.read_csv(file_path)
-            elif file_path.endswith('.pkl'):
+            elif file_path.endswith(".pkl"):
                 df = pd.read_pickle(file_path)
             else:
                 df = pd.read_csv(file_path)
-            required = ['preset_json', 'erode_px', 'dilate_px', 'morphology_key', 'method', 'rank', 'params', 'invert', 'close_px', 'open_px', 'actual_f1', 'pred_f1', 'cluster', 'cluster_co']
+            required = [
+                "preset_json",
+                "erode_px",
+                "dilate_px",
+                "morphology_key",
+                "method",
+                "rank",
+                "params",
+                "invert",
+                "close_px",
+                "open_px",
+                "actual_f1",
+                "pred_f1",
+                "cluster",
+                "cluster_co",
+            ]
             missing = [c for c in required if c not in df.columns]
             if missing:
                 raise ValueError(f"Файл не содержит необходимых колонок: {missing}")
+            self._invalidate_evaluation()
+            self._report_paths = []
+            self._report_source = (
+                df.copy(deep=True) if "annotations_json" in df else None
+            )
             self.df_full = df
             self.is_top_methods = True
             self.is_aggregated = False
@@ -363,84 +576,112 @@ class ModelResearchApp(QMainWindow):
             QMessageBox.warning(self, "Нет данных", "Датасет пуст.")
             return
         if not self.is_top_methods:
-            QMessageBox.warning(self, "Недоступно", "Эта операция доступна только для датасета топ-пресетов.")
+            QMessageBox.warning(
+                self,
+                "Недоступно",
+                "Эта операция доступна только для датасета топ-пресетов.",
+            )
             return
-        if 'actual_f1' not in self.df_full.columns:
-            QMessageBox.warning(self, "Нет колонки", "В датасете отсутствует колонка actual_f1.")
+        if "actual_f1" not in self.df_full.columns:
+            QMessageBox.warning(
+                self, "Нет колонки", "В датасете отсутствует колонка actual_f1."
+            )
             return
 
         threshold = self.perfect_threshold_spin.value()
         before = len(self.df_full)
-        self.df_full = self.df_full[self.df_full['actual_f1'] < threshold].reset_index(drop=True)
+        self.df_full = self.df_full[self.df_full["actual_f1"] < threshold].reset_index(
+            drop=True
+        )
         after = len(self.df_full)
-        self.log_msg(f"Удалено строк с actual_f1 >= {threshold}: {before - after}. Осталось {after}.")
+        self.log_msg(
+            f"Удалено строк с actual_f1 >= {threshold}: {before - after}. Осталось {after}."
+        )
         self.update_row_count_display()
         self.display_dataframe(self.df_full.head(100))
 
     # ---------- Загрузка данных ----------
     def select_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
-        if not folder:
-            return
-        self.current_folder = folder
-        self.log_msg(f"Selected folder: {folder}")
-
-        report_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(("_full_report.txt","_gradient_report.txt"))]
-        if not report_files:
-            self.log_msg("Нет готовых пороговых или градиентных отчётов.")
-            return
-
-        self.log_msg(f"Found {len(report_files)} report files.")
-        self.df_full = self.parse_reports(report_files)
-        if self.df_full is None or self.df_full.empty:
-            self.log_msg("No data extracted.")
-            return
-
-        self.df_full['num_true_objects'] = self.df_full['true_objects'].apply(
-            lambda s: len(literal_eval(s)) if isinstance(s, str) and s.startswith('[') else 0
-        )
-        self.df_full['num_objects'] = pd.to_numeric(self.df_full['num_objects'], errors='coerce').fillna(0).astype(int)
-
-        self.is_aggregated = False
-        self.display_dataframe(self.df_full.head(100))
-        self._enable_buttons()
-        self._update_f1_filter_button_state()
-        self._update_aggregate_button_state()
-        self._update_buttons_by_aggregated_flag()
-        self.update_row_count_display()
-        self.log_msg(f"Loaded {len(self.df_full)} rows.")
-        self.is_top_methods = False
-        self._update_buttons_state()
+        folder = QFileDialog.getExistingDirectory(self, "Добавить папку отчётов")
+        if folder:
+            paths = sorted(
+                str(path)
+                for path in Path(folder).rglob("*.txt")
+                if path.name.endswith(("_full_report.txt", "_gradient_report.txt"))
+            )
+            if not paths:
+                QMessageBox.warning(
+                    self,
+                    "Отчёты",
+                    "Готовые пороговые или градиентные отчёты не найдены.",
+                )
+                return
+            self._load_report_paths(paths)
 
     def load_dataset(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Dataset", "", "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)"
+            self,
+            "Load Dataset",
+            "",
+            "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)",
         )
         if not file_path:
             return
         try:
-            if file_path.endswith('.csv'):
+            if file_path.endswith(".csv"):
                 df = pd.read_csv(file_path)
-            elif file_path.endswith('.pkl'):
+            elif file_path.endswith(".pkl"):
                 df = pd.read_pickle(file_path)
             else:
                 df = pd.read_csv(file_path)
 
-            required = ['preset_json', 'erode_px', 'dilate_px', 'morphology_key', 'ground_truth_available', 'objects', 'true_objects', 'method', 'params', 'invert', 'close_px', 'open_px']
+            required = [
+                "preset_json",
+                "erode_px",
+                "dilate_px",
+                "morphology_key",
+                "ground_truth_available",
+                "objects",
+                "true_objects",
+                "method",
+                "params",
+                "invert",
+                "close_px",
+                "open_px",
+            ]
             missing = [c for c in required if c not in df.columns]
             if missing:
                 self.log_msg(f"Warning: missing columns: {missing}")
 
+            self._invalidate_evaluation()
+            self._report_paths = []
+            self._report_source = (
+                df.copy(deep=True) if "annotations_json" in df else None
+            )
             self.df_full = df
             self.log_msg(f"Loaded {len(df)} rows from {file_path}")
 
-            if 'num_true_objects' not in self.df_full.columns:
-                self.df_full['num_true_objects'] = self.df_full['true_objects'].apply(
-                    lambda s: len(literal_eval(s)) if isinstance(s, str) and s.startswith('[') else 0
+            if (
+                "num_true_objects" not in self.df_full.columns
+                and "true_objects" in self.df_full
+            ):
+                self.df_full["num_true_objects"] = self.df_full["true_objects"].apply(
+                    lambda s: (
+                        len(literal_eval(s))
+                        if isinstance(s, str) and s.startswith("[")
+                        else None
+                    )
                 )
-            if 'num_objects' not in self.df_full.columns and 'objects' in self.df_full.columns:
-                self.df_full['num_objects'] = self.df_full['objects'].apply(
-                    lambda s: len(literal_eval(s)) if isinstance(s, str) and s.startswith('[') else 0
+            if (
+                "num_objects" not in self.df_full.columns
+                and "objects" in self.df_full.columns
+            ):
+                self.df_full["num_objects"] = self.df_full["objects"].apply(
+                    lambda s: (
+                        len(literal_eval(s))
+                        if isinstance(s, str) and s.startswith("[")
+                        else 0
+                    )
                 )
 
             self.is_aggregated = False
@@ -470,7 +711,7 @@ class ModelResearchApp(QMainWindow):
         self.btn_filter_invalid_params.setEnabled(True)
         self.btn_filter_anomaly_count.setEnabled(True)
         self.btn_filter_full_image.setEnabled(True)
-        self.btn_remove_no_true.setEnabled(True)   # новая кнопка
+        self.btn_remove_no_true.setEnabled(True)  # новая кнопка
         self.btn_sample_n.setEnabled(True)
         self.btn_cluster.setEnabled(True)
         self.btn_save_unique_params.setEnabled(True)
@@ -491,6 +732,8 @@ class ModelResearchApp(QMainWindow):
             self.current_display_df = None
             return
 
+        sorting = self.table.isSortingEnabled()
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(df))
         self.table.setColumnCount(len(df.columns))
         self.table.setHorizontalHeaderLabels(df.columns)
@@ -501,14 +744,19 @@ class ModelResearchApp(QMainWindow):
         for i, (_, row) in enumerate(df.iterrows()):
             for j, col in enumerate(df.columns):
                 val = row[col]
-                if col in ('objects', 'true_objects', 'preset_json', 'morphology_key') and isinstance(val, str) and len(val) > 100:
-                    val = val[:100] + '...'
+                if (
+                    col in ("objects", "true_objects", "preset_json", "morphology_key")
+                    and isinstance(val, str)
+                    and len(val) > 100
+                ):
+                    val = val[:100] + "..."
                 item = QTableWidgetItem(str(val))
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.table.setItem(i, j, item)
 
+        self.table.setSortingEnabled(sorting)
         self.table.resizeColumnsToContents()
-        for col in ('preset_json', 'morphology_key'):
+        for col in ("preset_json", "morphology_key"):
             if col in df.columns:
                 self.table.setColumnHidden(df.columns.get_loc(col), True)
 
@@ -517,17 +765,20 @@ class ModelResearchApp(QMainWindow):
             QMessageBox.warning(self, "No Data", "No data to save.")
             return
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Dataset", "", "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)"
+            self,
+            "Save Dataset",
+            "",
+            "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)",
         )
         if not file_path:
             return
         try:
-            if file_path.endswith('.csv'):
-                self.df_full.to_csv(file_path, index=False, encoding='utf-8')
-            elif file_path.endswith('.pkl'):
+            if file_path.endswith(".csv"):
+                self.df_full.to_csv(file_path, index=False, encoding="utf-8")
+            elif file_path.endswith(".pkl"):
                 self.df_full.to_pickle(file_path)
             else:
-                self.df_full.to_csv(file_path, index=False, encoding='utf-8')
+                self.df_full.to_csv(file_path, index=False, encoding="utf-8")
             self.log_msg(f"Dataset saved to {file_path}")
             QMessageBox.information(self, "Success", f"Saved to {file_path}")
         except Exception as e:
@@ -558,115 +809,99 @@ class ModelResearchApp(QMainWindow):
             QMessageBox.warning(self, "No Data", "Нет данных для сохранения.")
             return
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Current Sample", "", "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)"
+            self,
+            "Save Current Sample",
+            "",
+            "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)",
         )
         if not file_path:
             return
         try:
-            if file_path.endswith('.csv'):
-                self.current_display_df.to_csv(file_path, index=False, encoding='utf-8')
-            elif file_path.endswith('.pkl'):
+            if file_path.endswith(".csv"):
+                self.current_display_df.to_csv(file_path, index=False, encoding="utf-8")
+            elif file_path.endswith(".pkl"):
                 self.current_display_df.to_pickle(file_path)
             else:
-                self.current_display_df.to_csv(file_path, index=False, encoding='utf-8')
+                self.current_display_df.to_csv(file_path, index=False, encoding="utf-8")
             self.log_msg(f"Sample saved to {file_path}")
-            QMessageBox.information(self, "Success", f"Saved {len(self.current_display_df)} rows.")
+            QMessageBox.information(
+                self, "Success", f"Saved {len(self.current_display_df)} rows."
+            )
         except Exception as e:
             self.log_msg(f"Error saving sample: {e}")
             QMessageBox.critical(self, "Error", f"Failed to save: {e}")
 
     # ---------- Анализ ----------
     def run_analysis(self):
-        if self.is_top_methods:
-            QMessageBox.warning(self, "Недоступно", "Анализ модели недоступен для датасета топ-пресетов.")
-            return
-        if self.df_full is None or self.df_full.empty:
-            QMessageBox.warning(self, "Нет данных", "Сначала загрузите датасет.")
-            return
-
-        required = ['method', 'params', 'invert', 'close_px', 'open_px']
-        missing = [c for c in required if c not in self.df_full.columns]
-        if missing:
-            QMessageBox.critical(self, "Отсутствуют колонки", f"Отсутствуют необходимые колонки: {missing}")
-            return
-
-        has_mean_f1 = 'mean_f1' in self.df_full.columns
-        has_avg_iou_tp = 'avg_iou_tp' in self.df_full.columns
-        has_objects = 'objects' in self.df_full.columns and 'true_objects' in self.df_full.columns
-
-        if not has_mean_f1 and not has_objects:
-            QMessageBox.critical(self, "Нет данных", "Нет ни объектов, ни mean_f1. Невозможно выполнить анализ.")
-            return
-
-        self.log_msg("Запуск анализа полных пресетов для каждого метода...")
-        self.btn_analyze.setEnabled(False)
-
-        result_dir = os.path.join(self.project_root, "result")
-        os.makedirs(result_dir, exist_ok=True)
-
-        use_diversity = self.chk_use_diversity.isChecked()
-        use_iou_penalty = self.chk_iou_penalty.isChecked()
-        skip_metrics = has_mean_f1
-
-        try:
-            top5 = analyze(
-                self.df_full,
-                output_dir=result_dir,
-                skip_metrics=skip_metrics,
-                use_diversity=use_diversity,
-                use_iou_penalty=use_iou_penalty,
-                penalty_alpha=0.5,
-                per_method=True,
-                cluster_col='cluster',
-                cluster_co_col='cluster_co'
+        source = (
+            self._report_source if self._report_source is not None else self.df_full
+        )
+        if source is None or source.empty:
+            QMessageBox.warning(
+                self, "Оценка", "Сначала загрузите исходные отчёты автоподбора."
             )
-            if top5 is not None and not top5.empty:
-                self.results_widget.display_results(top5)
-                self.log_msg("Анализ завершён.")
-            else:
-                self.log_msg("Анализ не вернул данных.")
-        except Exception as e:
-            self.log_msg(f"Ошибка анализа: {e}")
-            QMessageBox.critical(self, "Ошибка анализа", str(e))
-        finally:
-            self.btn_analyze.setEnabled(True)
+            return
+        if not self.ground_truth_path:
+            QMessageBox.warning(
+                self,
+                "Эталон",
+                "Выберите ручную разметку: YOLO YAML или папку датасета/TXT.",
+            )
+            return
+        required = {
+            "preset_json",
+            "source_size",
+            "working_size",
+            "annotations_json",
+            "image_path",
+        }
+        if not required.issubset(source.columns):
+            QMessageBox.warning(
+                self,
+                "Оценка",
+                "Нужны исходные отчёты с геометрией и размерами. Агрегированная таблица не заменяет результаты по снимкам.",
+            )
+            return
+        if self.evaluation_controller.busy:
+            self.log_msg("Оценка ещё выполняется. Дождитесь остановки.")
+            return
+        self._invalidate_evaluation()
+        self.btn_analyze.setEnabled(False)
+        self.btn_stop_evaluation.setEnabled(True)
+        self.lbl_evaluation_status.setText("Чтение эталона и сопоставление снимков…")
+        self.evaluation_controller.start(
+            source,
+            self.ground_truth_path,
+            self.truth_format.currentData(),
+            self.evaluation_iou.value(),
+            self.class_aware.isChecked(),
+        )
 
     def run_global_top5(self):
-        if self.df_full is None or self.df_full.empty:
-            QMessageBox.warning(self, "Нет данных", "Сначала загрузите датасет.")
-            return
-        if 'actual_f1' not in self.df_full.columns and 'mean_f1' not in self.df_full.columns:
-            QMessageBox.warning(self, "Нет метрики", "Нет колонок actual_f1 или mean_f1.")
-            return
-
-        score_col = 'actual_f1' if 'actual_f1' in self.df_full.columns else 'mean_f1'
-        try:
-            top5 = global_top_diverse(self.df_full, k=10, score_col=score_col)
-            if top5 is not None and not top5.empty:
-                self.results_widget.display_results(top5)
-                self.log_msg(f"Глобальный топ-10 (разнообразные) выбран. Использована метрика: {score_col}")
-            else:
-                self.log_msg("Не удалось выбрать топ-10.")
-        except Exception as e:
-            self.log_msg(f"Ошибка: {e}")
-            QMessageBox.critical(self, "Ошибка", str(e))
+        if self._evaluation_result is None:
+            self.run_analysis()
+        else:
+            self.results_widget.display_evaluation(self._evaluation_result)
 
     def save_dataframe(self, df, dialog_title="Сохранить датасет"):
         if df is None or df.empty:
             QMessageBox.warning(self, "Нет данных", "Нет данных для сохранения.")
             return
         file_path, _ = QFileDialog.getSaveFileName(
-            self, dialog_title, "", "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)"
+            self,
+            dialog_title,
+            "",
+            "CSV Files (*.csv);;Pickle Files (*.pkl);;All Files (*)",
         )
         if not file_path:
             return
         try:
-            if file_path.endswith('.csv'):
-                df.to_csv(file_path, index=False, encoding='utf-8')
-            elif file_path.endswith('.pkl'):
+            if file_path.endswith(".csv"):
+                df.to_csv(file_path, index=False, encoding="utf-8")
+            elif file_path.endswith(".pkl"):
                 df.to_pickle(file_path)
             else:
-                df.to_csv(file_path, index=False, encoding='utf-8')
+                df.to_csv(file_path, index=False, encoding="utf-8")
             self.log_msg(f"Сохранено в {file_path}")
             QMessageBox.information(self, "Успех", f"Сохранено {len(df)} строк.")
         except Exception as e:
@@ -676,26 +911,35 @@ class ModelResearchApp(QMainWindow):
     # ---------- Добавление в пресеты ----------
     def add_to_presets(self, top5):
         if top5 is None or top5.empty:
-            QMessageBox.warning(self, "Нет данных", "Нет данных для добавления в пресеты.")
+            QMessageBox.warning(
+                self, "Нет данных", "Нет данных для добавления в пресеты."
+            )
             return
         try:
-            presets=[preset_from_row(row) for _,row in top5.iterrows()]
-        except (ValueError,KeyError,TypeError) as exc:
-            QMessageBox.warning(self,"Пресет отчёта",str(exc))
+            presets = [preset_from_row(row) for _, row in top5.iterrows()]
+        except (ValueError, KeyError, TypeError) as exc:
+            QMessageBox.warning(self, "Пресет отчёта", str(exc))
             return
-        managers={}
-        added=[]
+        managers = {}
+        added = []
         for preset in presets:
-            kind=preset['kind']
+            kind = preset["kind"]
             if kind not in managers:
-                managers[kind]=(ThresholdPresetManager if kind=='threshold' else GradientPresetManager)(main_window=None)
-            preset_mgr=managers[kind]
-            method=preset['method']
-            base_name=f"{kind}: {method} auto"
-            name=base_name;counter=1
+                managers[kind] = (
+                    ThresholdPresetManager
+                    if kind == "threshold"
+                    else GradientPresetManager
+                )(main_window=None)
+            preset_mgr = managers[kind]
+            method = preset["method"]
+            base_name = f"{kind}: {method} auto"
+            name = base_name
+            counter = 1
             while name in preset_mgr.presets:
-                name=f"{base_name} ({counter})";counter+=1
-            if preset_mgr.add_preset_dict(name,preset):added.append(name)
+                name = f"{base_name} ({counter})"
+                counter += 1
+            if preset_mgr.add_preset_dict(name, preset):
+                added.append(name)
         if added:
             self.log_msg(f"Добавлены пресеты: {', '.join(added)}")
             QMessageBox.information(self, "Успех", f"Добавлено {len(added)} пресетов.")
@@ -726,7 +970,7 @@ class ModelResearchApp(QMainWindow):
             self.btn_filter_f1.setEnabled(False)
             self.btn_analyze.setEnabled(False)
             self.btn_global_top5.setEnabled(False)
-            self.btn_remove_perfect.setEnabled(False)   # для топ-пресетов
+            self.btn_remove_perfect.setEnabled(False)  # для топ-пресетов
             return
 
         if self.is_top_methods:
@@ -753,7 +997,7 @@ class ModelResearchApp(QMainWindow):
             self.btn_filter_f1.setEnabled(False)
             self.btn_analyze.setEnabled(False)
             self.btn_global_top5.setEnabled(True)
-            self.btn_remove_perfect.setEnabled(True)   # активна для топ-пресетов
+            self.btn_remove_perfect.setEnabled(True)  # активна для топ-пресетов
         else:
             self._enable_buttons()
             self.btn_remove_perfect.setEnabled(False)
@@ -764,4 +1008,5 @@ if __name__ == "__main__":
     window = ModelResearchApp()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

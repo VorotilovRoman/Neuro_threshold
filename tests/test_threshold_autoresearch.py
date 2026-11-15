@@ -209,14 +209,16 @@ with tempfile.TemporaryDirectory() as directory:
  after=(owner.get_current_threshold_params(),owner.current_index,owner.objects_widget.checked_indices,owner.objects_widget.focused_index)
  assert before[:4]==after;np.testing.assert_array_equal(before[4],owner.current_base_image)
  report=path.with_name(path.stem+'_full_report.txt');research=ModelResearchApp();df=research.parse_reports([report]);assert len(df)==2
- research.df_full=df;research.display_dataframe(df)
+ research.df_full=df;research.set_ground_truth_source(directory);research.display_dataframe(df)
  from utils_new.autoreseach_utils.prepare import add_meanap_metrics
  from utils_new.autoreseach_utils.analysis import analyze
  from ui.segmentation.preset_bindings import ThresholdPresetManager
  import json
  scored,_=add_meanap_metrics(df);top=analyze(scored,skip_metrics=True)
  with patch.object(QMessageBox,'critical') as errors:
-  research.run_analysis();errors.assert_not_called()
+  research.run_analysis();deadline=time.monotonic()+10
+  while research.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
+  assert not research.evaluation_controller.busy;errors.assert_not_called()
  assert len(research.results_widget.top5_df)==2
  manager=ThresholdPresetManager(None);manager.presets_file=str(Path(directory)/'presets.json');manager.presets={}
  with patch('tabs.model_research.ThresholdPresetManager',return_value=manager),patch.object(QMessageBox,'information'):

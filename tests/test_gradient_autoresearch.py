@@ -245,8 +245,11 @@ with tempfile.TemporaryDirectory() as directory:
   assert not owner.auto_search.busy
   np.testing.assert_array_equal(owner.current_base_image,before[0]);np.testing.assert_array_equal(owner.final_mask,before[1]);assert (owner.current_index,owner.draw_combo.currentData(),owner.objects_widget.checked_indices)==before[2:]
  research=ModelResearchApp();df=research.parse_reports(list(root.glob('*_report.txt')));assert set(df.kind)=={'threshold','gradient'}
- research.df_full=df
- with patch.object(QMessageBox,'critical') as error:research.run_analysis();error.assert_not_called()
+ research.df_full=df;research.set_ground_truth_source(root)
+ with patch.object(QMessageBox,'critical') as error:
+  research.run_analysis();deadline=time.monotonic()+10
+  while research.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
+  assert not research.evaluation_controller.busy;error.assert_not_called()
  top=research.results_widget.top5_df;assert set(top.kind)=={'threshold','gradient'}
  managers={}
  for kind,cls in [('threshold',ThresholdPresetManager),('gradient',GradientPresetManager)]:

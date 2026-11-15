@@ -1,9 +1,7 @@
-# analysis.py (исправленная версия для методов с малым количеством данных)
-
+"""Empirical exploration helpers. Dataset recommendations use evaluation.py."""
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
 
 from utils_new.autoreseach_utils.prepare import add_meanap_metrics
 
@@ -85,45 +83,17 @@ def analyze(
             df.groupby("preset_json")["avg_iou_tp"].mean().clip(lower=0)
             ** penalty_alpha
         )
-    # A descriptive regression estimate, not a held-out quality metric.
-    if len(df) >= 10:
-        import json
-
-        features = pd.DataFrame(
-            [
-                dict(
-                    json.loads(row["params"]),
-                    close_px=row["close_px"],
-                    open_px=row["open_px"],
-                    erode_px=row["erode_px"],
-                    dilate_px=row["dilate_px"],
-                    invert=int(row["invert"]),
-                    method=row["method"],
-                    kind=row["kind"],
-                    shape=json.loads(row["preset_json"])["morphology"]["shape"],
-                    order=",".join(
-                        op["operation"]
-                        for op in json.loads(row["preset_json"])["morphology"][
-                            "operations"
-                        ]
-                    ),
-                    mode=json.loads(row["preset_json"])["annotation_mode"],
-                    hull=int(json.loads(row["preset_json"])["use_hull"]),
-                )
-                for _, row in df.iterrows()
-            ],
-            index=df.index,
-        )
-        x = pd.get_dummies(features).fillna(0)
-        model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=1)
-        target = df["mean_f1"]
-        if use_iou_penalty:
-            target = target * df["avg_iou_tp"].clip(lower=0) ** penalty_alpha
-        model.fit(x, target)
-        predicted = (
-            pd.Series(model.predict(x), index=df["preset_json"]).groupby(level=0).mean()
-        )
-        representatives["pred_f1"] = predicted
+    # Rank only measured performance. An in-sample regressor can reorder equal
+    # or better real recipes, and does not establish generalization quality.
+    expected_images = df["image_path"].nunique() if "image_path" in df else 1
+    coverage = (
+        df.groupby("preset_json")["image_path"].nunique() / expected_images
+        if "image_path" in df
+        else scores * 0 + 1
+    )
+    representatives["coverage"] = coverage
+    representatives["eligible"] = coverage == 1
+    representatives = representatives[representatives["eligible"]]
     representatives = representatives.reset_index()
     groups = (
         representatives.groupby(["kind", "method"])

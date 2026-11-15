@@ -1,5 +1,4 @@
 import re
-from ast import literal_eval
 
 import numpy as np
 import pandas as pd
@@ -87,12 +86,9 @@ def parse_objects(s):
     Преобразует строковое представление списка объектов в список кортежей.
     Если строка пустая или невалидная, возвращает пустой список.
     """
-    if pd.isna(s) or s == "" or s == "[]":
-        return []
-    try:
-        return literal_eval(s)
-    except Exception:
-        return []
+    from .geometry_metrics import parse_sequence
+
+    return list(parse_sequence(s))
 
 
 # ========== Precision, Recall, F1 ==========
@@ -115,33 +111,22 @@ def compute_metrics(pred_boxes, gt_boxes, iou_threshold=0.5):
     Для одного изображения вычисляет F1, TP, FP, FN.
     pred_boxes и gt_boxes – списки в формате (cls, cx, cy, w, h).
     """
-    if not pred_boxes and not gt_boxes:
-        return 1.0, 0, 0, 0
-    if not pred_boxes:
-        return 0.0, 0, 0, len(gt_boxes)
-    if not gt_boxes:
-        return 0.0, len(pred_boxes), len(pred_boxes), 0
+    from .geometry_metrics import (
+        normalize_annotations,
+        overlap_matrix,
+        match_overlaps,
+        count_metrics,
+    )
 
-    used_gt = [False] * len(gt_boxes)
-    tp, fp = 0, 0
-    for p in pred_boxes:
-        best_iou = 0.0
-        best_idx = -1
-        for i, g in enumerate(gt_boxes):
-            if used_gt[i]:
-                continue
-            iou_val = iou(p, g)
-            if iou_val > best_iou:
-                best_iou = iou_val
-                best_idx = i
-        if best_iou > iou_threshold:
-            tp += 1
-            used_gt[best_idx] = True
-        else:
-            fp += 1
-    fn = len(gt_boxes) - sum(used_gt)
-    _, _, f1 = compute_precision_recall_f1(tp, fp, fn)
-    return f1, tp, fp, fn
+    predictions = normalize_annotations(pred_boxes, (1, 1), boxes=True)
+    truth = normalize_annotations(gt_boxes, (1, 1), boxes=True)
+    counts = match_overlaps(overlap_matrix(predictions, truth), iou_threshold)
+    return (
+        count_metrics(counts["tp"], counts["fp"], counts["fn"])["f1"],
+        counts["tp"],
+        counts["fp"],
+        counts["fn"],
+    )
 
 
 # ========== Average Precision (AP) и mAP ==========

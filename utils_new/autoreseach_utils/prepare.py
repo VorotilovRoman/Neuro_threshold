@@ -14,7 +14,6 @@ from sklearn.preprocessing import StandardScaler
 # Импорт общих функций из metrics_core
 from utils_new.autoreseach_utils.metrics_core import (
     DEFAULT_IOU_THRESHOLDS,
-    iou,
     parse_objects,
 )
 from utils_new.autoreseach_utils.metrics_core import (
@@ -32,99 +31,25 @@ def compute_metrics_detailed(row, iou_thresholds):
         tp_list, fp_list, fn_list: аналогично
         avg_iou_tp: средний IoU по всем TP (матчинг при пороге 0.5)
     """
-    pred = row["objects"]
-    gt = row["true_objects"]
-    if not pred and not gt:
-        # Идеальный случай: нет объектов и нет предсказаний -> F1=1 при любом пороге
-        return (
-            [1.0] * len(iou_thresholds),
-            [0] * len(iou_thresholds),
-            [0] * len(iou_thresholds),
-            [0] * len(iou_thresholds),
-            1.0,
-        )
-    if not pred:
-        # Пустое предсказание -> все FN
-        fn_cnt = len(gt)
-        return (
-            [0.0] * len(iou_thresholds),
-            [0] * len(iou_thresholds),
-            [0] * len(iou_thresholds),
-            [fn_cnt] * len(iou_thresholds),
-            0.0,
-        )
-    if not gt:
-        # Нет истинных объектов -> все FP
-        fp_cnt = len(pred)
-        return (
-            [0.0] * len(iou_thresholds),
-            [0] * len(iou_thresholds),
-            [fp_cnt] * len(iou_thresholds),
-            [0] * len(iou_thresholds),
-            0.0,
-        )
+    from .geometry_metrics import (
+        normalize_annotations,
+        overlap_matrix,
+        match_overlaps,
+        count_metrics,
+    )
 
-    # Предварительно вычисляем матрицу IoU между всеми pred и gt
-    iou_matrix = np.zeros((len(pred), len(gt)))
-    for i, p in enumerate(pred):
-        for j, g in enumerate(gt):
-            iou_matrix[i, j] = iou(p, g)
-
-    f1_list = []
-    tp_list = []
-    fp_list = []
-    fn_list = []
-    # Для avg_iou_tp используем матчинг при пороге 0.5 (классический)
-    used_gt_for_avg = [False] * len(gt)
-    tp_ious = []
-    for i, p in enumerate(pred):
-        best_iou = 0
-        best_j = -1
-        for j, g in enumerate(gt):
-            if used_gt_for_avg[j]:
-                continue
-            iou_val = iou_matrix[i, j]
-            if iou_val > best_iou:
-                best_iou = iou_val
-                best_j = j
-        if best_iou > 0.5:
-            tp_ious.append(best_iou)
-            used_gt_for_avg[best_j] = True
-    avg_iou_tp = np.mean(tp_ious) if tp_ious else 0.0
-
-    # Теперь для каждого порога считаем TP/FP/FN
-    for thresh in iou_thresholds:
-        used_gt = [False] * len(gt)
-        tp = 0
-        fp = 0
-        for i, p in enumerate(pred):
-            best_iou = 0
-            best_j = -1
-            for j, g in enumerate(gt):
-                if used_gt[j]:
-                    continue
-                iou_val = iou_matrix[i, j]
-                if iou_val > best_iou:
-                    best_iou = iou_val
-                    best_j = j
-            if best_iou > thresh:
-                tp += 1
-                used_gt[best_j] = True
-            else:
-                fp += 1
-        fn = len(gt) - sum(used_gt)
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0
-        )
-        f1_list.append(f1)
-        tp_list.append(tp)
-        fp_list.append(fp)
-        fn_list.append(fn)
-    return f1_list, tp_list, fp_list, fn_list, avg_iou_tp
+    predictions = normalize_annotations(row["objects"], (1, 1), boxes=True)
+    truth = normalize_annotations(row["true_objects"], (1, 1), boxes=True)
+    overlaps = overlap_matrix(predictions, truth)
+    counts = [match_overlaps(overlaps, value) for value in iou_thresholds]
+    localization = match_overlaps(overlaps, 0.5)
+    return (
+        [count_metrics(item["tp"], item["fp"], item["fn"])["f1"] for item in counts],
+        [item["tp"] for item in counts],
+        [item["fp"] for item in counts],
+        [item["fn"] for item in counts],
+        localization["mean_iou"] if predictions or truth else 1.0,
+    )
 
 
 def add_meanap_metrics(df, iou_thresholds=None):
@@ -212,7 +137,9 @@ def compute_f1(
             "objects": row["objects_parsed"],
             "true_objects": row["true_objects_parsed"],
         }
-        f1, tp, fp, fn = compute_metrics_core(temp_row, iou_threshold=iou_threshold)
+        f1, tp, fp, fn = compute_metrics_core(
+            temp_row["objects"], temp_row["true_objects"], iou_threshold=iou_threshold
+        )
         f1_list.append(f1)
         tp_list.append(tp)
         fp_list.append(fp)

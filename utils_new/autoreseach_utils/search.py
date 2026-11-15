@@ -15,6 +15,7 @@ from utils_new.segmentation.postprocessing import extract_objects
 from utils_new.threshold_processing import apply_threshold_method
 from .search_space import combination_count, iter_presets, search_kind, method_params
 from .gradient_processing import gradient_binary, finalize_gradient_mask
+from .ground_truth import digest_file
 
 
 def evaluate(gray, image, preset, *, raw_mask=None):
@@ -145,7 +146,13 @@ def run_search(
                         "record": "header",
                         "schema_version": 1,
                         "kind": kind + "_search",
-                        "image_path": str(path),
+                        "image_path": str(Path(path).resolve()),
+                        "source_sha256": digest_file(path),
+                        "processing": {
+                            "resize_enabled": bool(resize_enabled),
+                            "max_side": max_side,
+                            "pipeline_version": 1,
+                        },
                         "source_size": record["source_size"],
                         "working_size": [w, h],
                         "planned": count,

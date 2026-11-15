@@ -66,14 +66,27 @@ def validate_preset(state, kind=None):
         raise ValueError("Пресет принадлежит другой вкладке методов.")
     if {"close_factor", "open_factor", "kernel_shape"} & state.keys():
         raise ValueError("Относительные параметры морфологии больше не поддерживаются.")
+    if "preprocessing" in state:
+        processing = state["preprocessing"]
+        if (
+            not isinstance(processing, dict)
+            or type(processing.get("resize_enabled")) is not bool
+            or processing.get("max_side") != 1024
+            or processing.get("pipeline_version") != 1
+        ):
+            raise ValueError(
+                "Пресет поддерживает preprocessing: resize_enabled=bool, max_side=1024, pipeline_version=1."
+            )
     validate_morphology(state.get("morphology"))
     if not isinstance(state.get("invert"), bool) or not isinstance(
         state.get("use_hull"), bool
     ):
         raise ValueError("invert и use_hull должны быть логическими значениями.")
-    validate_mode(state.get('annotation_mode'))
-    if 'draw_mode' in state:
-        raise ValueError('draw_mode больше не поддерживается; используйте annotation_mode.')
+    validate_mode(state.get("annotation_mode"))
+    if "draw_mode" in state:
+        raise ValueError(
+            "draw_mode больше не поддерживается; используйте annotation_mode."
+        )
     key = "model" if state["kind"] in ("traditional_ml", "deep_learning") else "method"
     if not isinstance(state.get(key), str) or not state[key]:
         raise ValueError(f"Не задан {key}.")
