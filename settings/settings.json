@@ -1,0 +1,94 @@
+{
+    "schema_version": 1,
+    "theme": "light",
+    "primary_color": [
+        42,
+        130,
+        218
+    ],
+    "colors": {
+        "annotation": [
+            255,
+            0,
+            0
+        ],
+        "selected": [
+            0,
+            255,
+            255
+        ],
+        "crosshair": [
+            0,
+            255,
+            0
+        ],
+        "edit_points": [
+            0,
+            0,
+            255
+        ],
+        "label_text": [
+            255,
+            0,
+            0
+        ]
+    },
+    "font_size_px": 26,
+    "line_thickness_px": 6,
+    "dataset_class_palette": [
+        [
+            0,
+            0,
+            200
+        ],
+        [
+            0,
+            130,
+            220
+        ],
+        [
+            0,
+            150,
+            150
+        ],
+        [
+            0,
+            140,
+            0
+        ],
+        [
+            170,
+            110,
+            0
+        ],
+        [
+            200,
+            0,
+            0
+        ],
+        [
+            180,
+            0,
+            180
+        ],
+        [
+            110,
+            0,
+            110
+        ],
+        [
+            19,
+            69,
+            139
+        ],
+        [
+            100,
+            100,
+            0
+        ]
+    ],
+    "navigation_shortcuts": {
+        "prev": "Left",
+        "next": "Right"
+    }
+}
