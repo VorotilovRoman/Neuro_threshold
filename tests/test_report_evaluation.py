@@ -28,8 +28,7 @@ from utils_new.autoreseach_utils.geometry_metrics import (
 )
 from utils_new.autoreseach_utils.evaluation import evaluate_dataset
 from utils_new.autoreseach_utils.evaluation_export import export_evaluation
-from utils_new.autoreseach_utils.analysis import analyze
-from utils_new.autoreseach_utils.metrics_core import compute_metrics, parse_objects
+from utils_new.autoreseach_utils.geometry_metrics import parse_sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 BOX = ("detect", 0, 0.4, 0.4, 0.4, 0.4)
@@ -103,9 +102,7 @@ class ReportEvaluationTests(unittest.TestCase):
         return path
 
     def frame(self, paths):
-        return parse_reports(
-            paths, strict=True, include_failures=True, load_adjacent_truth=False
-        )
+        return parse_reports(paths)
 
     def test_complete_recipes_beat_cherry_picked_images_and_failures_are_visible(self):
         good, bad, missing, failed = (
@@ -195,9 +192,8 @@ class ReportEvaluationTests(unittest.TestCase):
         matched = match_overlaps([[0.9, 0.6], [0.8, 0]], 0.5)
         self.assertEqual(matched["tp"], 2)
         self.assertEqual(match_overlaps([[0.5]], 0.5)["tp"], 1)
-        self.assertEqual(compute_metrics([(0, 0.4, 0.4, 0.4, 0.4)], []), (0.0, 0, 1, 0))
         with self.assertRaises(ValueError):
-            parse_objects("broken")
+            parse_sequence("broken")
         concave = [("segment", 0, [0, 0, 1, 0, 1, 0.2, 0.2, 0.2, 0.2, 1, 0, 1])]
         self.assertAlmostEqual(
             evaluate_image(
@@ -256,8 +252,8 @@ class ReportEvaluationTests(unittest.TestCase):
             self.frame([*paths, clone])
         clone.write_text(paths[0].read_text() + json.dumps(data[1]))
         with self.assertRaises(ValueError):
-            read_report(clone, load_adjacent_truth=False)
-        self.assertEqual(len(read_report(paths[0], load_adjacent_truth=False)), 1)
+            read_report(clone)
+        self.assertEqual(len(read_report(paths[0])), 1)
 
     def test_processing_conditions_and_changed_pixels_cannot_share_a_good_score(self):
         paths = []
@@ -288,7 +284,7 @@ class ReportEvaluationTests(unittest.TestCase):
         self.assertEqual(json.loads(best.params)["threshold"], 80)
         self.assertEqual(set(result.details.method), {"Simple Threshold"})
 
-    def test_no_in_sample_regression_can_override_measured_scores(self):
+    def test_stale_csv_scores_cannot_override_measured_quality(self):
         paths = [
             self.report(
                 i, [(preset(value=80), [BOX] if i < 2 else []), (preset(value=100), [])]
@@ -296,13 +292,12 @@ class ReportEvaluationTests(unittest.TestCase):
             for i in range(3)
         ]
         frame = self.frame(paths)
-        # This legacy exploratory helper must also remain empirical with >=10 rows.
-        scored = pd.concat([frame, frame], ignore_index=True)
-        scored["mean_f1"] = [1.0, 0.0, 1.0, 0.0, 1.0, 1.0] * 2
-        scored["avg_iou_tp"] = 1.0
-        top = analyze(scored, skip_metrics=True, use_diversity=False, per_method=False)
-        self.assertAlmostEqual(top.iloc[0].actual_f1, 1.0)
-        np.testing.assert_allclose(top.pred_f1, top.actual_f1)
+        frame["mean_f1"] = 0.0
+        frame["pred_f1"] = 1.0
+        result = evaluate_dataset(frame, self.dataset)
+        self.assertEqual(json.loads(result.rankings.iloc[0].params)["threshold"], 80)
+        self.assertEqual(result.rankings.iloc[0].score, 1.0)
+        self.assertNotIn("pred_f1", result.rankings)
 
     def test_safe_export_full_details_and_cooperative_cancellation(self):
         paths = [self.report(i, [(preset(), [BOX] if i < 2 else [])]) for i in range(3)]
@@ -313,7 +308,7 @@ class ReportEvaluationTests(unittest.TestCase):
         metadata = json.loads((output / "evaluation.json").read_text())
         self.assertEqual(metadata["images"], 3)
         self.assertEqual(len(pd.read_csv(output / "image_details.csv")), 3)
-        self.assertIn("Лучший проверенный пресет", (output / "summary.md").read_text())
+        self.assertIn("Лучший из проверенных", (output / "summary.md").read_text())
         with self.assertRaises(ValueError):
             export_evaluation(result, output)
         with patch(
@@ -405,13 +400,20 @@ with TemporaryDirectory() as directory:
   else:
    state['methods']['Sobel']['ranges']['ksize']=[3,3,2];state['methods']['Sobel']['ranges']['scale']=[1,1,1]
   reports.extend(run_search([str(image)],state,Event())['reports'])
- assert w._load_report_paths(reports[:1]);assert w._load_report_paths(reports[1:])
- total=len(w._report_source);w.df_full=w.df_full.iloc[:0]
+ assert not w.btn_analyze.isEnabled()
+ for report in reports:
+  assert w._load_report_paths([report]);deadline=time.monotonic()+10
+  while w.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
+ assert w.btn_analyze.isEnabled()
+ total=len(w._report_source)
  w.run_analysis();deadline=time.monotonic()+10
  while w.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
  assert not w.evaluation_controller.busy and w._evaluation_result is not None
  result=w._evaluation_result;assert len(result.rankings)==total and set(result.methods.kind)=={'threshold','gradient'}
- assert result.rankings.eligible.all() and w.results_widget.rank_table.isVisible()
+ original=result.rankings.copy(deep=True);w.results_widget.kind_filter.setCurrentIndex(1);w.results_widget.problem_filter.setCurrentIndex(1)
+ import pandas as pd
+ pd.testing.assert_frame_equal(result.rankings,original)
+ assert result.rankings.eligible.all() and w.results_widget.methods_table.isVisible()
  output=root/'evaluation';output.mkdir()
  with patch.object(QFileDialog,'getExistingDirectory',return_value=str(output)),patch.object(QMessageBox,'information'):w.save_evaluation()
  assert (output/'rankings.csv').is_file()
@@ -441,7 +443,7 @@ with TemporaryDirectory() as directory:
   if kind=='threshold':state['methods']['Simple Threshold']['ranges']['threshold']=[80,80,1]
   else:
    state['methods']['Sobel']['ranges']['ksize']=[3,3,2];state['methods']['Sobel']['ranges']['scale']=[1,1,1]
-  reports=run_search([str(image)],state,Event(),resize_enabled=False)['reports'];row=parse_reports(reports,load_adjacent_truth=False).iloc[0];recipe=preset_from_row(row)
+  reports=run_search([str(image)],state,Event(),resize_enabled=False)['reports'];row=parse_reports(reports).iloc[0];recipe=preset_from_row(row)
   owner.preset_manager.presets={'raw':recipe};owner.preset_manager.apply_preset('raw');owner.update_timer.stop();owner.display_current_image()
   assert not owner.nav_widget.is_resize_enabled() and owner.current_gray.shape[1]==1400
   np.testing.assert_array_equal(owner.final_mask,evaluate(owner.current_gray,owner.original_image,recipe)[0])
@@ -461,7 +463,9 @@ app=QApplication([]);w=ImagePlayer([('reports','Reports')]);w.show();owner=w._ta
 started,release=Event(),Event()
 def blocked(*args,**kwargs):started.set();release.wait(5);raise ValueError('obsolete')
 frame=pd.DataFrame([dict(preset_json=json.dumps(next(iter_presets(default_settings()))),source_size='[10,10]',working_size='[10,10]',annotations_json='[]',image_path='x.png')])
-owner.df_full=frame;owner.set_ground_truth_source('/unneeded')
+from tempfile import TemporaryDirectory
+from utils_new.autoreseach_utils.workflow import ReportCollection
+temporary=TemporaryDirectory();owner._collection=ReportCollection((),frame,1,1,0,0);owner._report_source=frame;owner.set_ground_truth_source(temporary.name)
 with patch('ui.autoreseach_ui.evaluation_controller.evaluate_dataset',side_effect=blocked):
  owner.run_analysis();assert started.wait(2)
  owner.set_ground_truth_source('/new-input');assert owner._evaluation_result is None

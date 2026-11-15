@@ -16,12 +16,8 @@ from utils_new.autoreseach_utils.reports import (
     parse_reports,
     preset_from_row,
 )
-from utils_new.autoreseach_utils.prepare import (
-    add_meanap_metrics,
-    filter_invalid_params,
-    cluster_open_close,
-)
-from utils_new.autoreseach_utils.analysis import analyze, global_top_diverse
+from utils_new.autoreseach_utils.evaluation import evaluate_dataset
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,12 +91,9 @@ class SearchTests(unittest.TestCase):
             old = report.read_bytes()
             rows = read_report(report)
             self.assertEqual(len(rows), 2)
-            self.assertTrue(rows[0]["ground_truth_available"])
+            self.assertEqual(rows[0]["status"], "ok")
             df = parse_reports([report])
-            filtered, _ = filter_invalid_params(df)
-            self.assertEqual(len(filtered), 2)
-            scored, _ = add_meanap_metrics(df)
-            top = analyze(scored, skip_metrics=True, use_diversity=False)
+            top = evaluate_dataset(df, directory).rankings
             self.assertEqual(len(top), 2)
             self.assertEqual(
                 {preset_from_row(r)["params"]["threshold"] for _, r in top.iterrows()},
@@ -119,53 +112,65 @@ class SearchTests(unittest.TestCase):
                 len(read_report(partial["reports"][0], allow_partial=True)), 1
             )
 
-    def test_missing_empty_and_invalid_truth_and_failed_combinations(self):
+    def test_explicit_truth_negatives_and_failed_combinations(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "negative.png"
             cv2.imwrite(str(path), np.full((64, 128), 230, np.uint8))
             report = run_search([str(path)], self.settings(), Event())["reports"][0]
-            df = parse_reports([report])
-            self.assertFalse(df.ground_truth_available.any())
+            frame = parse_reports([report])
             with self.assertRaises(ValueError):
-                add_meanap_metrics(df)
+                evaluate_dataset(frame, directory)
             path.with_suffix(".txt").write_text("")
-            scored, _ = add_meanap_metrics(parse_reports([report]))
-            self.assertTrue((scored.mean_f1 == 1).all())
-            path.with_suffix(".txt").write_text("broken\n")
+            result = evaluate_dataset(frame, directory)
+            self.assertTrue((result.rankings.micro_f1 == 1).all())
+            self.assertTrue(result.methods.empty)
+            self.assertTrue(result.rankings["rank"].isna().all())
+            path.with_suffix(".txt").write_text("broken")
             with self.assertRaises(ValueError):
-                read_report(report)
+                evaluate_dataset(frame, directory)
+            # Loading predictions is independent of an unrelated adjacent TXT.
+            self.assertEqual(len(read_report(report)), 2)
             with patch(
                 "utils_new.autoreseach_utils.search.evaluate",
                 side_effect=RuntimeError("compute failed"),
             ):
                 failed = run_search([str(path)], self.settings(), Event())
-            path.with_suffix(".txt").write_text("")
+            rows = read_report(failed["reports"][0])
             self.assertEqual(failed["failed"], 2)
-            self.assertEqual(read_report(failed["reports"][0]), [])
+            self.assertEqual([row["status"] for row in rows], ["error", "error"])
 
-    def test_regression_retains_full_presets_and_all_morphology_columns(self):
+    def test_exact_recipes_keep_all_parameters_and_duplicate_inputs_do_not_change_quality(
+        self,
+    ):
+        import pandas as pd
+
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "frame.png"
-            cv2.imwrite(str(path), np.full((64, 128), 230, np.uint8))
-            path.with_suffix(".txt").write_text("")
+            image = np.full((64, 128), 230, np.uint8)
+            image[16:48, 32:96] = 0
+            cv2.imwrite(str(path), image)
+            path.with_suffix(".txt").write_text("0 .5 .5 .5 .5")
             state = self.settings()
             state["methods"]["Simple Threshold"]["ranges"]["threshold"] = [1, 12, 1]
             report = run_search([str(path)], state, Event())["reports"][0]
-            df, _ = add_meanap_metrics(parse_reports([report]))
-            df["cluster"] = 0
-            df, _ = cluster_open_close(df, n_clusters=2)
-            result = analyze(df, skip_metrics=True)
-            self.assertEqual(len(result), 5)
-            import pandas as pd
-
-            combined = pd.concat([df, df], ignore_index=True)
-            global_top = global_top_diverse(combined, k=10, score_col="mean_f1")
-            self.assertEqual(len(global_top), 10)
-            self.assertEqual(global_top.preset_json.nunique(), 10)
+            frame = parse_reports([report])
+            result = evaluate_dataset(frame, directory).rankings
+            combined = evaluate_dataset(
+                pd.concat([frame, frame], ignore_index=True), directory
+            ).rankings
+            self.assertEqual(len(result), 12)
+            self.assertEqual(len(combined), 12)
+            self.assertEqual(result.preset_json.nunique(), 12)
             for _, row in result.iterrows():
                 self.assertEqual(
                     preset_from_row(row)["params"], json.loads(row["params"])
                 )
+                self.assertTrue(
+                    all(
+                        op + "_px" in row for op in ("close", "open", "erode", "dilate")
+                    )
+                )
+            pd.testing.assert_series_equal(result.score, combined.score)
 
 
 @unittest.skipUnless(os.environ.get("NEURO_RUN_GUI_TESTS") == "1", "GUI opt-in")
@@ -208,18 +213,18 @@ with tempfile.TemporaryDirectory() as directory:
  assert not owner.auto_search.busy and ticks
  after=(owner.get_current_threshold_params(),owner.current_index,owner.objects_widget.checked_indices,owner.objects_widget.focused_index)
  assert before[:4]==after;np.testing.assert_array_equal(before[4],owner.current_base_image)
- report=path.with_name(path.stem+'_full_report.txt');research=ModelResearchApp();df=research.parse_reports([report]);assert len(df)==2
- research.df_full=df;research.set_ground_truth_source(directory);research.display_dataframe(df)
- from utils_new.autoreseach_utils.prepare import add_meanap_metrics
- from utils_new.autoreseach_utils.analysis import analyze
+ report=path.with_name(path.stem+'_full_report.txt');research=ModelResearchApp();research.set_ground_truth_source(directory)
+ assert research._load_report_paths([report])
+ deadline=time.monotonic()+10
+ while research.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
+ assert len(research._report_source)==2
  from ui.segmentation.preset_bindings import ThresholdPresetManager
  import json
- scored,_=add_meanap_metrics(df);top=analyze(scored,skip_metrics=True)
  with patch.object(QMessageBox,'critical') as errors:
   research.run_analysis();deadline=time.monotonic()+10
   while research.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
   assert not research.evaluation_controller.busy;errors.assert_not_called()
- assert len(research.results_widget.top5_df)==2
+ top=research._evaluation_result.rankings;assert len(top)==2
  manager=ThresholdPresetManager(None);manager.presets_file=str(Path(directory)/'presets.json');manager.presets={}
  with patch('tabs.model_research.ThresholdPresetManager',return_value=manager),patch.object(QMessageBox,'information'):
   research.add_to_presets(top)

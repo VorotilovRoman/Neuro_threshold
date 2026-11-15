@@ -7,8 +7,6 @@ from pathlib import Path
 
 import cv2
 
-from utils_new.annotations import ImageSize, from_legacy
-from utils_new.annotations.geometry import bounds
 from utils_new.morphology import apply_morphology
 from utils_new.segmentation.image_session import load_one_image_item
 from utils_new.segmentation.postprocessing import extract_objects
@@ -67,23 +65,6 @@ class RawMaskCache:
                 self.base, preset["threshold"], 255, cv2.THRESH_BINARY
             )[1]
         return self.base
-
-
-def metric_boxes(annotations, size):
-    result = []
-    for obj in annotations:
-        ann = from_legacy(obj, ImageSize(*size))
-        x0, y0, x1, y1 = bounds(ann.points_px)
-        result.append(
-            (
-                ann.class_id,
-                (x0 + x1) / (2 * size[0]),
-                (y0 + y1) / (2 * size[1]),
-                (x1 - x0) / size[0],
-                (y1 - y0) / size[1],
-            )
-        )
-    return result
 
 
 def run_search(
@@ -171,7 +152,6 @@ def run_search(
                                 "record": "result",
                                 "preset": preset,
                                 "annotations": annotations,
-                                "objects": metric_boxes(annotations, (w, h)),
                                 "status": "ok",
                             }
                         )

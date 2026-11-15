@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import pandas as pd
 from .search_space import validate_search_preset, method_params
-from .search import metric_boxes
 from .geometry_metrics import normalize_annotations
 
 
@@ -55,8 +54,7 @@ def read_report(
     path,
     *,
     allow_partial=False,
-    include_failures=False,
-    load_adjacent_truth=True,
+    cancel_check=lambda: False,
     log=lambda message: None,
 ):
     rows = []
@@ -83,25 +81,13 @@ def read_report(
             or processing.get("pipeline_version") != 1
         ):
             raise ValueError("Неверные условия обработки в отчёте.")
-        truth = None
-        truth_annotations = None
-        label = Path(header["image_path"]).with_suffix(".txt")
-        if load_adjacent_truth and label.is_file():
-            from utils_new.dataset_yolo_labels_new import read_yolo_labels
-            from utils_new.annotations import ImageSize, to_legacy
-
-            messages = []
-            values = read_yolo_labels(label, ImageSize(*size), log=messages.append)
-            if any("запись пропущена" in message for message in messages):
-                raise ValueError(f"Некорректная истинная разметка {label}: {messages}")
-            truth_annotations = [to_legacy(ann, ImageSize(*size)) for ann in values]
-            normalize_annotations(truth_annotations, size)
-            truth = metric_boxes(truth_annotations, size)
         processed = 0
         failed = 0
         footer = None
         seen = set()
         for line in stream:
+            if cancel_check():
+                raise InterruptedError("Загрузка отчётов отменена.")
             if not line.strip():
                 continue
             record = json.loads(line)
@@ -138,28 +124,17 @@ def read_report(
                     raise ValueError(
                         "Геометрия объектов не совпадает с режимом пресета."
                     )
-                # Do not trust an independently edited bounding-box cache.
-                objects = metric_boxes(record["annotations"], working)
             else:
                 failed += 1
-                objects = None
-                if not include_failures:
-                    continue
             rows.append(
                 dict(
                     image_path=header["image_path"],
                     report_path=str(Path(path).resolve()),
                     **describe_preset(preset),
-                    num_objects=len(objects) if success else None,
-                    objects=json.dumps(objects) if success else None,
+                    num_objects=len(record["annotations"]) if success else None,
                     annotations_json=json.dumps(record["annotations"])
                     if success
                     else None,
-                    true_objects=json.dumps(truth) if truth is not None else None,
-                    truth_annotations_json=json.dumps(truth_annotations)
-                    if truth is not None
-                    else None,
-                    ground_truth_available=truth is not None,
                     status=record["status"],
                     error=record.get("error", ""),
                     source_size=json.dumps(size),
@@ -189,26 +164,40 @@ def parse_reports(
     paths,
     log=lambda message: None,
     *,
-    strict=False,
-    include_failures=False,
-    load_adjacent_truth=True,
+    cancel_check=lambda: False,
+    progress=lambda *args: None,
 ):
     rows = []
     errors = []
-    for path in sorted(set(map(str, paths))):
+    selected = sorted(set(map(str, paths)))
+    for index, path in enumerate(selected):
+        if cancel_check():
+            raise InterruptedError("Загрузка отчётов отменена.")
         try:
             rows.extend(
                 read_report(
                     path,
                     log=log,
-                    include_failures=include_failures,
-                    load_adjacent_truth=load_adjacent_truth,
+                    cancel_check=cancel_check,
                 )
             )
+        except InterruptedError:
+            raise
         except Exception as exc:
-            message = f"{path}: {exc}"
+            if isinstance(
+                exc, (json.JSONDecodeError, StopIteration, UnicodeDecodeError)
+            ):
+                detail = "Файл не является готовым отчётом автоподбора UTF-8/JSONL. Выполните автоподбор заново и выберите созданный отчёт."
+            elif isinstance(exc, FileNotFoundError):
+                detail = "Файл не найден. Проверьте путь или выберите отчёт заново."
+            elif isinstance(exc, (KeyError, AttributeError, TypeError)):
+                detail = f"В отчёте отсутствуют обязательные данные или повреждена структура ({exc}). Создайте отчёт заново."
+            else:
+                detail = str(exc)
+            message = f"{path}: {detail}"
             errors.append(message)
             log(message)
-    if errors and strict:
+        progress(index + 1, len(selected), Path(path).name)
+    if errors:
         raise ValueError("\n".join(errors))
     return pd.DataFrame(rows) if rows else None

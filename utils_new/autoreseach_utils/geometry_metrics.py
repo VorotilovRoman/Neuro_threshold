@@ -1,7 +1,6 @@
 """Strict object geometry and maximum-cardinality one-to-one evaluation."""
 
 import json
-from ast import literal_eval
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from shapely.geometry import Polygon
@@ -14,8 +13,8 @@ def parse_sequence(value):
     if isinstance(value, str):
         try:
             value = json.loads(value)
-        except ValueError:
-            value = literal_eval(value)
+        except ValueError as exc:
+            raise ValueError("Некорректный JSON геометрии объектов.") from exc
     if not isinstance(value, (list, tuple)):
         raise ValueError(
             "Объекты должны быть списком; отсутствующая разметка не является пустой."
@@ -23,15 +22,11 @@ def parse_sequence(value):
     return value
 
 
-def normalize_annotations(values, size, *, boxes=False):
+def normalize_annotations(values, size):
     """Return class + normalized polygon, preserving physical source geometry."""
     result = []
     frame = ImageSize(*map(int, size))
     for value in parse_sequence(values):
-        if boxes:
-            if len(value) != 5:
-                raise ValueError("Ожидается (class, cx, cy, width, height).")
-            value = ("detect", *value)
         ann = from_legacy(value, frame)
         points = ann.points_px / [frame.width, frame.height]
         polygon = Polygon(points)

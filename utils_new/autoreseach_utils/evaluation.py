@@ -233,17 +233,25 @@ def evaluate_dataset(
         )
         .reset_index(drop=True)
     )
+    objects = sum(len(values) for values in ground.values())
+    ranked["recommendable"] = ranked["eligible"] & (objects > 0)
+    if not objects:
+        ranked["score"] = math.nan
+        ranked["actual_f1"] = math.nan
+        ranked["exclusion_reason"] = (
+            "В эталоне нет положительных примеров: выбрать метод обнаружения объектов нельзя."
+        )
     ranked["rank"] = pd.array(
-        [i + 1 if row.eligible else None for i, row in ranked.iterrows()], dtype="Int64"
+        [i + 1 if row.recommendable else None for i, row in ranked.iterrows()],
+        dtype="Int64",
     )
     ranked["method_rank"] = (
-        ranked.groupby(["kind", "method"])["eligible"]
+        ranked.groupby(["kind", "method"])["recommendable"]
         .cumsum()
-        .where(ranked["eligible"])
+        .where(ranked["recommendable"])
         .astype("Int64")
     )
-    methods = ranked[ranked.eligible].drop_duplicates(["kind", "method"]).copy()
-    objects = sum(len(values) for values in ground.values())
+    methods = ranked[ranked.recommendable].drop_duplicates(["kind", "method"]).copy()
     if not objects:
         diagnostics.append(
             "В эталоне нет объектов: оцениваются только ложные срабатывания, полнота и локализация объектов не проверяются."

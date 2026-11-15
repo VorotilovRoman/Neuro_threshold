@@ -113,13 +113,15 @@ def _label_for(image, root):
     return found[0] if found else candidates[0]
 
 
-def _labels_only(root, reports, format_hint):
+def _labels_only(root, reports, format_hint, cancel_check):
     if reports is None or reports.empty:
         raise ValueError(
             "В папке только TXT. Сначала загрузите отчёты: нужны размеры и имена изображений."
         )
     references = {}
     for _, row in reports.iterrows():
+        if cancel_check():
+            raise InterruptedError("Проверка эталона отменена.")
         path = str(row["image_path"])
         size = tuple(json.loads(row["source_size"]))
         if path in references and references[path] != size:
@@ -132,6 +134,8 @@ def _labels_only(root, reports, format_hint):
         if not p.name.endswith(("_report.txt", ".partial.txt"))
     )
     for label in labels:
+        if cancel_check():
+            raise InterruptedError("Проверка эталона отменена.")
         key = label.relative_to(root).with_suffix("").as_posix()
         target = path_parts(key)
         matches = []
@@ -209,7 +213,7 @@ def load_ground_truth(
             _read_sample(key, image, _label_for(image, root), size, format_hint)
         )
     if not samples and path.is_dir():
-        samples = _labels_only(root, reports, format_hint)
+        samples = _labels_only(root, reports, format_hint, cancel_check)
     if not samples:
         raise ValueError("Эталонный набор пуст.")
     if len({sample.key for sample in samples}) != len(samples):

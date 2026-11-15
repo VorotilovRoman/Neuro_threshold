@@ -17,13 +17,8 @@ from utils_new.autoreseach_utils.reports import (
     preset_from_row,
     read_report,
 )
-from utils_new.autoreseach_utils.prepare import (
-    add_meanap_metrics,
-    filter_invalid_params,
-    add_cluster_labels,
-    cluster_open_close,
-)
-from utils_new.autoreseach_utils.analysis import analyze, global_top_diverse
+from utils_new.autoreseach_utils.evaluation import evaluate_dataset
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -151,7 +146,7 @@ class GradientSearchTests(unittest.TestCase):
             for result, preset in zip(outputs, iter_presets(state)):
                 np.testing.assert_array_equal(result, evaluate(gray, image, preset)[0])
 
-    def test_mixed_reports_ranking_clustering_cancellation_and_preset_identity(self):
+    def test_mixed_reports_measured_ranking_cancellation_and_preset_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "frame.png"
             image = np.full((64, 96), 220, np.uint8)
@@ -171,23 +166,17 @@ class GradientSearchTests(unittest.TestCase):
             self.assertNotEqual(gradient, threshold)
             df = parse_reports([threshold, gradient])
             self.assertEqual(set(df.kind), {"threshold", "gradient"})
-            filtered, _ = filter_invalid_params(df)
-            self.assertEqual(len(df), len(filtered))
-            scored, _ = add_meanap_metrics(df)
-            scored, _ = add_cluster_labels(scored, output_dir=directory)
-            scored, _ = cluster_open_close(scored, n_clusters=2)
-            top = analyze(scored, skip_metrics=True)
+            top = evaluate_dataset(df, directory).rankings
             self.assertEqual(set(top.kind), {"threshold", "gradient"})
+            self.assertEqual(top.preset_json.nunique(), len(df))
             for _, row in top.iterrows():
                 self.assertEqual(preset_from_row(row)["kind"], row.kind)
             self.assertTrue(
                 all(
-                    "threshold" in json.loads(v)
-                    for v in scored.loc[scored.kind == "gradient", "params"]
+                    "threshold" in json.loads(value)
+                    for value in top.loc[top.kind == "gradient", "params"]
                 )
             )
-            global_top = global_top_diverse(scored, k=20, score_col="mean_f1")
-            self.assertEqual(global_top.preset_json.nunique(), len(scored))
             old = Path(gradient).read_bytes()
             cancel = Event()
             result = run_search([str(path)], state, cancel, lambda *args: cancel.set())
@@ -201,7 +190,12 @@ class GradientSearchTests(unittest.TestCase):
             ):
                 result = run_search([str(path)], state, Event())
                 self.assertEqual(result["failed"], 9)
-            self.assertEqual(read_report(result["reports"][0]), [])
+            self.assertTrue(
+                all(
+                    row["status"] == "error"
+                    for row in read_report(result["reports"][0])
+                )
+            )
 
 
 @unittest.skipUnless(os.environ.get("NEURO_RUN_GUI_TESTS") == "1", "GUI opt-in")
@@ -217,8 +211,6 @@ from main import ImagePlayer
 from ui.autoreseach_ui.settings_dialog import AutoSettingsDialog
 from utils_new.autoreseach_utils.search_space import default_settings,iter_presets
 from utils_new.autoreseach_utils.search import evaluate
-from utils_new.autoreseach_utils.prepare import add_meanap_metrics
-from utils_new.autoreseach_utils.analysis import analyze
 from tabs.model_research import ModelResearchApp
 from ui.segmentation.preset_bindings import ThresholdPresetManager,GradientPresetManager
 app=QApplication([]);w=ImagePlayer([('threshold','Threshold'),('gradient','Gradient')]);w.show()
@@ -244,13 +236,15 @@ with tempfile.TemporaryDirectory() as directory:
   while owner.auto_search.busy and time.monotonic()<until:app.processEvents();time.sleep(.002)
   assert not owner.auto_search.busy
   np.testing.assert_array_equal(owner.current_base_image,before[0]);np.testing.assert_array_equal(owner.final_mask,before[1]);assert (owner.current_index,owner.draw_combo.currentData(),owner.objects_widget.checked_indices)==before[2:]
- research=ModelResearchApp();df=research.parse_reports(list(root.glob('*_report.txt')));assert set(df.kind)=={'threshold','gradient'}
- research.df_full=df;research.set_ground_truth_source(root)
+ research=ModelResearchApp();research.set_ground_truth_source(root);assert research._load_report_paths(list(root.glob('*_report.txt')))
+ deadline=time.monotonic()+10
+ while research.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
+ assert set(research._report_source.kind)=={'threshold','gradient'}
  with patch.object(QMessageBox,'critical') as error:
   research.run_analysis();deadline=time.monotonic()+10
   while research.evaluation_controller.busy and time.monotonic()<deadline:app.processEvents();time.sleep(.002)
   assert not research.evaluation_controller.busy;error.assert_not_called()
- top=research.results_widget.top5_df;assert set(top.kind)=={'threshold','gradient'}
+ top=research._evaluation_result.rankings;assert set(top.kind)=={'threshold','gradient'}
  managers={}
  for kind,cls in [('threshold',ThresholdPresetManager),('gradient',GradientPresetManager)]:
   manager=cls(None);manager.presets_file=str(root/(kind+'_presets.json'));manager.presets={};managers[kind]=manager

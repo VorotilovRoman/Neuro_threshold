@@ -1,586 +1,297 @@
+"""Guided comparison page: reference → search reports → comparison → settings."""
+
 import pandas as pd
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, QSignalBlocker
 from PyQt5.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
-    QDoubleSpinBox,
-    QGridLayout,
+    QComboBox,
     QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
-    QSpinBox,
+    QScrollArea,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
-    QTextEdit,
+    QTabWidget,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
-
 from ui.log_widget import LogWidget
-from ui.autoreseach_ui.evaluation_controls import setup_evaluation_controls
-from utils_new.autoreseach_utils.evaluation_export import recommendation_text
-from utils_new.autoreseach_utils.reports import preset_from_row
-from utils_new.annotations.modes import MODE_LABELS
+from .evaluation_controls import hint, setup_evaluation_controls
+from .result_models import ComparisonTable, IMAGE_COLUMNS
+from utils_new.autoreseach_utils.evaluation_export import preset_settings_text
+from utils_new.autoreseach_utils.workflow import result_guidance
 
 
-class ModelResearchWidget(QWidget):
-    """Виджет для отображения результатов анализа модели."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent_app = parent
-        self.top5_df = None
-        self.setup_ui()
-
-    def setup_ui(self):
+class ComparisonResultsWidget(QWidget):
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner = owner
+        self.result = None
+        self._updating = False
+        self._recipe_key = None
         layout = QVBoxLayout(self)
-        self.text_edit = QTextEdit()
-        self.text_edit.setReadOnly(True)
-        self.text_edit.setFont(QFont("Courier New", 10))
-        layout.addWidget(self.text_edit)
-
-        btn_layout = QHBoxLayout()
-        self.rank_table = QTableWidget()
-        self.rank_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.rank_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.rank_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.rank_table.setSortingEnabled(True)
-        self.rank_table.setVisible(False)
-        self._ranking_df = None
-        layout.addWidget(self.rank_table)
-        self.add_btn = QPushButton("Добавить выбранные пресеты")
-        self.add_btn.setToolTip("Добавить выбранные топ комбинаций в список пресетов")
-        self.add_btn.clicked.connect(self.add_to_presets)
-        btn_layout.addWidget(self.add_btn)
-
-        self.save_btn = QPushButton("Сохранить топ-пресеты")
-        self.save_btn.setToolTip(
-            "Сохранить текущий список топ-пресетов в файл (CSV или Pickle)"
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.title = hint(
+            "Здесь появится ответ: какой метод и какие настройки лучше подходят для вашего датасета."
         )
-        self.save_btn.clicked.connect(self.save_top_presets)
-        btn_layout.addWidget(self.save_btn)
+        font = self.title.font()
+        font.setBold(True)
+        self.title.setFont(font)
+        layout.addWidget(self.title)
+        self.summary = hint(
+            "Сначала выберите эталон и отчёты, затем нажмите «Сравнить методы»."
+        )
+        layout.addWidget(self.summary)
+        self.next_action = hint(
+            "Выбор настройки и просмотр снимков помогут понять причины результата."
+        )
+        layout.addWidget(self.next_action)
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("Показать:"))
+        self.kind_filter = QComboBox()
+        for text, value in [
+            ("Все методы", "all"),
+            ("Пороговые", "threshold"),
+            ("Градиентные", "gradient"),
+        ]:
+            self.kind_filter.addItem(text, value)
+        self.kind_filter.setToolTip(
+            "Фильтрует только видимые строки; оценка датасета остаётся прежней."
+        )
+        toolbar.addWidget(self.kind_filter)
+        toolbar.addStretch()
+        self.selection_hint = hint(
+            "Нажмите строку метода или настройки, чтобы увидеть параметры справа."
+        )
+        toolbar.addWidget(self.selection_hint, 1)
+        layout.addLayout(toolbar)
+        split = QSplitter(Qt.Horizontal)
+        self.tabs = QTabWidget()
+        self.methods_table = ComparisonTable()
+        self.rank_table = ComparisonTable()
+        self.image_table = ComparisonTable(IMAGE_COLUMNS)
+        self.tabs.addTab(self.methods_table, "Лучшие настройки методов")
+        self.tabs.addTab(self.rank_table, "Все настройки")
+        images = QWidget()
+        box = QVBoxLayout(images)
+        box.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Снимки выбранной настройки:"))
+        self.problem_filter = QComboBox()
+        for text, value in [
+            ("Все снимки", "all"),
+            ("С проблемами", "problems"),
+            ("Есть лишние объекты", "fp"),
+            ("Есть пропуски объектов", "fn"),
+            ("Нет вычисления или ошибка", "missing"),
+        ]:
+            self.problem_filter.addItem(text, value)
+        self.problem_filter.setToolTip(
+            "Фильтрует только просмотр результатов по снимкам. Не удаляет данные и не меняет рейтинг."
+        )
+        row.addWidget(self.problem_filter)
+        row.addStretch()
+        box.addLayout(row)
+        box.addWidget(self.image_table)
+        self.tabs.addTab(images, "Снимки выбранной настройки")
+        split.addWidget(self.tabs)
+        self.properties = QTextBrowser()
+        self.properties.setPlaceholderText(
+            "Полные параметры выбранной настройки и условия её применения."
+        )
+        self.properties.setMinimumWidth(230)
+        split.addWidget(self.properties)
+        split.setSizes([850, 300])
+        layout.addWidget(split, 1)
+        self.metric_hint = hint(
+            "F1 — баланс точности и полноты. Лишние — объекты без пары в эталоне; пропущено — объекты эталона, которые метод не нашёл. Наведите указатель на заголовок столбца для пояснения."
+        )
+        layout.addWidget(self.metric_hint)
+        actions = QHBoxLayout()
+        self.add_btn = QPushButton("Добавить выбранные настройки в пресеты")
+        self.add_btn.setToolTip(
+            "Сохранить выбранные полные настройки во вкладках «Пороговые методы» или «Градиентные методы». Несколько строк выбираются с Ctrl/Shift."
+        )
+        self.owner.btn_export_evaluation = QPushButton("Сохранить сравнение…")
+        self.owner.btn_export_evaluation.setToolTip(
+            "Сохранить понятную сводку, рейтинг, полные пресеты и результаты по каждому снимку в отдельную пустую папку."
+        )
+        actions.addWidget(self.add_btn)
+        actions.addWidget(self.owner.btn_export_evaluation)
+        layout.addLayout(actions)
+        self.add_btn.clicked.connect(self._add_selected)
+        self.kind_filter.currentIndexChanged.connect(self._refresh_settings)
+        self.problem_filter.currentIndexChanged.connect(self._refresh_images)
+        self.tabs.currentChanged.connect(self._tab_changed)
+        self.methods_table.selectionModel().selectionChanged.connect(
+            lambda *args: self._selection_changed(self.methods_table)
+        )
+        self.rank_table.selectionModel().selectionChanged.connect(
+            lambda *args: self._selection_changed(self.rank_table)
+        )
+        self._last_settings_table = self.methods_table
+        self.clear()
 
-        layout.addLayout(btn_layout)
-
-    def save_top_presets(self):
-        if self.top5_df is None or self.top5_df.empty:
-            QMessageBox.warning(self, "Нет данных", "Нет данных для сохранения.")
-            return
-        if self.parent_app:
-            self.parent_app.save_dataframe(self.top5_df, "Сохранить топ-пресеты")
-        else:
-            print("No parent app")
-
-    def display_results(self, df):
-        self.top5_df = df
-        self._ranking_df = None
-        self.rank_table.setVisible(False)
-        if df is None or df.empty:
-            self.text_edit.clear()
-            self.text_edit.append("Нет данных для отображения.")
-            return
-        text = "=== ТОП пресетов ===\n\n"
-        if "rank" in df.columns:
-            df = df.sort_values("rank")
-        for idx, row in df.iterrows():
-            text += f"Ранг: {row.get('rank', idx + 1)}\n"
-            preset = preset_from_row(row)
-            text += f"Вид: {'Пороговые' if preset['kind'] == 'threshold' else 'Градиентные'}\n"
-            text += f"Метод: {row['method']}\n"
-            text += f"Параметры: {row['params']}\n"
-            text += f"Инверсия: {'Да' if row['invert'] else 'Нет'}\n"
-            for op in ("close", "open", "erode", "dilate"):
-                text += f"{op}: {row.get(op + '_px', 0)} px\n"
-            preset = preset_from_row(row)
-            text += (
-                f"Ядро: {preset['morphology']['shape']}; порядок: "
-                + " → ".join(
-                    op["operation"] for op in preset["morphology"]["operations"]
-                )
-                + "\n"
-            )
-            text += f"Разметка: {MODE_LABELS[preset['annotation_mode']]}; оболочка: {preset['use_hull']}\n"
-            if "actual_f1" in row and not pd.isna(row["actual_f1"]):
-                text += f"Реальный F1: {row['actual_f1']:.6f}\n"
-            if "mean_f1" in row and not pd.isna(row["mean_f1"]):
-                text += f"Mean F1: {row['mean_f1']:.6f}\n"
-            text += "-" * 50 + "\n"
-        self.text_edit.setText(text)
+    def clear(self):
+        self._updating = True
+        self.result = None
+        self._recipe_key = None
+        for table in (self.methods_table, self.rank_table, self.image_table):
+            table.set_frame(pd.DataFrame())
+        self.properties.clear()
+        self.title.setText("Результатов пока нет")
+        self.summary.setText(
+            "Загрузите ручной эталон и результаты автоподбора, затем сравните методы."
+        )
+        self.next_action.setText(
+            "После сравнения здесь будут лучший метод, полные параметры и ошибки по снимкам."
+        )
+        self.add_btn.setEnabled(False)
+        self._updating = False
 
     def display_evaluation(self, result):
-        self._ranking_df = result.rankings
-        self.top5_df = result.rankings[result.rankings.eligible].head(10)
-        self.text_edit.setPlainText(recommendation_text(result))
-        columns = [
-            "rank",
-            "kind",
-            "method",
-            "params",
-            "annotation_mode",
-            "micro_f1",
-            "avg_iou_tp",
-            "precision",
-            "recall",
-            "tp",
-            "fp",
-            "fn",
-            "coverage",
-            "failed_images",
-            "missing_images",
-            "exclusion_reason",
-        ]
-        labels = [
-            "Ранг",
-            "Вид",
-            "Метод",
-            "Параметры",
-            "Разметка",
-            "F1",
-            "IoU TP",
-            "Precision",
-            "Recall",
-            "TP",
-            "FP",
-            "FN",
-            "Покрытие, %",
-            "Ошибки",
-            "Нет расчёта",
-            "Ограничение",
-        ]
-        table = self.rank_table
-        table.setSortingEnabled(False)
-        table.setRowCount(len(result.rankings))
-        table.setColumnCount(len(columns))
-        table.setHorizontalHeaderLabels(labels)
-        for index, row in result.rankings.iterrows():
-            for column, key in enumerate(columns):
-                value = row[key]
-                if key == "coverage":
-                    value = value * 100
-                if key == "kind":
-                    value = {"threshold": "Пороговые", "gradient": "Градиентные"}[value]
-                if key == "annotation_mode":
-                    value = MODE_LABELS[value]
-                item = QTableWidgetItem()
-                if pd.isna(value):
-                    item.setText("—")
-                elif isinstance(value, (int, float)) or key in (
-                    "rank",
-                    "tp",
-                    "fp",
-                    "fn",
-                    "failed_images",
-                    "missing_images",
-                ):
-                    item.setData(
-                        Qt.DisplayRole,
-                        float(value)
-                        if key
-                        in ("micro_f1", "precision", "recall", "coverage", "avg_iou_tp")
-                        else int(value),
-                    )
-                else:
-                    item.setText(str(value))
-                item.setData(Qt.UserRole, index)
-                item.setToolTip(
-                    str(row.get("exclusion_reason", ""))
-                    + "\n"
-                    + str(row["preset_json"])
-                )
-                table.setItem(index, column, item)
-        table.setSortingEnabled(True)
-        table.sortItems(0, Qt.AscendingOrder)
-        table.resizeColumnsToContents()
-        table.setVisible(True)
-        if not self.top5_df.empty:
-            for index in range(table.rowCount()):
-                if table.item(index, 0).data(Qt.UserRole) == self.top5_df.index[0]:
-                    table.selectRow(index)
-                    break
+        self.result = result
+        title, body, action = result_guidance(result)
+        self.title.setText(title)
+        self.summary.setText(body)
+        self.next_action.setText(action)
+        with QSignalBlocker(self.kind_filter):
+            self.kind_filter.setCurrentIndex(0)
+        self.tabs.setCurrentIndex(0 if not result.methods.empty else 1)
+        self._refresh_settings()
 
-    def add_to_presets(self):
-        """Вызывает метод добавления пресетов у родительского окна"""
-        if self._ranking_df is not None:
-            indices = [
-                self.rank_table.item(index.row(), 0).data(Qt.UserRole)
-                for index in self.rank_table.selectionModel().selectedRows()
-            ]
-            if not indices:
-                QMessageBox.warning(self, "Пресеты", "Выберите строки рейтинга.")
-                return
-            selected = self._ranking_df.loc[indices]
-            if not selected.eligible.all():
-                QMessageBox.warning(
-                    self,
-                    "Пресеты",
-                    "Для добавления выберите пресеты с успешным покрытием всего эталона.",
-                )
-                return
-            self.parent_app.add_to_presets(selected)
+    def _refresh_settings(self, *args):
+        if self.result is None or self._updating:
             return
-        if self.top5_df is None or self.top5_df.empty:
-            QMessageBox.warning(
-                self, "Нет данных", "Нет данных для добавления в пресеты."
-            )
-            return
-        if self.parent_app and hasattr(self.parent_app, "add_to_presets"):
-            self.parent_app.add_to_presets(self.top5_df)
+        self._updating = True
+        family = self.kind_filter.currentData()
+        methods = self.result.methods.copy()
+        methods["rank"] = range(1, len(methods) + 1)
+        rankings = self.result.rankings
+        if family != "all":
+            methods = methods[methods.kind == family]
+            rankings = rankings[rankings.kind == family]
+        self.methods_table.set_frame(methods)
+        self.rank_table.set_frame(rankings)
+        self.methods_table.sortByColumn(0, Qt.AscendingOrder)
+        self.rank_table.sortByColumn(0, Qt.AscendingOrder)
+        self._updating = False
+        table = self.rank_table if self.tabs.currentIndex() == 1 else self.methods_table
+        if table.source.frame.empty and not self.rank_table.source.frame.empty:
+            self.tabs.setCurrentIndex(1)
+            table = self.rank_table
+        self._last_settings_table = table
+        if not table.source.frame.empty:
+            if not table.select_recipe(self._recipe_key):
+                table.selectRow(0)
         else:
-            print("No parent app or missing add_to_presets method")
+            self._recipe_key = None
+            self.properties.setPlainText(
+                "Для выбранного вида методов результатов нет. Добавьте его отчёты или выберите «Все методы»."
+            )
+            self._refresh_images()
+            self.add_btn.setEnabled(False)
+
+    def _selection_changed(self, table):
+        if self._updating or self.result is None:
+            return
+        selected = table.selected_frame()
+        self._last_settings_table = table
+        if selected.empty:
+            self.add_btn.setEnabled(False)
+            return
+        row = selected.iloc[0]
+        self._recipe_key = row["recipe_key"]
+        self.properties.setPlainText(preset_settings_text(row))
+        self.selection_hint.setText(
+            f"Выбрано настроек: {len(selected)}. Для снимков используется первая выбранная."
+        )
+        allowed = "recommendable" if "recommendable" in selected else "eligible"
+        self.add_btn.setEnabled(
+            bool(self.result.reference_objects and selected[allowed].all())
+        )
+        self._refresh_images()
+
+    def _tab_changed(self, index):
+        if self._updating or self.result is None:
+            return
+        if index in (0, 1):
+            table = self.methods_table if index == 0 else self.rank_table
+            if table.selected_frame().empty and not table.source.frame.empty:
+                table.selectRow(0)
+            else:
+                self._selection_changed(table)
+
+    def _refresh_images(self, *args):
+        if self.result is None or self._recipe_key is None:
+            self.image_table.set_frame(pd.DataFrame())
+            return
+        frame = self.result.details[self.result.details.recipe_key == self._recipe_key]
+        mode = self.problem_filter.currentData()
+        fp = frame.get("fp", pd.Series(0, index=frame.index)).fillna(0) > 0
+        fn = frame.get("fn", pd.Series(0, index=frame.index)).fillna(0) > 0
+        if mode == "problems":
+            frame = frame[(frame.status != "ok") | fp | fn]
+        elif mode == "missing":
+            frame = frame[frame.status != "ok"]
+        elif mode == "fp":
+            frame = frame[fp]
+        elif mode == "fn":
+            frame = frame[fn]
+        self.image_table.set_frame(frame)
+
+    def _add_selected(self):
+        if self.result is None:
+            return
+        selected = self._last_settings_table.selected_frame()
+        if selected.empty or not self.result.reference_objects:
+            return
+        allowed = "recommendable" if "recommendable" in selected else "eligible"
+        if selected[allowed].all():
+            self.owner.add_to_presets(selected)
 
 
-def setup_model_research_ui(parent):
-    """Настройка UI для ModelResearchApp."""
-    central = QWidget()
-    parent.setCentralWidget(central)
-    main_layout = QVBoxLayout(central)
-
-    # ========== ПЕРВЫЙ ГОРИЗОНТАЛЬНЫЙ БЛОК (загрузка/сохранение и отображение выборок) ==========
-    top_row_layout = QHBoxLayout()
-
-    # ---- Левый блок: загрузка и сохранение датасета ----
-    left_load_group = QGroupBox("Загрузка / сохранение датасета")
-    left_load_layout = QHBoxLayout()
-    parent.btn_select = QPushButton("2. Папка отчётов")
-    parent.btn_select.setToolTip(
-        "Добавить пороговые и градиентные отчёты из папки и вложенных каталогов"
+def setup_model_research_ui(owner):
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setContentsMargins(10, 10, 10, 10)
+    layout.setSpacing(8)
+    scroll.setWidget(content)
+    owner.setCentralWidget(scroll)
+    header = QHBoxLayout()
+    title = hint("Какие методы и настройки лучше подходят для разметки моего датасета?")
+    font = title.font()
+    font.setBold(True)
+    title.setFont(font)
+    header.addWidget(title, 1)
+    owner.btn_help = QPushButton("Как пользоваться")
+    owner.btn_help.setCheckable(True)
+    header.addWidget(owner.btn_help)
+    layout.addLayout(header)
+    help_box = QGroupBox("Краткая инструкция")
+    help_layout = QVBoxLayout(help_box)
+    help_layout.addWidget(
+        hint(
+            "1. Выберите правильную ручную разметку — она будет эталоном.\n2. На вкладках пороговых/градиентных методов выполните автоподбор для этих же изображений, затем добавьте готовые отчёты сюда.\n3. Нажмите «Сравнить методы». F1 оценивает пропущенные и лишние объекты; для победы нужен успешный результат на всех снимках.\n4. Выберите строку метода, изучите настройки и ошибки по снимкам. Добавьте нужный пресет в соответствующую вкладку методов или сохраните сравнение.\nОтчёты partial не подходят. Для папки только с TXT нужны отчёты с исходными размерами. Если методы запускались с разными диапазонами, дополните автоподбор, чтобы сравнить один и тот же пресет на всём эталоне."
+        )
     )
-    parent.btn_load = QPushButton("Загрузить датасет")
-    parent.btn_load.setToolTip("Загрузить ранее сохраненный датасет (CSV или Pickle)")
-    parent.btn_save = QPushButton("Сохранить датасет")
-    parent.btn_save.setToolTip("Сохранить текущий датасет в файл (CSV или Pickle)")
-    parent.btn_save.setEnabled(False)
-
-    left_load_layout.addWidget(parent.btn_select)
-    left_load_layout.addWidget(parent.btn_load)
-    left_load_layout.addWidget(parent.btn_save)
-    left_load_group.setLayout(left_load_layout)
-
-    # ---- Правый блок: отображение выборок ----
-    right_view_group = QGroupBox("Отображение выборок")
-    right_view_layout = QHBoxLayout()
-    parent.btn_first = QPushButton("Первые 100")
-    parent.btn_first.setToolTip("Показать первые 100 строк датасета")
-    parent.btn_last = QPushButton("Последние 100")
-    parent.btn_last.setToolTip("Показать последние 100 строк датасета")
-    parent.btn_random = QPushButton("Случайные 100")
-    parent.btn_random.setToolTip("Показать 100 случайных строк датасета")
-    parent.btn_save_sample = QPushButton("Сохранить отображаемые")
-    parent.btn_save_sample.setToolTip(
-        "Сохранить текущий отображаемый датасет (например, отфильтрованный) в файл"
-    )
-    parent.btn_all = QPushButton("Показать всё")
-    parent.btn_all.setToolTip("Показать весь датасет (осторожно, если много строк)")
-
-    parent.btn_first.setEnabled(False)
-    parent.btn_last.setEnabled(False)
-    parent.btn_random.setEnabled(False)
-    parent.btn_save_sample.setEnabled(False)
-    parent.btn_all.setEnabled(False)
-
-    right_view_layout.addWidget(parent.btn_first)
-    right_view_layout.addWidget(parent.btn_last)
-    right_view_layout.addWidget(parent.btn_random)
-    right_view_layout.addWidget(parent.btn_save_sample)
-    right_view_layout.addWidget(parent.btn_all)
-    right_view_group.setLayout(right_view_layout)
-
-    top_row_layout.addWidget(left_load_group)
-    top_row_layout.addWidget(right_view_group)
-    main_layout.addLayout(top_row_layout)
-    setup_evaluation_controls(parent, main_layout)
-
-    # ========== ВТОРОЙ ГОРИЗОНТАЛЬНЫЙ БЛОК (фильтрация и подготовка) ==========
-    second_row_layout = QHBoxLayout()
-
-    # ---- Левый блок: фильтрация датасета (кнопки в 2 столбца) ----
-    left_filter_group = QGroupBox("Фильтрация датасета")
-    left_filter_layout = QVBoxLayout()
-
-    # Сетка 2x3 для кнопок фильтрации
-    filter_grid = QGridLayout()
-    filter_grid.setSpacing(10)
-
-    parent.btn_filter_zero_true = QPushButton("Удалить: num_objects=0 и true>=1")
-    parent.btn_filter_zero_true.setToolTip(
-        "Удалить строки, где нет предсказанных объектов, но есть 1 и более истинных"
-    )
-    parent.btn_filter_overseg = QPushButton("Удалить: pred > 2*true")
-    parent.btn_filter_overseg.setToolTip(
-        "Удалить строки с сильной oversegmentation (предсказаний больше чем в 3 раза больше истинных)"
-    )
-    parent.btn_filter_duplicates = QPushButton("Удалить дубликаты строк")
-    parent.btn_filter_duplicates.setToolTip("Удалить полностью дублирующиеся строки")
-    parent.btn_filter_invalid_params = QPushButton("Удалить некорректные параметры")
-    parent.btn_filter_invalid_params.setToolTip(
-        "Удалить строки с некорректными (нечисловыми) параметрами бинаризации"
-    )
-    parent.btn_filter_anomaly_count = QPushButton(
-        "Удалить: num>15 (объектов или истинных)"
-    )
-    parent.btn_filter_anomaly_count.setToolTip(
-        "Удалить строки, где количество объектов или истинных объектов превышает 15"
-    )
-    parent.btn_filter_full_image = QPushButton("Удалить: объект на весь снимок")
-    parent.btn_filter_full_image.setToolTip(
-        "Удалить строки, где среди предсказанных объектов есть объект, покрывающий почти всё изображение (центр 0.5,0.5 и размеры 1,1)"
-    )
-
-    # Устанавливаем enabled состояние (по умолчанию выключены)
-    parent.btn_filter_zero_true.setEnabled(False)
-    parent.btn_filter_overseg.setEnabled(False)
-    parent.btn_filter_duplicates.setEnabled(False)
-    parent.btn_filter_invalid_params.setEnabled(False)
-    parent.btn_filter_anomaly_count.setEnabled(False)
-    parent.btn_filter_full_image.setEnabled(False)
-
-    # Размещаем кнопки в сетке 2x3
-    filter_grid.addWidget(parent.btn_filter_zero_true, 0, 0)
-    filter_grid.addWidget(parent.btn_filter_overseg, 0, 1)
-    filter_grid.addWidget(parent.btn_filter_duplicates, 1, 0)
-    filter_grid.addWidget(parent.btn_filter_invalid_params, 1, 1)
-    filter_grid.addWidget(parent.btn_filter_anomaly_count, 2, 0)
-    filter_grid.addWidget(parent.btn_filter_full_image, 2, 1)
-
-    left_filter_layout.addLayout(filter_grid)
-
-    # Кнопка удаления строк без истинных объектов (num_true_objects == 0)
-    parent.btn_remove_no_true = QPushButton(
-        "Удалить строки без истинных объектов (num_true_objects == 0)"
-    )
-    parent.btn_remove_no_true.setToolTip(
-        "Удалить все строки, где нет ни одного истинного объекта (пустые изображения)"
-    )
-    parent.btn_remove_no_true.setEnabled(False)
-    left_filter_layout.addWidget(parent.btn_remove_no_true)
-
-    # Строка со случайной выборкой
-    sample_layout = QHBoxLayout()
-    parent.sample_label = QLabel("Случайная выборка:")
-    parent.sample_spin = QSpinBox()
-    parent.sample_spin.setRange(1, 1000000)
-    parent.sample_spin.setValue(10000)
-    parent.sample_spin.setToolTip("Количество строк для случайной выборки")
-    parent.btn_sample_n = QPushButton("Выбрать N строк")
-    parent.btn_sample_n.setToolTip("Оставить в датасете только N случайных строк")
-    parent.btn_sample_n.setEnabled(False)
-    sample_layout.addWidget(parent.sample_label)
-    sample_layout.addWidget(parent.sample_spin)
-    sample_layout.addWidget(parent.btn_sample_n)
-    sample_layout.addStretch()
-    left_filter_layout.addLayout(sample_layout)
-
-    # Счётчик строк
-    parent.lbl_row_count = QLabel("Строк в датасете: 0")
-    left_filter_layout.addWidget(parent.lbl_row_count)
-
-    left_filter_group.setLayout(left_filter_layout)
-
-    # ---- Правый блок: подготовка датасета и анализ ----
-    right_prepare_group = QGroupBox("Подготовка датасета и анализ")
-    right_prepare_layout = QVBoxLayout()
-
-    # Первая строка: сохранение уникальных параметров и кластеризация
-    prepare_row1 = QHBoxLayout()
-    parent.btn_save_unique_params = QPushButton("Сохранить уникальные params")
-    parent.btn_save_unique_params.setToolTip(
-        "Сохранить все уникальные строки params для каждого метода в текстовый файл"
-    )
-    parent.btn_cluster = QPushButton("Кластеризация параметров")
-    parent.btn_cluster.setToolTip(
-        "Добавить колонку 'cluster' с меткой кластера для каждой строки (на основе параметров)"
-    )
-    parent.btn_cluster_co = QPushButton("Кластеризация морфологии")
-    parent.btn_cluster_co.setToolTip(
-        "Добавить колонку 'cluster_co' – кластеризация close/open/erode/dilate (px) для каждого cluster каждого метода"
-    )
-    parent.btn_save_unique_params.setEnabled(False)
-    parent.btn_cluster.setEnabled(False)
-    parent.btn_cluster_co.setEnabled(False)
-
-    prepare_row1.addWidget(parent.btn_save_unique_params)
-    prepare_row1.addWidget(parent.btn_cluster)
-    prepare_row1.addWidget(parent.btn_cluster_co)
-    prepare_row1.addStretch()
-    right_prepare_layout.addLayout(prepare_row1)
-
-    # Вторая строка: расчёт mean F1 по IoU и фильтр по mean_f1
-    prepare_row2 = QHBoxLayout()
-    parent.iou_label = QLabel("Вспомогательные метрики BBox:")
-    parent.iou_spin = QDoubleSpinBox()
-    parent.iou_spin.setRange(0.0, 1.0)
-    parent.iou_spin.setSingleStep(0.05)
-    parent.iou_spin.setValue(0.5)
-    parent.iou_spin.setToolTip(
-        "Порог пересечения для определения TP (используется только для колонки f1_50)"
-    )
-    parent.btn_compute_f1 = QPushButton("Расчет mean F1 по IoU")
-    parent.btn_compute_f1.setToolTip(
-        "Добавить колонки: mean_f1 (среднее по порогам 0.1-0.9), avg_iou_tp, f1_50 и др."
-    )
-    parent.btn_compute_f1.setEnabled(False)
-
-    parent.f1_threshold_label = QLabel("Порог mean_f1:")
-    parent.f1_threshold_spin = QDoubleSpinBox()
-    parent.f1_threshold_spin.setRange(0.0, 1.0)
-    parent.f1_threshold_spin.setSingleStep(0.05)
-    parent.f1_threshold_spin.setValue(0.1)
-    parent.f1_threshold_spin.setToolTip("Удалить строки с mean_f1 ниже этого порога")
-    parent.btn_filter_f1 = QPushButton("Удалить строки с mean_f1 < порога")
-    parent.btn_filter_f1.setToolTip("Требуется наличие колонки mean_f1")
-    parent.btn_filter_f1.setEnabled(False)
-
-    prepare_row2.addWidget(parent.iou_label)
-    parent.iou_spin.setVisible(False)
-    prepare_row2.addWidget(parent.btn_compute_f1)
-    prepare_row2.addSpacing(20)
-    prepare_row2.addWidget(parent.f1_threshold_label)
-    prepare_row2.addWidget(parent.f1_threshold_spin)
-    prepare_row2.addWidget(parent.btn_filter_f1)
-    prepare_row2.addStretch()
-    right_prepare_layout.addLayout(prepare_row2)
-
-    # Третья строка: агрегация и настройки анализа
-    prepare_row3 = QHBoxLayout()
-    parent.label_top_k = QLabel("Топ-K для агрегации:")
-    parent.top_k_spin = QSpinBox()
-    parent.top_k_spin.setRange(1, 20)
-    parent.top_k_spin.setValue(1)
-    parent.top_k_spin.setToolTip(
-        "Сколько лучших строк (по mean_f1) оставлять в каждой группе при агрегации"
-    )
-    parent.btn_aggregate = QPushButton("Агрегировать по параметрам")
-    parent.btn_aggregate.setToolTip(
-        "Сгруппировать строки с одинаковыми параметрами, усреднив метрики"
-    )
-    parent.btn_aggregate.setEnabled(False)
-
-    prepare_row3.addWidget(parent.label_top_k)
-    prepare_row3.addWidget(parent.top_k_spin)
-    prepare_row3.addWidget(parent.btn_aggregate)
-    prepare_row3.addStretch()
-    right_prepare_layout.addLayout(prepare_row3)
-
-    # Четвёртая строка: оптимизация инверсии
-    prepare_row_invert = QHBoxLayout()
-    parent.btn_optimize_invert = QPushButton("Оптимизировать инверсию")
-    parent.btn_optimize_invert.setToolTip(
-        "Для каждого метода оставить только строки с лучшим значением invert (по среднему mean_f1)"
-    )
-    parent.btn_optimize_invert.setEnabled(False)
-    prepare_row_invert.addWidget(parent.btn_optimize_invert)
-    prepare_row_invert.addStretch()
-    right_prepare_layout.addLayout(prepare_row_invert)
-
-    # Пятая строка: галочки и кнопка анализа
-    prepare_row5 = QHBoxLayout()
-    parent.chk_use_diversity = QCheckBox("Использовать разнообразие при выборе топ‑5")
-    parent.chk_use_diversity.setChecked(True)
-    parent.chk_use_diversity.setToolTip(
-        "Включает жадный алгоритм для выбора максимально разных пресетов из всего пула уникальных параметров"
-    )
-    parent.chk_iou_penalty = QCheckBox(
-        "Штраф за низкое качество TP (mean_f1 * avg_iou_tp^0.5)"
-    )
-    parent.chk_iou_penalty.setToolTip(
-        "При анализе использовать взвешенный F1 = mean_f1 * sqrt(avg_iou_tp)"
-    )
-    parent.btn_analyze = QPushButton("3. Оценить методы по эталону")
-    parent.btn_analyze.setToolTip(
-        "Сравнить все полные пресеты на всём ручном эталоне по измеренным TP/FP/FN"
-    )
-    parent.btn_analyze.setEnabled(False)
-
-    prepare_row5.addWidget(parent.chk_use_diversity)
-    prepare_row5.addWidget(parent.chk_iou_penalty)
-    prepare_row5.addStretch()
-    prepare_row5.addWidget(parent.btn_analyze)
-    right_prepare_layout.addLayout(prepare_row5)
-
-    # Шестая строка: загрузка топ-пресетов по методам и глобальный топ-5
-    prepare_row6 = QHBoxLayout()
-    parent.btn_load_top_methods = QPushButton("Загрузить топ по методам")
-    parent.btn_load_top_methods.setToolTip(
-        "Загрузить предварительно сохранённый датасет с топ пресетами для каждого метода"
-    )
-    parent.btn_load_top_methods.setEnabled(True)
-    parent.btn_global_top5 = QPushButton("Глобальный топ методов")
-    parent.btn_global_top5.setToolTip(
-        "Выбрать глобальный топ разнообразных пресетов из загруженного датасета (по реальному F1)"
-    )
-    parent.btn_global_top5.setEnabled(False)
-    prepare_row6.addWidget(parent.btn_load_top_methods)
-    prepare_row6.addWidget(parent.btn_global_top5)
-    prepare_row6.addStretch()
-    right_prepare_layout.addLayout(prepare_row6)
-
-    # Седьмая строка: удаление идеальных строк (actual_f1 >= порога)
-    prepare_row7 = QHBoxLayout()
-    parent.label_perfect_threshold = QLabel("Удалить строки с actual_f1 ≥")
-    parent.perfect_threshold_spin = QDoubleSpinBox()
-    parent.perfect_threshold_spin.setRange(0.0, 1.0)
-    parent.perfect_threshold_spin.setSingleStep(0.05)
-    parent.perfect_threshold_spin.setValue(1.0)
-    parent.perfect_threshold_spin.setToolTip(
-        "Удалить строки, где actual_f1 больше или равно этому порогу"
-    )
-    parent.btn_remove_perfect = QPushButton("Удалить идеальные строки")
-    parent.btn_remove_perfect.setToolTip(
-        "Удалить из датасета строки с actual_f1 >= порога (полезно для фильтрации переобученных пресетов)"
-    )
-    parent.btn_remove_perfect.setEnabled(False)
-    prepare_row7.addWidget(parent.label_perfect_threshold)
-    prepare_row7.addWidget(parent.perfect_threshold_spin)
-    prepare_row7.addWidget(parent.btn_remove_perfect)
-    prepare_row7.addStretch()
-    right_prepare_layout.addLayout(prepare_row7)
-
-    right_prepare_group.setLayout(right_prepare_layout)
-
-    second_row_layout.addWidget(left_filter_group, 40)  # 40% ширины
-    second_row_layout.addWidget(right_prepare_group, 60)  # 60% ширины
-    prepare_row5.removeWidget(parent.btn_analyze)
-    prepare_row6.removeWidget(parent.btn_global_top5)
-    parent.btn_global_top5.setText("Показать рейтинг")
-    parent.evaluation_grid.addWidget(parent.btn_analyze, 4, 0, 1, 2)
-    parent.evaluation_grid.addWidget(parent.btn_global_top5, 4, 2)
-    parent.chk_use_diversity.setVisible(False)
-    parent.chk_iou_penalty.setVisible(False)
-    parent.explore_toggle = QCheckBox(
-        "Исследовать строки отчётов: фильтры и выборки (не меняют оценку всего эталона)"
-    )
-    main_layout.addWidget(parent.explore_toggle)
-    exploration = QWidget()
-    exploration.setLayout(second_row_layout)
-    exploration.setVisible(False)
-    parent.explore_toggle.toggled.connect(exploration.setVisible)
-    main_layout.addWidget(exploration)
-
-    # ========== Таблица и результаты ==========
-    main_splitter = QSplitter(Qt.Vertical)
-    parent.table = QTableWidget()
-    parent.table.setAlternatingRowColors(True)
-    parent.table.setSortingEnabled(True)
-    parent.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-    main_splitter.addWidget(parent.table)
-    parent.table.setVisible(False)
-    parent.explore_toggle.toggled.connect(parent.table.setVisible)
-
-    bottom_splitter = QSplitter(Qt.Horizontal)
-    parent.results_widget = ModelResearchWidget(parent)
-    bottom_splitter.addWidget(parent.results_widget)
-
-    parent.log_widget = LogWidget(show_clear_btn=True, show_progress=False)
-    parent.log_widget.text.setMaximumHeight(150)
-    bottom_splitter.addWidget(parent.log_widget)
-
-    main_splitter.addWidget(bottom_splitter)
-    main_splitter.setSizes([500, 200])
-    bottom_splitter.setSizes([600, 400])
-
-    main_layout.addWidget(main_splitter)
+    help_box.setVisible(False)
+    owner.btn_help.toggled.connect(help_box.setVisible)
+    layout.addWidget(help_box)
+    setup_evaluation_controls(owner, layout)
+    result_box = QGroupBox("4. Вывод, настройки и проверка по снимкам")
+    result_layout = QVBoxLayout(result_box)
+    owner.results_widget = ComparisonResultsWidget(owner)
+    owner.results_widget.setMinimumHeight(350)
+    result_layout.addWidget(owner.results_widget)
+    layout.addWidget(result_box, 1)
+    owner.log_toggle = QCheckBox("Подробности выполнения")
+    owner.log_widget = LogWidget(show_clear_btn=True, show_progress=False)
+    owner.log_widget.setVisible(False)
+    owner.log_widget.text.setMaximumHeight(140)
+    owner.log_toggle.toggled.connect(owner.log_widget.setVisible)
+    layout.addWidget(owner.log_toggle)
+    layout.addWidget(owner.log_widget)

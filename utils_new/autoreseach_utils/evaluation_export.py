@@ -9,71 +9,125 @@ from .reports import preset_from_row
 from utils_new.annotations.modes import MODE_LABELS
 
 
-def recommendation_text(result):
-    lines = [
-        f"Эталон: {result.reference_images} снимков, {result.reference_objects} объектов.",
-        f"Сравнение: IoU ≥ {result.threshold:g}; классы "
-        + (
-            "учитываются."
-            if result.class_aware
-            else "объединены (поиск геометрии объектов)."
-        ),
-        "Рейтинг: F1 по суммарным TP/FP/FN всего эталона; только успешное покрытие 100%.",
-        "Средний F1 по IoU 0.50–0.95 — дополнительная метрика, не mAP.",
+PARAMETER_LABELS = {
+    "threshold": "Порог",
+    "window": "Размер окна",
+    "c": "Смещение C",
+    "k": "Коэффициент k",
+    "r": "Диапазон R",
+    "init": "Начальный порог",
+    "excess": "Избыток фона",
+    "ksize": "Размер ядра",
+    "scale": "Масштаб",
+    "threshold1": "Нижний порог Canny",
+    "threshold2": "Верхний порог Canny",
+    "aperture": "Апертурa Canny",
+    "fill_contours": "Заливка контуров",
+    "min_area_percent": "Минимальная площадь, %",
+}
+
+
+def preset_settings_text(row):
+    """Complete reproducible settings, for both UI selection and saved summary."""
+    state = preset_from_row(row)
+    from .reports import describe_preset
+    import math
+
+    description = describe_preset(state)
+    lines = [f"Метод: {state['method']}", "Параметры:"]
+    values = json.loads(description["params"])
+    for key, value in values.items():
+        if type(value) is bool:
+            value = "да" if value else "нет"
+        lines.append(f"  {PARAMETER_LABELS.get(key, key)}: {value}")
+    if not values:
+        lines.append("  У метода нет настраиваемых параметров.")
+    lines += [
+        f"Инверсия: {'да' if state['invert'] else 'нет'}",
+        f"Разметка: {MODE_LABELS[state['annotation_mode']]}",
+        f"Выпуклая оболочка: {'да' if state['use_hull'] else 'нет'}",
         "",
+        "Морфология, в порядке применения:",
     ]
-    valid = result.rankings[result.rankings.eligible]
-    if valid.empty:
+    names = {
+        "close": "Закрытие",
+        "open": "Открытие",
+        "erode": "Эрозия",
+        "dilate": "Дилатация",
+    }
+    for operation in state["morphology"]["operations"]:
+        value = operation["kernel_px"]
         lines.append(
-            "Победитель не определён: ни один пресет не проверен на всём эталоне."
+            f"  {names[operation['operation']]}: {value} px"
+            + (" (не применяется)" if value <= 1 else "")
+        )
+    shape = {"Rectangle": "Прямоугольник", "Ellipse": "Эллипс", "Cross": "Крест"}.get(
+        state["morphology"]["shape"], state["morphology"]["shape"]
+    )
+    lines.append("Форма ядра: " + shape)
+    processing = json.loads(row.get("processing_json", "{}"))
+    if type(processing.get("resize_enabled")) is bool:
+        lines.append(
+            "Размер обработки: "
+            + (
+                f"уменьшение до {processing['max_side']} px"
+                if processing["resize_enabled"]
+                else "исходное разрешение"
+            )
         )
     else:
-        best = valid.iloc[0]
+        lines.append(
+            "Размер обработки: в старом отчёте не указан; перед применением уточните режим уменьшения."
+        )
+    if "expected_images" in row:
         lines += [
-            f"Лучший проверенный пресет: {best['kind']} / {best['method']}.",
-            f"F1={best.micro_f1:.4f}; Precision={best.precision:.4f}; Recall={best.recall:.4f}.",
-            f"TP={best.tp}, лишних объектов FP={best.fp}, пропущенных FN={best.fn}.",
             "",
-            "Лучшие настройки каждого метода:",
+            f"Проверено снимков: {int(row['evaluated_images'])} / {int(row['expected_images'])}",
         ]
-        if (valid["score"] == best["score"]).sum() > 1:
-            lines.insert(
-                -2,
-                "Есть несколько пресетов с одинаковым F1; порядок уточнён средним F1 по снимкам и IoU, затем качеством локализации.",
+        if row.get("exclusion_reason"):
+            lines.append(str(row["exclusion_reason"]))
+        for key, label in [
+            ("score", "F1 всего датасета"),
+            ("precision", "Точность"),
+            ("recall", "Полнота"),
+            ("avg_iou_tp", "IoU совпавших объектов"),
+        ]:
+            value = row.get(key)
+            lines.append(
+                f"{label}: {float(value):.1%}"
+                if value is not None and math.isfinite(value)
+                else f"{label}: —"
             )
-        for _, row in result.methods.iterrows():
-            state = preset_from_row(row)
-            names = {"threshold": "Пороговые", "gradient": "Градиентные"}
-            operations = " → ".join(
-                f"{op['operation']}: {op['kernel_px']} px"
-                for op in state["morphology"]["operations"]
-            )
-            parameters = (
-                "; ".join(
-                    f"{key}={value}" for key, value in json.loads(row["params"]).items()
-                )
-                or "без параметров метода"
-            )
-            processing = json.loads(row.get("processing_json", "{}"))
-            if type(processing.get("resize_enabled")) is bool:
-                resize = (
-                    f"до {processing['max_side']} px"
-                    if processing["resize_enabled"]
-                    else "исходное разрешение"
-                )
-            else:
-                resize = "режим уменьшения в отчёте не указан"
-            lines += [
-                f"• {names[row['kind']]} / {row['method']}: F1={row.micro_f1:.4f}; Precision={row.precision:.4f}; Recall={row.recall:.4f}; FP={row.fp}; FN={row.fn}",
-                f"  Средний F1 по IoU 0.50–0.95: {row.mean_f1:.4f}; средний IoU совпавших объектов: {row.avg_iou_tp:.4f}",
-                f"  {parameters}; инверсия: {'да' if state['invert'] else 'нет'}; разметка: {MODE_LABELS[state['annotation_mode']]}; оболочка: {'да' if state['use_hull'] else 'нет'}",
-                f"  Морфология: {operations}; форма: {state['morphology']['shape']}",
-                f"  Обработка: {resize}.",
-            ]
+    return "\n".join(lines)
+
+
+def recommendation_text(result):
+    from .workflow import result_guidance
+
+    title, body, next_action = result_guidance(result)
+    lines = [
+        title,
+        body,
+        next_action,
+        "",
+        f"Эталон: {result.reference_images} снимков, {result.reference_objects} объектов.",
+        f"Порог совпадения IoU: {result.threshold:g}.",
+        "Учёт классов: "
+        + (
+            "включён"
+            if result.class_aware
+            else "выключен — сравнивается геометрия объектов"
+        ),
+        "Рейтинг — измеренный F1 по суммарным TP/FP/FN всего эталона.",
+        "Средний F1 по IoU 0.50–0.95 не является mAP.",
+        "",
+        "Лучшие настройки каждого метода:",
+    ]
+    for _, row in result.methods.iterrows():
+        lines += ["", preset_settings_text(row)]
     lines += [
         "",
-        f"Успешно на всём эталоне: {len(valid)} из {len(result.rankings)} пресетов.",
-        "Оценка описывает выбранный эталон. Для проверки переноса на новые снимки нужен отдельный контрольный датасет.",
+        "Оценка описывает выбранный эталон. Проверьте выбранные настройки на новых снимках, не участвовавших в подборе.",
     ]
     lines.extend(result.diagnostics)
     return "\n".join(lines)
