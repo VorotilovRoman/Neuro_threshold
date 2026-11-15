@@ -55,7 +55,7 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 | `interactive` → `interactive_methods.py` | `interactive_methods_ui.py` | `utils_ops.interactive_ops` через numerical operations/worker; SegmentationInputView для ROI/FG/BG; общие маски/объекты |
 | `traditional_ml` → `traditional_ml_methods.py` | `traditional_ml_methods_ui.py` | `utils_ops.traditional_ml_ops` через operations/worker: признаки, train/predict/scaler; joblib; eager I/O и общая presentation |
 | `deep_learning` → `deep_learning_methods.py` | `deep_learning_methods_ui.py` | `utils_ops.deep_learning_ops` через operations/worker: load/predict; параметры из ui.DL_predict_settings; общая presentation |
-| `reports` → `model_research.py` | `model_research_ui.py` | `utils_new.autoreseach_utils`: prepare, analysis, metrics_core, reports: фильтры, метрики, регрессия, ранжирование пресетов |
+| `reports` → `model_research.py` | `model_research_ui.py` | `utils_new.autoreseach_utils`: reports, ground_truth, geometry_metrics, evaluation/export; отдельный эталон, геометрия, покрытие и измеренный рейтинг; ui.autoreseach_ui.EvaluationController |
 | `labeler` → `layout_dataset.py` | `layout_dataset_ui.py` | Прямые импорты `dataset_files_new`, `dataset_yolo_labels_new`, YAML/UNet/COCO/catalog; `SmartGraphicsViewNew`, обработка аннотаций |
 | `test` → `viewing_dataset.py` | `viewing_dataset_ui.py` | Те же новые файловые службы; `DatasetReviewGraphicsView`, маски, редактирование и постобработка |
 | `dataset` → `preparing_dataset_yaml.py` | `preparing_dataset_yaml_ui.py` | Агрегатор даёт **новые** `DatasetLoaderMixin`, `PairValidator`, `DatasetGeneratorThread`; bridge приводит пары и классы масок |

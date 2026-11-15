@@ -116,6 +116,11 @@ backend нужен, установите его явно и повторите �
 выбирает явный Torch backend. Предпочтителен `install.py`; после ручного pip
 нужен `--repair-opencv` и диагностика.
 
+`shapely==2.1.2` теперь входит в основные requirements: анализ отчётов
+вычисляет точный IoU OBB и невыпуклых Segment. Для обновления существующего
+окружения выполните `python install.py --torch cpu` либо свой прежний явный
+Torch-профиль (`cu126`/`cu130`), затем `python dependency_health.py --load`.
+
 ## Дополнительные возможности
 
 | Extra | Пакеты | Возможности |
@@ -123,7 +128,7 @@ backend нужен, установите его явно и повторите �
 | `training` | segmentation-models-pytorch, psutil | U-Net/DeepLab, мониторинг обучения |
 | `audit` | ImageHash, open-clip-torch, transformers, umap-learn, hdbscan, xgboost | Аудит, эмбеддинги, исследовательское ML |
 | `sahi` | sahi | Нарезка датасета |
-| `export` | onnx, tifffile, shapely, pascal-voc-writer | Экспорт моделей/разметки, TIFF, геометрия |
+| `export` | onnx, tifffile, pascal-voc-writer | Экспорт моделей/разметки, TIFF, геометрия |
 
 Extras декларированы в отдельных файлах, их транзитивные версии не заперты.
 Полная совместимость всех optional backend и весов не проверена. Доступность

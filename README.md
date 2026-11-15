@@ -33,6 +33,7 @@ python main.py
 
 ## Документация и проверки
 
+- [Выбор методов по ручному эталону](Docs/Report_Evaluation.md): пороговые и градиентные отчёты, реальные Precision/Recall/F1, покрытие всего набора и точные пресеты.
 - [Анализ и аудит датасета](Docs/Dataset_Audit_Refactor_Status.md): новые утилиты, исправленные маски/OBB, фильтры, экспорт и фоновые задачи.
 - [Навигация по Docs](Docs/README.md)
 - [Windows: ошибка c10.dll / WinError 1114](Docs/Windows_Torch_DLL.md)
@@ -52,5 +53,5 @@ NEURO_RUN_GUI_TESTS=1 python -m unittest discover -s tests -v
 ```
 
 Вторая команда включает GUI offscreen, автономные запуски и небольшие проверки
-классического ML без скачивания весов. Текущий результат — 102 теста успешно. В PowerShell сначала задайте `$env:NEURO_RUN_GUI_TESTS="1"`.
+классического ML без скачивания весов. Текущий результат — 115 тестов успешно. В PowerShell сначала задайте `$env:NEURO_RUN_GUI_TESTS="1"`.
 Отдельная вкладка: `python -m tabs.threshold_methods` из корня проекта.
