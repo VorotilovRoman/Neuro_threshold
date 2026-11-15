@@ -156,6 +156,7 @@ class DatasetLoaderMixin:
         folder = QFileDialog.getExistingDirectory(self, "Select folder with images")
         if folder:
             self._yaml_mode = False
+            self._source_yaml_path = None
             self.images_folder = folder
             self.log(f"Images folder: {folder}")
             self.validator.clear_cache()
@@ -165,6 +166,7 @@ class DatasetLoaderMixin:
         if self.dataset_type == 2:
             return
         self._yaml_mode = False
+        self._source_yaml_path = None
         self.validator.clear_cache()
         if self.dataset_type == 0:
             folder = QFileDialog.getExistingDirectory(self, "Select folder with label files")
@@ -238,6 +240,7 @@ class DatasetLoaderMixin:
             input_format='auto',
             class_names_from_yaml=names,
             source_label=f"YAML: {file_path}",
+            source_yaml=file_path,
         )
 
         self.log(f"=== Загрузка из YAML: {file_path} ===")
@@ -417,6 +420,7 @@ class DatasetLoaderMixin:
             input_format='auto',
             class_names_override=pixel_class_names,
             source_label=f"U-Net YAML: {yaml_path}",
+            source_yaml=yaml_path,
         )
         self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")
         self.log(f"Root: {root}")
@@ -427,7 +431,8 @@ class DatasetLoaderMixin:
     def _apply_loaded_pairs(self, pairs, input_type, input_format,
                             class_names_from_yaml=None,
                             class_names_override=None,
-                            source_label=""):
+                            source_label="", source_yaml=None):
+        self._source_yaml_path=source_yaml
         if input_type != 0 or class_names_override is None:
             self._coco_tmp_labels_dir = None
             self._coco_json_counter = 0
@@ -732,6 +737,7 @@ class DatasetLoaderMixin:
             self.original_ids = []
             self.validation_warning_label.setVisible(False)
             self._yaml_mode = False
+            self._source_yaml_path = None
             self._update_color_stats_label()
 
         self._after_type_change_hook(new_type)

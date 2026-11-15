@@ -219,6 +219,15 @@ class ImagePlayer(QMainWindow):
     #  Завершение работы / сбор информации
     # ------------------------------------------------------------------
     def closeEvent(self, event):
+        scanning = False
+        for tab in getattr(self, '_tab_widgets', []):
+            shutdown = getattr(tab, 'shutdown_audit', None)
+            if shutdown is not None:
+                shutdown()
+                scanning = scanning or tab._scan_busy
+        if scanning:
+            event.ignore()
+            return
         # Проверяем глобальный флаг через переменную окружения
         collect_info = os.environ.get('COLLECT_LIBS_INFO', '0').lower() in ('1', 'true', 'yes')
         if collect_info:

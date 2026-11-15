@@ -11,7 +11,6 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
-import io
 import os
 import shutil
 import subprocess
@@ -22,7 +21,7 @@ from collections import Counter
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QKeySequence, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractItemView,
@@ -45,7 +44,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ui_tabs.dataset_analysis_ui import TrainingImageLabel, setup_dataset_analysis_ui
-from utils.dataset_analysis_logic import (
+from utils_new.dataset_audit.analysis import (
     BrightnessAnalyzer,
     ClassImbalanceAnalyzer,
     DatasetAnalyzer,
@@ -54,249 +53,28 @@ from utils.dataset_analysis_logic import (
     TrainingResultsLoader,
     clear_brightness_cache,
 )
-from utils.dataset_audit_logic import detect_device
-from utils.image_io import load_annotations
+from utils_new.dataset_audit.splits import split_memberships
+from utils_new.dataset_audit.objects import load_pair_annotations, read_objects
+from ui.dataset_audit import presentation as audit_presentation
+from ui.dataset_audit.lifecycle import serialized_scan, stale, close_workers
+from ui.dataset_audit.workers import YoloValidationWorker
+from utils_new.dataset_files_new import read_image, read_index_mask
 from utils_new.dataset_loader_new import DatasetLoaderMixin
 from utils_new.dataset_validation_new import ImageStats, PairValidator
 from utils_ops.segmentation_ops import get_class_color
 
 
 # ============================================================
-# Валидация YOLO в отдельном потоке
+# Анализ датасета и управление фоновыми задачами
 # ============================================================
-class YoloValThread(QThread):
-    log_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(dict)
-
-    def __init__(self, model_path, data_path, split='val',
-                 imgsz=640, conf=0.001, iou=0.6, device=None, parent=None):
-        super().__init__(parent)
-        self.model_path = model_path
-        self.data_path = data_path
-        self.split = split
-        self.imgsz = imgsz
-        self.conf = conf
-        self.iou = iou
-        self.device = device or detect_device()
-        self._stop = False
-
-    def request_stop(self):
-        self._stop = True
-
-    def _extract_metrics(self, metrics):
-        """Извлекает summary + per-class из объекта DetMetrics."""
-        box = getattr(metrics, 'box', None)
-        names = getattr(metrics, 'names', {}) or {}
-        summary = {}
-        per_class = []
-
-        if box is None:
-            return {'summary': summary, 'per_class': per_class}
-
-        def _safe(obj, attr, default=0.0):
-            try:
-                v = getattr(obj, attr, None)
-                if v is None:
-                    return default
-                if hasattr(v, '__len__') and not isinstance(v, str):
-                    return float(np.mean(v)) if len(v) > 0 else default
-                return float(v)
-            except Exception:
-                return default
-
-        summary['Precision'] = _safe(box, 'mp')
-        summary['Recall'] = _safe(box, 'mr')
-        summary['mAP50'] = _safe(box, 'map50')
-        summary['mAP50-95'] = _safe(box, 'map')
-        summary['mAP75'] = _safe(box, 'map75')
-
-        try:
-            f1_arr = getattr(box, 'f1', None)
-            if f1_arr is not None and len(f1_arr) > 0:
-                summary['F1'] = float(np.mean(f1_arr))
-        except Exception:
-            pass
-        if 'F1' not in summary:
-            p, r = summary['Precision'], summary['Recall']
-            summary['F1'] = (2.0 * p * r / (p + r)) if (p + r) > 0 else 0.0
-
-        try:
-            ap_class_index = getattr(box, 'ap_class_index', None)
-            if ap_class_index is None:
-                return {'summary': summary, 'per_class': per_class}
-
-            p_arr = getattr(box, 'p', None)
-            r_arr = getattr(box, 'r', None)
-            f1_arr = getattr(box, 'f1', None)
-            ap50_arr = getattr(box, 'ap50', None)
-            ap_arr = getattr(box, 'ap', None)
-
-            def _v(arr, i, fmt='{:.4f}'):
-                if arr is None or i >= len(arr):
-                    return ''
-                try:
-                    return fmt.format(float(arr[i]))
-                except Exception:
-                    return ''
-
-            for i, ci in enumerate(ap_class_index):
-                ci = int(ci)
-                if isinstance(names, dict):
-                    name = names.get(ci, str(ci))
-                elif isinstance(names, (list, tuple)) and ci < len(names):
-                    name = names[ci]
-                else:
-                    name = str(ci)
-                per_class.append({
-                    'class': f"{ci}: {name}",
-                    'p': _v(p_arr, i),
-                    'r': _v(r_arr, i),
-                    'f1': _v(f1_arr, i),
-                    'ap50': _v(ap50_arr, i),
-                    'ap': _v(ap_arr, i),
-                })
-        except Exception as e:
-            self.log_signal.emit(f"[VAL] Ошибка per-class: {e}")
-
-        return {'summary': summary, 'per_class': per_class}
-
-    def run(self):
-        try:
-            from runtime_policy import configure_ultralytics
-            configure_ultralytics()
-            from runtime_torch import require_torch
-            require_torch()
-            from ultralytics import YOLO
-            from ultralytics.utils import LOGGER
-        except (ImportError, OSError, RuntimeError) as exc:
-            self.finished_signal.emit({
-                'error': f'PyTorch/Ultralytics недоступен: {exc}',
-                'metrics': None})
-            return
-
-        import logging
-
-        class _QtLoggerHandler(logging.Handler):
-            """Пересылает записи Ultralytics-LOGGER в Qt-сигнал."""
-            def __init__(self, emit_fn):
-                super().__init__()
-                self._emit = emit_fn
-            def emit(self, record):
-                try:
-                    msg = self.format(record).strip()
-                    if msg:
-                        self._emit(msg)
-                except Exception:
-                    pass
-
-        handler = _QtLoggerHandler(
-            lambda s: self.log_signal.emit(f"[VAL] {s}"))
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        handler.setLevel(logging.INFO)
-        LOGGER.addHandler(handler)
-
-        try:
-            self.log_signal.emit(
-                f"[VAL] Загрузка модели: {self.model_path}")
-            model = YOLO(self.model_path)
-
-            if not os.path.exists(self.data_path):
-                raise FileNotFoundError(
-                    f"data.yaml не найден: {self.data_path}")
-
-            self.log_signal.emit(
-                f"[VAL] Модель загружена. Старт валидации: "
-                f"data={self.data_path}, split={self.split}, "
-                f"imgsz={self.imgsz}, conf={self.conf}, iou={self.iou}, "
-                f"device={self.device}")
-
-            # Callback отмены — срабатывает между батчами
-            try:
-                def _stop_cb(*args, **kwargs):
-                    if self._stop:
-                        raise SystemExit("__VAL_CANCEL__")
-                model.add_callback("on_val_batch_end", _stop_cb)
-            except Exception as e:
-                self.log_signal.emit(
-                    f"[VAL] Не удалось добавить callback отмены: {e}")
-
-            try:
-                metrics = model.val(
-                    data=self.data_path,
-                    split=self.split,
-                    imgsz=self.imgsz,
-                    conf=self.conf,
-                    iou=self.iou,
-                    device=self.device,
-                    verbose=True,
-                )
-            except Exception as e:
-                # Один автоматический fallback на CPU при сбое GPU
-                msg = str(e).lower()
-                if (self.device != 'cpu'
-                        and any(k in msg for k in
-                                ('cuda', 'out of memory',
-                                 'device', 'cublas', 'cudnn'))):
-                    self.log_signal.emit(
-                        f"[VAL] Ошибка на {self.device} ({e}), "
-                        f"повтор на cpu")
-                    try:
-                        model.to('cpu')
-                    except Exception:
-                        pass
-                    self.device = 'cpu'
-                    metrics = model.val(
-                        data=self.data_path,
-                        split=self.split,
-                        imgsz=self.imgsz,
-                        conf=self.conf,
-                        iou=self.iou,
-                        device='cpu',
-                        verbose=True,
-                    )
-                else:
-                    raise
-        except SystemExit as e:
-            if str(e) == "__VAL_CANCEL__":
-                self.finished_signal.emit({
-                    'error': 'Валидация отменена пользователем',
-                    'metrics': None})
-            else:
-                self.finished_signal.emit({
-                    'error': f'Валидация прервана: {e}',
-                    'metrics': None})
-            return
-        except Exception as e:
-            tb = traceback.format_exc()
-            self.log_signal.emit(f"[VAL][ERROR] {e}")
-            self.log_signal.emit(tb)
-            self.finished_signal.emit({'error': str(e), 'metrics': None})
-            return
-        finally:
-            try:
-                LOGGER.removeHandler(handler)
-            except Exception:
-                pass
-
-        if self._stop:
-            self.finished_signal.emit({
-                'error': 'Валидация отменена пользователем',
-                'metrics': None})
-            return
-
-        try:
-            data = self._extract_metrics(metrics)
-            self.finished_signal.emit({'error': None, 'metrics': data})
-        except Exception as e:
-            tb = traceback.format_exc()
-            self.log_signal.emit(f"[VAL][ERROR] extract: {e}")
-            self.log_signal.emit(tb)
-            self.finished_signal.emit({'error': str(e), 'metrics': None})
-
-
 class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     def __init__(self):
         super().__init__()
+        self._scan_busy=False
+        self._closing=False
+        self._dataset_revision=0
+        self._filters_applied=False
+        self._analysis_splits={}
         self.setWindowTitle("Анализ и фильтрация датасета")
         self.setMinimumWidth(1200)
         self.setMinimumHeight(800)
@@ -452,6 +230,99 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._audit_log("Вкладка анализа датасета инициализирована.",
                         tag="INIT")
 
+    def _start_audit_worker(self, worker):
+        worker.revision = self._dataset_revision
+        worker.start()
+
+    def shutdown_audit(self):
+        close_workers(self)
+
+    def closeEvent(self, event):
+        self.shutdown_audit()
+        if self._scan_busy:
+            event.ignore()
+        else:event.accept()
+
+    def _invalidate_analysis_results(self):
+        self._dataset_revision += 1
+        try:
+            self._analysis_splits = split_memberships(
+                getattr(self, "_source_yaml_path", None), self.pairs
+            )
+        except (OSError, ValueError) as exc:
+            self._analysis_splits = {}
+            self.log(f"Не удалось прочитать split YAML: {exc}")
+        self._filters_applied = False
+        self._stop_requested = False
+        for name in (
+            "_audit_thread",
+            "_cluster_thread",
+            "_report_thread",
+            "_val_thread",
+        ):
+            worker = getattr(self, name, None)
+            if worker is not None:
+                worker.close()
+        for name in (
+            "_last_quality",
+            "_last_dup",
+            "_last_imbalance",
+            "_last_heatmap",
+            "_last_audit_meta",
+            "_last_cluster",
+            "_last_cluster_data",
+            "_last_validation",
+            "_last_filter_stats",
+        ):
+            setattr(self, name, None)
+        for name in (
+            "_last_audit_results",
+            "_last_audit_all_results",
+            "_last_audit_display",
+            "_dup_groups_by_row",
+        ):
+            setattr(self, name, [])
+        for name in ("dup_table", "audit_table", "val_table"):
+            getattr(self, name).setRowCount(0)
+        for name in (
+            "quality_summary_label",
+            "dup_summary_label",
+            "heatmap_summary_label",
+            "audit_summary_label",
+            "cluster_summary_label",
+            "val_summary_label",
+        ):
+            getattr(self, name).setText("Данные изменены. Выполните анализ заново.")
+        for name in (
+            "btn_run_quality",
+            "btn_run_duplicates",
+            "btn_run_heatmap",
+            "btn_run_audit",
+            "btn_run_cluster",
+            "btn_run_validation",
+            "btn_generate_report",
+        ):
+            getattr(self, name).setEnabled(True)
+        for name in (
+            "btn_stop_quality",
+            "btn_stop_duplicates",
+            "btn_stop_heatmap",
+            "btn_stop_audit",
+            "btn_stop_cluster",
+            "btn_stop_validation",
+        ):
+            getattr(self, name).setEnabled(False)
+        if self._heatmap_colorbar is not None:
+            try:
+                self._heatmap_colorbar.remove()
+            except (ValueError, KeyError):
+                pass
+            self._heatmap_colorbar = None
+        for prefix in ("quality", "heatmap", "cluster"):
+            for ax in getattr(self, prefix + "_figure").axes:
+                ax.clear()
+            getattr(self,prefix+'_canvas').draw_idle()
+
     # ==================================================================
     # Логирование
     # ==================================================================
@@ -490,6 +361,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     # Хуки
     # ==================================================================
     def _after_load_hook(self):
+        self._invalidate_analysis_results()
         self._pair_class_cache = {}
         self._last_cluster_data = None
         self._audit_log(
@@ -499,6 +371,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self.apply_filters_and_update_metrics()
 
     def _after_type_change_hook(self, new_type):
+        self._invalidate_analysis_results()
         self._pair_class_cache = {}
         self._last_cluster_data = None
         self._audit_log(f"Смена dataset_type → {new_type}",
@@ -522,7 +395,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     def get_class_names_from_table(self):
         if self.dataset_type == 2:
             return {}
-        return DatasetAnalyzer.get_class_names_included(self.class_table)
+        return audit_presentation.get_class_names_included(self.class_table)
 
     def _build_extra_info(self):
         if not self.annotation_types_stats:
@@ -532,13 +405,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                   self.annotation_types_stats.items()) + "]"
 
     def _get_analysis_pairs(self):
-        if self.filtered_pairs:
-            self._audit_log(
-                f"Используются отфильтрованные пары: "
-                f"{len(self.filtered_pairs)} (из {len(self.pairs)})",
-                tag="ANALYSIS")
-            return self.filtered_pairs
-        return self.pairs
+        return list(self.filtered_pairs if self._filters_applied else self.pairs)
 
     def _on_include_empty_toggled(self, *_):
         include_empty = bool(self.include_empty_annotations.isChecked())
@@ -577,7 +444,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self.class_legend_label.setVisible(True)
         self.class_legend_scroll.setVisible(True)
 
-        name_by_orig = DatasetAnalyzer.get_class_names_by_orig_id(
+        name_by_orig = audit_presentation.get_class_names_by_orig_id(
             self.class_table)
         for row in range(self.class_table.rowCount()):
             try:
@@ -632,8 +499,11 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     # Фильтрация
     # ==================================================================
+    @serialized_scan
     def apply_filters_and_update_metrics(self):
         self._sync_analyzer()
+        self._invalidate_analysis_results()
+        self._filters_applied = True
         if not self.pairs:
             self.filtered_pairs = []
             self._render_metrics({}, 0, [], {})
@@ -642,7 +512,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 f"Всего пар: 0{self._build_extra_info()}")
             return
 
-        included_class_ids = DatasetAnalyzer.get_included_class_ids(
+        included_class_ids = audit_presentation.get_included_class_ids(
             self.class_table)
         total_classes = self.class_table.rowCount()
 
@@ -689,7 +559,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
 
         result = self.analyzer.filter_pairs(
             self.pairs, included_class_ids, total_classes, params,
-            progress_cb=on_progress, include_empty=include_empty)
+            progress_cb=on_progress, include_empty=include_empty, cancel_check=lambda: self._stop_requested)
         self.progress_bar.setVisible(False)
 
         if result['error']:
@@ -702,6 +572,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 f"Всего пар: {len(self.pairs)} | после фильтрации: 0")
             return
 
+        for message in result.get('errors',[]):self.log(message)
         self.filtered_pairs = result['filtered_pairs']
         empty_imgs = result.get('empty_images', 0)
 
@@ -791,9 +662,9 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                         object_areas_pct=None):
         if class_areas is None:
             class_areas = {}
-        name_by_orig = DatasetAnalyzer.get_class_names_by_orig_id(
+        name_by_orig = audit_presentation.get_class_names_by_orig_id(
             self.class_table)
-        DatasetAnalyzer.render_metrics(
+        audit_presentation.render_metrics(
             self.metrics_summary_label, self.class_stats_table,
             self.ax, self.ax_classes, self.canvas,
             self.filtered_pairs, self.pairs,
@@ -809,31 +680,12 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     # Перекраска + сортировка file_list
     # ==================================================================
     def _get_pair_dominant_class(self, pair):
-        key = (pair[0], pair[1] if len(pair) > 1 else None)
-        if key in self._pair_class_cache:
-            return self._pair_class_cache[key]
-
-        cls_id = None
-        lbl = pair[1] if len(pair) > 1 else None
         try:
-            if self.dataset_type == 0 and lbl and os.path.exists(lbl):
-                anns = load_annotations(
-                    lbl, 1, 1, format_hint=self.input_format)
-                cls_ids = [int(a[1]) for a in anns if len(a) >= 2]
-                if cls_ids:
-                    cls_id = Counter(cls_ids).most_common(1)[0][0]
-            elif self.dataset_type == 1 and lbl and os.path.exists(lbl):
-                import cv2
-                import numpy as np
-                mask = cv2.imread(lbl, cv2.IMREAD_UNCHANGED)
-                if mask is not None:
-                    u = [int(c) for c in np.unique(mask) if c != 0]
-                    if u:
-                        cls_id = u[0]
-        except Exception:
-            pass
-        self._pair_class_cache[key] = cls_id
-        return cls_id
+            _, objects = read_objects(pair, self.dataset_type, self.input_format)
+            counts = Counter(obj.class_id for obj in objects)
+            return counts.most_common(1)[0][0] if objects else None
+        except (OSError, ValueError):
+            return None
 
     def _restyle_and_sort_file_list(self):
         if not self.pairs or not hasattr(self, 'file_list'):
@@ -1041,10 +893,10 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                     new_groups.append(new_g)
             self._last_dup[key] = new_groups
         try:
-            from utils.dataset_audit_logic import LeakageChecker
+            from utils_new.dataset_audit.checks import LeakageChecker
             self._last_dup['leak'] = LeakageChecker.check(
                 self._last_dup['exact'] + self._last_dup['near'],
-                self.pairs)
+                self.pairs,self._analysis_splits)
         except Exception:
             pass
         try:
@@ -1060,18 +912,19 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             self._dup_groups_by_row = []
             return
 
-        from utils.dataset_audit_logic import LeakageChecker
+        from utils_new.dataset_audit.checks import LeakageChecker
         exact = self._last_dup.get('exact', [])
         near = self._last_dup.get('near', [])
 
         rows = []
         self._dup_groups_by_row = []
-        for kind, groups in (('MD5', exact), ('pHash', near)):
+        overlaps=[row['paths'] for row in self._last_dup.get('leak',{}).get('groups',[]) if len(row['paths'])==1 and row['leak']]
+        for kind, groups in (('MD5', exact), ('pHash', near), ('YAML',overlaps)):
             for g_idx, group in enumerate(groups, 1):
                 if not group:
                     continue
-                splits = Counter(LeakageChecker._infer_split(p) for p in group)
-                leak = len({s for s in splits if s != 'unknown'}) >= 2
+                membership=LeakageChecker.check([group],self.pairs,self._analysis_splits)['groups'][0]
+                splits=membership['splits'];leak=membership['leak']
                 files_short = ", ".join(os.path.basename(p) for p in group[:3])
                 if len(group) > 3:
                     files_short += f" … (+{len(group) - 3})"
@@ -1100,27 +953,31 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     # Экспорт
     # ==================================================================
+    @serialized_scan
     def export_filtered_dataset(self):
         if not self.filtered_pairs:
-            QMessageBox.warning(self, "Ошибка",
-                                "Нет данных для экспорта.")
+            QMessageBox.warning(self, "Ошибка", "Нет данных для экспорта.")
             return
-        out_dir = QFileDialog.getExistingDirectory(
-            self, "Папка для датасета")
+        out_dir = QFileDialog.getExistingDirectory(self, "Папка для датасета")
         if not out_dir:
             return
         try:
-            class_names = DatasetAnalyzer.get_class_names_included(
-                self.class_table)
+            class_names = (
+                audit_presentation.get_class_names_included
+                if self.chk_exclude_classes_from_files.isChecked()
+                else audit_presentation.get_class_names_by_orig_id
+            )(self.class_table)
 
             included_class_ids = None
             if self.chk_exclude_classes_from_files.isChecked():
-                included_class_ids = DatasetAnalyzer.get_included_class_ids(
-                    self.class_table)
+                included_class_ids = audit_presentation.get_included_class_ids(
+                    self.class_table
+                )
                 self._audit_log(
-                    f"Экспорт с фильтрацией .txt по классам: "
+                    f"Экспорт с фильтрацией разметки по классам: "
                     f"оставлены только {sorted(included_class_ids)}",
-                    tag="EXPORT")
+                    tag="EXPORT",
+                )
 
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, len(self.filtered_pairs))
@@ -1131,27 +988,41 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                     QApplication.processEvents()
 
             DatasetAnalyzer.export_subset(
-                self.filtered_pairs, out_dir, class_names,
-                progress_cb=on_progress, log_cb=self.log,
-                included_class_ids=included_class_ids)
+                self.filtered_pairs,
+                out_dir,
+                class_names,
+                progress_cb=on_progress,
+                log_cb=self.log,
+                cancel_check=lambda: self._closing,
+                included_class_ids=included_class_ids,
+                split_by_image=self._analysis_splits,
+                dataset_type=self.dataset_type,
+                input_format=self.input_format,
+            )
 
             self.progress_bar.setVisible(False)
             self._last_export_dir = out_dir
             self.btn_open_last_export.setEnabled(True)
             self._audit_log(
                 f"Экспорт: {len(self.filtered_pairs)} снимков → {out_dir}",
-                tag="EXPORT", level='OK')
+                tag="EXPORT",
+                level="OK",
+            )
             QMessageBox.information(
-                self, "Успех",
-                f"Датасет создан: {out_dir}\n"
-                f"Снимков: {len(self.filtered_pairs)}")
+                self,
+                "Успех",
+                f"Датасет создан: {out_dir}\nСнимков: {len(self.filtered_pairs)}",
+            )
         except Exception as e:
             self.progress_bar.setVisible(False)
             self._audit_exception("Ошибка экспорта", e, tag="EXPORT")
+            if not self._closing:
+                QMessageBox.critical(self, "Ошибка экспорта", str(e))
 
     # ==================================================================
     # Качество
     # ==================================================================
+    @serialized_scan
     def run_quality_analysis(self):
         pairs = self._get_analysis_pairs()
         if not pairs:
@@ -1188,6 +1059,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         if self._stop_requested:
             self._audit_log("Анализ качества остановлен.",
                             tag="QUALITY", level='WARN')
+            self.quality_summary_label.setText("Анализ качества отменён. Результат не обновлён.")
+            return
         if res is None:
             self.quality_summary_label.setText(
                 "Не удалось прочитать изображения.")
@@ -1264,13 +1137,14 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     # Дубликаты
     # ==================================================================
+    @serialized_scan
     def run_duplicate_analysis(self):
         pairs = self._get_analysis_pairs()
         if not pairs:
             QMessageBox.warning(self, "Нет данных",
                                 "Нет пар для анализа.")
             return
-        from utils.dataset_audit_logic import DuplicateDetector, LeakageChecker
+        from utils_new.dataset_audit.checks import DuplicateDetector, LeakageChecker
         self._stop_requested = False
         self.btn_run_duplicates.setEnabled(False)
         self.btn_stop_duplicates.setEnabled(True)
@@ -1300,10 +1174,12 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         if dups.get('cancelled'):
             self._audit_log("Поиск дубликатов остановлен.",
                             tag="DUP", level='WARN')
+            self.dup_summary_label.setText("Поиск дубликатов отменён. Проверка утечек не завершена.")
+            return
 
         exact = dups.get('exact', [])
         near = dups.get('near', [])
-        leak_report = LeakageChecker.check(exact + near, pairs)
+        leak_report = LeakageChecker.check(exact + near, pairs,self._analysis_splits)
         leaked = leak_report.get('leaked_count', 0)
 
         self._last_dup = {
@@ -1536,7 +1412,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                 continue
 
             try:
-                base = cv2.imread(img_path)
+                base = read_image(img_path)
             except Exception as e:
                 rendered.append((idx, img_path, lbl_path, None,
                                  f"ошибка чтения: {e}"))
@@ -1553,8 +1429,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             try:
                 if (self.dataset_type == 0
                         and lbl_path and os.path.exists(lbl_path)):
-                    anns = load_annotations(
-                        lbl_path, 1, 1, format_hint=self.input_format)
+                    anns = load_pair_annotations(
+                        img_path, lbl_path, format_hint=self.input_format)
                     for ann in anns:
                         if not ann:
                             continue
@@ -1583,7 +1459,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                           (0, 200, 0), 2)
                 elif (self.dataset_type == 1
                         and lbl_path and os.path.exists(lbl_path)):
-                    mask = cv2.imread(lbl_path, cv2.IMREAD_UNCHANGED)
+                    mask = read_index_mask(lbl_path)
                     if mask is not None and mask.ndim == 2:
                         overlay = np.zeros_like(img)
                         overlay[mask > 0] = (0, 200, 0)
@@ -1716,13 +1592,14 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     # Тепловая карта
     # ==================================================================
+    @serialized_scan
     def run_heatmap_analysis(self):
         pairs = self._get_analysis_pairs()
         if not pairs:
             QMessageBox.warning(self, "Нет данных",
                                 "Нет пар для анализа.")
             return
-        from utils.dataset_audit_logic import ObjectDistributionHeatmap
+        from utils_new.dataset_audit.checks import ObjectDistributionHeatmap
         self._stop_requested = False
         self.btn_run_heatmap.setEnabled(False)
         self.btn_stop_heatmap.setEnabled(True)
@@ -1738,7 +1615,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         try:
             result = ObjectDistributionHeatmap.compute(
                 pairs, dataset_type=self.dataset_type,
-                grid_size=grid_size, progress_cb=progress,
+                grid_size=grid_size, input_format=self.input_format, progress_cb=progress,
                 cancel_check=lambda: self._stop_requested)
         except Exception as e:
             self._audit_exception("Ошибка тепловой карты", e,
@@ -1753,7 +1630,11 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         if result.get('cancelled'):
             self._audit_log("Тепловая карта остановлена.",
                             tag="HEATMAP", level='WARN')
+            self.heatmap_summary_label.setText("Построение тепловой карты отменено.")
+            return
 
+        for error in result.get("errors", []):
+            self._audit_log(str(error), tag="HEATMAP", level="WARN")
         self._last_heatmap = result
         heatmap = result['heatmap']
         total_objs = result['total_objects']
@@ -1839,7 +1720,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                     "Дождитесь завершения.")
             return
 
-        from utils.dataset_audit_logic import LossInspectionThread
+        from ui.dataset_audit.workers import LossInspectionWorker
         iou_thr = float(self.audit_iou_spin.value())
         conf_thr = float(self.audit_conf_spin.value())
         imgsz = int(self.audit_imgsz_spin.value())
@@ -1854,19 +1735,19 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self.btn_run_audit.setEnabled(False)
         self.btn_stop_audit.setEnabled(True)
 
-        self._audit_thread = LossInspectionThread(
+        self._audit_thread = LossInspectionWorker(
             pairs, self._audit_model_path,
             dataset_type=self.dataset_type,
             iou_threshold=iou_thr, conf_threshold=conf_thr,
             imgsz=imgsz,
             input_format=self.input_format,
-            device=self._device)
+            device=self._device, mask_class_map=dict(self.mask_class_remap) if self.dataset_type==1 else None)
         self._audit_thread.log_signal.connect(self.log)
         self._audit_thread.log_signal.connect(
             lambda m: print(f"[AUDIT][THREAD] {m}", flush=True))
         self._audit_thread.progress.connect(self._on_audit_progress)
         self._audit_thread.finished_signal.connect(self._on_audit_finished)
-        self._audit_thread.start()
+        self._start_audit_worker(self._audit_thread)
 
     def stop_loss_inspection(self):
         if self._audit_thread and self._audit_thread.isRunning():
@@ -1875,35 +1756,43 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                             tag="AUDIT", level='WARN')
 
     def _on_audit_progress(self, c, t):
+        if stale(self):
+            return
         self.audit_summary_label.setText(f"⏳ Аудит: {c}/{t}…")
-        QApplication.processEvents()
 
     def _on_audit_finished(self, result):
+        if stale(self, result):
+            return
         self.btn_run_audit.setEnabled(True)
         self.btn_stop_audit.setEnabled(False)
-        err = result.get('error')
+        err = result.get("error")
         if err:
             self.audit_summary_label.setText(f"❌ {err}")
-            self._audit_log(f"Аудит ошибка: {err}",
-                            tag="AUDIT", level='ERROR')
+            self._audit_log(f"Аудит ошибка: {err}", tag="AUDIT", level="ERROR")
             return
 
-        suspicious = result.get('suspicious', [])
-        all_results = result.get('all_results', suspicious)
-        processed = result.get('processed', 0)
-        total = result.get('total', 0)
-        errors = result.get('errors', 0)
+        if result.get("cancelled"):
+            self.audit_summary_label.setText("Аудит отменён. Результат не обновлён.")
+            return
+
+        suspicious = result.get("suspicious", [])
+        all_results = result.get("all_results", suspicious)
+        processed = result.get("processed", 0)
+        total = result.get("total", 0)
+        errors = result.get("errors", 0)
 
         self._last_audit_results = suspicious
         self._last_audit_all_results = all_results
         self._last_audit_meta = {
-            'model': self._audit_model_path,
-            'iou_thr': float(self.audit_iou_spin.value()),
-            'conf_thr': float(self.audit_conf_spin.value()),
-            'imgsz': int(self.audit_imgsz_spin.value()),
-            'processed': processed, 'total': total,
-            'errors': errors, 'suspicious_count': len(suspicious),
-            'audited_count': len(all_results),
+            "model": self._audit_model_path,
+            "iou_thr": float(self.audit_iou_spin.value()),
+            "conf_thr": float(self.audit_conf_spin.value()),
+            "imgsz": int(self.audit_imgsz_spin.value()),
+            "processed": processed,
+            "total": total,
+            "errors": errors,
+            "suspicious_count": len(suspicious),
+            "audited_count": len(all_results),
         }
 
         self._rebuild_audit_table()
@@ -1912,13 +1801,17 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             f"Аудит завершён: processed={processed}/{total}, "
             f"errors={errors}, аудировано={len(all_results)}, "
             f"подозрительных={len(suspicious)}",
-            tag="AUDIT", level='OK')
+            tag="AUDIT",
+            level="OK",
+        )
 
         for item in suspicious[:5]:
             self._audit_log(
                 f"  {os.path.basename(item['img_path'])}: "
                 f"gt={item['gt_count']}, pred={item['pred_count']}, "
-                f"iou={item['mean_iou']:.3f}", tag="AUDIT")
+                f"iou={item['mean_iou']:.3f}",
+                tag="AUDIT",
+            )
 
     def _open_audit_row(self, row, col):
         items = getattr(self, '_last_audit_display', None) or []
@@ -2065,7 +1958,10 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             QMessageBox.warning(self, "Нет файла", img_path)
             return
 
-        base = cv2.imread(img_path)
+        try:
+            base = read_image(img_path)
+        except OSError:
+            base = None
         if base is None:
             QMessageBox.warning(self, "Не удалось прочитать", img_path)
             return
@@ -2091,8 +1987,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         try:
             if (self.dataset_type == 0
                     and lbl_path and os.path.exists(lbl_path)):
-                anns = load_annotations(
-                    lbl_path, 1, 1, format_hint=self.input_format)
+                anns = load_pair_annotations(
+                    img_path, lbl_path, format_hint=self.input_format)
                 for ann in anns:
                     if not ann:
                         continue
@@ -2120,7 +2016,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                       (0, 200, 0), 2)
             elif (self.dataset_type == 1
                     and lbl_path and os.path.exists(lbl_path)):
-                mask = cv2.imread(lbl_path, cv2.IMREAD_UNCHANGED)
+                mask = read_index_mask(lbl_path)
                 if mask is not None and mask.ndim == 2:
                     overlay = np.zeros_like(img_gt)
                     overlay[mask > 0] = (0, 200, 0)
@@ -2308,7 +2204,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self.btn_run_validation.setEnabled(False)
         self.btn_stop_validation.setEnabled(True)
 
-        self._val_thread = YoloValThread(
+        self._val_thread = YoloValidationWorker(
             model_path=self._audit_model_path,
             data_path=data_path,
             split=split,
@@ -2321,7 +2217,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._val_thread.log_signal.connect(
             lambda m: print(f"[VAL][THREAD] {m}", flush=True))
         self._val_thread.finished_signal.connect(self._on_validation_finished)
-        self._val_thread.start()
+        self._start_audit_worker(self._val_thread)
 
     def stop_yolo_validation(self):
         if self._val_thread and self._val_thread.isRunning():
@@ -2330,6 +2226,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                             tag="VAL", level='WARN')
 
     def _on_validation_finished(self, result):
+        if stale(self, result):
+            return
         self.btn_run_validation.setEnabled(True)
         self.btn_stop_validation.setEnabled(False)
         err = result.get('error')
@@ -2395,7 +2293,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                                     "Дождитесь.")
             return
 
-        from utils.dataset_audit_logic import CLIP_AVAILABLE, EmbeddingClusterThread
+        from utils_new.dataset_audit.checks import CLIP_AVAILABLE
+        from ui.dataset_audit.workers import EmbeddingClusterWorker
         if not CLIP_AVAILABLE:
             QMessageBox.warning(self, "CLIP не установлен",
                                 "pip install open_clip_torch")
@@ -2412,7 +2311,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             f"Старт кластеризации: pairs={len(pairs)}, "
             f"device={self._device}", tag="CLUSTER")
 
-        self._cluster_thread = EmbeddingClusterThread(
+        self._cluster_thread = EmbeddingClusterWorker(
             pairs, batch_size=16, device=self._device)
         self._cluster_thread.log_signal.connect(self.log)
         self._cluster_thread.log_signal.connect(
@@ -2420,7 +2319,7 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self._cluster_thread.progress.connect(self._on_cluster_progress)
         self._cluster_thread.finished_signal.connect(
             self._on_cluster_finished)
-        self._cluster_thread.start()
+        self._start_audit_worker(self._cluster_thread)
 
     def stop_embedding_clustering(self):
         if self._cluster_thread and self._cluster_thread.isRunning():
@@ -2429,55 +2328,67 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
                             tag="CLUSTER", level='WARN')
 
     def _on_cluster_progress(self, c, t):
+        if stale(self):
+            return
         self.cluster_summary_label.setText(f"⏳ CLIP: {c}/{t}…")
-        QApplication.processEvents()
 
     def _on_cluster_finished(self, result):
+        if stale(self, result):
+            return
         from matplotlib import pyplot as plt
+
         self.btn_run_cluster.setEnabled(True)
         self.btn_stop_cluster.setEnabled(False)
 
-        err = result.get('error')
+        err = result.get("error")
         if err:
             self.cluster_summary_label.setText(f"❌ {err}")
-            self._audit_log(f"Кластеризация ошибка: {err}",
-                            tag="CLUSTER", level='ERROR')
+            self._audit_log(
+                f"Кластеризация ошибка: {err}", tag="CLUSTER", level="ERROR"
+            )
             return
 
-        paths = result['paths']
-        emb_2d = np.array(result['embeddings_2d'])
-        clusters = np.array(result['clusters'])
+        if result.get("cancelled"):
+            self.cluster_summary_label.setText("Кластеризация отменена.")
+            return
+        paths = result["paths"]
+        emb_2d = np.array(result["embeddings_2d"])
+        clusters = np.array(result["clusters"])
 
         self._last_cluster = {
-            'count': len(paths),
-            'n_clusters': len(set(clusters.tolist()) - {-1}),
-            'noise': int((clusters == -1).sum()),
-            'sizes': dict(Counter(clusters.tolist())),
+            "count": len(paths),
+            "n_clusters": len(set(clusters.tolist()) - {-1}),
+            "noise": int((clusters == -1).sum()),
+            "sizes": dict(Counter(clusters.tolist())),
         }
         self._last_cluster_data = {
-            'embeddings_2d': emb_2d.tolist(),
-            'paths': paths,
-            'clusters': clusters.tolist(),
+            "embeddings_2d": emb_2d.tolist(),
+            "paths": paths,
+            "clusters": clusters.tolist(),
         }
 
         self.cluster_ax.clear()
         unique = sorted(set(clusters.tolist()))
-        cmap = plt.get_cmap('tab20')
+        cmap = plt.get_cmap("tab20")
         for i, cl in enumerate(unique):
             mask = clusters == cl
-            color = 'lightgray' if cl == -1 else cmap(i % 20)
-            label = 'Шум' if cl == -1 else f'Кластер {cl}'
-            self.cluster_ax.scatter(emb_2d[mask, 0], emb_2d[mask, 1],
-                                    c=[color], label=label,
-                                    s=20, alpha=0.7)
+            color = "lightgray" if cl == -1 else cmap(i % 20)
+            label = "Шум" if cl == -1 else f"Кластер {cl}"
+            self.cluster_ax.scatter(
+                emb_2d[mask, 0],
+                emb_2d[mask, 1],
+                c=[color],
+                label=label,
+                s=20,
+                alpha=0.7,
+            )
         n_clusters = len(unique) - (1 if -1 in unique else 0)
         n_noise = int((clusters == -1).sum())
-        self.cluster_ax.set_title(
-            f"UMAP + HDBSCAN (кластеров: {n_clusters})")
+        self.cluster_ax.set_title(f"UMAP + HDBSCAN (кластеров: {n_clusters})")
         self.cluster_ax.set_xlabel("UMAP-1")
         self.cluster_ax.set_ylabel("UMAP-2")
         if len(unique) <= 20:
-            self.cluster_ax.legend(fontsize=6, loc='best')
+            self.cluster_ax.legend(fontsize=6, loc="best")
         self.cluster_figure.tight_layout()
         self.cluster_canvas.draw()
 
@@ -2485,11 +2396,14 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
             f"Изображений: {len(paths)}. Кластеров: {n_clusters}. "
             f"Шум: {n_noise}. Клик по точке — открыть пару. "
             f"Панель инструментов — зум/pan/сохранение. "
-            f"Device: {self._device}.")
+            f"Device: {self._device}."
+        )
         self._audit_log(
             f"Кластеризация готова: images={len(paths)}, "
             f"clusters={n_clusters}, noise={n_noise}",
-            tag="CLUSTER", level='OK')
+            tag="CLUSTER",
+            level="OK",
+        )
 
     def _on_cluster_click(self, event):
         if not self._last_cluster_data:
@@ -2671,6 +2585,8 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         return rel
 
     def generate_full_report(self):
+        if self._report_thread and self._report_thread.isRunning():
+            QMessageBox.information(self,"Отчёт","Дождитесь завершения предыдущего отчёта.");return
         if not self.pairs:
             QMessageBox.warning(self, "Нет данных",
                                 "Загрузите датасет.")
@@ -2715,29 +2631,27 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
         self.btn_generate_report.setEnabled(False)
         self.btn_generate_report.setText("Генерация…")
 
-        from utils.dataset_audit_logic import ReportThread
-        self._report_thread = ReportThread(data, save_path, sections)
+        from ui.dataset_audit.workers import ReportWorker
+        self._report_thread = ReportWorker(data, save_path, sections)
         self._report_thread.finished_signal.connect(
             self._on_report_finished)
-        self._report_thread.start()
+        self._start_audit_worker(self._report_thread)
 
     def _on_report_finished(self, result):
+        if stale(self, result):
+            return
         self.btn_generate_report.setEnabled(True)
-        self.btn_generate_report.setText(
-            "💾 Сгенерировать .md отчёт")
-        err = result.get('error')
+        self.btn_generate_report.setText("💾 Сгенерировать .md отчёт")
+        err = result.get("error")
         if err:
-            self._audit_log(f"Ошибка отчёта: {err}",
-                            tag="REPORT", level='ERROR')
+            self._audit_log(f"Ошибка отчёта: {err}", tag="REPORT", level="ERROR")
             QMessageBox.critical(self, "Ошибка", err)
             return
-        path = result['path']
+        path = result["path"]
         self._last_report_dir = os.path.dirname(path)
         self.btn_open_report_folder.setEnabled(True)
-        self._audit_log(f"Отчёт сохранён: {path}",
-                        tag="REPORT", level='OK')
-        QMessageBox.information(
-            self, "Готово", f"Отчёт сохранён:\n{path}")
+        self._audit_log(f"Отчёт сохранён: {path}", tag="REPORT", level="OK")
+        QMessageBox.information(self, "Готово", f"Отчёт сохранён:\n{path}")
 
     def _collect_report_data(self):
         data = {}
@@ -2760,10 +2674,10 @@ class DatasetAnalysisWindow(DatasetLoaderMixin, QMainWindow):
 
         try:
             all_ids = sorted(
-                DatasetAnalyzer.get_class_names_by_orig_id(
+                audit_presentation.get_class_names_by_orig_id(
                     self.class_table).keys())
             included_ids = sorted(
-                DatasetAnalyzer.get_included_class_ids(self.class_table))
+                audit_presentation.get_included_class_ids(self.class_table))
         except Exception:
             all_ids, included_ids = [], []
         excluded_ids = sorted(set(all_ids) - set(included_ids))

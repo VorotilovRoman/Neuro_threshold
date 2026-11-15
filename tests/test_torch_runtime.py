@@ -63,13 +63,14 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QCoreApplication, QEvent
 from unittest.mock import patch
 import runtime_torch
-from tabs.dataset_analysis import DatasetAnalysisWindow, YoloValThread
+from tabs.dataset_analysis import DatasetAnalysisWindow
+from ui.dataset_audit.workers import YoloValidationWorker
 app = QApplication([])
 with patch.object(runtime_torch, '_runtime', None), patch.object(
         runtime_torch.importlib, 'import_module', side_effect=OSError('[WinError 1114] c10.dll')) as loader:
     windows = [DatasetAnalysisWindow(), DatasetAnalysisWindow()]
     assert runtime_torch.get_torch_runtime().module is None
-    worker = YoloValThread('not-loaded.pt', 'not-loaded.yaml', device='cpu')
+    worker = YoloValidationWorker('not-loaded.pt', 'not-loaded.yaml', device='cpu')
     results = []
     worker.finished_signal.connect(results.append)
     worker.run()
