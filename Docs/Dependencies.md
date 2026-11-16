@@ -125,7 +125,7 @@ Torch-профиль (`cu126`/`cu130`), затем `python dependency_health.py 
 
 | Extra | Пакеты | Возможности |
 | --- | --- | --- |
-| `training` | segmentation-models-pytorch, psutil | U-Net/DeepLab, мониторинг обучения |
+| `training` | segmentation-models-pytorch==0.6.0, psutil | U-Net/DeepLab, мониторинг обучения |
 | `audit` | ImageHash, open-clip-torch, transformers, umap-learn, hdbscan, xgboost | Аудит, эмбеддинги, исследовательское ML |
 | `sahi` | sahi | Нарезка датасета |
 | `export` | onnx, tifffile, pascal-voc-writer | Экспорт моделей/разметки, TIFF, геометрия |
@@ -191,3 +191,10 @@ wheels для согласованной пары Torch 2.11.0 и torchvision 0.
 детекций. Это не ошибка DLL. Некоторые действия включаются только после загрузки
 данных или выбора параметров, а часть исследовательских backend требует extras.
 Для установления причины нужен конкретный элемент UI и последовательность действий.
+
+
+Проверка алгоритмов 16 ноября 2026: дополнительно установлены SMP 0.6.0 и ONNX
+для настоящих CPU loss/backward, загрузки весов и ONNX Runtime/экспорта. Полный
+прогон — 151 тест; без optional backend часть модельных тестов пропускается.
+[Подробности и границы проверки](Segmentation_Methods_Audit.md). Это не проверка
+качества на пользовательском датасете и не прогон CUDA/Windows.

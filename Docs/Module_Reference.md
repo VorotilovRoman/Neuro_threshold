@@ -4,7 +4,7 @@
 
 Сгенерировано `python Docs/generate_reference.py` из текущих исходников. Каталог исключает саму документацию и скрытые каталоги.
 
-Проанализировано Python-модулей: **185**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
+Проанализировано Python-модулей: **193**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
 
 Для всех модулей перечислены верхнеуровневые функции и классы. Для всех каталогов утилит дополнительно перечислены сигнатуры методов классов. Вложенные локальные функции не являются отдельным API и в список не включены. Приватные имена сохранены для поиска реализации.
 
@@ -50,6 +50,8 @@
 - [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch)
 - [tests.test_import_architecture](#tests-test-import-architecture)
 - [tests.test_label_save_merge](#tests-test-label-save-merge)
+- [tests.test_method_algorithms](#tests-test-method-algorithms)
+- [tests.test_model_contracts](#tests-test-model-contracts)
 - [tests.test_pixel_morphology](#tests-test-pixel-morphology)
 - [tests.test_processing_smoke](#tests-test-processing-smoke)
 - [tests.test_report_evaluation](#tests-test-report-evaluation)
@@ -178,10 +180,16 @@
 - [utils_new.presets_store](#utils-new-presets-store)
 - [utils_new.segmentation.export](#utils-new-segmentation-export)
 - [utils_new.segmentation.image_session](#utils-new-segmentation-image-session)
+- [utils_new.segmentation.model_export](#utils-new-segmentation-model-export)
+- [utils_new.segmentation.model_metrics](#utils-new-segmentation-model-metrics)
+- [utils_new.segmentation.model_output](#utils-new-segmentation-model-output)
 - [utils_new.segmentation.operations](#utils-new-segmentation-operations)
 - [utils_new.segmentation.postprocessing](#utils-new-segmentation-postprocessing)
 - [utils_new.segmentation.presets](#utils-new-segmentation-presets)
 - [utils_new.segmentation.result](#utils-new-segmentation-result)
+- [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts)
+- [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels)
+- [utils_new.segmentation.yolo_metrics](#utils-new-segmentation-yolo-metrics)
 - [utils_new.settings_store](#utils-new-settings-store)
 - [utils_new.threshold_processing](#utils-new-threshold-processing)
 - [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops)
@@ -202,16 +210,16 @@
 
 | Import | Файлы-потребители (включая условные импорты) |
 | --- | --- |
-| `PIL` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.test_new_image](#cluster-test-new-image), [generate](#generate), [utils.image_io](#utils-image-io), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий), [utils_training.yolo2voc](#utils-training-yolo2voc) |
+| `PIL` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.test_new_image](#cluster-test-new-image), [generate](#generate), [tests.test_model_contracts](#tests-test-model-contracts), [utils.image_io](#utils-image-io), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий), [utils_training.yolo2voc](#utils-training-yolo2voc) |
 | `PyQt5` | [generate](#generate), [main](#main), [main_ui](#main-ui), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [ui.DL_predict_settings](#ui-DL-predict-settings), [ui.DL_train_settings_base](#ui-DL-train-settings-base), [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model), [ui.annotation_objects](#ui-annotation-objects), [ui.annotation_review_view](#ui-annotation-review-view), [ui.application](#ui-application), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.evaluation_controller](#ui-autoreseach-ui-evaluation-controller), [ui.autoreseach_ui.evaluation_controls](#ui-autoreseach-ui-evaluation-controls), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [ui.autoreseach_ui.result_models](#ui-autoreseach-ui-result-models), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [ui.control_buttons](#ui-control-buttons), [ui.dataset_audit.lifecycle](#ui-dataset-audit-lifecycle), [ui.dataset_audit.presentation](#ui-dataset-audit-presentation), [ui.dataset_audit.workers](#ui-dataset-audit-workers), [ui.image_conversion](#ui-image-conversion), [ui.image_navigation](#ui-image-navigation), [ui.image_view](#ui-image-view), [ui.interactive_params_ui](#ui-interactive-params-ui), [ui.log_widget](#ui-log-widget), [ui.morphology_ui](#ui-morphology-ui), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.actions](#ui-segmentation-actions), [ui.segmentation.computation](#ui-segmentation-computation), [ui.segmentation.controller](#ui-segmentation-controller), [ui.segmentation.errors](#ui-segmentation-errors), [ui.segmentation.export](#ui-segmentation-export), [ui.segmentation.image_input](#ui-segmentation-image-input), [ui.segmentation.interactive_view](#ui-segmentation-interactive-view), [ui.segmentation.jobs](#ui-segmentation-jobs), [ui.segmentation.panels](#ui-segmentation-panels), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [ui.segmentation.results](#ui-segmentation-results), [ui.settings_service](#ui-settings-service), [ui.settings_ui](#ui-settings-ui), [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui), [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui), [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.slice_dataset_sahi_ui](#ui-tabs-slice-dataset-sahi-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui), [utils.image_io](#utils-image-io), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops) |
-| `cv2` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_dataset_audit](#tests-test-dataset-audit), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_report_evaluation](#tests-test-report-evaluation), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
+| `cv2` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_dataset_audit](#tests-test-dataset-audit), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_report_evaluation](#tests-test-report-evaluation), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.model_output](#utils-new-segmentation-model-output), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `hdbscan` | [cluster.cluster_embeddings](#cluster-cluster-embeddings), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs) |
 | `imagehash` | [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks) |
 | `joblib` | [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.test_new_image](#cluster-test-new-image), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `matplotlib` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [ui.dataset_audit.presentation](#ui-dataset-audit-presentation), [ui.segmentation.histogram](#ui-segmentation-histogram), [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `networkx` | [utils_ops.interactive_ops](#utils-ops-interactive-ops) |
-| `numpy` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_dataset_audit](#tests-test-dataset-audit), [tests.test_ensemble_view](#tests-test-ensemble-view), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_report_evaluation](#tests-test-report-evaluation), [tests.test_report_workflow](#tests-test-report-workflow), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.annotation_objects](#ui-annotation-objects), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.computation](#ui-segmentation-computation), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.augmentation](#utils-new-annotations-augmentation), [utils_new.annotations.boxes](#utils-new-annotations-boxes), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.model](#utils-new-annotations-model), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.geometry_metrics](#utils-new-autoreseach-utils-geometry-metrics), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs), [utils_new.dataset_audit.matching](#utils-new-dataset-audit-matching), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
-| `onnx` | [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker) |
+| `numpy` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_dataset_audit](#tests-test-dataset-audit), [tests.test_ensemble_view](#tests-test-ensemble-view), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_model_contracts](#tests-test-model-contracts), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_report_evaluation](#tests-test-report-evaluation), [tests.test_report_workflow](#tests-test-report-workflow), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.annotation_objects](#ui-annotation-objects), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.computation](#ui-segmentation-computation), [utils.ensemble_utils](#utils-ensemble-utils), [utils.image_io](#utils-image-io), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.augmentation](#utils-new-annotations-augmentation), [utils_new.annotations.boxes](#utils-new-annotations-boxes), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.model](#utils-new-annotations-model), [utils_new.annotations.object_info](#utils-new-annotations-object-info), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.geometry_metrics](#utils-new-autoreseach-utils-geometry-metrics), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs), [utils_new.dataset_audit.matching](#utils-new-dataset-audit-matching), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.model_output](#utils-new-segmentation-model-output), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
+| `onnx` | [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker) |
 | `onnxruntime` | [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker) |
 | `open_clip` | [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs) |
 | `pandas` | [tests.test_report_evaluation](#tests-test-report-evaluation), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [ui.autoreseach_ui.result_models](#ui-autoreseach-ui-result-models), [utils_new.autoreseach_utils.evaluation](#utils-new-autoreseach-utils-evaluation), [utils_new.autoreseach_utils.reports](#utils-new-autoreseach-utils-reports) |
@@ -220,14 +228,13 @@
 | `sahi` | [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi) |
 | `scipy` | [utils_new.autoreseach_utils.geometry_metrics](#utils-new-autoreseach-utils-geometry-metrics) |
 | `seaborn` | [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
-| `segment_anything` | [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops) |
-| `segmentation_models_pytorch` | [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
+| `segmentation_models_pytorch` | [tests.test_model_contracts](#tests-test-model-contracts), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `shapely` | [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.autoreseach_utils.geometry_metrics](#utils-new-autoreseach-utils-geometry-metrics) |
-| `skimage` | [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
+| `skimage` | [tests.test_method_algorithms](#tests-test-method-algorithms), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `sklearn` | [cluster.cluster_embeddings](#cluster-cluster-embeddings), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs), [utils_new.dataset_audit.matching](#utils-new-dataset-audit-matching), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `test_report_evaluation` | [tests.test_report_workflow](#tests-test-report-workflow) |
 | `tifffile` | [utils.image_io](#utils-image-io) |
-| `torch` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_dataset_audit](#tests-test-dataset-audit), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
+| `torch` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_dataset_audit](#tests-test-dataset-audit), [tests.test_model_contracts](#tests-test-model-contracts), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_aeb.yolo_aeb_utils](#utils-aeb-yolo-aeb-utils), [utils_new.segmentation.model_export](#utils-new-segmentation-model-export), [utils_new.segmentation.model_metrics](#utils-new-segmentation-model-metrics), [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `torchvision` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.test_new_image](#cluster-test-new-image), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий) |
 | `transformers` | [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs) |
 | `ultralytics` | [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker) |
@@ -716,7 +723,7 @@
 **Объявления:**
 
 - Класс [`DeepLearningWindow`](../tabs/deep_learning_methods.py#L48) (`QMainWindow`)
-- [`center_window(window, width=1200, height=800)`](../tabs/deep_learning_methods.py#L508)
+- [`center_window(window, width=1200, height=800)`](../tabs/deep_learning_methods.py#L511)
 
 <a id="tabs-deep-learning-training"></a>
 
@@ -1235,6 +1242,61 @@
 
 - Класс [`LabelSaveMergeTests`](../tests/test_label_save_merge.py#L18) (`unittest.TestCase`)
 
+<a id="tests-test-method-algorithms"></a>
+
+## tests.test_method_algorithms
+
+Исходник: [tests/test_method_algorithms.py](../tests/test_method_algorithms.py#L1).
+
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+
+**Прямые локальные импорты:**
+- [utils_new.segmentation.operations](#utils-new-segmentation-operations): `interactive`, `operations`
+- [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels): `manual_target`
+- [utils_new.threshold_processing](#utils-new-threshold-processing): `apply_threshold_method`, `niblack_threshold`, `row_adaptive_threshold`, `sauvola_threshold`, `threshold_processing`
+- [utils_ops.gradient_ops](#utils-ops-gradient-ops): `apply_gradient_method`
+- [utils_ops.interactive_ops](#utils-ops-interactive-ops): `interactive_ops as ops`
+- [utils_ops.segmentation_ops](#utils-ops-segmentation-ops): `segmentation_ops`
+- [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops): `compute_elbow_kmeans`, `create_superpixels`, `find_optimal_k_elbow`
+
+**Внешние/stdlib импорты:** `cv2`, `numpy`, `pathlib.Path`, `skimage.filters.threshold_niblack`, `skimage.filters.threshold_sauvola`, `tempfile`, `threading`, `unittest`, `unittest.mock.patch`.
+
+**Объявления:**
+
+- Класс [`InteractiveAlgorithms`](../tests/test_method_algorithms.py#L13) (`unittest.TestCase`)
+- Класс [`ThresholdAndGradientAlgorithms`](../tests/test_method_algorithms.py#L135) (`unittest.TestCase`)
+- Класс [`TraditionalLearningContracts`](../tests/test_method_algorithms.py#L221) (`unittest.TestCase`)
+
+<a id="tests-test-model-contracts"></a>
+
+## tests.test_model_contracts
+
+Исходник: [tests/test_model_contracts.py](../tests/test_model_contracts.py#L1).
+
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+
+**Прямые локальные импорты:**
+- [utils_new.segmentation.model_export](#utils-new-segmentation-model-export): `stride_padded_model`
+- [utils_new.segmentation.model_metrics](#utils-new-segmentation-model-metrics): `segmentation_metrics`
+- [utils_new.segmentation.model_output](#utils-new-segmentation-model-output): `decode_output`
+- [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts): `apply_decoder_dropout`, `validate_mask_files`
+- [utils_new.segmentation.yolo_metrics](#utils-new-segmentation-yolo-metrics): `validation_metrics`
+- [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops): `DeepLabV3Segmentor`, `ONNXSegmentor`, `UNetSegmentor`, `YOLOSegmentor`
+- [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker): `VOCSegmentationPairs`, `get_loss_function`, `get_loss_function as deeplab_loss`
+- [utils_training.train_unet_worker](#utils-training-train-unet-worker): `SegmentationDataset`, `get_loss_function`
+
+**Внешние/stdlib импорты:** `PIL.Image`, `importlib.util.find_spec`, `json`, `numpy`, `onnx`, `onnx.TensorProto`, `onnx.helper`, `pathlib.Path`, `segmentation_models_pytorch`, `tempfile`, `torch`, `types.SimpleNamespace`, `unittest`.
+
+**Объявления:**
+
+- Класс [`OutputContracts`](../tests/test_model_contracts.py#L17) (`unittest.TestCase`)
+- Класс [`RealTorchContracts`](../tests/test_model_contracts.py#L83) (`unittest.TestCase`)
+- Класс [`SemanticMetrics`](../tests/test_model_contracts.py#L217) (`unittest.TestCase`)
+- Класс [`RealONNXContracts`](../tests/test_model_contracts.py#L264) (`unittest.TestCase`)
+- Класс [`YOLOContracts`](../tests/test_model_contracts.py#L303) (`unittest.TestCase`)
+- Класс [`ExportGeometryContracts`](../tests/test_model_contracts.py#L365) (`unittest.TestCase`)
+- Класс [`BinaryVoidContracts`](../tests/test_model_contracts.py#L428) (`unittest.TestCase`)
+
 <a id="tests-test-pixel-morphology"></a>
 
 ## tests.test_pixel_morphology
@@ -1388,7 +1450,7 @@
 **Объявления:**
 
 - Класс [`SegmentationTaskGuiTests`](../tests/test_segmentation_tasks.py#L35) (`unittest.TestCase`)
-- Класс [`NumericalOperationTests`](../tests/test_segmentation_tasks.py#L177) (`unittest.TestCase`)
+- Класс [`NumericalOperationTests`](../tests/test_segmentation_tasks.py#L213) (`unittest.TestCase`)
 
 <a id="tests-test-segmentation-unification"></a>
 
@@ -1469,11 +1531,11 @@
 
 - Класс [`BaseInferenceSettings`](../ui/DL_predict_settings.py#L19) (`QGroupBox`)
 - Класс [`YOLOInferenceSettings`](../ui/DL_predict_settings.py#L43) (`BaseInferenceSettings`)
-- Класс [`UNetInferenceSettings`](../ui/DL_predict_settings.py#L122) (`BaseInferenceSettings`)
-- Класс [`DeepLabV3InferenceSettings`](../ui/DL_predict_settings.py#L463) (`BaseInferenceSettings`)
-- Класс [`SegFormerInferenceSettings`](../ui/DL_predict_settings.py#L848) (`BaseInferenceSettings`)
-- Класс [`SAMInferenceSettings`](../ui/DL_predict_settings.py#L885) (`BaseInferenceSettings`)
-- Класс [`CustomONNXInferenceSettings`](../ui/DL_predict_settings.py#L928) (`BaseInferenceSettings`)
+- Класс [`UNetInferenceSettings`](../ui/DL_predict_settings.py#L126) (`BaseInferenceSettings`)
+- Класс [`DeepLabV3InferenceSettings`](../ui/DL_predict_settings.py#L469) (`BaseInferenceSettings`)
+- Класс [`SegFormerInferenceSettings`](../ui/DL_predict_settings.py#L845) (`BaseInferenceSettings`)
+- Класс [`SAMInferenceSettings`](../ui/DL_predict_settings.py#L882) (`BaseInferenceSettings`)
+- Класс [`CustomONNXInferenceSettings`](../ui/DL_predict_settings.py#L925) (`BaseInferenceSettings`)
 
 <a id="ui-DL-train-settings-base"></a>
 
@@ -1871,11 +1933,11 @@
 **Прямые локальные импорты:**
 - нет
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QSlider`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QSlider`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `importlib.util.find_spec`.
 
 **Объявления:**
 
-- Класс [`InteractiveParametersUI`](../ui/interactive_params_ui.py#L18) (`QWidget`)
+- Класс [`InteractiveParametersUI`](../ui/interactive_params_ui.py#L19) (`QWidget`)
 
 <a id="ui-log-widget"></a>
 
@@ -1981,13 +2043,13 @@
 - [`frame_for(owner)`](../ui/segmentation/computation.py#L25)
 - [`accept_mask(owner, attribute, mask, shape)`](../ui/segmentation/computation.py#L36)
 - [`run_interactive(owner)`](../ui/segmentation/computation.py#L43)
-- [`run_dl(owner)`](../ui/segmentation/computation.py#L89)
-- [`cluster_result(owner, result)`](../ui/segmentation/computation.py#L130)
-- [`predict_ml(owner, cluster=False)`](../ui/segmentation/computation.py#L161)
-- [`train_ml(owner)`](../ui/segmentation/computation.py#L191)
-- [`find_k(owner)`](../ui/segmentation/computation.py#L251)
-- [`load_dl(owner, name)`](../ui/segmentation/computation.py#L277)
-- [`load_ml(owner, path=None)`](../ui/segmentation/computation.py#L330)
+- [`run_dl(owner)`](../ui/segmentation/computation.py#L90)
+- [`cluster_result(owner, result)`](../ui/segmentation/computation.py#L134)
+- [`predict_ml(owner, cluster=False)`](../ui/segmentation/computation.py#L165)
+- [`train_ml(owner)`](../ui/segmentation/computation.py#L195)
+- [`find_k(owner)`](../ui/segmentation/computation.py#L256)
+- [`load_dl(owner, name)`](../ui/segmentation/computation.py#L282)
+- [`load_ml(owner, path=None)`](../ui/segmentation/computation.py#L337)
 
 <a id="ui-segmentation-controller"></a>
 
@@ -2247,7 +2309,7 @@
 - Класс [`GradientPresetManager`](../ui/segmentation/preset_bindings.py#L298) (`MethodPresetManager`)
 - Класс [`InteractivePresetManager`](../ui/segmentation/preset_bindings.py#L327) (`MethodPresetManager`)
 - Класс [`TraditionalMLPresetManager`](../ui/segmentation/preset_bindings.py#L360) (`MethodPresetManager`)
-- Класс [`DeepLearningPresetManager`](../ui/segmentation/preset_bindings.py#L389) (`MethodPresetManager`)
+- Класс [`DeepLearningPresetManager`](../ui/segmentation/preset_bindings.py#L390) (`MethodPresetManager`)
 
 <a id="ui-segmentation-results"></a>
 
@@ -3188,7 +3250,7 @@
 
 Исходник: [utils_new/annotations/__init__.py](../utils_new/annotations/__init__.py#L1).
 
-**Прямые потребители:** [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.autoreseach_utils.geometry_metrics](#utils-new-autoreseach-utils-geometry-metrics), [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new).
+**Прямые потребители:** [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_unification](#tests-test-segmentation-unification), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.autoreseach_utils.geometry_metrics](#utils-new-autoreseach-utils-geometry-metrics), [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_coco_new](#utils-new-dataset-coco-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.adapters](#utils-new-annotations-adapters): `from_detection_dict`, `from_legacy`, `from_legacy_many`, `from_ultralytics_result`, `legacy_convert_annotations`, `to_detection_dict`, `to_legacy`, `to_legacy_many`
@@ -3333,7 +3395,7 @@
 
 Исходник: [utils_new/annotations/masks.py](../utils_new/annotations/masks.py#L1).
 
-**Прямые потребители:** [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new).
+**Прямые потребители:** [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.geometry](#utils-new-annotations-geometry): `GeometryError`, `bounds`, `canonical_obb_points`, `is_axis_aligned`, `rectangle_points`
@@ -3345,7 +3407,7 @@
 
 - [`_dtype_for_values(values)`](../utils_new/annotations/masks.py#L17)
 - [`annotation_binary_mask(ann: Annotation, size: ImageSize)`](../utils_new/annotations/masks.py#L22) — Raster footprint with half-open pixel-center semantics for rectangles.
-  Явно импортируют: [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new).
+  Явно импортируют: [utils_new.annotations.__init__](#utils-new-annotations---init--), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels).
 - [`rasterize_annotations(annotations: list[Annotation], size: ImageSize, *, encoding: MaskEncoding=MaskEncoding(), overlap='last', dtype=None)`](../utils_new/annotations/masks.py#L46) — Rasterize detect/obb/segment to one label per pixel.
   Явно импортируют: [utils_new.annotations.__init__](#utils-new-annotations---init--).
 - [`remap_mask_indices(mask: np.ndarray, class_map: dict[int, int], *, source_encoding: MaskEncoding=MaskEncoding(), target_encoding: MaskEncoding=MaskEncoding(), unmapped='background', dtype=None)`](../utils_new/annotations/masks.py#L78) — Remap index image without intermediate value collisions or input mutation.
@@ -4479,7 +4541,7 @@
 
 Исходник: [utils_new/dataset_yolo_labels_new.py](../utils_new/dataset_yolo_labels_new.py#L1).
 
-**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_label_save_merge](#tests-test-label-save-merge), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui.annotation_objects](#ui-annotation-objects), [ui.segmentation.export](#ui-segmentation-export), [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.segmentation.export](#utils-new-segmentation-export), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session).
+**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_annotation_objects](#tests-test-annotation-objects), [tests.test_label_save_merge](#tests-test-label-save-merge), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui.annotation_objects](#ui-annotation-objects), [ui.segmentation.export](#ui-segmentation-export), [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.segmentation.export](#utils-new-segmentation-export), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.__init__](#utils-new-annotations---init--): `Annotation`, `ImageSize`, `from_legacy`, `to_legacy`
@@ -4493,7 +4555,7 @@
 - [`_xywhr_points(vals, size=None)`](../utils_new/dataset_yolo_labels_new.py#L16) — Decode normalized ``cx,cy,w,h,angle`` into rectangle corners.
   Явно импортируют: [utils_new.dataset_io_new](#utils-new-dataset-io-new).
 - [`read_yolo_labels(path, size: ImageSize, *, format_hint='auto', log=None)`](../utils_new/dataset_yolo_labels_new.py#L43) — Read YOLO txt variants into canonical pixel-space annotations.
-  Явно импортируют: [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new).
+  Явно импортируют: [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels).
 - [`_normalized_xywhr(ann, size)`](../utils_new/dataset_yolo_labels_new.py#L115) — OBB as ``cx/W, cy/H, width_px/W, height_px/H, radians_px``.
   Явно импортируют: [utils_new.dataset_io_new](#utils-new-dataset-io-new).
 - [`serialize_yolo_labels(annotations, size: ImageSize, *, obb_format='corners')`](../utils_new/dataset_yolo_labels_new.py#L138) — Return exactly the TXT contents used by the writer, without filesystem I/O.
@@ -4625,15 +4687,74 @@
 - [`create_cache(source, **loader_options)`](../utils_new/segmentation/image_session.py#L79)
   Явно импортируют: [ui.segmentation.image_input](#ui-segmentation-image-input).
 
+<a id="utils-new-segmentation-model-export"></a>
+
+## utils_new.segmentation.model_export
+
+Исходник: [utils_new/segmentation/model_export.py](../utils_new/segmentation/model_export.py#L1).
+
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker).
+
+**Прямые локальные импорты:**
+- нет
+
+**Внешние/stdlib импорты:** `torch`.
+
+**Объявления:**
+
+- [`stride_padded_model(model)`](../utils_new/segmentation/model_export.py#L4)
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker).
+
+<a id="utils-new-segmentation-model-metrics"></a>
+
+## utils_new.segmentation.model_metrics
+
+Исходник: [utils_new/segmentation/model_metrics.py](../utils_new/segmentation/model_metrics.py#L1).
+
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий).
+
+**Прямые локальные импорты:**
+- нет
+
+**Внешние/stdlib импорты:** `torch`.
+
+**Объявления:**
+
+- [`prediction_labels(logits, num_classes, threshold=0.5)`](../utils_new/segmentation/model_metrics.py#L4)
+  Явно импортируют: [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий).
+- [`segmentation_metrics(logits, target, num_classes, *, threshold=0.5, ignore_index=None)`](../utils_new/segmentation/model_metrics.py#L15)
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий).
+- [`confusion_matrix(logits, target, num_classes, *, threshold=0.5, ignore_index=None)`](../utils_new/segmentation/model_metrics.py#L76)
+  Явно импортируют: [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий).
+
+<a id="utils-new-segmentation-model-output"></a>
+
+## utils_new.segmentation.model_output
+
+Исходник: [utils_new/segmentation/model_output.py](../utils_new/segmentation/model_output.py#L1).
+
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops).
+
+**Прямые локальные импорты:**
+- нет
+
+**Внешние/stdlib импорты:** `cv2`, `numpy`.
+
+**Объявления:**
+
+- [`decode_output(output, *, output_kind='logits', threshold=0.5, target_shape=None)`](../utils_new/segmentation/model_output.py#L7)
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops).
+
 <a id="utils-new-segmentation-operations"></a>
 
 ## utils_new.segmentation.operations
 
 Исходник: [utils_new/segmentation/operations.py](../utils_new/segmentation/operations.py#L1).
 
-**Прямые потребители:** [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [ui.segmentation.computation](#ui-segmentation-computation).
+**Прямые потребители:** [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [ui.segmentation.computation](#ui-segmentation-computation).
 
 **Прямые локальные импорты:**
+- [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels): `manual_target`
 - [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops): `create_segmentor`
 - [utils_ops.interactive_ops](#utils-ops-interactive-ops): `interactive_ops as ops`
 - [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops): `traditional_ml_ops as ops`
@@ -4644,14 +4765,15 @@
 
 - [`checkpoint(cancel)`](../utils_new/segmentation/operations.py#L9)
 - [`interactive(method, image, gray, rect, fg, bg, params, cancel)`](../utils_new/segmentation/operations.py#L14)
-- [`features(image, spec)`](../utils_new/segmentation/operations.py#L58)
-- [`prepare_training(images, grays, spec, cancel)`](../utils_new/segmentation/operations.py#L68)
-- [`train_prepared(x, y, spec, cancel)`](../utils_new/segmentation/operations.py#L91)
-- [`predict_ml(image, gray, model, metadata, spec, cluster, cancel)`](../utils_new/segmentation/operations.py#L121)
-- [`optimal_k(images, spec, cancel)`](../utils_new/segmentation/operations.py#L141)
-- [`predict_dl(model, image, parameters, overrides, cancel)`](../utils_new/segmentation/operations.py#L156)
-- [`load_dl(name, path, device, cancel)`](../utils_new/segmentation/operations.py#L166)
-- [`load_ml(path, cancel)`](../utils_new/segmentation/operations.py#L179)
+  Явно импортируют: [tests.test_method_algorithms](#tests-test-method-algorithms).
+- [`features(image, spec)`](../utils_new/segmentation/operations.py#L62)
+- [`prepare_training(images, grays, spec, cancel, paths=None)`](../utils_new/segmentation/operations.py#L72)
+- [`train_prepared(x, y, spec, cancel)`](../utils_new/segmentation/operations.py#L105)
+- [`predict_ml(image, gray, model, metadata, spec, cluster, cancel)`](../utils_new/segmentation/operations.py#L137)
+- [`optimal_k(images, spec, cancel)`](../utils_new/segmentation/operations.py#L164)
+- [`predict_dl(model, image, parameters, overrides, cancel)`](../utils_new/segmentation/operations.py#L179)
+- [`load_dl(name, path, device, cancel)`](../utils_new/segmentation/operations.py#L189)
+- [`load_ml(path, cancel)`](../utils_new/segmentation/operations.py#L202)
 
 <a id="utils-new-segmentation-postprocessing"></a>
 
@@ -4720,6 +4842,64 @@
 - [`masked_preview(image, mask)`](../utils_new/segmentation/result.py#L70)
   Явно импортируют: [tests.test_segmentation_unification](#tests-test-segmentation-unification), [ui.segmentation.presentation](#ui-segmentation-presentation).
 
+<a id="utils-new-segmentation-training-contracts"></a>
+
+## utils_new.segmentation.training_contracts
+
+Исходник: [utils_new/segmentation/training_contracts.py](../utils_new/segmentation/training_contracts.py#L1).
+
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий).
+
+**Прямые локальные импорты:**
+- нет
+
+**Внешние/stdlib импорты:** `PIL.Image`, `numpy`, `torch.nn.functional`.
+
+**Объявления:**
+
+- [`validate_mask_files(paths, num_classes, ignore_index=None)`](../utils_new/segmentation/training_contracts.py#L7) — Read EVERY source mask before training; never silently relabel bad IDs.
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий).
+- [`apply_decoder_dropout(model, probability)`](../utils_new/segmentation/training_contracts.py#L24) — SMP U-Net has no decoder_dropout argument. Apply it to decoder features.
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий).
+
+<a id="utils-new-segmentation-training-labels"></a>
+
+## utils_new.segmentation.training_labels
+
+Исходник: [utils_new/segmentation/training_labels.py](../utils_new/segmentation/training_labels.py#L1).
+
+**Прямые потребители:** [tests.test_method_algorithms](#tests-test-method-algorithms), [utils_new.segmentation.operations](#utils-new-segmentation-operations).
+
+**Прямые локальные импорты:**
+- [utils_new.annotations.__init__](#utils-new-annotations---init--): `ImageSize`
+- [utils_new.annotations.masks](#utils-new-annotations-masks): `annotation_binary_mask`
+- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `read_yolo_labels`
+
+**Внешние/stdlib импорты:** `PIL.Image`, `numpy`, `pathlib.Path`.
+
+**Объявления:**
+
+- [`manual_target(image_path, shape)`](../utils_new/segmentation/training_labels.py#L13) — YOLO TXT next to image, or images/... -> labels/...; union of all objects.
+  Явно импортируют: [tests.test_method_algorithms](#tests-test-method-algorithms), [utils_new.segmentation.operations](#utils-new-segmentation-operations).
+
+<a id="utils-new-segmentation-yolo-metrics"></a>
+
+## utils_new.segmentation.yolo_metrics
+
+Исходник: [utils_new/segmentation/yolo_metrics.py](../utils_new/segmentation/yolo_metrics.py#L1).
+
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker).
+
+**Прямые локальные импорты:**
+- нет
+
+**Внешние/stdlib импорты:** `math`.
+
+**Объявления:**
+
+- [`validation_metrics(result)`](../utils_new/segmentation/yolo_metrics.py#L6)
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts), [utils_training.train_yolo_worker](#utils-training-train-yolo-worker).
+
 <a id="utils-new-settings-store"></a>
 
 ## utils_new.settings_store
@@ -4748,7 +4928,7 @@
 
 Исходник: [utils_new/threshold_processing.py](../utils_new/threshold_processing.py#L1).
 
-**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+**Прямые потребители:** [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
 
 **Прямые локальные импорты:**
 - нет
@@ -4758,16 +4938,25 @@
 **Объявления:**
 
 - [`simple_threshold(img, thresh)`](../utils_new/threshold_processing.py#L28)
+  Явно импортируют: [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
 - [`otsu_threshold(img)`](../utils_new/threshold_processing.py#L32)
+  Явно импортируют: [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
 - [`triangle_threshold(img)`](../utils_new/threshold_processing.py#L36)
+  Явно импортируют: [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
 - [`niblack_threshold(img, window_size=15, k=-0.2)`](../utils_new/threshold_processing.py#L40)
-- [`sauvola_threshold(img, window_size=25, k=0.2, R=128)`](../utils_new/threshold_processing.py#L48)
-- [`isodata_threshold(img, initial_threshold=128)`](../utils_new/threshold_processing.py#L56)
-- [`background_symmetry_threshold(img, excess_threshold=0.2)`](../utils_new/threshold_processing.py#L73)
-- [`row_adaptive_threshold(img, window_size=50, k=0.5)`](../utils_new/threshold_processing.py#L95)
-- [`normalize_method_name(method_name)`](../utils_new/threshold_processing.py#L110) — Приводит имя метода к каноническому виду для UI.
-- [`apply_threshold_method(gray_img, method_name, params)`](../utils_new/threshold_processing.py#L135) — Применяет метод бинаризации по имени и параметрам.
-  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
+  Явно импортируют: [tests.test_method_algorithms](#tests-test-method-algorithms), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
+- [`sauvola_threshold(img, window_size=25, k=0.2, R=128)`](../utils_new/threshold_processing.py#L50)
+  Явно импортируют: [tests.test_method_algorithms](#tests-test-method-algorithms), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
+- [`isodata_threshold(img, initial_threshold=128)`](../utils_new/threshold_processing.py#L62)
+  Явно импортируют: [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
+- [`background_symmetry_threshold(img, excess_threshold=0.2)`](../utils_new/threshold_processing.py#L79) — Project histogram heuristic; symmetric background peak, excess tail.
+  Явно импортируют: [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
+- [`row_adaptive_threshold(img, window_size=50, k=0.5)`](../utils_new/threshold_processing.py#L104)
+  Явно импортируют: [tests.test_method_algorithms](#tests-test-method-algorithms), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
+- [`normalize_method_name(method_name)`](../utils_new/threshold_processing.py#L121) — Приводит имя метода к каноническому виду для UI.
+  Явно импортируют: [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
+- [`apply_threshold_method(gray_img, method_name, params)`](../utils_new/threshold_processing.py#L146) — Применяет метод бинаризации по имени и параметрам.
+  Явно импортируют: [tabs.threshold_methods](#tabs-threshold-methods), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops).
 
 <a id="utils-ops-deep-learning-ops"></a>
 
@@ -4775,43 +4964,44 @@
 
 Исходник: [utils_ops/deep_learning_ops.py](../utils_ops/deep_learning_ops.py#L1).
 
-**Прямые потребители:** [utils_new.segmentation.operations](#utils-new-segmentation-operations).
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts), [utils_new.segmentation.operations](#utils-new-segmentation-operations).
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [utils_new.segmentation.model_output](#utils-new-segmentation-model-output): `decode_output`
 
-**Внешние/stdlib импорты:** `cv2`, `importlib.util.find_spec`, `json`, `numpy`, `onnxruntime`, `os`, `segment_anything.SamPredictor`, `segment_anything.sam_model_registry`, `segmentation_models_pytorch`, `sys`, `time`, `torch`, `torchvision.transforms`, `ultralytics.YOLO`.
+**Внешние/stdlib импорты:** `cv2`, `importlib.util.find_spec`, `json`, `numpy`, `onnxruntime`, `os`, `segmentation_models_pytorch`, `sys`, `time`, `torch`, `torchvision.transforms`, `ultralytics.YOLO`, `ultralytics.utils.ops.scale_masks`.
 
 **Объявления:**
 
-- [`_log(msg)`](../utils_ops/deep_learning_ops.py#L11)
-- Класс [`BaseSegmentor`](../utils_ops/deep_learning_ops.py#L28)
-  - [`BaseSegmentor.__init__(self, model_path=None, device='cpu')`](../utils_ops/deep_learning_ops.py#L30)
-  - [`BaseSegmentor.load(self, **kwargs)`](../utils_ops/deep_learning_ops.py#L36)
-  - [`BaseSegmentor.predict(self, image, **kwargs)`](../utils_ops/deep_learning_ops.py#L39)
-- Класс [`TorchSegmentor`](../utils_ops/deep_learning_ops.py#L43) (`BaseSegmentor`)
-  - [`TorchSegmentor.__init__(self, model_path=None, device='cpu')`](../utils_ops/deep_learning_ops.py#L45)
-  - [`TorchSegmentor._get_device(self)`](../utils_ops/deep_learning_ops.py#L50)
-  - [`TorchSegmentor._resolve_resize_mode(self)`](../utils_ops/deep_learning_ops.py#L69)
-  - [`TorchSegmentor._preprocess(self, image, input_size)`](../utils_ops/deep_learning_ops.py#L104)
-  - [`TorchSegmentor._postprocess_mask(self, mask_np, orig_size, pad_info, resize_mode)`](../utils_ops/deep_learning_ops.py#L174)
-- Класс [`UNetSegmentor`](../utils_ops/deep_learning_ops.py#L195) (`TorchSegmentor`)
-  - [`UNetSegmentor.load(self, weights_path=None, encoder=None, input_size=None)`](../utils_ops/deep_learning_ops.py#L213)
-  - [`UNetSegmentor.predict(self, image, threshold=0.5)`](../utils_ops/deep_learning_ops.py#L357)
-- Класс [`DeepLabV3Segmentor`](../utils_ops/deep_learning_ops.py#L414) (`TorchSegmentor`)
-  - [`DeepLabV3Segmentor.load(self, weights_path=None, backbone=None, output_stride=None)`](../utils_ops/deep_learning_ops.py#L437)
-  - [`DeepLabV3Segmentor.predict(self, image, threshold=0.5)`](../utils_ops/deep_learning_ops.py#L608)
-- Класс [`YOLOSegmentor`](../utils_ops/deep_learning_ops.py#L699) (`BaseSegmentor`)
-  - [`YOLOSegmentor.load(self, model_path=None)`](../utils_ops/deep_learning_ops.py#L713)
-  - [`YOLOSegmentor._otsu_inside_roi(image, x1, y1, x2, y2)`](../utils_ops/deep_learning_ops.py#L736)
-  - [`YOLOSegmentor.predict(self, image, conf=0.25, iou=0.45, imgsz=640, save=False)`](../utils_ops/deep_learning_ops.py#L751)
-- Класс [`SAMSegmentor`](../utils_ops/deep_learning_ops.py#L882) (`BaseSegmentor`)
-  - [`SAMSegmentor.load(self, model_type='vit_h', model_path=None)`](../utils_ops/deep_learning_ops.py#L884)
-  - [`SAMSegmentor.predict(self, image, prompt_type='everything')`](../utils_ops/deep_learning_ops.py#L897)
-- Класс [`ONNXSegmentor`](../utils_ops/deep_learning_ops.py#L904) (`BaseSegmentor`)
-  - [`ONNXSegmentor.load(self, model_path)`](../utils_ops/deep_learning_ops.py#L906)
-  - [`ONNXSegmentor.predict(self, image)`](../utils_ops/deep_learning_ops.py#L916)
-- [`create_segmentor(model_type, **kwargs)`](../utils_ops/deep_learning_ops.py#L948)
+- [`_log(msg)`](../utils_ops/deep_learning_ops.py#L14)
+- Класс [`BaseSegmentor`](../utils_ops/deep_learning_ops.py#L31)
+  - [`BaseSegmentor.__init__(self, model_path=None, device='cpu')`](../utils_ops/deep_learning_ops.py#L33)
+  - [`BaseSegmentor.load(self, **kwargs)`](../utils_ops/deep_learning_ops.py#L39)
+  - [`BaseSegmentor.predict(self, image, **kwargs)`](../utils_ops/deep_learning_ops.py#L42)
+- Класс [`TorchSegmentor`](../utils_ops/deep_learning_ops.py#L46) (`BaseSegmentor`)
+  - [`TorchSegmentor.__init__(self, model_path=None, device='cpu')`](../utils_ops/deep_learning_ops.py#L48)
+  - [`TorchSegmentor._get_device(self)`](../utils_ops/deep_learning_ops.py#L53)
+  - [`TorchSegmentor._resolve_resize_mode(self)`](../utils_ops/deep_learning_ops.py#L72)
+  - [`TorchSegmentor._preprocess(self, image, input_size)`](../utils_ops/deep_learning_ops.py#L107)
+  - [`TorchSegmentor._postprocess_mask(self, mask_np, orig_size, pad_info, resize_mode)`](../utils_ops/deep_learning_ops.py#L177)
+- Класс [`UNetSegmentor`](../utils_ops/deep_learning_ops.py#L198) (`TorchSegmentor`)
+  - [`UNetSegmentor.load(self, weights_path=None, encoder=None, input_size=None)`](../utils_ops/deep_learning_ops.py#L216)
+  - [`UNetSegmentor.predict(self, image, threshold=0.5)`](../utils_ops/deep_learning_ops.py#L359)
+- Класс [`DeepLabV3Segmentor`](../utils_ops/deep_learning_ops.py#L413) (`TorchSegmentor`)
+  - [`DeepLabV3Segmentor.load(self, weights_path=None, backbone=None, output_stride=None)`](../utils_ops/deep_learning_ops.py#L436)
+  - [`DeepLabV3Segmentor.predict(self, image, threshold=0.5)`](../utils_ops/deep_learning_ops.py#L606)
+- Класс [`YOLOSegmentor`](../utils_ops/deep_learning_ops.py#L678) (`BaseSegmentor`)
+  - [`YOLOSegmentor.load(self, model_path=None)`](../utils_ops/deep_learning_ops.py#L693)
+  - [`YOLOSegmentor._otsu_inside_roi(image, x1, y1, x2, y2)`](../utils_ops/deep_learning_ops.py#L716)
+  - [`YOLOSegmentor.predict(self, image, conf=0.25, iou=0.45, imgsz=640, save=False, allow_box_otsu=False)`](../utils_ops/deep_learning_ops.py#L731)
+- Класс [`SAMSegmentor`](../utils_ops/deep_learning_ops.py#L869) (`BaseSegmentor`)
+  - [`SAMSegmentor.load(self, model_type='vit_h', model_path=None)`](../utils_ops/deep_learning_ops.py#L871)
+  - [`SAMSegmentor.predict(self, image, prompt_type='everything')`](../utils_ops/deep_learning_ops.py#L880)
+- Класс [`ONNXSegmentor`](../utils_ops/deep_learning_ops.py#L887) (`BaseSegmentor`)
+  - [`ONNXSegmentor.load(self, model_path)`](../utils_ops/deep_learning_ops.py#L893)
+  - [`ONNXSegmentor.predict(self, image, threshold=None)`](../utils_ops/deep_learning_ops.py#L922)
+- [`create_segmentor(model_type, **kwargs)`](../utils_ops/deep_learning_ops.py#L964)
   Явно импортируют: [utils_new.segmentation.operations](#utils-new-segmentation-operations).
 
 <a id="utils-ops-gradient-ops"></a>
@@ -4820,7 +5010,7 @@
 
 Исходник: [utils_ops/gradient_ops.py](../utils_ops/gradient_ops.py#L1).
 
-**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing).
+**Прямые потребители:** [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing).
 
 **Прямые локальные импорты:**
 - нет
@@ -4830,7 +5020,7 @@
 **Объявления:**
 
 - [`apply_gradient_method(gray, method, params)`](../utils_ops/gradient_ops.py#L5)
-  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing).
+  Явно импортируют: [tabs.gradient_methods](#tabs-gradient-methods), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing).
 
 <a id="utils-ops-interactive-ops"></a>
 
@@ -4838,22 +5028,30 @@
 
 Исходник: [utils_ops/interactive_ops.py](../utils_ops/interactive_ops.py#L1).
 
-**Прямые потребители:** [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [utils_new.segmentation.operations](#utils-new-segmentation-operations).
+**Прямые потребители:** [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_segmentation_tasks](#tests-test-segmentation-tasks), [utils_new.segmentation.operations](#utils-new-segmentation-operations).
 
 **Прямые локальные импорты:**
 - нет
 
-**Внешние/stdlib импорты:** `cv2`, `networkx`, `numpy`, `skimage.segmentation.active_contour`, `skimage.segmentation.find_boundaries`, `skimage.segmentation.random_walker`, `skimage.segmentation.slic`, `sklearn.mixture.GaussianMixture`, `warnings`.
+**Внешние/stdlib импорты:** `cv2`, `importlib.util.find_spec`, `networkx`, `numpy`, `skimage.feature.peak_local_max`, `skimage.filters.sobel`, `skimage.segmentation.active_contour`, `skimage.segmentation.morphological_chan_vese`, `skimage.segmentation.random_walker`, `skimage.segmentation.slic`, `skimage.segmentation.watershed`, `sklearn.mixture.GaussianMixture`.
 
 **Объявления:**
 
-- [`grabcut_segmentation(img, rect=None, mask=None, fg_scribbles=None, bg_scribbles=None, iterations=5, mode='Both')`](../utils_ops/interactive_ops.py#L17) — GrabCut segmentation with mode selection.
-- [`watershed_segmentation(gray, distance_threshold=50, min_area=20)`](../utils_ops/interactive_ops.py#L67)
-- [`random_walker_segmentation(img, markers, beta=130, mode='cg_j')`](../utils_ops/interactive_ops.py#L92) — Random Walker segmentation.
-- [`active_contour_segmentation(gray, rect, alpha=0.01, beta=0.1, gamma=0.01, max_iter=250, convergence=0.001, smooth=True, init_type='Ellipse')`](../utils_ops/interactive_ops.py#L116) — Active Contours (Snakes) segmentation.
-- [`supercut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1.0, lambda_val=0.5, sigma_color=10.0)`](../utils_ops/interactive_ops.py#L200) — SuperCut using graph cut (max-flow/min-cut) on superpixels.
-- [`onecut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1.0, spatial_weight=1.0, data_weight=1.0, color_sigma=10.0)`](../utils_ops/interactive_ops.py#L305) — OneCut segmentation using superpixels and graph cut.
-- [`lazy_snapping(img, fg_scribbles, bg_scribbles, superpixel_size=50, compactness=10, sigma=1.0, color_sigma=10.0)`](../utils_ops/interactive_ops.py#L452) — Lazy Snapping using graph cut on superpixels.
+- [`_image(image)`](../utils_ops/interactive_ops.py#L12)
+- [`_rect(rect, shape)`](../utils_ops/interactive_ops.py#L19)
+- [`_seeds(fg, bg, shape, required=True)`](../utils_ops/interactive_ops.py#L31)
+- [`_positive(name, value, zero=False)`](../utils_ops/interactive_ops.py#L48)
+- [`grabcut_segmentation(img, rect=None, mask=None, fg_scribbles=None, bg_scribbles=None, iterations=5, mode='Both')`](../utils_ops/interactive_ops.py#L55) — Initialize once: rectangle, seeds, or rectangle with hard seed constraints.
+- [`watershed_segmentation(gray, distance_threshold=50, min_distance=20, fg_scribbles=None, bg_scribbles=None, mode='automatic')`](../utils_ops/interactive_ops.py#L110) — Marker watershed; automatic mode assumes dark objects on a light background.
+- [`random_walker_segmentation(img, markers, beta=130, mode='cg_j', use_color=True)`](../utils_ops/interactive_ops.py#L153)
+- [`active_contour_segmentation(gray, rect, alpha=0.01, beta=0.1, gamma=0.01, max_iter=250, convergence=0.001, smooth=True, init_type='Ellipse')`](../utils_ops/interactive_ops.py#L192)
+- [`morphological_chan_vese_segmentation(gray, rect, iterations=100, smoothing=2, lambda_inside=1.0, lambda_outside=1.0)`](../utils_ops/interactive_ops.py#L249) — Region-based evolution, useful when an object has a weak edge.
+- [`_superpixels(img, superpixel_size, compactness, sigma)`](../utils_ops/interactive_ops.py#L276)
+- [`_appearance_costs(colors, fg_pixels, bg_pixels)`](../utils_ops/interactive_ops.py#L314)
+- [`_cut(segments, colors, pairs, costs, color_sigma, spatial_weight=1.0, fg=None, bg=None)`](../utils_ops/interactive_ops.py#L336)
+- [`supercut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1.0, lambda_val=0.5, sigma_color=10.0)`](../utils_ops/interactive_ops.py#L374) — Project variant: ROI-occupancy prior and color-sensitive SLIC graph.
+- [`onecut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1.0, spatial_weight=1.0, data_weight=1.0, color_sigma=10.0)`](../utils_ops/interactive_ops.py#L397) — Project variant: GMM learned from ROI/exterior and a SLIC graph cut.
+- [`lazy_snapping(img, fg_scribbles, bg_scribbles, superpixel_size=50, compactness=10, sigma=1.0, color_sigma=10.0)`](../utils_ops/interactive_ops.py#L417) — Project variant: seed-trained GMM unary costs with hard superpixel seeds.
 
 <a id="utils-ops-segmentation-ops"></a>
 
@@ -4861,48 +5059,38 @@
 
 Исходник: [utils_ops/segmentation_ops.py](../utils_ops/segmentation_ops.py#L1).
 
-**Прямые потребители:** [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [utils.ensemble_utils](#utils-ensemble-utils).
+**Прямые потребители:** [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [utils.ensemble_utils](#utils-ensemble-utils).
 
 **Прямые локальные импорты:**
 - [ui.settings_service](#ui-settings-service): `settings`
+- [utils_new.threshold_processing](#utils-new-threshold-processing): `apply_threshold_method as apply_threshold_method`, `background_symmetry_threshold as background_symmetry_threshold`, `isodata_threshold as isodata_threshold`, `niblack_threshold as niblack_threshold`, `normalize_method_name as normalize_method_name`, `otsu_threshold as otsu_threshold`, `row_adaptive_threshold as row_adaptive_threshold`, `sauvola_threshold as sauvola_threshold`, `simple_threshold as simple_threshold`, `triangle_threshold as triangle_threshold`
 
 **Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QListWidgetItem`, `cv2`, `numpy`.
 
 **Объявления:**
 
-- [`get_display_params(img_shape)`](../utils_ops/segmentation_ops.py#L11)
-- [`draw_label(img_color, label, x, y, box_w, box_h, font_scale, font_thickness, thickness, color=None)`](../utils_ops/segmentation_ops.py#L25)
-- [`draw_label_rotated(img_color, label, center, font_scale, font_thickness, color=None)`](../utils_ops/segmentation_ops.py#L48)
-- [`get_class_color(cls_id)`](../utils_ops/segmentation_ops.py#L85) — Цвет (BGR) для класса. Для id >= 10 цвета циклически повторяются.
+- [`get_display_params(img_shape)`](../utils_ops/segmentation_ops.py#L23)
+- [`draw_label(img_color, label, x, y, box_w, box_h, font_scale, font_thickness, thickness, color=None)`](../utils_ops/segmentation_ops.py#L37)
+- [`draw_label_rotated(img_color, label, center, font_scale, font_thickness, color=None)`](../utils_ops/segmentation_ops.py#L60)
+- [`get_class_color(cls_id)`](../utils_ops/segmentation_ops.py#L97) — Цвет (BGR) для класса. Для id >= 10 цвета циклически повторяются.
   Явно импортируют: [tabs.dataset_analysis](#tabs-dataset-analysis), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui).
-- [`draw_class_label(img, text, x, y, box_w, box_h, font_scale, font_thickness, bg_color, text_color=(255, 255, 255), padding=2, margin=5)`](../utils_ops/segmentation_ops.py#L96) — Рисует текстовую подпись поверх изображения на цветной плашке.
-- [`simple_threshold(img, thresh)`](../utils_ops/segmentation_ops.py#L153)
-- [`otsu_threshold(img)`](../utils_ops/segmentation_ops.py#L158)
-- [`triangle_threshold(img)`](../utils_ops/segmentation_ops.py#L163)
-- [`niblack_threshold(img, window_size=15, k=-0.2)`](../utils_ops/segmentation_ops.py#L168)
-- [`sauvola_threshold(img, window_size=25, k=0.2, R=128)`](../utils_ops/segmentation_ops.py#L177)
-- [`isodata_threshold(img, initial_threshold=128)`](../utils_ops/segmentation_ops.py#L186)
-- [`background_symmetry_threshold(img, excess_threshold=0.2)`](../utils_ops/segmentation_ops.py#L204)
-- [`row_adaptive_threshold(img, window_size=50, k=0.5)`](../utils_ops/segmentation_ops.py#L227)
-- [`segment_contours(img, binary, use_hull, draw=True)`](../utils_ops/segmentation_ops.py#L244) — Возвращает (img_color, objects) где objects = список ('segment', 0, points) в нормализованных координатах.
+- [`draw_class_label(img, text, x, y, box_w, box_h, font_scale, font_thickness, bg_color, text_color=(255, 255, 255), padding=2, margin=5)`](../utils_ops/segmentation_ops.py#L108) — Рисует текстовую подпись поверх изображения на цветной плашке.
+- [`segment_contours(img, binary, use_hull, draw=True)`](../utils_ops/segmentation_ops.py#L165) — Возвращает (img_color, objects) где objects = список ('segment', 0, points) в нормализованных координатах.
   Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [utils.ensemble_utils](#utils-ensemble-utils).
-- [`segment_projections(img, binary, draw=True)`](../utils_ops/segmentation_ops.py#L284) — Возвращает (img_color, objects) где objects = список ('detect', 0, cx, cy, w, h)
+- [`segment_projections(img, binary, draw=True)`](../utils_ops/segmentation_ops.py#L205) — Возвращает (img_color, objects) где objects = список ('detect', 0, cx, cy, w, h)
   Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [utils.ensemble_utils](#utils-ensemble-utils).
-- [`segment_min_area_rect(img, binary, use_hull, draw=True)`](../utils_ops/segmentation_ops.py#L322) — Возвращает (img_color, objects) где objects = список ('obb', 0, points) где points = 8 нормализованных координат углов.
+- [`segment_min_area_rect(img, binary, use_hull, draw=True)`](../utils_ops/segmentation_ops.py#L243) — Возвращает (img_color, objects) где objects = список ('obb', 0, points) где points = 8 нормализованных координат углов.
   Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [utils.ensemble_utils](#utils-ensemble-utils).
-- [`segment_polygons(img, binary, use_hull, draw=True)`](../utils_ops/segmentation_ops.py#L362) — Алиас для segment_contours (уже возвращает segment).
-- [`draw_yolo_annotations(img, annotations, color=(0, 255, 0))`](../utils_ops/segmentation_ops.py#L368) — Рисует аннотации любого типа (detect, obb, segment) на изображении.
-- [`format_annotation_display(index, ann, img_w, img_h)`](../utils_ops/segmentation_ops.py#L419) — Форматирует аннотацию для отображения в QListWidget.
-- [`update_annotation_list(list_widget: QListWidget, annotations, img_w: int, img_h: int)`](../utils_ops/segmentation_ops.py#L449) — Очищает и заполняет QListWidget строками аннотаций. Каждому элементу в UserRole записывается индекс.
+- [`segment_polygons(img, binary, use_hull, draw=True)`](../utils_ops/segmentation_ops.py#L283) — Алиас для segment_contours (уже возвращает segment).
+- [`draw_yolo_annotations(img, annotations, color=(0, 255, 0))`](../utils_ops/segmentation_ops.py#L289) — Рисует аннотации любого типа (detect, obb, segment) на изображении.
+- [`format_annotation_display(index, ann, img_w, img_h)`](../utils_ops/segmentation_ops.py#L340) — Форматирует аннотацию для отображения в QListWidget.
+- [`update_annotation_list(list_widget: QListWidget, annotations, img_w: int, img_h: int)`](../utils_ops/segmentation_ops.py#L370) — Очищает и заполняет QListWidget строками аннотаций. Каждому элементу в UserRole записывается индекс.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset).
-- [`delete_annotation_by_index(current_annotations, idx, all_annotations=None, current_index=None)`](../utils_ops/segmentation_ops.py#L459) — Удаляет аннотацию с индексом idx. Возвращает (new_annotations, new_selected_index).
-- [`draw_selected_objects(img, objects, selected_indices, draw_mode, use_hull, color_rect, color_label, thickness, font_scale, font_thickness)`](../utils_ops/segmentation_ops.py#L472) — Рисует выбранные объекты на изображении. Поддерживает ('detect',...), ('obb',...), ('segment',...).
-- [`format_object_for_list(index, obj, img_w, img_h)`](../utils_ops/segmentation_ops.py#L521) — Универсальное форматирование для старого стиля (используется в threshold_methods.py).
-- [`normalize_method_name(method_name)`](../utils_ops/segmentation_ops.py#L542) — Приводит имя метода к каноническому виду для UI.
-- [`apply_threshold_method(gray_img, method_name, params)`](../utils_ops/segmentation_ops.py#L568) — Применяет метод бинаризации по имени и параметрам.
-  Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tests.test_processing_smoke](#tests-test-processing-smoke), [utils.ensemble_utils](#utils-ensemble-utils).
-- [`get_morph_kernel(size, shape_name)`](../utils_ops/segmentation_ops.py#L629)
-- [`apply_morphology(binary, close_factor, open_factor, kernel_shape, img_shape=None)`](../utils_ops/segmentation_ops.py#L639)
+- [`delete_annotation_by_index(current_annotations, idx, all_annotations=None, current_index=None)`](../utils_ops/segmentation_ops.py#L380) — Удаляет аннотацию с индексом idx. Возвращает (new_annotations, new_selected_index).
+- [`draw_selected_objects(img, objects, selected_indices, draw_mode, use_hull, color_rect, color_label, thickness, font_scale, font_thickness)`](../utils_ops/segmentation_ops.py#L393) — Рисует выбранные объекты на изображении. Поддерживает ('detect',...), ('obb',...), ('segment',...).
+- [`format_object_for_list(index, obj, img_w, img_h)`](../utils_ops/segmentation_ops.py#L442) — Универсальное форматирование для старого стиля (используется в threshold_methods.py).
+- [`get_morph_kernel(size, shape_name)`](../utils_ops/segmentation_ops.py#L463)
+- [`apply_morphology(binary, close_factor, open_factor, kernel_shape, img_shape=None)`](../utils_ops/segmentation_ops.py#L473)
 
 <a id="utils-ops-traditional-ml-ops"></a>
 
@@ -4910,7 +5098,7 @@
 
 Исходник: [utils_ops/traditional_ml_ops.py](../utils_ops/traditional_ml_ops.py#L1).
 
-**Прямые потребители:** [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [utils_new.segmentation.operations](#utils-new-segmentation-operations).
+**Прямые потребители:** [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tests.test_method_algorithms](#tests-test-method-algorithms), [utils_new.segmentation.operations](#utils-new-segmentation-operations).
 
 **Прямые локальные импорты:**
 - нет
@@ -4924,17 +5112,19 @@
 - [`extract_superpixel_features(image, segments, use_intensity=True, use_texture=False, use_spatial=False)`](../utils_ops/traditional_ml_ops.py#L47)
   Явно импортируют: [tabs.traditional_ml_methods](#tabs-traditional-ml-methods).
 - [`train_kmeans(X, n_clusters=3)`](../utils_ops/traditional_ml_ops.py#L85)
-- [`train_meanshift(X)`](../utils_ops/traditional_ml_ops.py#L90)
-- [`train_svm(X, y, kernel='rbf', C=10)`](../utils_ops/traditional_ml_ops.py#L95)
-- [`train_random_forest(X, y, n_estimators=100)`](../utils_ops/traditional_ml_ops.py#L100)
-- [`train_xgboost(X, y, n_estimators=100)`](../utils_ops/traditional_ml_ops.py#L105)
-- [`train_decision_tree(X, y)`](../utils_ops/traditional_ml_ops.py#L112)
-- [`predict_pixelwise(model, X, original_shape)`](../utils_ops/traditional_ml_ops.py#L117)
-- [`predict_superpixel(model, segments, X_superpixel)`](../utils_ops/traditional_ml_ops.py#L121)
-- [`create_superpixels(image, superpixel_size=50)`](../utils_ops/traditional_ml_ops.py#L128)
-  Явно импортируют: [tabs.traditional_ml_methods](#tabs-traditional-ml-methods).
-- [`compute_elbow_kmeans(X, max_k=10)`](../utils_ops/traditional_ml_ops.py#L134) — Вычисляет инерцию (сумму квадратов расстояний) для K от 1 до max_k.
-- [`find_optimal_k_elbow(inertias)`](../utils_ops/traditional_ml_ops.py#L146) — Находит оптимальное K как точку максимального изгиба (метод локтя).
+- [`train_meanshift(X)`](../utils_ops/traditional_ml_ops.py#L92)
+- [`train_svm(X, y, kernel='rbf', C=10)`](../utils_ops/traditional_ml_ops.py#L97)
+- [`train_random_forest(X, y, n_estimators=100)`](../utils_ops/traditional_ml_ops.py#L102)
+- [`train_xgboost(X, y, n_estimators=100)`](../utils_ops/traditional_ml_ops.py#L107)
+- [`train_decision_tree(X, y)`](../utils_ops/traditional_ml_ops.py#L114)
+- [`predict_pixelwise(model, X, original_shape)`](../utils_ops/traditional_ml_ops.py#L119)
+- [`predict_superpixel(model, segments, X_superpixel)`](../utils_ops/traditional_ml_ops.py#L123)
+- [`create_superpixels(image, superpixel_size=50)`](../utils_ops/traditional_ml_ops.py#L130)
+  Явно импортируют: [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tests.test_method_algorithms](#tests-test-method-algorithms).
+- [`compute_elbow_kmeans(X, max_k=10)`](../utils_ops/traditional_ml_ops.py#L140) — Вычисляет инерцию (сумму квадратов расстояний) для K от 1 до max_k.
+  Явно импортируют: [tests.test_method_algorithms](#tests-test-method-algorithms).
+- [`find_optimal_k_elbow(inertias)`](../utils_ops/traditional_ml_ops.py#L155) — Находит оптимальное K как точку максимального изгиба (метод локтя).
+  Явно импортируют: [tests.test_method_algorithms](#tests-test-method-algorithms).
 
 <a id="utils-training-test-train-worker"></a>
 
@@ -4962,55 +5152,58 @@
 
 Исходник: [utils_training/train_DeepLabV3_worker.py](../utils_training/train_DeepLabV3_worker.py#L1).
 
-**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts).
 
 **Прямые локальные импорты:**
-- нет
+- [utils_new.segmentation.model_export](#utils-new-segmentation-model-export): `stride_padded_model`
+- [utils_new.segmentation.model_metrics](#utils-new-segmentation-model-metrics): `confusion_matrix`, `prediction_labels`, `segmentation_metrics`
+- [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts): `validate_mask_files`
 
-**Внешние/stdlib импорты:** `PIL.Image`, `argparse`, `copy`, `csv`, `datetime.datetime`, `glob.glob`, `io`, `json`, `matplotlib`, `matplotlib.pyplot`, `numpy`, `onnx`, `onnxruntime`, `os`, `psutil`, `seaborn`, `segmentation_models_pytorch`, `signal`, `sys`, `torch`, `torch.nn`, `torch.optim`, `torch.utils.data.DataLoader`, `torch.utils.data.Dataset`, `torchvision.transforms`, `torchvision.transforms.functional`, `traceback`, `yaml`.
+**Внешние/stdlib импорты:** `PIL.Image`, `argparse`, `copy`, `csv`, `datetime.datetime`, `glob.glob`, `io`, `json`, `matplotlib`, `matplotlib.pyplot`, `numpy`, `onnx`, `onnxruntime`, `os`, `pathlib.Path`, `psutil`, `seaborn`, `segmentation_models_pytorch`, `signal`, `sys`, `torch`, `torch.nn`, `torch.optim`, `torch.utils.data.DataLoader`, `torch.utils.data.Dataset`, `torchvision.transforms`, `torchvision.transforms.functional`, `traceback`, `yaml`.
 
 **Объявления:**
 
-- [`log(msg)`](../utils_training/train_DeepLabV3_worker.py#L186)
-- [`signal_handler(signum, frame)`](../utils_training/train_DeepLabV3_worker.py#L190)
-- [`find_image_file(jpeg_dir, basename)`](../utils_training/train_DeepLabV3_worker.py#L206)
-- [`read_voc_pairs(txt_path, jpeg_dir, seg_dir)`](../utils_training/train_DeepLabV3_worker.py#L213)
-- [`read_voc_file_list(txt_path, root_dir)`](../utils_training/train_DeepLabV3_worker.py#L238)
-- [`_resolve_path(root, p)`](../utils_training/train_DeepLabV3_worker.py#L243)
-- [`create_loaders_from_yaml(yaml_path, default_input_size, default_num_classes, augmentations, ignore_index, batch_size, num_workers, normalize, resize_mode)`](../utils_training/train_DeepLabV3_worker.py#L254)
-- [`create_voc_loaders(root, input_size, num_classes, augmentations, ignore_index, batch_size, num_workers, normalize=False, resize_mode='hard')`](../utils_training/train_DeepLabV3_worker.py#L361)
-- Класс [`VOCSegmentationPairs`](../utils_training/train_DeepLabV3_worker.py#L385) (`Dataset`)
-  - [`VOCSegmentationPairs.__init__(self, image_mask_pairs, input_size, num_classes, ignore_index, augmentations, normalize=False, resize_mode='hard')`](../utils_training/train_DeepLabV3_worker.py#L386)
-  - [`VOCSegmentationPairs.__len__(self)`](../utils_training/train_DeepLabV3_worker.py#L396)
-  - [`VOCSegmentationPairs.__getitem__(self, idx)`](../utils_training/train_DeepLabV3_worker.py#L399)
-- [`get_loss_function(loss_name, num_classes, ignore_index=None, class_weights=None, loss_weights=None, device='cpu')`](../utils_training/train_DeepLabV3_worker.py#L464) — Патч 1: weights_tensor создаётся на нужном устройстве (device).
-- [`get_optimizer(model, opt_name, lr, momentum=0.9, weight_decay=0.0001)`](../utils_training/train_DeepLabV3_worker.py#L515)
-- [`get_layerwise_optimizer(model, opt_name, base_lr, momentum=0.9, weight_decay=0.0001, decay_factor=0.1)`](../utils_training/train_DeepLabV3_worker.py#L528) — Layer-wise LR. Устойчив к тому, что get_stages() может возвращать
-- [`get_scheduler(optimizer, scheduler_name, epochs, eta_min=1e-06)`](../utils_training/train_DeepLabV3_worker.py#L587)
-- Класс [`PolyLRSchedulerIter`](../utils_training/train_DeepLabV3_worker.py#L600)
-  - [`PolyLRSchedulerIter.__init__(self, optimizer, max_iter, power=0.9, min_lr=0.0)`](../utils_training/train_DeepLabV3_worker.py#L601)
-  - [`PolyLRSchedulerIter.step(self)`](../utils_training/train_DeepLabV3_worker.py#L609)
-  - [`PolyLRSchedulerIter.get_last_lr(self)`](../utils_training/train_DeepLabV3_worker.py#L615)
-- Класс [`ModelEMA`](../utils_training/train_DeepLabV3_worker.py#L619)
-  - [`ModelEMA.__init__(self, model, decay=0.999, device=None)`](../utils_training/train_DeepLabV3_worker.py#L620)
-  - [`ModelEMA.update(self, model)`](../utils_training/train_DeepLabV3_worker.py#L631)
-  - [`ModelEMA.state_dict(self)`](../utils_training/train_DeepLabV3_worker.py#L642)
-- [`set_bn_eval(module)`](../utils_training/train_DeepLabV3_worker.py#L646)
-- [`_pad_to_multiple(x, multiple=16)`](../utils_training/train_DeepLabV3_worker.py#L652)
-- [`_crop_to_hw(x, hw)`](../utils_training/train_DeepLabV3_worker.py#L662)
-- [`_forward_safe(model, x, use_amp, device, output_stride=None)`](../utils_training/train_DeepLabV3_worker.py#L667) — Патч 3: убран nan_to_num(nan=0.0) — он маскировал проблему,
-- [`predict_batch_multiscale(model, images, device, scales, use_amp)`](../utils_training/train_DeepLabV3_worker.py#L697)
-- [`compute_metrics(pred_logits, true_masks, num_classes, ignore_index=None, output_activation='argmax', threshold=0.5)`](../utils_training/train_DeepLabV3_worker.py#L722)
-- [`auto_batch_size(device, input_size, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX)`](../utils_training/train_DeepLabV3_worker.py#L784)
-- [`save_args_yaml(args_dict, save_path)`](../utils_training/train_DeepLabV3_worker.py#L813)
-- [`save_model_meta(meta_dict, model_path)`](../utils_training/train_DeepLabV3_worker.py#L825)
-- [`save_training_plots(history_dict, save_dir)`](../utils_training/train_DeepLabV3_worker.py#L832)
-- [`save_csv_results(history_dict, save_path)`](../utils_training/train_DeepLabV3_worker.py#L854)
-- [`save_pr_curve(preds, masks, save_dir, threshold=0.5)`](../utils_training/train_DeepLabV3_worker.py#L862)
-- [`save_confusion_matrix(preds, true_masks, save_dir, num_classes, ignore_index=None, threshold=0.5)`](../utils_training/train_DeepLabV3_worker.py#L881)
-- [`save_train_batch_examples(loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1, normalize=False)`](../utils_training/train_DeepLabV3_worker.py#L919)
-- [`save_val_examples(loader, model, device, save_dir, num_samples=8, num_classes=1, output_activation='argmax', normalize=False, use_amp=False, multi_scale=False, scales=None)`](../utils_training/train_DeepLabV3_worker.py#L951)
-- [`main()`](../utils_training/train_DeepLabV3_worker.py#L1011)
+- [`log(msg)`](../utils_training/train_DeepLabV3_worker.py#L192)
+- [`signal_handler(signum, frame)`](../utils_training/train_DeepLabV3_worker.py#L196)
+- [`find_image_file(jpeg_dir, basename)`](../utils_training/train_DeepLabV3_worker.py#L212)
+- [`read_voc_pairs(txt_path, jpeg_dir, seg_dir)`](../utils_training/train_DeepLabV3_worker.py#L219)
+- [`read_voc_file_list(txt_path, root_dir)`](../utils_training/train_DeepLabV3_worker.py#L244)
+- [`_resolve_path(root, p)`](../utils_training/train_DeepLabV3_worker.py#L249)
+- [`create_loaders_from_yaml(yaml_path, default_input_size, default_num_classes, augmentations, ignore_index, batch_size, num_workers, normalize, resize_mode)`](../utils_training/train_DeepLabV3_worker.py#L260)
+- [`create_voc_loaders(root, input_size, num_classes, augmentations, ignore_index, batch_size, num_workers, normalize=False, resize_mode='hard')`](../utils_training/train_DeepLabV3_worker.py#L367)
+- Класс [`VOCSegmentationPairs`](../utils_training/train_DeepLabV3_worker.py#L391) (`Dataset`)
+  - [`VOCSegmentationPairs.__init__(self, image_mask_pairs, input_size, num_classes, ignore_index, augmentations, normalize=False, resize_mode='hard')`](../utils_training/train_DeepLabV3_worker.py#L392)
+  - [`VOCSegmentationPairs.__len__(self)`](../utils_training/train_DeepLabV3_worker.py#L404)
+  - [`VOCSegmentationPairs.__getitem__(self, idx)`](../utils_training/train_DeepLabV3_worker.py#L407)
+- [`get_loss_function(loss_name, num_classes, ignore_index=None, class_weights=None, loss_weights=None, device='cpu')`](../utils_training/train_DeepLabV3_worker.py#L475) — Патч 1: weights_tensor создаётся на нужном устройстве (device).
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts).
+- [`get_optimizer(model, opt_name, lr, momentum=0.9, weight_decay=0.0001)`](../utils_training/train_DeepLabV3_worker.py#L530)
+- [`get_layerwise_optimizer(model, opt_name, base_lr, momentum=0.9, weight_decay=0.0001, decay_factor=0.1)`](../utils_training/train_DeepLabV3_worker.py#L543) — Layer-wise LR. Устойчив к тому, что get_stages() может возвращать
+- [`get_scheduler(optimizer, scheduler_name, epochs, eta_min=1e-06)`](../utils_training/train_DeepLabV3_worker.py#L602)
+- Класс [`PolyLRSchedulerIter`](../utils_training/train_DeepLabV3_worker.py#L615)
+  - [`PolyLRSchedulerIter.__init__(self, optimizer, max_iter, power=0.9, min_lr=0.0)`](../utils_training/train_DeepLabV3_worker.py#L616)
+  - [`PolyLRSchedulerIter.step(self)`](../utils_training/train_DeepLabV3_worker.py#L624)
+  - [`PolyLRSchedulerIter.get_last_lr(self)`](../utils_training/train_DeepLabV3_worker.py#L630)
+- Класс [`ModelEMA`](../utils_training/train_DeepLabV3_worker.py#L634)
+  - [`ModelEMA.__init__(self, model, decay=0.999, device=None)`](../utils_training/train_DeepLabV3_worker.py#L635)
+  - [`ModelEMA.update(self, model)`](../utils_training/train_DeepLabV3_worker.py#L646)
+  - [`ModelEMA.state_dict(self)`](../utils_training/train_DeepLabV3_worker.py#L657)
+- [`set_bn_eval(module)`](../utils_training/train_DeepLabV3_worker.py#L661)
+- [`_pad_to_multiple(x, multiple=16)`](../utils_training/train_DeepLabV3_worker.py#L667)
+- [`_crop_to_hw(x, hw)`](../utils_training/train_DeepLabV3_worker.py#L677)
+- [`_forward_safe(model, x, use_amp, device, output_stride=None)`](../utils_training/train_DeepLabV3_worker.py#L682) — Патч 3: убран nan_to_num(nan=0.0) — он маскировал проблему,
+- [`predict_batch_multiscale(model, images, device, scales, use_amp)`](../utils_training/train_DeepLabV3_worker.py#L712)
+- [`compute_metrics(pred_logits, true_masks, num_classes, ignore_index=None, output_activation='argmax', threshold=0.5)`](../utils_training/train_DeepLabV3_worker.py#L737)
+- [`auto_batch_size(device, input_size, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX)`](../utils_training/train_DeepLabV3_worker.py#L746)
+- [`save_args_yaml(args_dict, save_path)`](../utils_training/train_DeepLabV3_worker.py#L775)
+- [`save_model_meta(meta_dict, model_path)`](../utils_training/train_DeepLabV3_worker.py#L787)
+- [`save_training_plots(history_dict, save_dir)`](../utils_training/train_DeepLabV3_worker.py#L794)
+- [`save_csv_results(history_dict, save_path)`](../utils_training/train_DeepLabV3_worker.py#L815)
+- [`save_pr_curve(preds, masks, save_dir, threshold=0.5)`](../utils_training/train_DeepLabV3_worker.py#L823)
+- [`save_confusion_matrix(preds, true_masks, save_dir, num_classes, ignore_index=None, threshold=0.5)`](../utils_training/train_DeepLabV3_worker.py#L842)
+- [`save_train_batch_examples(loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1, normalize=False)`](../utils_training/train_DeepLabV3_worker.py#L863)
+- [`save_val_examples(loader, model, device, save_dir, num_samples=8, num_classes=1, output_activation='argmax', normalize=False, use_amp=False, multi_scale=False, scales=None, threshold=0.5)`](../utils_training/train_DeepLabV3_worker.py#L895)
+- [`main()`](../utils_training/train_DeepLabV3_worker.py#L948)
 
 <a id="utils-training-train-unet-worker"></a>
 
@@ -5018,37 +5211,40 @@
 
 Исходник: [utils_training/train_unet_worker.py](../utils_training/train_unet_worker.py#L1).
 
-**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+**Прямые потребители:** [tests.test_model_contracts](#tests-test-model-contracts).
 
 **Прямые локальные импорты:**
-- нет
+- [utils_new.segmentation.model_export](#utils-new-segmentation-model-export): `stride_padded_model`
+- [utils_new.segmentation.model_metrics](#utils-new-segmentation-model-metrics): `confusion_matrix`, `prediction_labels`, `segmentation_metrics`
+- [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts): `apply_decoder_dropout`, `validate_mask_files`
 
-**Внешние/stdlib импорты:** `PIL.Image`, `argparse`, `csv`, `datetime.datetime`, `io`, `json`, `matplotlib`, `matplotlib.pyplot`, `numpy`, `onnx`, `onnxruntime`, `os`, `psutil`, `seaborn`, `segmentation_models_pytorch`, `signal`, `sys`, `torch`, `torch.nn`, `torch.optim`, `torch.utils.data.DataLoader`, `torch.utils.data.Dataset`, `torchvision.transforms`, `torchvision.transforms.functional`, `traceback`, `yaml`.
+**Внешние/stdlib импорты:** `PIL.Image`, `argparse`, `csv`, `datetime.datetime`, `io`, `json`, `matplotlib`, `matplotlib.pyplot`, `numpy`, `onnx`, `onnxruntime`, `os`, `pathlib.Path`, `psutil`, `seaborn`, `segmentation_models_pytorch`, `signal`, `sys`, `torch`, `torch.nn`, `torch.optim`, `torch.utils.data.DataLoader`, `torch.utils.data.Dataset`, `torchvision.transforms`, `torchvision.transforms.functional`, `traceback`, `yaml`.
 
 **Объявления:**
 
-- [`log(msg)`](../utils_training/train_unet_worker.py#L129)
-- [`signal_handler(signum, frame)`](../utils_training/train_unet_worker.py#L134)
-- Класс [`SegmentationDataset`](../utils_training/train_unet_worker.py#L156) (`Dataset`)
-  - [`SegmentationDataset.__init__(self, images_dir, masks_dir, input_size=512, num_classes=1, augmentations=None, normalize=False, resize_mode='hard', is_train=True)`](../utils_training/train_unet_worker.py#L157)
-  - [`SegmentationDataset.__len__(self)`](../utils_training/train_unet_worker.py#L199)
-  - [`SegmentationDataset._resize_pair(self, image, mask)`](../utils_training/train_unet_worker.py#L202)
-  - [`SegmentationDataset.__getitem__(self, idx)`](../utils_training/train_unet_worker.py#L258)
-- [`get_loss_function(loss_name, num_classes=1)`](../utils_training/train_unet_worker.py#L333)
-- [`get_optimizer(model, opt_name, lr)`](../utils_training/train_unet_worker.py#L371)
-- [`get_scheduler(optimizer, scheduler_name, epochs)`](../utils_training/train_unet_worker.py#L386)
-- [`compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker.py#L399)
-- [`auto_batch_size(device, input_size, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX)`](../utils_training/train_unet_worker.py#L474)
-- [`save_args_yaml(args_dict, save_path)`](../utils_training/train_unet_worker.py#L517)
-- [`save_model_meta(meta_dict, model_path)`](../utils_training/train_unet_worker.py#L529)
-- [`save_training_plots(history_dict, save_dir)`](../utils_training/train_unet_worker.py#L537)
-- [`save_csv_results(history_dict, save_path)`](../utils_training/train_unet_worker.py#L572)
-- [`save_pr_curve(preds, masks, save_dir, num_classes=1)`](../utils_training/train_unet_worker.py#L581)
-- [`save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker.py#L640)
-- [`save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1, normalize=False)`](../utils_training/train_unet_worker.py#L701)
-- [`save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1, normalize=False)`](../utils_training/train_unet_worker.py#L744)
-- [`check_dataset_masks_consistency(dataset, num_classes, max_check=20)`](../utils_training/train_unet_worker.py#L815)
-- [`main()`](../utils_training/train_unet_worker.py#L865)
+- [`log(msg)`](../utils_training/train_unet_worker.py#L134)
+- [`signal_handler(signum, frame)`](../utils_training/train_unet_worker.py#L139)
+- Класс [`SegmentationDataset`](../utils_training/train_unet_worker.py#L161) (`Dataset`)
+  - [`SegmentationDataset.__init__(self, images_dir, masks_dir, input_size=512, num_classes=1, augmentations=None, normalize=False, resize_mode='hard', is_train=True)`](../utils_training/train_unet_worker.py#L162)
+  - [`SegmentationDataset.__len__(self)`](../utils_training/train_unet_worker.py#L206)
+  - [`SegmentationDataset._resize_pair(self, image, mask)`](../utils_training/train_unet_worker.py#L209)
+  - [`SegmentationDataset.__getitem__(self, idx)`](../utils_training/train_unet_worker.py#L265)
+- [`get_loss_function(loss_name, num_classes=1)`](../utils_training/train_unet_worker.py#L332)
+  Явно импортируют: [tests.test_model_contracts](#tests-test-model-contracts).
+- [`get_optimizer(model, opt_name, lr)`](../utils_training/train_unet_worker.py#L370)
+- [`get_scheduler(optimizer, scheduler_name, epochs)`](../utils_training/train_unet_worker.py#L385)
+- [`compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker.py#L398)
+- [`auto_batch_size(device, input_size, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX)`](../utils_training/train_unet_worker.py#L404)
+- [`save_args_yaml(args_dict, save_path)`](../utils_training/train_unet_worker.py#L447)
+- [`save_model_meta(meta_dict, model_path)`](../utils_training/train_unet_worker.py#L459)
+- [`save_training_plots(history_dict, save_dir)`](../utils_training/train_unet_worker.py#L467)
+- [`save_csv_results(history_dict, save_path)`](../utils_training/train_unet_worker.py#L501)
+- [`save_pr_curve(preds, masks, save_dir, num_classes=1)`](../utils_training/train_unet_worker.py#L510)
+- [`save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker.py#L569)
+- [`save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1, normalize=False)`](../utils_training/train_unet_worker.py#L615)
+- [`save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1, normalize=False, threshold=0.5)`](../utils_training/train_unet_worker.py#L658)
+- [`check_dataset_masks_consistency(dataset, num_classes, max_check=20)`](../utils_training/train_unet_worker.py#L727)
+- [`main()`](../utils_training/train_unet_worker.py#L777)
 
 <a id="utils-training-train-unet-worker-рабочий"></a>
 
@@ -5059,34 +5255,35 @@
 **Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
 
 **Прямые локальные импорты:**
-- нет
+- [utils_new.segmentation.model_metrics](#utils-new-segmentation-model-metrics): `confusion_matrix`, `prediction_labels`, `segmentation_metrics`
+- [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts): `apply_decoder_dropout`, `validate_mask_files`
 
-**Внешние/stdlib импорты:** `PIL.Image`, `argparse`, `csv`, `datetime.datetime`, `io`, `json`, `matplotlib`, `matplotlib.pyplot`, `numpy`, `os`, `psutil`, `seaborn`, `segmentation_models_pytorch`, `signal`, `sys`, `torch`, `torch.nn`, `torch.optim`, `torch.utils.data.DataLoader`, `torch.utils.data.Dataset`, `torchvision.transforms`, `torchvision.transforms.functional`, `yaml`.
+**Внешние/stdlib импорты:** `PIL.Image`, `argparse`, `csv`, `datetime.datetime`, `io`, `json`, `matplotlib`, `matplotlib.pyplot`, `numpy`, `os`, `pathlib.Path`, `psutil`, `seaborn`, `segmentation_models_pytorch`, `signal`, `sys`, `torch`, `torch.nn`, `torch.optim`, `torch.utils.data.DataLoader`, `torch.utils.data.Dataset`, `torchvision.transforms`, `torchvision.transforms.functional`, `yaml`.
 
 **Объявления:**
 
-- [`log(msg)`](../utils_training/train_unet_worker_рабочий.py#L124)
-- [`signal_handler(signum, frame)`](../utils_training/train_unet_worker_рабочий.py#L128)
-- Класс [`SegmentationDataset`](../utils_training/train_unet_worker_рабочий.py#L149) (`Dataset`)
-  - [`SegmentationDataset.__init__(self, images_dir, masks_dir, input_size=512, num_classes=1, augmentations=None, normalize=False, resize_mode='hard', is_train=True)`](../utils_training/train_unet_worker_рабочий.py#L150)
-  - [`SegmentationDataset.__len__(self)`](../utils_training/train_unet_worker_рабочий.py#L192)
-  - [`SegmentationDataset._resize_pair(self, image, mask)`](../utils_training/train_unet_worker_рабочий.py#L195)
-  - [`SegmentationDataset.__getitem__(self, idx)`](../utils_training/train_unet_worker_рабочий.py#L260)
-- [`get_loss_function(loss_name, num_classes=1)`](../utils_training/train_unet_worker_рабочий.py#L338)
-- [`get_optimizer(model, opt_name, lr)`](../utils_training/train_unet_worker_рабочий.py#L376)
-- [`get_scheduler(optimizer, scheduler_name, epochs)`](../utils_training/train_unet_worker_рабочий.py#L391)
-- [`compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker_рабочий.py#L404)
-- [`auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX)`](../utils_training/train_unet_worker_рабочий.py#L479)
-- [`save_args_yaml(args_dict, save_path)`](../utils_training/train_unet_worker_рабочий.py#L503)
-- [`save_model_meta(meta_dict, model_path)`](../utils_training/train_unet_worker_рабочий.py#L514)
-- [`save_training_plots(history_dict, save_dir)`](../utils_training/train_unet_worker_рабочий.py#L522)
-- [`save_csv_results(history_dict, save_path)`](../utils_training/train_unet_worker_рабочий.py#L550)
-- [`save_pr_curve(preds, masks, save_dir, num_classes=1)`](../utils_training/train_unet_worker_рабочий.py#L558)
-- [`save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker_рабочий.py#L601)
-- [`save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1)`](../utils_training/train_unet_worker_рабочий.py#L657)
-- [`save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1)`](../utils_training/train_unet_worker_рабочий.py#L688)
-- [`check_dataset_masks_consistency(dataset, num_classes, max_check=20)`](../utils_training/train_unet_worker_рабочий.py#L746) — Проверяет первые max_check масок: собирает уникальные значения пикселей,
-- [`main()`](../utils_training/train_unet_worker_рабочий.py#L801)
+- [`log(msg)`](../utils_training/train_unet_worker_рабочий.py#L129)
+- [`signal_handler(signum, frame)`](../utils_training/train_unet_worker_рабочий.py#L133)
+- Класс [`SegmentationDataset`](../utils_training/train_unet_worker_рабочий.py#L154) (`Dataset`)
+  - [`SegmentationDataset.__init__(self, images_dir, masks_dir, input_size=512, num_classes=1, augmentations=None, normalize=False, resize_mode='hard', is_train=True)`](../utils_training/train_unet_worker_рабочий.py#L155)
+  - [`SegmentationDataset.__len__(self)`](../utils_training/train_unet_worker_рабочий.py#L199)
+  - [`SegmentationDataset._resize_pair(self, image, mask)`](../utils_training/train_unet_worker_рабочий.py#L202)
+  - [`SegmentationDataset.__getitem__(self, idx)`](../utils_training/train_unet_worker_рабочий.py#L267)
+- [`get_loss_function(loss_name, num_classes=1)`](../utils_training/train_unet_worker_рабочий.py#L337)
+- [`get_optimizer(model, opt_name, lr)`](../utils_training/train_unet_worker_рабочий.py#L375)
+- [`get_scheduler(optimizer, scheduler_name, epochs)`](../utils_training/train_unet_worker_рабочий.py#L390)
+- [`compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker_рабочий.py#L403)
+- [`auto_batch_size(device, mem_factor=AUTO_BATCH_MEM_FACTOR, min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX)`](../utils_training/train_unet_worker_рабочий.py#L409)
+- [`save_args_yaml(args_dict, save_path)`](../utils_training/train_unet_worker_рабочий.py#L433)
+- [`save_model_meta(meta_dict, model_path)`](../utils_training/train_unet_worker_рабочий.py#L444)
+- [`save_training_plots(history_dict, save_dir)`](../utils_training/train_unet_worker_рабочий.py#L452)
+- [`save_csv_results(history_dict, save_path)`](../utils_training/train_unet_worker_рабочий.py#L479)
+- [`save_pr_curve(preds, masks, save_dir, num_classes=1)`](../utils_training/train_unet_worker_рабочий.py#L487)
+- [`save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker_рабочий.py#L530)
+- [`save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per_batch=4, num_classes=1)`](../utils_training/train_unet_worker_рабочий.py#L571)
+- [`save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1, threshold=0.5)`](../utils_training/train_unet_worker_рабочий.py#L602)
+- [`check_dataset_masks_consistency(dataset, num_classes, max_check=20)`](../utils_training/train_unet_worker_рабочий.py#L658) — Проверяет первые max_check масок: собирает уникальные значения пикселей,
+- [`main()`](../utils_training/train_unet_worker_рабочий.py#L713)
 
 <a id="utils-training-train-yolo-worker"></a>
 
@@ -5098,6 +5295,7 @@
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
+- [utils_new.segmentation.yolo_metrics](#utils-new-segmentation-yolo-metrics): `validation_metrics`
 
 **Внешние/stdlib импорты:** `argparse`, `datetime.datetime`, `json`, `onnx`, `os`, `pathlib.Path`, `shutil`, `signal`, `sys`, `traceback`, `ultralytics`, `ultralytics.YOLO`.
 

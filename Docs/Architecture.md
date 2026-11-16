@@ -230,3 +230,12 @@ Preset schema_version=3 проверяет `utils_new.segmentation.presets`; р�
 [Удаление утилит](Utils_Removal_Audit.md).
 Тесты test_segmentation_shared, test_pixel_morphology, test_segmentation_unification
 и test_segmentation_tasks защищают эти контракты и границы импортов.
+
+
+Алгоритмическая проверка 16 ноября 2026: [результат](Segmentation_Methods_Audit.md).
+`utils_new/segmentation` теперь также содержит явные контракты training_labels,
+training_contracts, model_output, model_metrics, model_export и yolo_metrics.
+Математика пороговых методов имеет одного владельца в threshold_processing;
+старый segmentation_ops переэкспортирует её для оставшихся потребителей.
+Интерактивный backend остаётся в utils_ops/interactive_ops; общие UI/задачи —
+в ui/segmentation, операции выбора/передачи параметров — в operations.
