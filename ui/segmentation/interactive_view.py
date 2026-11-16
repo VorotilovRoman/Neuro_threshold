@@ -9,9 +9,16 @@ from ui.image_view import SmartGraphicsViewNew
 
 
 class SegmentationInputView(SmartGraphicsViewNew):
+    def _add_scribble(self, x, y, temp=False):
+        # The owner draws a continuous stroke at the configured working-pixel radius.
+        if self.on_scribble_added_callback:
+            self.on_scribble_added_callback(x, y, self.current_tool)
+
     def _input_point(self, event):
         point = self.mapToScene(event.pos())
         if self.img_width <= 0 or self.img_height <= 0:
+            return None
+        if not self.drawing and not (0 <= point.x() < self.img_width and 0 <= point.y() < self.img_height):
             return None
         return (max(0,min(int(point.x()),self.img_width-1)),
                 max(0,min(int(point.y()),self.img_height-1)))
@@ -21,6 +28,7 @@ class SegmentationInputView(SmartGraphicsViewNew):
             point = self._input_point(event)
             if point is None:
                 return
+            self.stroke_serial = getattr(self, "stroke_serial", 0) + 1
             self.drawing = True
             self.start_point = self.current_point = point
             if self.current_tool=='rect':
@@ -56,7 +64,8 @@ class SegmentationInputView(SmartGraphicsViewNew):
             if point is not None:
                 if tool=='rect' and start is not None:
                     rect=(min(start[0],point[0]),min(start[1],point[1]),
-                          max(start[0],point[0]),max(start[1],point[1]))
+                          min(max(start[0],point[0]) + 1, self.img_width),
+                          min(max(start[1],point[1]) + 1, self.img_height))
                     if self.on_rect_drawn_callback:
                         self.on_rect_drawn_callback(rect)
                 else:

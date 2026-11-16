@@ -95,6 +95,12 @@
 #   - class_weights автоматически на нужном device
 # ------------------------------------------------------------------------------
 
+# Make shared numerical contracts available for direct worker execution.
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
 import argparse
 import copy
 import csv
@@ -180,7 +186,7 @@ history = {
     'epoch': [], 'train_loss': [], 'val_loss': [],
     'iou': [], 'dice': [], 'f1': [],
     'precision': [], 'recall': [], 'accuracy': [],
-    'map50': [], 'map50_95': []
+
 }
 
 def log(msg):
@@ -392,6 +398,8 @@ class VOCSegmentationPairs(Dataset):
         self.augmentations = augmentations
         self.normalize = normalize
         self.resize_mode = resize_mode
+        from utils_new.segmentation.training_contracts import validate_mask_files
+        validate_mask_files([mask for _, mask in self.pairs], num_classes, ignore_index)
 
     def __len__(self):
         return len(self.pairs)
@@ -401,8 +409,11 @@ class VOCSegmentationPairs(Dataset):
         image = Image.open(img_path).convert('RGB')
         mask_np = np.array(Image.open(mask_path))
 
-        if self.num_classes == 2 and np.max(mask_np) == 255:
-            mask_np = (mask_np > 127).astype(np.int64)
+        if self.num_classes == 1:
+            void = mask_np == self.ignore_index if self.ignore_index is not None else np.zeros_like(mask_np, bool)
+            mask_np = (mask_np > 0).astype(np.int64)
+            if self.ignore_index is not None:
+                mask_np[void] = self.ignore_index
 
         if self.resize_mode == "keep_aspect_pad":
             S = self.input_size
@@ -410,7 +421,7 @@ class VOCSegmentationPairs(Dataset):
             scale = S / max(h, w)
             nh, nw = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
             image = image.resize((nw, nh), Image.BILINEAR)
-            mask_img = Image.fromarray(mask_np.astype(np.uint8)).resize((nw, nh), Image.NEAREST)
+            mask_img = Image.fromarray(mask_np.astype(np.int32)).resize((nw, nh), Image.NEAREST)
             pad_h, pad_w = S - nh, S - nw
             pt, pl = pad_h // 2, pad_w // 2
             pb, pr = pad_h - pt, pad_w - pl
@@ -422,7 +433,7 @@ class VOCSegmentationPairs(Dataset):
             resize_op = transforms.Resize((self.input_size, self.input_size),
                                           interpolation=transforms.InterpolationMode.NEAREST)
             image = resize_op(image)
-            mask_np = np.array(resize_op(Image.fromarray(mask_np.astype(np.uint8))))
+            mask_np = np.array(resize_op(Image.fromarray(mask_np.astype(np.int32))))
 
         aug = self.augmentations
         if aug.get('hflip', False) and np.random.rand() < 0.5:
@@ -434,14 +445,14 @@ class VOCSegmentationPairs(Dataset):
         if aug.get('rotate', False):
             angle = np.random.uniform(-10, 10)
             image = TF.rotate(image, angle)
-            mask_np = np.array(TF.rotate(Image.fromarray(mask_np.astype(np.uint8)), angle,
+            mask_np = np.array(TF.rotate(Image.fromarray(mask_np.astype(np.int32)), angle,
                                          interpolation=TF.InterpolationMode.NEAREST))
         if aug.get('scale', False):
             scale = np.random.uniform(0.9, 1.1)
             new_size = (int(self.input_size * scale), int(self.input_size * scale))
             image = transforms.Resize(new_size)(image)
             mask_img = transforms.Resize(new_size, interpolation=transforms.InterpolationMode.NEAREST)(
-                Image.fromarray(mask_np.astype(np.uint8)))
+                Image.fromarray(mask_np.astype(np.int32)))
             image = transforms.CenterCrop(self.input_size)(image)
             mask_img = transforms.CenterCrop(self.input_size)(mask_img)
             mask_np = np.array(mask_img)
@@ -482,14 +493,18 @@ def get_loss_function(loss_name, num_classes, ignore_index=None,
     mode = 'binary' if num_classes == 1 else 'multiclass'
 
     if mode == 'binary':
-        ce_loss = nn.BCEWithLogitsLoss(pos_weight=weights_tensor) if weights_tensor is not None \
-                  else nn.BCEWithLogitsLoss()
+        def ce_loss(prediction, target):
+            valid = torch.ones_like(target, dtype=torch.bool) if ignore_index is None else target != ignore_index
+            safe_target = torch.where(valid, target, 0)
+            losses = torch.nn.functional.binary_cross_entropy_with_logits(
+                prediction, safe_target, pos_weight=weights_tensor, reduction='none')
+            return losses[valid].mean() if valid.any() else prediction.sum() * 0
         dice_loss = smp.losses.DiceLoss(mode=mode, ignore_index=ignore_index)
         focal_loss = smp.losses.FocalLoss(mode=mode, alpha=0.25, gamma=2, ignore_index=ignore_index)
     else:
         ign = ignore_index if ignore_index is not None else -100
         ce_loss = nn.CrossEntropyLoss(weight=weights_tensor, ignore_index=ign)
-        dice_loss = smp.losses.DiceLoss(mode=mode, classes=num_classes, ignore_index=ignore_index)
+        dice_loss = smp.losses.DiceLoss(mode=mode, ignore_index=ignore_index)
         focal_loss = smp.losses.FocalLoss(mode=mode, alpha=0.25, gamma=2, ignore_index=ignore_index)
 
     ln = loss_name.lower()
@@ -721,66 +736,13 @@ def predict_batch_multiscale(model, images, device, scales, use_amp):
 # =============================================================================
 def compute_metrics(pred_logits, true_masks, num_classes, ignore_index=None,
                     output_activation='argmax', threshold=0.5):
-    if num_classes == 1:
-        probs = torch.sigmoid(pred_logits)
-        pred = (probs > threshold).float()
-        true = true_masks.float()
-        if true.dim() == 3:
-            true = true.unsqueeze(1)
-        if ignore_index is not None:
-            m = (true == ignore_index)
-            pred = pred.masked_fill(m, 0)
-            true = true.masked_fill(m, 0)
-        inter = (pred * true).sum(dim=(2, 3))
-        ps, ts = pred.sum(dim=(2, 3)), true.sum(dim=(2, 3))
-        union = ps + ts - inter
-        iou = (inter + 1e-6) / (union + 1e-6)
-        dice = (2 * inter + 1e-6) / (ps + ts + 1e-6)
-        tp = inter
-        prec = tp / (tp + (ps - inter) + 1e-6)
-        rec = tp / (tp + (ts - inter) + 1e-6)
-        f1 = 2 * prec * rec / (prec + rec + 1e-6)
-        acc = (pred == true).float().sum(dim=(2, 3)) / (pred.shape[2] * pred.shape[3])
-        map50 = (iou > 0.5).float().mean().item()
-        return {
-            'IoU': iou.mean().item(), 'Dice': dice.mean().item(),
-            'Precision': prec.mean().item(), 'Recall': rec.mean().item(),
-            'F1': f1.mean().item(), 'Accuracy': acc.mean().item(),
-            'mAP50': map50, 'mAP50-95': iou.mean().item(),
-        }
-    else:
-        if output_activation == 'softmax':
-            pred = torch.argmax(torch.softmax(pred_logits, dim=1), dim=1)
-        else:
-            pred = torch.argmax(pred_logits, dim=1)
-        true = true_masks.long()
-        if ignore_index is not None:
-            valid = (true != ignore_index)
-            pred, true = pred[valid], true[valid]
-        iou_l, dice_l, prec_l, rec_l = [], [], [], []
-        for c in range(num_classes):
-            pc = (pred == c); tc = (true == c)
-            inter = (pc & tc).sum().float()
-            union = (pc | tc).sum().float()
-            iou_l.append((inter + 1e-6) / (union + 1e-6))
-            tp = inter
-            fp = (pc & ~tc).sum().float()
-            fn = (~pc & tc).sum().float()
-            dice_l.append((2 * tp + 1e-6) / (2 * tp + fp + fn + 1e-6))
-            prec_l.append(tp / (tp + fp + 1e-6))
-            rec_l.append(tp / (tp + fn + 1e-6))
-        miou = torch.mean(torch.tensor(iou_l)).item()
-        mdice = torch.mean(torch.tensor(dice_l)).item()
-        prec = torch.mean(torch.tensor(prec_l)).item()
-        rec = torch.mean(torch.tensor(rec_l)).item()
-        f1 = 2 * prec * rec / (prec + rec + 1e-6)
-        acc = (pred == true).float().mean().item()
-        return {
-            'IoU': miou, 'Dice': mdice, 'Precision': prec, 'Recall': rec,
-            'F1': f1, 'Accuracy': acc, 'mAP50': miou, 'mAP50-95': miou,
-        }
+    from utils_new.segmentation.model_metrics import segmentation_metrics
+    return segmentation_metrics(pred_logits, true_masks, num_classes, threshold=threshold, ignore_index=ignore_index)
 
 
+# =============================================================================
+# MAIN
+# =============================================================================
 def auto_batch_size(device, input_size, mem_factor=AUTO_BATCH_MEM_FACTOR,
                     min_batch=AUTO_BATCH_MIN, max_batch=AUTO_BATCH_MAX):
     if device.type == 'cuda' and torch.cuda.is_available():
@@ -844,9 +806,8 @@ def save_training_plots(history_dict, save_dir):
     ax[1, 0].plot(ep, history_dict['recall'], label='Recall')
     ax[1, 0].plot(ep, history_dict['f1'], label='F1')
     ax[1, 0].set_xlabel('Epoch'); ax[1, 0].legend(); ax[1, 0].set_title('P/R/F1')
-    ax[1, 1].plot(ep, history_dict['map50'], label='mAP50')
-    ax[1, 1].plot(ep, history_dict['map50_95'], label='mAP50-95')
-    ax[1, 1].set_xlabel('Epoch'); ax[1, 1].legend(); ax[1, 1].set_title('mAP')
+    ax[1, 1].plot(ep, history_dict['accuracy'], label='Pixel accuracy')
+    ax[1, 1].set_xlabel('Epoch'); ax[1, 1].legend(); ax[1, 1].set_title('Pixel accuracy')
     plt.tight_layout(); plt.savefig(os.path.join(save_dir, 'results.png'), dpi=150); plt.close()
     log(f"График обучения: {os.path.join(save_dir, 'results.png')}")
 
@@ -881,26 +842,9 @@ def save_pr_curve(preds, masks, save_dir, threshold=0.5):
 def save_confusion_matrix(preds, true_masks, save_dir, num_classes, ignore_index=None, threshold=0.5):
     if not HAS_MATPLOTLIB:
         return
-    if num_classes == 1:
-        pb = (torch.sigmoid(preds) > threshold).long()
-        tb = (true_masks > 0.5).long() if true_masks.dim() == 3 else true_masks.long().unsqueeze(1)
-        if ignore_index is not None:
-            m = (true_masks == ignore_index)
-            pb, tb = pb.masked_fill(m, 0), tb.masked_fill(m, 0)
-        tp = ((pb == 1) & (tb == 1)).sum().item()
-        fp = ((pb == 1) & (tb == 0)).sum().item()
-        fn = ((pb == 0) & (tb == 1)).sum().item()
-        tn = ((pb == 0) & (tb == 0)).sum().item()
-        cm = np.array([[tn, fp], [fn, tp]]); labels = ['BG', 'FG']
-    else:
-        pred = torch.argmax(preds, dim=1); true = true_masks.long()
-        if ignore_index is not None:
-            v = (true != ignore_index); pred, true = pred[v], true[v]
-        cm = torch.zeros(num_classes, num_classes, dtype=torch.long)
-        for t in range(num_classes):
-            for p in range(num_classes):
-                cm[t, p] = ((true == t) & (pred == p)).sum().item()
-        cm = cm.numpy(); labels = [f'C{i}' for i in range(num_classes)]
+    from utils_new.segmentation.model_metrics import confusion_matrix
+    cm = confusion_matrix(preds, true_masks, num_classes, threshold=threshold, ignore_index=ignore_index).cpu().numpy()
+    labels = ['BG', 'FG'] if num_classes == 1 else [f'C{i}' for i in range(num_classes)]
     for arr, name, fmt in [(cm, 'confusion_matrix', 'd'),
                            (cm.astype(np.float32) / (cm.sum(axis=1, keepdims=True) + 1e-8),
                             'confusion_matrix_normalized', '.2f')]:
@@ -951,7 +895,7 @@ def save_train_batch_examples(loader, save_dir, num_batches=3, samples_per_batch
 def save_val_examples(loader, model, device, save_dir, num_samples=8,
                       num_classes=1, output_activation='argmax',
                       normalize=False, use_amp=False,
-                      multi_scale=False, scales=None):
+                      multi_scale=False, scales=None, threshold=.5):
     if not HAS_MATPLOTLIB:
         return
     os.makedirs(save_dir, exist_ok=True)
@@ -965,12 +909,8 @@ def save_val_examples(loader, model, device, save_dir, num_samples=8,
                 outputs = predict_batch_multiscale(model, images, device, scales, use_amp)
             else:
                 outputs = _forward_safe(model, images, use_amp, device)
-            if num_classes == 1:
-                preds = (torch.sigmoid(outputs.float()) > 0.5).float()
-            else:
-                preds = (torch.argmax(torch.softmax(outputs.float(), dim=1), dim=1)
-                         if output_activation == 'softmax'
-                         else torch.argmax(outputs.float(), dim=1)).float()
+            from utils_new.segmentation.model_metrics import prediction_labels
+            preds = prediction_labels(outputs, num_classes, threshold)
             for i in range(images.size(0)):
                 if collected >= num_samples:
                     break
@@ -1005,9 +945,6 @@ def save_val_examples(loader, model, device, save_dir, num_samples=8,
     log(f"Сохранено {collected} val-примеров в {save_dir}/val_examples.jpg")
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params', type=str)
@@ -1031,7 +968,7 @@ def main():
     name = params.get('name')
     backbone = params.get('backbone', 'resnet50')
     output_stride = params.get('output_stride', 16)
-    output_activation = params.get('output_activation', 'argmax')
+    output_activation = "argmax"  # argmax(logits) = argmax(softmax); binary decoding is handled by class count
     num_classes = params.get('num_classes', 21)
     ignore_index = params.get('ignore_index')
     class_weights = params.get('class_weights')
@@ -1603,11 +1540,11 @@ def main():
         history['epoch'].append(epoch)
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss if val_loss is not None else float('nan'))
-        for k in ['iou', 'dice', 'f1', 'precision', 'recall', 'accuracy', 'map50', 'map50_95']:
+        for k in ['iou', 'dice', 'f1', 'precision', 'recall', 'accuracy']:
             if metrics:
                 key_map = {'iou': 'IoU', 'dice': 'Dice', 'f1': 'F1',
                            'precision': 'Precision', 'recall': 'Recall',
-                           'accuracy': 'Accuracy', 'map50': 'mAP50', 'map50_95': 'mAP50-95'}
+                           'accuracy': 'Accuracy'}
                 history[k].append(metrics[key_map[k]])
             else:
                 history[k].append(float('nan'))
@@ -1675,7 +1612,7 @@ def main():
         try:
             save_val_examples(val_loader, model, device, save_root,
                               NUM_VAL_SAMPLES_TO_SAVE, num_classes, output_activation,
-                              normalize, use_amp, multi_scale_infer, infer_scales)
+                              normalize, use_amp, multi_scale_infer, infer_scales, threshold)
         except Exception as e:
             log(f"⚠️ Ошибка визуализации val-примеров: {e}")
 
@@ -1705,7 +1642,7 @@ def main():
         log("   Установите: pip install onnx onnxruntime")
     else:
         onnx_path = os.path.join(weights_dir, 'model.onnx')
-        onnx_meta_path = os.path.join(weights_dir, 'model_onnx_meta.json')
+        onnx_meta_path = os.path.join(weights_dir, 'model_meta.json')
 
         # Загружаем лучшие веса в модель (лучше всего экспортировать best_iou или last)
         best_weights = best_iou_model_path if os.path.exists(best_iou_model_path) else final_model_path
@@ -1723,10 +1660,11 @@ def main():
             'output': {0: 'batch_size', 2: 'height', 3: 'width'},
         }
 
-        log(f"Запуск torch.onnx.export (opset=17, dynamic_axes=True)...")
+        log(f"Запуск torch.onnx.export (opset=18, dynamic_axes=True)...")
         try:
+            from utils_new.segmentation.model_export import stride_padded_model
             torch.onnx.export(
-                model,
+                stride_padded_model(model),
                 dummy_input,
                 onnx_path,
                 export_params=True,
@@ -1753,6 +1691,7 @@ def main():
             # Метаданные для ONNX-модели
             onnx_meta = {
                 'format': 'ONNX',
+                'output_kind': 'logits',
                 'source_weights': os.path.basename(best_weights),
                 'onnx_opset': 18,
                 'architecture': architecture,

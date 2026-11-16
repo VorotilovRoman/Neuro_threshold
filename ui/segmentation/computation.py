@@ -46,7 +46,7 @@ def run_interactive(owner):
         return
     method = owner.method_combo.currentText()
     widget = owner.params_widget
-    if method in ("SuperCut", "OneCut", "Active Contours") and not errors.require(
+    if method in ("SuperCut", "OneCut", "Active Contours", "Morphological Chan–Vese") and not errors.require(
         owner, owner.rect is not None, "Нарисуйте ROI."
     ):
         return
@@ -72,6 +72,7 @@ def run_interactive(owner):
         "OneCut": widget.get_onecut_params,
         "Random Walker": widget.get_random_walker_params,
         "Active Contours": widget.get_active_contour_params,
+        "Morphological Chan–Vese": widget.get_mcv_params,
     }
     params = getters[method]()
     rect = owner.rect
@@ -108,7 +109,10 @@ def run_dl(owner):
             iou=widget._iou.value(),
             imgsz=widget._imgsz.value(),
             save=widget._save.isChecked(),
+            allow_box_otsu=widget._box_otsu.isChecked(),
         )
+    if name == "Custom ONNX":
+        parameters["threshold"] = owner.custom_settings._threshold.value()
     if name in ("U-Net", "DeepLabV3+", "DeepLabV3"):
         widget = owner.unet_settings if name == "U-Net" else owner.deeplab_settings
         valid, message = widget.validate_for_prediction()
@@ -200,6 +204,7 @@ def train_ml(owner):
     images = [None if image is None else image.copy() for image in owner.display_images]
     grays = [None if gray is None else gray.copy() for gray in owner.gray_images]
     spec = owner._get_current_settings_dict()
+    paths = list(owner.image_paths)
 
     def prepared(values):
         x, y = values
@@ -229,7 +234,7 @@ def train_ml(owner):
             owner._update_model_path_display()
             owner._update_apply_button_status()
             owner.check_settings_match_model()
-            owner.log(f"Модель {spec['model_type']} обучена на {len(x)} образцах.")
+            owner.log(f"Модель {spec['model_type']} обучена на {len(x)} образцах. Источник: {spec['training_source']}.")
             owner._reset_for_new_image()
 
         owner.jobs.start(
@@ -241,7 +246,7 @@ def train_ml(owner):
 
     owner.jobs.start(
         "Подготовка обучающих данных",
-        lambda cancel: operations.prepare_training(images, grays, spec, cancel),
+        lambda cancel: operations.prepare_training(images, grays, spec, cancel, paths=paths),
         prepared,
         frame_sensitive=False,
     )
@@ -306,6 +311,8 @@ def load_dl(owner, name):
         owner.ignore_ui_changes = True
         try:
             metadata = getattr(model, "metadata", None)
+            if metadata and name == "Custom ONNX":
+                owner.custom_settings._threshold.setValue(metadata.get("threshold", .5))
             if metadata and name == "U-Net":
                 owner._update_unet_ui_from_metadata(metadata)
             elif metadata and name in ("DeepLabV3", "DeepLabV3+"):

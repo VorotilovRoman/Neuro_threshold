@@ -19,6 +19,12 @@
 #                       Для инференса в приложении пользователь отдельно выбирает
 #                       hard / keep_aspect_pad (в metadata: inference_resize_mode).
 
+# Make shared numerical contracts available for direct worker execution.
+if __name__ == "__main__" and not __package__:
+    import sys as _bootstrap_sys
+    from pathlib import Path as _BootstrapPath
+    _bootstrap_sys.path.insert(0, str(_BootstrapPath(__file__).resolve().parents[1]))
+
 import argparse
 import csv
 import io
@@ -117,8 +123,7 @@ history = {  # для сбора метрик по эпохам
     'precision': [],
     'recall': [],
     'accuracy': [],
-    'map50': [],
-    'map50_95': []
+
 }
 
 def log(msg):
@@ -184,6 +189,8 @@ class SegmentationDataset(Dataset):
             self.image_paths.append(os.path.join(images_dir, f))
             self.mask_paths.append(mask_path)
 
+        from utils_new.segmentation.training_contracts import validate_mask_files
+        validate_mask_files(self.mask_paths, self.num_classes)
         if not self.image_paths:
             raise RuntimeError(f"Не найдено ни одной пары изображение-маска в {images_dir} и {masks_dir}")
         log(f"✅ Загружено {len(self.image_paths)} пар "
@@ -314,23 +321,15 @@ class SegmentationDataset(Dataset):
             # Бинарная сегментация. Принимаем оба варианта значений пикселей:
             #   {0, 255} — классическая бинарная PNG-маска;
             #   {0, 1}   — формат, который генерирует наша утилита (offset=1).
-            if int(mask_np.max()) > 1:
-                binary = (mask_np > 127).astype(np.float32)
-            else:
-                binary = (mask_np > 0).astype(np.float32)
+            binary = (mask_np > 0).astype(np.float32)
             mask_tensor = torch.from_numpy(binary).unsqueeze(0)   # [1, H, W]
         else:
             # Многоклассовая сегментация.
             # ПРАВИЛО: значение пикселя = индекс класса (0 — фон, 1..N-1 — объекты).
             mask_tensor = torch.from_numpy(mask_np.astype(np.int64))
             max_val = int(mask_tensor.max())
-            if max_val >= self.num_classes:
-                log(f"⚠️ ВНИМАНИЕ: в маске {os.path.basename(self.mask_paths[idx])} "
-                    f"найдено значение пикселя {max_val}, что >= num_classes={self.num_classes}. "
-                    f"Проверьте поле «Количество классов (вкл. фон)». "
-                    f"Некорректные пиксели будут заменены на 0 (фон).")
-                mask_tensor = mask_tensor.clone()
-                mask_tensor[mask_tensor >= self.num_classes] = 0
+            if max_val >= self.num_classes or int(mask_tensor.min()) < 0:
+                raise ValueError(f"Некорректный индекс класса в {self.mask_paths[idx]}; num_classes={self.num_classes}.")
         return image, mask_tensor
 
 
@@ -343,14 +342,14 @@ def get_loss_function(loss_name, num_classes=1):
         if loss_name in ("ce", "crossentropy"):
             return nn.CrossEntropyLoss()
         elif loss_name == "dice":
-            return smp.losses.DiceLoss(mode='multiclass', from_logits=True, classes=num_classes)
+            return smp.losses.DiceLoss(mode='multiclass', from_logits=True)
         elif loss_name == "focal":
             return smp.losses.FocalLoss(mode='multiclass', alpha=0.25, gamma=2, from_logits=True)
         elif loss_name == "tversky":
             return smp.losses.TverskyLoss(mode='multiclass', alpha=0.3, beta=0.7, from_logits=True)
         elif loss_name in ("bce+dice", "ce+dice", "crossentropy+dice"):
             ce = nn.CrossEntropyLoss()
-            dice = smp.losses.DiceLoss(mode='multiclass', from_logits=True, classes=num_classes)
+            dice = smp.losses.DiceLoss(mode='multiclass', from_logits=True)
             return lambda pred, target: ce(pred, target) + dice(pred, target)
         else:
             return nn.CrossEntropyLoss()
@@ -402,77 +401,8 @@ def get_scheduler(optimizer, scheduler_name, epochs):
 
 # ---------- Метрики ----------
 def compute_metrics(pred_logits, true_masks, num_classes=1, threshold=0.5):
-    if num_classes == 1:
-        pred_probs = torch.sigmoid(pred_logits)
-        pred = (pred_probs > threshold).float()
-        if true_masks.dim() == 3:
-            true = true_masks.unsqueeze(1).float()
-        else:
-            true = true_masks.float()
-        intersection = (pred * true).sum(dim=(2, 3))
-        pred_sum = pred.sum(dim=(2, 3))
-        true_sum = true.sum(dim=(2, 3))
-        union = pred_sum + true_sum - intersection
-        iou = (intersection + 1e-6) / (union + 1e-6)
-        dice = (2 * intersection + 1e-6) / (pred_sum + true_sum + 1e-6)
-        tp = intersection
-        fp = pred_sum - intersection
-        fn = true_sum - intersection
-        precision = tp / (tp + fp + 1e-6)
-        recall = tp / (tp + fn + 1e-6)
-        f1 = 2 * precision * recall / (precision + recall + 1e-6)
-        correct = (pred == true).float().sum(dim=(2, 3))
-        total = pred.shape[2] * pred.shape[3]
-        accuracy = correct / total
-        map50 = (iou > 0.5).float().mean().item()
-        map50_95 = iou.mean().item()
-        return {
-            'IoU': iou.mean().item(),
-            'Dice': dice.mean().item(),
-            'Precision': precision.mean().item(),
-            'Recall': recall.mean().item(),
-            'F1': f1.mean().item(),
-            'Accuracy': accuracy.mean().item(),
-            'mAP50': map50,
-            'mAP50-95': map50_95,
-        }
-    else:
-        pred = torch.argmax(pred_logits, dim=1)
-        true = true_masks.long()
-        iou_per_class, dice_per_class = [], []
-        precision_per_class, recall_per_class = [], []
-        for c in range(num_classes):
-            pred_c = (pred == c)
-            true_c = (true == c)
-            intersection = (pred_c & true_c).sum().float()
-            union = (pred_c | true_c).sum().float()
-            iou = (intersection + 1e-6) / (union + 1e-6)
-            iou_per_class.append(iou)
-            tp = intersection
-            fp = (pred_c & ~true_c).sum().float()
-            fn = (~pred_c & true_c).sum().float()
-            dice = (2 * tp + 1e-6) / (2 * tp + fp + fn + 1e-6)
-            dice_per_class.append(dice)
-            prec = tp / (tp + fp + 1e-6)
-            rec = tp / (tp + fn + 1e-6)
-            precision_per_class.append(prec)
-            recall_per_class.append(rec)
-        miou = torch.mean(torch.tensor(iou_per_class)).item()
-        mdice = torch.mean(torch.tensor(dice_per_class)).item()
-        precision = torch.mean(torch.tensor(precision_per_class)).item()
-        recall = torch.mean(torch.tensor(recall_per_class)).item()
-        f1 = 2 * precision * recall / (precision + recall + 1e-6)
-        accuracy = (pred == true).float().mean().item()
-        return {
-            'IoU': miou,
-            'Dice': mdice,
-            'Precision': precision,
-            'Recall': recall,
-            'F1': f1,
-            'Accuracy': accuracy,
-            'mAP50': miou,
-            'mAP50-95': miou,
-        }
+    from utils_new.segmentation.model_metrics import segmentation_metrics
+    return segmentation_metrics(pred_logits, true_masks, num_classes, threshold=threshold)
 
 
 # ---------- Автоподбор batch_size ----------
@@ -538,10 +468,9 @@ def save_training_plots(history_dict, save_dir):
     axes[1, 0].plot(epochs, history_dict['f1'], label='F1')
     axes[1, 0].set_xlabel('Epoch'); axes[1, 0].legend()
     axes[1, 0].set_title('Precision/Recall/F1')
-    axes[1, 1].plot(epochs, history_dict['map50'], label='mAP50')
-    axes[1, 1].plot(epochs, history_dict['map50_95'], label='mAP50-95')
+    axes[1, 1].plot(epochs, history_dict['accuracy'], label='Pixel accuracy')
     axes[1, 1].set_xlabel('Epoch'); axes[1, 1].legend()
-    axes[1, 1].set_title('mAP')
+    axes[1, 1].set_title('Pixel accuracy')
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'results.png'), dpi=150)
     plt.close()
@@ -559,7 +488,7 @@ def save_pr_curve(preds, masks, save_dir, num_classes=1):
     if not HAS_MATPLOTLIB:
         return
     if num_classes == 1:
-        preds_np = preds.cpu().numpy().flatten()
+        preds_np = torch.sigmoid(preds).cpu().numpy().flatten()
         masks_np = masks.cpu().numpy().flatten()
         thresholds = np.linspace(0, 1, 51)
         precisions, recalls, f1_scores = [], [], []
@@ -601,24 +530,9 @@ def save_pr_curve(preds, masks, save_dir, num_classes=1):
 def save_confusion_matrix(preds, true_masks, save_dir, num_classes=1, threshold=0.5):
     if not HAS_MATPLOTLIB:
         return
-    if num_classes == 1:
-        pred_bin = (preds > threshold).float()
-        true_bin = true_masks.float()
-        tp = ((pred_bin == 1) & (true_bin == 1)).sum().item()
-        fp = ((pred_bin == 1) & (true_bin == 0)).sum().item()
-        fn = ((pred_bin == 0) & (true_bin == 1)).sum().item()
-        tn = ((pred_bin == 0) & (true_bin == 0)).sum().item()
-        conf_matrix = np.array([[tn, fp], [fn, tp]])
-        tick_labels = ['Background', 'Object']
-    else:
-        pred = torch.argmax(preds, dim=1)
-        true = true_masks.long()
-        conf_matrix = torch.zeros(num_classes, num_classes, dtype=torch.long)
-        for t in range(num_classes):
-            for p in range(num_classes):
-                conf_matrix[t, p] = ((true == t) & (pred == p)).sum().item()
-        conf_matrix = conf_matrix.numpy()
-        tick_labels = [f'Class {i}' for i in range(num_classes)]
+    from utils_new.segmentation.model_metrics import confusion_matrix
+    conf_matrix = confusion_matrix(preds, true_masks, num_classes, threshold=threshold).cpu().numpy()
+    tick_labels = ['Background', 'Object'] if num_classes == 1 else [f'Class {i}' for i in range(num_classes)]
 
     plt.figure(figsize=(max(6, num_classes * 0.6), max(5, num_classes * 0.5)))
     if HAS_SEABORN:
@@ -685,7 +599,7 @@ def save_train_batch_examples(train_loader, save_dir, num_batches=3, samples_per
         plt.close()
     log(f"Сохранено {num_batches} тренировочных батчей в {save_dir}")
 
-def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1):
+def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_classes=1, threshold=.5):
     if not HAS_MATPLOTLIB:
         return
     os.makedirs(save_dir, exist_ok=True)
@@ -696,10 +610,8 @@ def save_val_examples(val_loader, save_dir, num_samples=8, device='cpu', num_cla
         for images, masks in val_loader:
             images = images.to(device); masks = masks.to(device)
             outputs = model(images)
-            if num_classes == 1:
-                preds = (torch.sigmoid(outputs) > 0.5).float()
-            else:
-                preds = torch.argmax(outputs, dim=1).float()
+            from utils_new.segmentation.model_metrics import prediction_labels
+            preds = prediction_labels(outputs, num_classes, threshold)
             for i in range(images.size(0)):
                 if collected >= num_samples:
                     break
@@ -1131,8 +1043,10 @@ def main():
         classes=num_classes,
         decoder_use_batchnorm=True,
         decoder_channels=decoder_channels,
-        decoder_dropout=dropout,
     )
+
+    from utils_new.segmentation.training_contracts import apply_decoder_dropout
+    apply_decoder_dropout(model, dropout)
 
     if model_source is not None and os.path.exists(model_source):
         state_dict = torch.load(model_source, map_location='cpu')
@@ -1267,7 +1181,7 @@ def main():
                     outputs = model(images)
                     loss = criterion(outputs, masks)
                     if num_classes == 1:
-                        all_preds.append(torch.sigmoid(outputs).cpu())
+                        all_preds.append(outputs.cpu())
                         all_masks.append(masks.cpu())
                     else:
                         all_preds.append(outputs.cpu())
@@ -1331,10 +1245,8 @@ def main():
             history['precision'].append(metrics['Precision'])
             history['recall'].append(metrics['Recall'])
             history['accuracy'].append(metrics['Accuracy'])
-            history['map50'].append(metrics['mAP50'])
-            history['map50_95'].append(metrics['mAP50-95'])
         else:
-            for k in ['iou', 'dice', 'f1', 'precision', 'recall', 'accuracy', 'map50', 'map50_95']:
+            for k in ['iou', 'dice', 'f1', 'precision', 'recall', 'accuracy']:
                 history[k].append(float('nan'))
 
         # Scheduler
@@ -1415,7 +1327,7 @@ def main():
                 masks = masks.to(device)
                 outputs = model(images)
                 if num_classes == 1:
-                    all_preds.append(torch.sigmoid(outputs).cpu())
+                    all_preds.append(outputs.cpu())
                     all_masks.append(masks.cpu())
                 else:
                     all_preds.append(outputs.cpu())
@@ -1427,13 +1339,13 @@ def main():
         if HAS_MATPLOTLIB:
             save_training_plots(history, save_root)
             save_pr_curve(all_preds, all_masks, save_root, num_classes)
-            save_confusion_matrix(all_preds, all_masks, save_root, num_classes)
+            save_confusion_matrix(all_preds, all_masks, save_root, num_classes, threshold)
         save_train_batch_examples(train_loader, save_root,
                                    num_batches=NUM_TRAIN_BATCHES_TO_SAVE,
                                    samples_per_batch=min(4, batch_size),
                                    num_classes=num_classes)
         save_val_examples(val_loader, save_root, num_samples=NUM_VAL_SAMPLES_TO_SAVE,
-                          device=device, num_classes=num_classes)
+                          device=device, num_classes=num_classes, threshold=threshold)
 
         final_metrics = compute_metrics(all_preds, all_masks, num_classes, threshold=threshold)
         log(f"METRICS: {json.dumps(final_metrics)}")

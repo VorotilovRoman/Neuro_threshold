@@ -1,10 +1,13 @@
 # deep_learning_ops.py
+import json
 import os
 import sys
 import time
 
 import cv2
 import numpy as np
+
+from utils_new.segmentation.model_output import decode_output
 
 
 # ------------------ Логирование с немедленным выводом ------------------
@@ -291,10 +294,9 @@ class UNetSegmentor(TorchSegmentor):
         cleaned = {k: v for k, v in state_dict.items()
                    if not k.endswith('num_batches_tracked')}
         missing, unexpected = self.model.load_state_dict(cleaned, strict=False)
-        if missing:
-            _log(f"[UNet] Отсутствуют ключи: {missing[:3]}...")
-        if unexpected:
-            _log(f"[UNet] Лишние ключи (игнорируются): {unexpected[:3]}...")
+        missing = [key for key in missing if not key.endswith("num_batches_tracked")]
+        if missing or unexpected:
+            raise ValueError(f"Веса U-Net не соответствуют архитектуре: missing={missing[:5]}, unexpected={unexpected[:5]}")
 
         self.model.to(self._get_device())
         self.model.eval()
@@ -382,21 +384,18 @@ class UNetSegmentor(TorchSegmentor):
         device = self._get_device()
         tensor = tensor.to(device)
 
+        h_in, w_in = tensor.shape[-2:]
+        stride = int(getattr(getattr(self.model, "encoder", None), "output_stride", 32))
+        nh, nw = ((h_in + stride - 1) // stride) * stride, ((w_in + stride - 1) // stride) * stride
+        tensor = torch.nn.functional.pad(tensor, (0, nw - w_in, 0, nh - h_in))
         with torch.no_grad():
             logits = self.model(tensor)   # [1, C, H, W]
-            if num_classes == 1:
-                probs = torch.sigmoid(logits).squeeze().cpu().numpy()   # [H, W]
-                mask_np = (probs > threshold).astype(np.uint8) * 255
-            elif num_classes == 2:
-                # «Фон + один объект»: берём вероятность класса «объект» (index 1)
-                probs = torch.softmax(logits, dim=1)                    # [1, 2, H, W]
-                obj_prob = probs[0, 1].cpu().numpy()                    # [H, W]
-                mask_np = (obj_prob > threshold).astype(np.uint8) * 255
-            else:
-                probs = torch.softmax(logits, dim=1)
-                pred_class = torch.argmax(probs, dim=1)
-                mask_np = pred_class.squeeze().cpu().numpy().astype(np.uint8)
-                mask_np = (mask_np * (255 // (num_classes - 1))).astype(np.uint8)
+            if logits.ndim != 4 or logits.shape[1] != num_classes:
+                raise ValueError("Выход U-Net не соответствует num_classes из метаданных.")
+            if tuple(logits.shape[-2:]) != (nh, nw):
+                logits = torch.nn.functional.interpolate(logits, size=(nh, nw), mode='bilinear', align_corners=False)
+            mask_np = decode_output(logits[..., :h_in, :w_in].cpu().numpy(), threshold=threshold,
+                                    target_shape=(h_in, w_in))
 
         _log(f"[UNet predict] Предсказание shape={mask_np.shape}, "
              f"min={mask_np.min()}, max={mask_np.max()}")
@@ -554,10 +553,9 @@ class DeepLabV3Segmentor(TorchSegmentor):
         cleaned = {k: v for k, v in state_dict.items()
                    if not k.endswith('num_batches_tracked')}
         missing, unexpected = self.model.load_state_dict(cleaned, strict=False)
-        if missing:
-            _log(f"[DeepLab] Отсутствуют ключи ({len(missing)}): {missing[:3]}...")
-        if unexpected:
-            _log(f"[DeepLab] Лишние ключи ({len(unexpected)}): {unexpected[:3]}...")
+        missing = [key for key in missing if not key.endswith("num_batches_tracked")]
+        if missing or unexpected:
+            raise ValueError(f"Веса DeepLab не соответствуют архитектуре: missing={missing[:5]}, unexpected={unexpected[:5]}")
 
         self.model.to(self._get_device())
         self.model.eval()
@@ -613,7 +611,7 @@ class DeepLabV3Segmentor(TorchSegmentor):
             1 → sigmoid + threshold
             2 → softmax[:, 1] + threshold
                 (или sigmoid[:, 1] + threshold при output_activation='sigmoid')
-           >2 → softmax + argmax (класс масштабируется в 0..255 для визуализации)
+           >2 → argmax, индексы классов сохраняются
 
         Параметр threshold игнорируется для num_classes > 2.
         """
@@ -622,7 +620,7 @@ class DeepLabV3Segmentor(TorchSegmentor):
 
         input_size = self.metadata.get('input_size', 513)
         num_classes = self.metadata.get('num_classes', 21)
-        output_activation = self.metadata.get('output_activation', 'argmax')
+        output_activation = "sigmoid" if num_classes == 1 else "softmax"
         train_resize_mode = self.metadata.get('resize_mode', '?')
         resize_mode = self._resolve_resize_mode()
 
@@ -636,10 +634,11 @@ class DeepLabV3Segmentor(TorchSegmentor):
         tensor = tensor.to(device)
 
         # smp.DeepLabV3/V3+ требуют кратности output_stride.
-        # Паддим до ближайшего кратного 16 и обрезаем обратно.
+        # Паддим до кратности из метаданных и обрезаем обратно.
         h_in, w_in = tensor.shape[-2], tensor.shape[-1]
-        nh = ((h_in + 15) // 16) * 16
-        nw = ((w_in + 15) // 16) * 16
+        stride = int(self.metadata.get("output_stride", 16))
+        nh = ((h_in + stride - 1) // stride) * stride
+        nw = ((w_in + stride - 1) // stride) * stride
         if nh != h_in or nw != w_in:
             tensor = torch.nn.functional.pad(
                 tensor, (0, nw - w_in, 0, nh - h_in), mode='constant', value=0
@@ -648,34 +647,14 @@ class DeepLabV3Segmentor(TorchSegmentor):
 
         with torch.no_grad():
             logits = self.model(tensor)  # [1, C, H, W]
-            if nh != h_in or nw != w_in:
-                logits = logits[..., :h_in, :w_in]
-
-            if num_classes == 1:
-                # Бинарная сегментация — всегда sigmoid
-                probs = torch.sigmoid(logits).squeeze().cpu().numpy()
-                mask_np = (probs > threshold).astype(np.uint8) * 255
-
-            elif num_classes == 2:
-                # «Фон + один объект»
-                if output_activation == 'sigmoid':
-                    probs = torch.sigmoid(logits)
-                else:
-                    if output_activation == 'sigmoid':
-                        _log("[DeepLab predict] ВНИМАНИЕ: output_activation='sigmoid' при "
-                             f"num_classes={num_classes} > 2 — использую softmax + argmax.")
-                    probs = torch.softmax(logits, dim=1)
-                obj_prob = probs[0, 1].cpu().numpy()  # [H, W]
-                mask_np = (obj_prob > threshold).astype(np.uint8) * 255
-
-            else:
-                # Истинный multiclass
-                probs = torch.softmax(logits, dim=1)
-                pred_class = torch.argmax(probs, dim=1)
-                mask_np = pred_class.squeeze().cpu().numpy().astype(np.uint8)
-                # Масштабируем индексы классов в 0..255 для совместимости
-                # с downstream-морфологией (бинарная обработка).
-                mask_np = (mask_np * (255 // (num_classes - 1))).astype(np.uint8)
+            if logits.ndim != 4 or logits.shape[1] != num_classes:
+                raise ValueError("Выход DeepLab не соответствует num_classes из метаданных.")
+            if tuple(logits.shape[-2:]) != (nh, nw):
+                logits = torch.nn.functional.interpolate(logits, size=(nh, nw), mode='bilinear', align_corners=False)
+            logits = logits[..., :h_in, :w_in]
+            # Training workers use mutually exclusive CE classes for C >= 2.
+            mask_np = decode_output(logits.cpu().numpy(), threshold=threshold,
+                                    target_shape=(h_in, w_in))
 
         _log(f"[DeepLab predict] Предсказание shape={mask_np.shape}, "
              f"min={mask_np.min()}, max={mask_np.max()}")
@@ -708,7 +687,8 @@ class YOLOSegmentor(BaseSegmentor):
                         результат маскируем полигоном OBB;
         • detect      — если есть .boxes: для каждого бокса внутри ROI применяем Otsu.
 
-    Параметры инференса: conf, iou, imgsz, save.
+    Параметры инференса: conf, iou, imgsz, save, allow_box_otsu.
+    Detect/OBB + Otsu доступны только при явном allow_box_otsu=True.
     """
     def load(self, model_path=None):
         try:
@@ -748,7 +728,7 @@ class YOLOSegmentor(BaseSegmentor):
         )
         return roi_mask
 
-    def predict(self, image, conf=0.25, iou=0.45, imgsz=640, save=False):
+    def predict(self, image, conf=0.25, iou=0.45, imgsz=640, save=False, allow_box_otsu=False):
         start_time = time.time()
         original_h, original_w = image.shape[:2]
         _log(f"[YOLO predict] Начало, изображение ({original_h}, {original_w}), "
@@ -762,6 +742,7 @@ class YOLOSegmentor(BaseSegmentor):
             imgsz=imgsz,
             save=save,
             verbose=False,
+            retina_masks=True,  # masks in original coordinates, without letterbox padding
             device=device_arg,
         )
         r = results[0]
@@ -778,10 +759,12 @@ class YOLOSegmentor(BaseSegmentor):
                  f"{masks_np.shape[0]} масок, размер внутри модели: "
                  f"{masks_np.shape[1]}x{masks_np.shape[2]}")
 
-            combined = np.max(masks_np, axis=0)
-            combined = cv2.resize(combined, (original_w, original_h),
-                                  interpolation=cv2.INTER_LINEAR)
-            combined_mask = (combined * 255).astype(np.uint8)
+            if masks_np.shape[1:] != (original_h, original_w):
+                # Official inverse letterbox transform for backends returning padded masks.
+                import torch
+                from ultralytics.utils.ops import scale_masks
+                masks_np = scale_masks(torch.as_tensor(masks_np)[None], (original_h, original_w))[0].numpy()
+            combined_mask = (np.max(masks_np, axis=0) > .5).astype(np.uint8) * 255
             object_pixels = int(np.sum(combined_mask > 127))
             _log(f"[YOLO predict] Маска (segmentation): "
                  f"объектных пикселей {object_pixels} "
@@ -794,6 +777,8 @@ class YOLOSegmentor(BaseSegmentor):
         # ============== 2. OBB ==============
         obb = getattr(r, 'obb', None)
         if obb is not None and len(obb) > 0:
+            if not allow_box_otsu:
+                raise ValueError("Модель OBB не предсказывает пиксельную маску. Загрузите *-seg.pt или явно включите гибрид Otsu внутри боксов.")
             try:
                 corners_all = obb.xyxyxyxy.cpu().numpy()     # (N, 4, 2)
             except AttributeError:
@@ -836,6 +821,8 @@ class YOLOSegmentor(BaseSegmentor):
         # ============== 3. DETECT (boxes) ==============
         boxes = getattr(r, 'boxes', None)
         if boxes is not None and len(boxes) > 0:
+            if not allow_box_otsu:
+                raise ValueError("Detection-модель не предсказывает пиксельную маску. Загрузите *-seg.pt или явно включите гибрид Otsu внутри боксов.")
             try:
                 xyxy_all = boxes.xyxy.cpu().numpy()          # (N, 4)
             except AttributeError:
@@ -882,10 +869,6 @@ class YOLOSegmentor(BaseSegmentor):
 class SAMSegmentor(BaseSegmentor):
     """Segment Anything Model (заглушка)."""
     def load(self, model_type='vit_h', model_path=None):
-        try:
-            from segment_anything import SamPredictor, sam_model_registry
-        except ImportError:
-            raise ImportError("segment-anything is required for SAM")
         self.metadata = {
             'model_type': 'SAM',
             'model_type_detail': model_type,
@@ -902,44 +885,77 @@ class SAMSegmentor(BaseSegmentor):
 # ONNX
 # =============================================================================
 class ONNXSegmentor(BaseSegmentor):
-    """ONNX Runtime инференс."""
+    """One RGB float32 NCHW input, one semantic output. Metadata is mandatory.
+
+    The sidecar <stem>_meta.json specifies preprocessing and output semantics;
+    input_size may supply dynamic spatial dimensions. No output-type guessing.
+    """
     def load(self, model_path):
-        import onnxruntime as ort
         if not ONNX_AVAILABLE:
             raise ImportError("onnxruntime is not installed")
-        self.metadata = {'model_type': 'Custom ONNX', 'path': model_path}
-        self.session = ort.InferenceSession(
-            model_path, providers=['CPUExecutionProvider']
-        )
-        _log(f"[ONNX] Сессия создана для {model_path}")
+        import onnxruntime as ort
 
-    def predict(self, image):
-        start_time = time.time()
-        original_h, original_w = image.shape[:2]
-        input_name = self.session.get_inputs()[0].name
-        input_shape = self.session.get_inputs()[0].shape
-        h_in, w_in = input_shape[2], input_shape[3]
-        _log(f"[ONNX predict] Ожидаемый вход: {input_shape}, "
-             f"текущее изображение: ({original_h}, {original_w})")
+        meta_path = os.path.splitext(model_path)[0] + '_meta.json'
+        if not os.path.isfile(meta_path):
+            raise ValueError("Для ONNX нужен файл <имя>_meta.json: input_size, normalize, resize_mode, output_kind (logits/probabilities/labels). Экспорт проекта создаёт метаданные автоматически.")
+        with open(meta_path, encoding='utf-8') as stream:
+            self.metadata = json.load(stream)
+        required = {'input_size', 'normalize', 'resize_mode'}
+        if not required <= self.metadata.keys():
+            raise ValueError(f"В ONNX метаданных отсутствуют: {sorted(required - self.metadata.keys())}")
+        # Project exports explicitly use the raw network head (logits).
+        if 'output_kind' not in self.metadata:
+            if self.metadata.get('model_type') not in ('U-Net', 'DeepLabV3', 'DeepLabV3+', 'unet', 'unet++'):
+                raise ValueError("Укажите output_kind в ONNX метаданных: logits, probabilities или labels.")
+            self.metadata['output_kind'] = 'logits'
+        self.session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+        inputs = self.session.get_inputs()
+        if len(inputs) != 1 or len(inputs[0].shape) != 4 or inputs[0].type != 'tensor(float)':
+            raise ValueError("Поддерживается один вход NCHW float32; для другой модели нужен отдельный адаптер.")
+        shape = inputs[0].shape
+        if isinstance(shape[0], int) and shape[0] != 1 or shape[1] != 3:
+            raise ValueError("ONNX: нужен batch=1 (или динамический) и 3 канала RGB.")
+        if len(self.session.get_outputs()) != 1:
+            raise ValueError("Ожидается один выход семантической сегментации.")
+        self.model_path = model_path
 
-        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) \
-            if len(image.shape) == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        img = cv2.resize(img, (w_in, h_in))
-        _log(f"[ONNX predict] После ресайза: {img.shape}")
-        img = img.astype(np.float32) / 255.0
-        img = np.transpose(img, (2, 0, 1))
-        img = np.expand_dims(img, axis=0)
-
-        outputs = self.session.run(None, {input_name: img})
-        mask = outputs[0].squeeze()
-        _log(f"[ONNX predict] Выход модели (до ресайза): {mask.shape}, "
-             f"min={mask.min()}, max={mask.max()}")
-        mask = cv2.resize(mask, (original_w, original_h))
-        result = (mask * 255).astype(np.uint8)
-        elapsed = time.time() - start_time
-        _log(f"[ONNX predict] Готово за {elapsed:.3f} сек. "
-             f"Итоговая маска shape={result.shape}")
-        return result
+    def predict(self, image, threshold=None):
+        shape = self.session.get_inputs()[0].shape
+        configured = self.metadata['input_size']
+        configured = (configured, configured) if isinstance(configured, int) else configured
+        h_in, w_in = [dimension if isinstance(dimension, int) and dimension > 0 else configured[i]
+                      for i, dimension in enumerate(shape[2:])]
+        if min(h_in, w_in) < 1:
+            raise ValueError("ONNX input_size должен содержать положительные H, W.")
+        # Same RGB, /255, ImageNet normalization and centered padding as Torch.
+        # Reuse preprocessing geometry without importing Torch or torchvision.
+        rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB if image.ndim == 2 else
+                           cv2.COLOR_BGRA2RGB if image.shape[2] == 4 else cv2.COLOR_BGR2RGB)
+        original = rgb.shape[:2]
+        mode = self.metadata['resize_mode']
+        if mode == 'random_crop':
+            mode = self.metadata.get('inference_resize_mode', 'keep_aspect_pad')
+        if mode not in VALID_INFERENCE_RESIZE_MODES:
+            raise ValueError("ONNX resize_mode: hard или keep_aspect_pad.")
+        if mode == 'keep_aspect_pad':
+            scale = min(h_in / original[0], w_in / original[1])
+            nh, nw = max(1, round(original[0] * scale)), max(1, round(original[1] * scale))
+            top, left = (h_in - nh) // 2, (w_in - nw) // 2
+            prepared = np.zeros((h_in, w_in, 3), np.uint8)
+            prepared[top:top + nh, left:left + nw] = cv2.resize(rgb, (nw, nh))
+        else:
+            prepared = cv2.resize(rgb, (w_in, h_in))
+            top, left, nh, nw = 0, 0, h_in, w_in
+        prepared = prepared.astype(np.float32) / 255
+        if self.metadata['normalize']:
+            prepared = (prepared - np.array([.485, .456, .406], np.float32)) / np.array([.229, .224, .225], np.float32)
+        tensor = np.ascontiguousarray(prepared.transpose(2, 0, 1)[None])
+        output = self.session.run(None, {self.session.get_inputs()[0].name: tensor})[0]
+        threshold = self.metadata.get('threshold', .5) if threshold is None else threshold
+        mask = decode_output(output, output_kind=self.metadata['output_kind'], threshold=threshold,
+                             target_shape=(h_in, w_in))
+        mask = mask[top:top + nh, left:left + nw]
+        return cv2.resize(mask, (original[1], original[0]), interpolation=cv2.INTER_NEAREST)
 
 
 # =============================================================================

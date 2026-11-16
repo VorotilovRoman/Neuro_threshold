@@ -645,7 +645,7 @@ class UNetTrainWidget(BaseTrainWidget):
         prep_layout = QVBoxLayout(prep_group)
 
         self.normalize_checkbox = QCheckBox("ImageNet-нормализация входа")
-        self.normalize_checkbox.setChecked(False)
+        self.normalize_checkbox.setChecked(True)
         self.normalize_checkbox.setToolTip(
             "Если включено — изображение нормализуется по mean/std ImageNet:\n"
             "  mean = [0.485, 0.456, 0.406]\n"

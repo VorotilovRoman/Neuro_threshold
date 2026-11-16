@@ -28,8 +28,9 @@ def interactive(method, image, gray, rect, fg, bg, params, cancel):
     if method == "Watershed (marker)":
         return ops.watershed_segmentation(
             gray,
-            distance_threshold=params["threshold"],
-            min_area=params["min_distance"],
+            distance_threshold=params.get("threshold", 50),
+            min_distance=params.get("min_distance", 20),
+            fg_scribbles=fg, bg_scribbles=bg, mode=params.get("mode", "automatic"),
         )
     if method == "Lazy Snapping":
         return ops.lazy_snapping(image, fg, bg, **params)
@@ -43,15 +44,18 @@ def interactive(method, image, gray, rect, fg, bg, params, cancel):
         return ops.onecut_segmentation(
             image,
             rect,
-            **{key: value for key, value in params.items() if key != "sigma"},
+            **params,
         )
     if method == "Random Walker":
+        ops._seeds(fg, bg, gray.shape)
         markers = np.zeros(gray.shape, np.int32)
         markers[fg == 255] = 1
         markers[bg == 255] = 2
         return ops.random_walker_segmentation(image, markers, **params)
     if method == "Active Contours":
         return ops.active_contour_segmentation(gray, rect, **params)
+    if method == "Morphological Chan–Vese":
+        return ops.morphological_chan_vese_segmentation(gray, rect, **params)
     raise ValueError(f"Неизвестный интерактивный метод: {method}")
 
 
@@ -65,14 +69,24 @@ def features(image, spec):
     return ops.extract_pixel_features(image, *flags), None
 
 
-def prepare_training(images, grays, spec, cancel):
+def prepare_training(images, grays, spec, cancel, paths=None):
     all_x, all_y = [], []
-    for image, gray in zip(images, grays):
+    for index, (image, gray) in enumerate(zip(images, grays)):
         checkpoint(cancel)
         if image is None:
             continue
         x, segments = features(image, spec)
-        _, pseudo = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        if spec["model_type"] in ("K-Means Clustering", "MeanShift"):
+            pseudo = np.zeros(gray.shape, np.uint8)  # clustering does not consume labels
+        elif spec.get("training_source") == "Otsu (псевдометки)":
+            _, pseudo = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        elif spec.get("training_source") == "Ручная разметка YOLO":
+            from .training_labels import manual_target
+            if paths is None or len(paths) != len(images):
+                raise ValueError("Для ручного обучения нужны пути всех изображений.")
+            pseudo = manual_target(paths[index], gray.shape) * 255
+        else:
+            raise ValueError("Укажите источник обучающей разметки: ручной YOLO или явные псевдометки Otsu.")
         if spec["use_superpixels"]:
             y = np.zeros(len(np.unique(segments)), np.int32)
             for segment_id in np.unique(segments):
@@ -93,6 +107,8 @@ def train_prepared(x, y, spec, cancel):
 
     checkpoint(cancel)
     metadata = dict(spec)
+    if spec["model_type"] not in ("K-Means Clustering", "MeanShift") and len(np.unique(y)) < 2:
+        raise ValueError("В обучающей разметке нужны и фон, и объект.")
     if spec["normalize_features"]:
         from sklearn.preprocessing import StandardScaler
 
@@ -121,6 +137,13 @@ def train_prepared(x, y, spec, cancel):
 def predict_ml(image, gray, model, metadata, spec, cluster, cancel):
 
     checkpoint(cancel)
+    feature_keys = ("use_intensity", "use_texture", "use_spatial", "use_superpixels", "normalize_features")
+    if not metadata or any(key not in metadata or metadata[key] != spec[key] for key in feature_keys):
+        raise ValueError("Признаки отличаются от обучения. Нажмите «Сбросить к настройкам модели» или переобучите модель.")
+    if spec["use_superpixels"] and metadata.get("superpixel_size") != spec["superpixel_size"]:
+        raise ValueError("Размер суперпикселей отличается от обучения. Сбросьте настройки модели.")
+    if spec["normalize_features"] and "scaler" not in metadata:
+        raise ValueError("В модели отсутствует обученный StandardScaler. Переобучите модель.")
     x, segments = features(image, spec)
     if metadata and "scaler" in metadata:
         x = metadata["scaler"].transform(x)

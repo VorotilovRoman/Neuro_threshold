@@ -296,6 +296,8 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
 
         self.output_activation = QComboBox()
         self.output_activation.addItems(["argmax", "softmax", "sigmoid"])
+        self.output_activation.setEnabled(False)
+        self.output_activation.setToolTip("Определяется числом классов: sigmoid для одного канала; softmax для двух; argmax для многоклассовой маски. Обучение использует логиты.")
         arch_layout.addWidget(QLabel("  Активация:"))
         arch_layout.addWidget(self.output_activation)
 
@@ -498,6 +500,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.num_classes = QSpinBox()
         self.num_classes.setRange(1, 100)
         self.num_classes.setValue(21)
+        self.num_classes.valueChanged.connect(lambda value: self.output_activation.setCurrentText('sigmoid' if value == 1 else 'softmax' if value == 2 else 'argmax'))
         sched_layout.addWidget(QLabel("  Классов:"))
         sched_layout.addWidget(self.num_classes)
         sched_layout.addStretch()
@@ -648,7 +651,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             "output_stride": int(self.output_stride.currentText()),
             "input_size": self.input_size.value(),
             "atrous_rates": self.atrous_rates.text().strip(),
-            "output_activation": self.output_activation.currentText(),
+            "output_activation": "sigmoid" if self.num_classes.value() == 1 else "softmax" if self.num_classes.value() == 2 else "argmax",
             "num_classes": self.num_classes.value(),
             "ignore_index": self.ignore_index.value() if self.ignore_index.value() != -1 else None,
             "class_weights": (
@@ -730,12 +733,9 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             else:
                 self.atrous_rates.setText(str(val) if val not in (None, "") else "")
 
-        if "output_activation" in d:
-            idx = self.output_activation.findText(str(d["output_activation"]))
-            if idx >= 0:
-                self.output_activation.setCurrentIndex(idx)
         if "num_classes" in d:
             self.num_classes.setValue(int(d["num_classes"]))
+        self.output_activation.setCurrentText('sigmoid' if self.num_classes.value() == 1 else 'softmax' if self.num_classes.value() == 2 else 'argmax')
         if "ignore_index" in d:
             val = d["ignore_index"]
             self.ignore_index.setValue(int(val) if val is not None else -1)
@@ -927,7 +927,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             "backbone": self.backbone.currentText(),
             "output_stride": int(self.output_stride.currentText()),
             "atrous_rates": atrous_rates,
-            "output_activation": self.output_activation.currentText(),
+            "output_activation": "sigmoid" if self.num_classes.value() == 1 else "softmax" if self.num_classes.value() == 2 else "argmax",
             "input_size": self.input_size.value(),
 
             "class_weights": class_weights,

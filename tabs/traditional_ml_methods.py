@@ -169,6 +169,7 @@ class TraditionalMLWindow(QMainWindow):
             idx = self.model_combo.findText(model_type)
             if idx >= 0:
                 self.model_combo.setCurrentIndex(idx)
+        self.training_source.setCurrentText(metadata.get('training_source', 'Ручная разметка YOLO'))
         self.color_feature.setChecked(metadata.get('use_intensity', True))
         self.texture_feature.setChecked(metadata.get('use_texture', False))
         self.spatial_feature.setChecked(metadata.get('use_spatial', False))
@@ -263,7 +264,7 @@ class TraditionalMLWindow(QMainWindow):
             self.normalize_features, self.color_feature, self.texture_feature, self.spatial_feature,
             self.use_superpixels, self.superpixel_size,
             self.kmeans_clusters, self.svm_kernel_combo, self.svm_c,
-            self.rf_trees, self.xgb_trees, self.model_combo
+            self.rf_trees, self.xgb_trees, self.model_combo, self.training_source
         ]
         for w in widgets:
             if isinstance(w, QCheckBox):
@@ -290,6 +291,7 @@ class TraditionalMLWindow(QMainWindow):
         self.update_features_availability()
 
         is_clustering = model_name in ("K-Means Clustering", "MeanShift")
+        self.training_source.setEnabled(not is_clustering)
         self.cluster_group.setVisible(is_clustering)
         self.find_best_k_btn.setVisible(model_name == "K-Means Clustering")
 
@@ -415,6 +417,7 @@ class TraditionalMLWindow(QMainWindow):
         model_name = self.model_combo.currentText()
         settings_dict = {
             'model_type': model_name,
+            'training_source': 'Не требуется (кластеризация)' if model_name in ('K-Means Clustering', 'MeanShift') else self.training_source.currentText(),
             'use_intensity': self.color_feature.isChecked(),
             'use_texture': self.texture_feature.isChecked(),
             'use_spatial': self.spatial_feature.isChecked(),

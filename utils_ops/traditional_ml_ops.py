@@ -83,6 +83,8 @@ def extract_superpixel_features(image, segments, use_intensity=True, use_texture
     return X
 
 def train_kmeans(X, n_clusters=3):
+    if n_clusters > min(len(X), len(np.unique(X, axis=0))):
+        raise ValueError("K превышает число различных обучающих образцов.")
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     kmeans.fit(X)
     return kmeans
@@ -127,8 +129,12 @@ def predict_superpixel(model, segments, X_superpixel):
 
 def create_superpixels(image, superpixel_size=50):
     h, w = image.shape[:2]
-    n_segments = int((h * w) / (superpixel_size * superpixel_size))
-    segments = segmentation.slic(image, n_segments=n_segments, compactness=10, start_label=0)
+    if superpixel_size <= 0:
+        raise ValueError("Superpixel size должен быть положительным.")
+    n_segments = min(h * w, max(1, round(h * w / superpixel_size ** 2)))
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if image.ndim == 3 else image
+    segments = segmentation.slic(rgb, n_segments=n_segments, compactness=10, start_label=0,
+                                 channel_axis=-1 if image.ndim == 3 else None)
     return segments
 
 def compute_elbow_kmeans(X, max_k=10):
@@ -137,6 +143,9 @@ def compute_elbow_kmeans(X, max_k=10):
     Возвращает список инерций.
     """
     inertias = []
+    max_k = min(max_k, len(X), len(np.unique(X, axis=0)))
+    if max_k < 1:
+        raise ValueError("Нет образцов для поиска K.")
     for k in range(1, max_k + 1):
         kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
         kmeans.fit(X)
@@ -147,14 +156,11 @@ def find_optimal_k_elbow(inertias):
     """
     Находит оптимальное K как точку максимального изгиба (метод локтя).
     """
-    if len(inertias) < 3:
-        return 2
-    # Вычисляем разности и нормализуем
-    diffs = np.diff(inertias)
-    # Ищем точку, где падение замедляется
-    # Простой метод: выбираем K, где производная меньше среднего
-    mean_diff = np.mean(diffs)
-    for i, diff in enumerate(diffs):
-        if diff < mean_diff and i >= 1:
-            return i + 1  # K = i+1 (так как diff[i] между i и i+1)
-    return 2
+    if not inertias:
+        raise ValueError("Нет значений инерции.")
+    if len(inertias) < 3 or inertias[0] == inertias[-1]:
+        return 1
+    # Maximum distance from the normalized endpoint line. A heuristic, not validation.
+    x = np.linspace(0, 1, len(inertias))
+    y = (np.asarray(inertias) - inertias[-1]) / (inertias[0] - inertias[-1])
+    return int(np.argmax(1 - x - y)) + 1

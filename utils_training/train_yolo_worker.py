@@ -148,7 +148,7 @@ def main():
                 'fliplr': 0.0, 'flipud': 0.0, 'scale': 0.0, 'translate': 0.0,
                 'shear': 0.0, 'perspective': 0.0, 'hsv_h': 0.0, 'hsv_s': 0.0,
                 'hsv_v': 0.0, 'copy_paste': 0.0, 'mixup': 0.0, 'erasing': 0.0,
-                'auto_augment': 'none',
+                'auto_augment': None, 'mosaic': 0.0, 'degrees': 0.0,
             })
 
         log("=== Начало обучения ===")
@@ -222,23 +222,8 @@ def main():
         # ========== Валидация и сохранение метрик ==========
         log("=== Запуск валидации для сбора метрик ===")
         val_results = model.val()
-        metrics = {}
-
-        if hasattr(val_results, 'results_dict') and val_results.results_dict:
-            metrics = val_results.results_dict
-        elif hasattr(val_results, 'box'):
-            box = val_results.box
-            if hasattr(box, 'ap50'):
-                metrics['mAP50'] = box.ap50.item() if hasattr(box.ap50, 'item') else box.ap50
-                metrics['mAP50-95'] = box.ap.item() if hasattr(box.ap, 'item') else box.ap
-            elif hasattr(box, 'mp50'):
-                metrics['mAP50'] = box.mp50
-                metrics['mAP50-95'] = box.mp
-            if hasattr(box, 'p'):
-                metrics['precision'] = box.p
-                metrics['recall'] = box.r
-
-        metrics = {k: float(v) if hasattr(v, 'item') else v for k, v in metrics.items()}
+        from utils_new.segmentation.yolo_metrics import validation_metrics
+        metrics = validation_metrics(val_results)
         log(f"METRICS: {json.dumps(metrics)}")
 
         # Обновляем метафайлы с добавленными метриками и финальной датой
@@ -247,6 +232,7 @@ def main():
             if os.path.exists(weights_dir):
                 best_pt = os.path.join(weights_dir, 'best.pt')
                 last_pt = os.path.join(weights_dir, 'last.pt')
+                meta['validation_metrics'] = metrics
                 meta['mAP50'] = metrics.get('mAP50')
                 meta['mAP50-95'] = metrics.get('mAP50-95')
                 meta['precision'] = metrics.get('precision')

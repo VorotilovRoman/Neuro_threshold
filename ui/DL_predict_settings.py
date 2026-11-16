@@ -97,6 +97,10 @@ class YOLOInferenceSettings(BaseInferenceSettings):
         imgsz_save_row.addStretch()
         layout.addLayout(imgsz_save_row)
 
+        self._box_otsu = QCheckBox("Гибрид: Otsu внутри detect/OBB (не обученная маска)")
+        self._box_otsu.setToolTip("Для обычных *-seg.pt оставьте выключенным. Гибрид предполагает тёмные объекты на светлом фоне и не заменяет сегментационную модель.")
+        layout.addWidget(self._box_otsu)
+
         # Сигналы
         self._model_path.textChanged.connect(self.model_path_changed.emit)
         self._browse_btn.clicked.connect(self._browse_file)
@@ -261,6 +265,8 @@ class UNetInferenceSettings(BaseInferenceSettings):
         self._threshold.valueChanged.connect(self.threshold_changed.emit)
 
         # Override-поля: любое изменение эмитит override_changed
+        self._num_classes_override.valueChanged.connect(lambda value: self._threshold.setEnabled(value <= 2))
+        self._threshold.setEnabled(self._num_classes_override.value() <= 2)
         self._num_classes_override.valueChanged.connect(
             lambda _v: self.override_changed.emit()
         )
@@ -606,6 +612,8 @@ class DeepLabV3InferenceSettings(BaseInferenceSettings):
         )
         self._threshold.valueChanged.connect(self.threshold_changed.emit)
 
+        self._num_classes_override.valueChanged.connect(lambda value: self._threshold.setEnabled(value <= 2))
+        self._threshold.setEnabled(self._num_classes_override.value() <= 2)
         self._num_classes_override.valueChanged.connect(
             lambda _v: self.override_changed.emit()
         )
@@ -696,19 +704,8 @@ class DeepLabV3InferenceSettings(BaseInferenceSettings):
             result['missing'].append('input_size')
 
         # --- Output activation ---
-        if 'output_activation' in metadata:
-            self._output_activation.setText(str(metadata['output_activation']))
-        else:
-            # Дефолт по числу классов
-            nc = metadata.get('num_classes', 21)
-            try:
-                nc_int = int(nc)
-            except (TypeError, ValueError):
-                nc_int = 21
-            if nc_int <= 2:
-                self._output_activation.setText("sigmoid (по num_classes)")
-            else:
-                self._output_activation.setText("argmax (по num_classes)")
+        classes = int(metadata.get('num_classes', 21))
+        self._output_activation.setText('sigmoid' if classes == 1 else 'softmax + threshold' if classes == 2 else 'argmax')
 
         # --- num_classes ---
         if 'num_classes' in metadata:
@@ -941,6 +938,16 @@ class CustomONNXInferenceSettings(BaseInferenceSettings):
         path_layout.addWidget(self._model_path)
         path_layout.addWidget(self._browse_btn)
         layout.addLayout(path_layout)
+
+        self._threshold = QDoubleSpinBox()
+        self._threshold.setRange(0, 1)
+        self._threshold.setSingleStep(.05)
+        self._threshold.setValue(.5)
+        layout.addWidget(QLabel("Порог объекта (1/2 канала; для >2 классов используется argmax):"))
+        layout.addWidget(self._threshold)
+        hint = QLabel("Требуется <имя>_meta.json с input_size, normalize, resize_mode, output_kind. Поддерживается семантическая модель NCHW RGB float32 с одним выходом. Выполнение ONNX — на CPU.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
         self._model_path.textChanged.connect(self.model_path_changed.emit)
         self._browse_btn.clicked.connect(self._browse_file)

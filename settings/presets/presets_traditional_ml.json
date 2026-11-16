@@ -44,7 +44,8 @@
             "XGBoost": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/xgboost.pkl"
         },
         "annotation_mode": "none",
-        "normalize_features": false
+        "normalize_features": false,
+        "training_source": "Ручная разметка YOLO"
     },
     "321": {
         "schema_version": 3,
@@ -91,6 +92,7 @@
             "MeanShift": "C:/Users/romka/PycharmProjects/Neuro_threshold/models/mean-shift.pkl"
         },
         "annotation_mode": "none",
-        "normalize_features": false
+        "normalize_features": false,
+        "training_source": "Ручная разметка YOLO"
     }
 }

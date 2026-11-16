@@ -128,7 +128,8 @@ QTimer.singleShot(10,w.close);assert exec_window(w,app)==0
 w=ImagePlayer([('traditional_ml','ML')]);w.show();owner=w._tab_widgets[0]
 with tempfile.TemporaryDirectory() as directory:
     path=Path(directory)/'frame.png';image=np.full((40,60,3),220,np.uint8);image[10:30,15:45]=20
-    cv2.imwrite(str(path),image);owner._load_images([str(path)])
+    cv2.imwrite(str(path),image);path.with_suffix('.txt').write_text('0 0.5 0.5 0.5 0.5\\n')
+    owner._load_images([str(path)])
     owner.model_combo.setCurrentText('Decision Tree');owner.color_feature.setChecked(True)
     owner.texture_feature.setChecked(False);owner.spatial_feature.setChecked(False)
     owner.use_superpixels.setChecked(False);owner.normalize_features.setChecked(True)
@@ -170,6 +171,41 @@ with tempfile.TemporaryDirectory() as directory:
         owner.cluster_combo.setCurrentIndex(1-owner.cluster_combo.currentIndex());owner.display_current_image();owner.update_timer.stop()
         predict.assert_not_called()
     np.testing.assert_array_equal(first.astype(np.int16)+owner.prediction_mask,255)
+QTimer.singleShot(10,w.close);assert exec_window(w,app)==0
+""")
+
+
+    def test_continuous_brush_replaces_opposite_marks_and_new_methods_run(self):
+        self.run_gui("""
+from PyQt5.QtCore import Qt,QPointF
+w=ImagePlayer([('interactive','Interactive')]);w.show();owner=w._tab_widgets[0]
+with tempfile.TemporaryDirectory() as directory:
+    path=Path(directory)/'frame.png'
+    image=np.full((40,80,3),220,np.uint8);image[10:30,20:60]=20
+    cv2.imwrite(str(path),image);owner._load_images([str(path)]);app.processEvents()
+    view=owner.image_view;owner.params_widget.brush_radius.setValue(2)
+    def point(x,y):return view.mapFromScene(QPointF(x,y))
+    owner.activate_fg_tool()
+    QTest.mousePress(view.viewport(),Qt.LeftButton,pos=point(25,20))
+    QTest.mouseMove(view.viewport(),point(55,20),20)
+    QTest.mouseRelease(view.viewport(),Qt.LeftButton,pos=point(55,20))
+    assert np.all(owner.fg_scribbles[20,25:56]>0),'fast stroke has gaps'
+    owner.activate_bg_tool()
+    QTest.mouseClick(view.viewport(),Qt.LeftButton,pos=point(40,20))
+    assert owner.bg_scribbles[20,40] and not owner.fg_scribbles[20,40]
+    assert not np.any((owner.fg_scribbles>0)&(owner.bg_scribbles>0))
+    owner.method_combo.setCurrentText('Watershed (marker)')
+    owner.params_widget.watershed_mode.setCurrentText('scribbles')
+    assert owner.fg_scribble_btn.isEnabled() and not owner.params_widget.watershed_thresh.isEnabled()
+    owner.run_segmentation();until(lambda:not owner.jobs.busy and owner.mask is not None)
+    assert owner.mask[20,25]==255 and owner.mask[20,40]==0
+    owner.params_widget.watershed_mode.setCurrentText('automatic')
+    assert not owner.fg_scribble_btn.isEnabled() and owner.params_widget.watershed_thresh.isEnabled()
+    owner.method_combo.setCurrentText('Morphological Chan–Vese');owner.on_rect_drawn((15,5,65,35))
+    owner.params_widget.mcv_iterations.setValue(20)
+    owner.run_segmentation();until(lambda:not owner.jobs.busy and owner.mask is not None)
+    assert owner.mask[20,40]==255 and owner.mask[0,0]==0
+    owner._lazy_cache.shutdown()
 QTimer.singleShot(10,w.close);assert exec_window(w,app)==0
 """)
 
@@ -236,13 +272,14 @@ class NumericalOperationTests(unittest.TestCase):
 
         image = np.zeros((2, 3, 3), np.uint8)
         gray = np.zeros((2, 3), np.uint8)
+        spec = dict(use_intensity=True, use_texture=False, use_spatial=False, use_superpixels=False, normalize_features=False)
         labels = np.array([0, 256, 257, 0, 1, 2], np.int64)
         model = SimpleNamespace(predict=lambda features: labels)
         with patch.object(
             operations, "features", return_value=(np.zeros((6, 1)), None)
         ):
             result = operations.predict_ml(
-                image, gray, model, None, {"use_superpixels": False}, False, Event()
+                image, gray, model, spec, spec, False, Event()
             )
         np.testing.assert_array_equal(result, labels.reshape(2, 3))
         np.testing.assert_array_equal(

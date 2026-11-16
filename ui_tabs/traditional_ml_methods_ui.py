@@ -88,7 +88,7 @@ def setup_traditional_ml_ui(parent):
     # Горизонтальный ряд: комбобокс + кнопка поиска K
     cluster_combo_layout = QHBoxLayout()
     cluster_combo_layout.addWidget(parent.cluster_combo, 1)
-    parent.find_best_k_btn = QPushButton("Find best K (elbow)")
+    parent.find_best_k_btn = QPushButton("Оценить K (эвристика локтя)")
     cluster_combo_layout.addWidget(parent.find_best_k_btn)
 
     cluster_layout.addWidget(parent.cluster_label)
@@ -130,6 +130,12 @@ def setup_traditional_ml_ui(parent):
     superpixel_layout.addStretch()
     superpixel_group.setLayout(superpixel_layout)
     controls_layout.addWidget(superpixel_group)
+
+    parent.training_source = QComboBox()
+    parent.training_source.addItems(["Ручная разметка YOLO", "Otsu (псевдометки)"])
+    parent.training_source.setToolTip("YOLO TXT рядом с изображением или в labels вместо images. Все классы объединяются в объект. Segment даёт точный контур; BBox/OBB заполняются целиком. Otsu — демонстрационное обучение по порогу, не по эталону. Кластеризации разметка не нужна.")
+    controls_layout.addWidget(QLabel("Источник разметки для обучения классификатора:"))
+    controls_layout.addWidget(parent.training_source)
 
     # Кнопки обучения, загрузки, сохранения
     train_layout = QHBoxLayout()

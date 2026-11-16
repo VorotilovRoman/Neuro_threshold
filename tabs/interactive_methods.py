@@ -112,6 +112,7 @@ class InteractiveMethodsWindow(QMainWindow):
         self.update_input_ui()
         self.update_params_visibility()
         self.params_widget.grabcut_mode.currentIndexChanged.connect(self.update_input_ui)
+        self.params_widget.watershed_mode.currentIndexChanged.connect(self.update_input_ui)
         for widget in self.preset_manager._parameter_controls().values():
             signal = widget.currentIndexChanged if hasattr(widget, 'currentIndexChanged') else widget.toggled if hasattr(widget, 'toggled') else widget.valueChanged
             signal.connect(self.on_segmentation_parameters_changed)
@@ -195,14 +196,23 @@ class InteractiveMethodsWindow(QMainWindow):
         self.update_scribble_display()
 
     def on_scribble_added(self, x, y, tool):
-        if tool == 'fg':
-            if self.fg_scribbles is None:
-                self.fg_scribbles = np.zeros((self.current_img_h, self.current_img_w), dtype=np.uint8)
-            cv2.circle(self.fg_scribbles, (x, y), 5, 255, -1)
-        else:
-            if self.bg_scribbles is None:
-                self.bg_scribbles = np.zeros((self.current_img_h, self.current_img_w), dtype=np.uint8)
-            cv2.circle(self.bg_scribbles, (x, y), 5, 255, -1)
+        if self.original_image is None:
+            return
+        shape = (self.current_img_h, self.current_img_w)
+        if self.fg_scribbles is None:
+            self.fg_scribbles = np.zeros(shape, np.uint8)
+        if self.bg_scribbles is None:
+            self.bg_scribbles = np.zeros(shape, np.uint8)
+        serial = getattr(self.image_view, "stroke_serial", 0)
+        key = (serial, tool)
+        previous = getattr(self, "_stroke_point", None)
+        start = previous[1] if previous is not None and previous[0] == key else (x, y)
+        target, opposite = ((self.fg_scribbles, self.bg_scribbles) if tool == 'fg'
+                            else (self.bg_scribbles, self.fg_scribbles))
+        radius = self.params_widget.brush_radius.value()
+        cv2.line(target, start, (x, y), 255, radius * 2 + 1)
+        cv2.line(opposite, start, (x, y), 0, radius * 2 + 1)
+        self._stroke_point = (key, (x, y))
         self.on_segmentation_parameters_changed()
         self.update_input_ui()
         self.update_scribble_display()
@@ -236,12 +246,12 @@ class InteractiveMethodsWindow(QMainWindow):
                 rect_required, fg_required, bg_required = False, True, True
                 can_run = bool(fg_ok and bg_ok)
                 requirements = "Требуются штрихи FG и BG"
-            elif method in ("SuperCut", "Active Contours", "OneCut"):
+            elif method in ("SuperCut", "Active Contours", "OneCut", "Morphological Chan–Vese"):
                 rect_active, fg_active, bg_active = True, False, False
                 rect_required, fg_required, bg_required = True, False, False
                 can_run = bool(rect_ok)
                 requirements = "Требуется прямоугольник"
-            elif method == "Random Walker":
+            elif method == "Random Walker" or (method == "Watershed (marker)" and self.params_widget.watershed_mode.currentText() == "scribbles"):
                 rect_active, fg_active, bg_active = False, True, True
                 rect_required, fg_required, bg_required = False, True, True
                 can_run = bool(fg_ok and bg_ok)
@@ -278,7 +288,7 @@ class InteractiveMethodsWindow(QMainWindow):
             set_style(self.bg_scribble_btn, bg_active, bg_required, bg_ok)
 
             self.requirements_text.setText(requirements)
-            self.run_seg_btn.setEnabled(bool(can_run))
+            self.run_seg_btn.setEnabled(bool(can_run and self.original_image is not None))
 
         except Exception as e:
             import traceback
@@ -344,6 +354,9 @@ class InteractiveMethodsWindow(QMainWindow):
         self.params_widget.watershed_group.setVisible(False)
         self.params_widget.rw_group.setVisible(False)
         self.params_widget.ac_group.setVisible(False)
+        self.params_widget.mcv_group.setVisible(False)
+        self.params_widget.lazy_color_sigma.setEnabled(method != "SuperCut")
+        self.params_widget.lazy_group.setToolTip("Варианты проекта на SLIC-графе; не точное воспроизведение одноимённых публикаций.")
 
         if method == "GrabCut":
             self.params_widget.grabcut_group.setVisible(True)
@@ -361,6 +374,8 @@ class InteractiveMethodsWindow(QMainWindow):
             self.params_widget.watershed_group.setVisible(True)
         elif method == "Active Contours":
             self.params_widget.ac_group.setVisible(True)
+        elif method == "Morphological Chan–Vese":
+            self.params_widget.mcv_group.setVisible(True)
 
     # ----------------------------------------------------------------------
     #  Запуск сегментации
@@ -369,6 +384,8 @@ class InteractiveMethodsWindow(QMainWindow):
         segmentation_computation.run_interactive(self)
 
     def reset_mask(self):
+        segmentation_controller.invalidate_prediction(self)
+        self._stroke_point = None
         self.mask = None
         self.rect = None
         self.fg_scribbles = None
@@ -416,6 +433,7 @@ class InteractiveMethodsWindow(QMainWindow):
         segmentation_navigation.update_state(self)
 
     def _reset_interactive_state(self):
+        self._stroke_point = None
         self.mask = None
         self.rect = None
         self.fg_scribbles = None

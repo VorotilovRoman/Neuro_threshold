@@ -23,10 +23,27 @@ def setup_interactive_ui(parent):
     method_layout = QHBoxLayout()
     method_layout.addWidget(QLabel("Method:"))
     parent.method_combo = QComboBox()
-    methods = ["GrabCut", "Lazy Snapping", "SuperCut", "OneCut", "Random Walker", "Watershed (marker)", "Active Contours"]
+    methods = ["GrabCut", "Lazy Snapping", "SuperCut", "OneCut", "Random Walker", "Watershed (marker)", "Active Contours", "Morphological Chan–Vese"]
     parent.method_combo.addItems(methods)
     method_layout.addWidget(parent.method_combo)
     controls_layout.addLayout(method_layout)
+    parent.method_help = QLabel()
+    parent.method_help.setWordWrap(True)
+    descriptions = {
+        "GrabCut": "ROI должен охватывать объект и оставлять фон снаружи. Both учитывает ROI и жёсткие штрихи; без ROI нужны FG и BG. Итерации переоценивают цветовые модели только текущего снимка.",
+        "Lazy Snapping": "Вариант проекта: SLIC + цветовые GMM по FG/BG + разрез графа. Если противоположные метки попали в один суперпиксель, уменьшите Superpixel size. Это не точная реализация одноимённой статьи.",
+        "SuperCut": "Вариант проекта: разрез SLIC-графа с априорной вероятностью из ROI. Lambda усиливает влияние ROI; color sigma ослабляет влияние различий цвета. Это не точная реализация одноимённой статьи.",
+        "OneCut": "Вариант проекта: цветовые GMM из ROI/фона и разрез SLIC-графа. ROI должен содержать преимущественно объект. Data weight — цветовые модели; spatial weight — согласованность соседей. Это не точная реализация одноимённой статьи.",
+        "Random Walker": "Нанесите FG/BG в разных областях. Beta повышает чувствительность к границам; RGB учитывает цвет. cg_j — основной решатель; bf ограничен малыми снимками, cg_mg требует pyamg.",
+        "Watershed (marker)": "scribbles: заполнение от ручных FG/BG по градиенту. automatic: тёмные объекты на светлом фоне, Otsu + distance transform. Min distance — расстояние между пиками в рабочих пикселях, не площадь маркера.",
+        "Active Contours": "ROI задаёт начальную замкнутую кривую возле границы. Alpha стягивает контур, beta подавляет изгибы, gamma задаёт численный шаг. Метод зависит от начального контура и границ изображения.",
+        "Morphological Chan–Vese": "ROI задаёт начальную область. Метод ищет однородные внутреннюю/внешнюю области и подходит для слабых границ. Smoothing сглаживает контур; Lambda1/Lambda2 — параметры областей skimage. Текстурные и неоднородные объекты могут потребовать другой метод.",
+    }
+    def update_help():
+        parent.method_help.setText(descriptions[parent.method_combo.currentText()])
+    parent.method_combo.currentIndexChanged.connect(update_help)
+    update_help()
+    controls_layout.addWidget(parent.method_help)
 
     # Группа для отображения требований
     parent.requirements_frame = QFrame()

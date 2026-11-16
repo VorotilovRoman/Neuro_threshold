@@ -31,6 +31,10 @@ def setup_deep_learning_methods_ui(parent):
     parent.model_combo = QComboBox()
     models = ["YOLO-seg", "U-Net", "DeepLabV3+", "SegFormer", "SAM", "Custom ONNX"]
     parent.model_combo.addItems(models)
+    for pending in ("SAM", "SegFormer"):
+        item = parent.model_combo.model().item(parent.model_combo.findText(pending))
+        item.setEnabled(False)
+        item.setToolTip("Пока не реализован: требуется адаптер модели и её входных подсказок.")
     model_layout.addWidget(parent.model_combo)
     controls_layout.addLayout(model_layout)
 

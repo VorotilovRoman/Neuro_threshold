@@ -361,6 +361,7 @@ class TraditionalMLPresetManager(MethodPresetManager):
     kind = "traditional_ml"
     fields = dict(
         model="model_combo",
+        training_source="training_source",
         n_clusters="kmeans_clusters",
         svm_kernel="svm_kernel_combo",
         svm_c="svm_c",
@@ -395,10 +396,12 @@ class DeepLearningPresetManager(MethodPresetManager):
         deeplab_model_path="deeplab_settings._model_path",
         yolo_model_path="yolo_settings._model_path",
         onnx_model_path="custom_settings._model_path",
+        onnx_threshold="custom_settings._threshold",
         yolo_conf="yolo_settings._conf",
         yolo_iou="yolo_settings._iou",
         yolo_imgsz="yolo_settings._imgsz",
         yolo_save="yolo_settings._save",
+        yolo_box_otsu="yolo_settings._box_otsu",
         unet_encoder="unet_settings._encoder",
         unet_input_size="unet_settings._input_size",
         deeplab_backbone="deeplab_settings._backbone",

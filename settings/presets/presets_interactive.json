@@ -51,7 +51,14 @@
             "ac_max_iter": 250,
             "ac_convergence": 0.0001,
             "ac_init_type": "Rectangle",
-            "ac_smooth_check": true
+            "ac_smooth_check": true,
+            "brush_radius": 5,
+            "watershed_mode": "scribbles",
+            "rw_color": true,
+            "mcv_iterations": 100,
+            "mcv_smoothing": 2,
+            "mcv_inside": 1.0,
+            "mcv_outside": 1.0
         },
         "annotation_mode": "none"
     }

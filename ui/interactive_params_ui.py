@@ -1,4 +1,6 @@
 # interactive_params_ui.py
+from importlib.util import find_spec
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -6,7 +8,6 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QSlider,
     QSpinBox,
@@ -24,6 +25,13 @@ class InteractiveParametersUI(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+
+        self.brush_radius = QSpinBox()
+        self.brush_radius.setRange(1, 64)
+        self.brush_radius.setValue(5)
+        self.brush_radius.setPrefix("Радиус кисти, px: ")
+        self.brush_radius.setToolTip("Последний штрих заменяет противоположную метку в тех же пикселях.")
+        layout.addWidget(self.brush_radius)
 
         # === GrabCut параметры ===
         self.grabcut_group = QGroupBox("GrabCut Parameters")
@@ -90,7 +98,7 @@ class InteractiveParametersUI(QWidget):
 
         sc_layout.addWidget(QLabel("Sigma (color distance):"), 1, 0)
         self.supercut_sigma = QDoubleSpinBox()
-        self.supercut_sigma.setRange(0, 100)
+        self.supercut_sigma.setRange(0.1, 100)
         self.supercut_sigma.setValue(10)
         sc_layout.addWidget(self.supercut_sigma, 1, 1)
 
@@ -119,6 +127,10 @@ class InteractiveParametersUI(QWidget):
         # === Watershed параметры ===
         self.watershed_group = QGroupBox("Watershed Parameters")
         ws_layout = QGridLayout()
+        self.watershed_mode = QComboBox()
+        self.watershed_mode.addItems(["scribbles", "automatic"])
+        self.watershed_mode.setToolTip("scribbles: штрихи FG/BG; automatic: тёмные объекты на светлом фоне, пики distance transform.")
+        ws_layout.addWidget(self.watershed_mode, 2, 0, 1, 3)
 
         ws_layout.addWidget(QLabel("Distance threshold (%):"), 0, 0)
         self.watershed_thresh = QSlider(Qt.Horizontal)
@@ -136,6 +148,12 @@ class InteractiveParametersUI(QWidget):
         self.watershed_min_dist.setValue(20)
         ws_layout.addWidget(self.watershed_min_dist, 1, 1)
 
+        def update_watershed_controls():
+            automatic = self.watershed_mode.currentText() == "automatic"
+            self.watershed_thresh.setEnabled(automatic)
+            self.watershed_min_dist.setEnabled(automatic)
+        self.watershed_mode.currentIndexChanged.connect(update_watershed_controls)
+        update_watershed_controls()
         self.watershed_group.setLayout(ws_layout)
         layout.addWidget(self.watershed_group)
 
@@ -153,7 +171,13 @@ class InteractiveParametersUI(QWidget):
         rw_layout.addWidget(QLabel("Mode:"), 1, 0)
         self.rw_mode = QComboBox()
         self.rw_mode.addItems(["cg_j", "cg_mg", "bf"])
+        if find_spec("pyamg") is None:
+            self.rw_mode.model().item(1).setEnabled(False)
+        self.rw_mode.setToolTip("cg_mg требует pyamg; bf — прямой решатель для изображений до 256×256.")
         rw_layout.addWidget(self.rw_mode, 1, 1)
+        self.rw_color = QCheckBox("Использовать цвет RGB")
+        self.rw_color.setChecked(True)
+        rw_layout.addWidget(self.rw_color, 2, 0, 1, 2)
 
         self.rw_group.setLayout(rw_layout)
         layout.addWidget(self.rw_group)
@@ -179,7 +203,8 @@ class InteractiveParametersUI(QWidget):
 
         ac_layout.addWidget(QLabel("Gamma (step size):"), 2, 0)
         self.ac_gamma = QDoubleSpinBox()
-        self.ac_gamma.setRange(0, 1)
+        self.ac_gamma.setDecimals(4)
+        self.ac_gamma.setRange(0.0001, 1)
         self.ac_gamma.setValue(0.01)
         self.ac_gamma.setSingleStep(0.005)
         ac_layout.addWidget(self.ac_gamma, 2, 1)
@@ -209,6 +234,22 @@ class InteractiveParametersUI(QWidget):
         self.ac_group.setLayout(ac_layout)
         layout.addWidget(self.ac_group)
 
+        self.mcv_group = QGroupBox("Morphological Chan–Vese: однородные области, слабые границы")
+        mcv_layout = QGridLayout(self.mcv_group)
+        for row, (name, title, low, high, value) in enumerate([
+            ("mcv_iterations", "Итерации", 1, 1000, 100),
+            ("mcv_smoothing", "Сглаживание за итерацию", 0, 10, 2),
+            ("mcv_inside", "Lambda2 (внутренняя область)", 0.1, 10., 1.),
+            ("mcv_outside", "Lambda1 (внешняя область)", 0.1, 10., 1.),
+        ]):
+            control = QSpinBox() if isinstance(value, int) else QDoubleSpinBox()
+            control.setRange(low, high)
+            control.setValue(value)
+            setattr(self, name, control)
+            mcv_layout.addWidget(QLabel(title), row, 0)
+            mcv_layout.addWidget(control, row, 1)
+        layout.addWidget(self.mcv_group)
+
         # Изначально скрываем специфичные группы
         self.supercut_group.setVisible(False)
         self.onecut_group.setVisible(False)
@@ -231,6 +272,7 @@ class InteractiveParametersUI(QWidget):
 
     def get_supercut_params(self):
         params = self.get_superpixel_params()
+        del params["color_sigma"]
         params.update({
             'lambda_val': self.supercut_lambda.value(),
             'sigma_color': self.supercut_sigma.value()
@@ -246,7 +288,10 @@ class InteractiveParametersUI(QWidget):
         return params
 
     def get_watershed_params(self):
+        if self.watershed_mode.currentText() == "scribbles":
+            return {"mode": "scribbles"}
         return {
+            "mode": "automatic",
             'threshold': self.watershed_thresh.value(),
             'min_distance': self.watershed_min_dist.value()
         }
@@ -254,7 +299,8 @@ class InteractiveParametersUI(QWidget):
     def get_random_walker_params(self):
         return {
             'beta': self.rw_beta.value(),
-            'mode': self.rw_mode.currentText()
+            'mode': self.rw_mode.currentText(),
+            'use_color': self.rw_color.isChecked()
         }
 
     def get_active_contour_params(self):
@@ -267,3 +313,7 @@ class InteractiveParametersUI(QWidget):
             'init_type': self.ac_init_type.currentText(),
             'smooth': self.ac_smooth_check.isChecked()
         }
+
+    def get_mcv_params(self):
+        return {"iterations": self.mcv_iterations.value(), "smoothing": self.mcv_smoothing.value(),
+                    "lambda_inside": self.mcv_inside.value(), "lambda_outside": self.mcv_outside.value()}

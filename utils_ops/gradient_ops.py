@@ -3,6 +3,14 @@ import numpy as np
 
 
 def apply_gradient_method(gray, method, params):
+    if gray.dtype != np.uint8 or gray.ndim != 2 or not gray.size:
+        raise ValueError("Нужно непустое grayscale изображение uint8.")
+    if any(not np.isfinite(value) for value in params.values()):
+        raise ValueError("Параметры должны быть конечными числами.")
+    if method in ('Sobel', 'Laplacian'):
+        size = params.get('ksize', 3)
+        if int(size) != size or not 1 <= size <= 31 or size % 2 != 1:
+            raise ValueError("Размер ядра должен быть нечётным целым числом 1..31.")
     if method == "Sobel":
         ksize = params.get("ksize", 3)
         scale = params.get("scale", 1)
@@ -31,6 +39,8 @@ def apply_gradient_method(gray, method, params):
         t1 = params.get("threshold1", 50)
         t2 = params.get("threshold2", 150)
         aperture = params.get("aperture", 3)
+        if not 0 <= t1 <= t2 <= 255 or aperture not in (3, 5, 7):
+            raise ValueError("Canny: 0 ≤ threshold1 ≤ threshold2 ≤ 255; aperture = 3, 5 или 7.")
         edges = cv2.Canny(gray, t1, t2, apertureSize=aperture)
         return edges
 
@@ -66,7 +76,7 @@ def apply_gradient_method(gray, method, params):
         max_response = np.zeros_like(gray, dtype=np.float64)
         for kernel in kernels:
             response = cv2.filter2D(gray, cv2.CV_64F, kernel)
-            max_response = np.maximum(max_response, np.abs(response))   # ИСПРАВЛЕНО
+            max_response = np.maximum(max_response, response)  # Kirsch: maximum signed compass response
         magnitude = np.uint8(np.clip(max_response, 0, 255))
         return magnitude
 

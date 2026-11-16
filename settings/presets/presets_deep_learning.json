@@ -45,7 +45,9 @@
         "deeplab_output_stride": "8",
         "unet_threshold": 0.5,
         "deeplab_threshold": 0.5,
-        "annotation_mode": "none"
+        "annotation_mode": "none",
+        "onnx_threshold": 0.5,
+        "yolo_box_otsu": false
     },
     "123": {
         "schema_version": 3,
@@ -93,7 +95,9 @@
         "deeplab_output_stride": "8",
         "unet_threshold": 0.5,
         "deeplab_threshold": 0.5,
-        "annotation_mode": "none"
+        "annotation_mode": "none",
+        "onnx_threshold": 0.5,
+        "yolo_box_otsu": false
     },
     "321": {
         "schema_version": 3,
@@ -141,6 +145,8 @@
         "deeplab_output_stride": "8",
         "unet_threshold": 0.5,
         "deeplab_threshold": 0.5,
-        "annotation_mode": "segment"
+        "annotation_mode": "segment",
+        "onnx_threshold": 0.5,
+        "yolo_box_otsu": false
     }
 }

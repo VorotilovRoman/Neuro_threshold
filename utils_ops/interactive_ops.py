@@ -1,565 +1,430 @@
-# interactive_ops.py
+"""Interactive binary segmentation, without implicit morphology or fallback masks.
+
+SuperCut/OneCut/Lazy Snapping are project variants on a SLIC graph, not
+reproductions of the similarly named publications. See Docs/Segmentation_Methods_Audit.md.
+"""
+
 import cv2
 import numpy as np
-from skimage.segmentation import find_boundaries, slic
-
-# Проверка наличия networkx для Lazy Snapping
-try:
-    import networkx as nx
-    HAS_NETWORKX = True
-except ImportError:
-    nx = None
-    HAS_NETWORKX = False
-    print("Предупреждение: networkx не установлена. Lazy Snapping будет недоступен.")
+from skimage.segmentation import slic
 
 
-
-def grabcut_segmentation(img, rect=None, mask=None, fg_scribbles=None, bg_scribbles=None,
-                         iterations=5, mode="Both"):
-    """
-    GrabCut segmentation with mode selection.
-    mode: "GC_INIT_WITH_RECT" (only rectangle), "GC_INIT_WITH_MASK" (only scribbles), "Both" (both)
-    """
+def _image(image):
+    image = np.asarray(image)
+    if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError("Нужно цветное изображение BGR uint8.")
+    return image
 
 
-    h, w = img.shape[:2]
-    if mask is None:
-        mask = np.full((h, w), cv2.GC_PR_BGD, dtype=np.uint8)
-    if fg_scribbles is not None:
-        mask[fg_scribbles == 255] = cv2.GC_FGD
-    if bg_scribbles is not None:
-        mask[bg_scribbles == 255] = cv2.GC_BGD
+def _rect(rect, shape):
+    if rect is None or len(rect) != 4:
+        raise ValueError("Выделите прямоугольную область объекта (ROI).")
+    x1, y1, x2, y2 = map(int, rect)
+    h, w = shape[:2]
+    if not (0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h):
+        raise ValueError(
+            "ROI должен иметь положительную площадь и находиться внутри изображения."
+        )
+    return x1, y1, x2, y2
 
-    has_def_fg = np.any(mask == cv2.GC_FGD)
-    has_def_bg = np.any(mask == cv2.GC_BGD)
 
-    if mode == "GC_INIT_WITH_MASK" and (not has_def_fg or not has_def_bg):
-        # fallback: использовать инициализацию с прямоугольником, если он есть
-        if rect is not None:
-            mode = "GC_INIT_WITH_RECT"
+def _seeds(fg, bg, shape, required=True):
+    result = []
+    for value in (fg, bg):
+        if value is None:
+            result.append(np.zeros(shape[:2], bool))
+        elif np.shape(value) != shape[:2]:
+            raise ValueError("Размер штрихов не совпадает с изображением.")
         else:
-            raise ValueError("Для GrabCut с маской нужны и FG, и BG метки, либо прямоугольник.")
-
-    bgdModel = np.zeros((1, 65), np.float64)
-    fgdModel = np.zeros((1, 65), np.float64)
-
-    if mode == "GC_INIT_WITH_RECT" and rect is not None:
-        x1, y1, x2, y2 = rect
-        rect_tuple = (x1, y1, x2 - x1, y2 - y1)
-        cv2.grabCut(img, mask, rect_tuple, bgdModel, fgdModel, iterations, cv2.GC_INIT_WITH_RECT)
-    elif mode == "GC_INIT_WITH_MASK" and (fg_scribbles is not None or bg_scribbles is not None):
-        cv2.grabCut(img, mask, None, bgdModel, fgdModel, iterations, cv2.GC_INIT_WITH_MASK)
-    elif mode == "Both":
-        if rect is not None:
-            x1, y1, x2, y2 = rect
-            rect_tuple = (x1, y1, x2 - x1, y2 - y1)
-            cv2.grabCut(img, mask, rect_tuple, bgdModel, fgdModel, iterations, cv2.GC_INIT_WITH_RECT)
-            if fg_scribbles is not None or bg_scribbles is not None:
-                cv2.grabCut(img, mask, rect_tuple, bgdModel, fgdModel, iterations, cv2.GC_INIT_WITH_MASK)
-    else:
-        # fallback: if nothing suitable, just run with mask if available
-        cv2.grabCut(img, mask, None, bgdModel, fgdModel, iterations, cv2.GC_INIT_WITH_MASK)
-
-    result = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
-    return result
+            result.append(np.asarray(value) > 0)
+    fg, bg = result
+    if np.any(fg & bg):
+        raise ValueError("Штрихи объекта и фона пересекаются. Исправьте разметку.")
+    if required and (not fg.any() or not bg.any()):
+        raise ValueError("Отметьте штрихами и объект (FG), и фон (BG).")
+    return fg, bg
 
 
-def watershed_segmentation(gray, distance_threshold=50, min_area=20):
+def _positive(name, value, zero=False):
+    if not np.isfinite(value) or (value < 0 if zero else value <= 0):
+        raise ValueError(
+            f"{name}: требуется {'неотрицательное' if zero else 'положительное'} конечное значение."
+        )
+
+
+def grabcut_segmentation(
+    img,
+    rect=None,
+    mask=None,
+    fg_scribbles=None,
+    bg_scribbles=None,
+    iterations=5,
+    mode="Both",
+):
+    """Initialize once: rectangle, seeds, or rectangle with hard seed constraints."""
+    img = _image(img)
+    _positive("Iterations", iterations)
+    if mode not in ("GC_INIT_WITH_RECT", "GC_INIT_WITH_MASK", "Both"):
+        raise ValueError("Неизвестный режим GrabCut.")
+    fg, bg = _seeds(fg_scribbles, bg_scribbles, img.shape, required=False)
+    labels = np.full(img.shape[:2], cv2.GC_PR_BGD, np.uint8)
+    if mask is not None:
+        if np.shape(mask) != labels.shape or not np.isin(mask, [0, 1, 2, 3]).all():
+            raise ValueError("Маска GrabCut должна содержать только метки 0, 1, 2, 3.")
+        labels = np.array(mask, dtype=np.uint8, copy=True)
+    cv_rect = None
+    init = cv2.GC_INIT_WITH_MASK
+    if mode == "GC_INIT_WITH_RECT" or (mode == "Both" and rect is not None):
+        x1, y1, x2, y2 = _rect(rect, img.shape)
+        labels.fill(cv2.GC_BGD)
+        labels[y1:y2, x1:x2] = cv2.GC_PR_FGD
+        cv_rect = (x1, y1, x2 - x1, y2 - y1)
+        if mode == "GC_INIT_WITH_RECT":
+            init = cv2.GC_INIT_WITH_RECT
+        elif np.any(fg & (labels == cv2.GC_BGD)):
+            raise ValueError("Штрихи FG должны находиться внутри ROI GrabCut.")
+    elif mask is None and (not fg.any() or not bg.any()):
+        raise ValueError("Без ROI для GrabCut нужны штрихи и FG, и BG.")
+    if mode != "GC_INIT_WITH_RECT":
+        labels[fg] = cv2.GC_FGD
+        labels[bg] = cv2.GC_BGD
+    for kinds in ((cv2.GC_BGD, cv2.GC_PR_BGD), (cv2.GC_FGD, cv2.GC_PR_FGD)):
+        if np.isin(labels, kinds).sum() < 5:
+            raise ValueError(
+                "Для цветовых моделей GrabCut нужны минимум 5 пикселей объекта и фона. Уменьшите ROI или добавьте штрихи."
+            )
+    cv2.grabCut(
+        img,
+        labels,
+        cv_rect,
+        np.zeros((1, 65)),
+        np.zeros((1, 65)),
+        int(iterations),
+        init,
+    )
+    return np.where(np.isin(labels, [cv2.GC_FGD, cv2.GC_PR_FGD]), 255, 0).astype(
+        np.uint8
+    )
+
+
+def watershed_segmentation(
+    gray,
+    distance_threshold=50,
+    min_distance=20,
+    fg_scribbles=None,
+    bg_scribbles=None,
+    mode="automatic",
+):
+    """Marker watershed; automatic mode assumes dark objects on a light background."""
+    from skimage.feature import peak_local_max
+    from skimage.filters import sobel
+    from skimage.segmentation import watershed
+
+    if mode == "scribbles":
+        fg, bg = _seeds(fg_scribbles, bg_scribbles, gray.shape)
+        _, labels = cv2.connectedComponents(fg.astype(np.uint8))
+        markers = np.where(fg, labels + 1, 0).astype(np.int32)
+        markers[bg] = 1
+        result = watershed(sobel(gray.astype(float) / 255), markers)
+        return np.where(result > 1, 255, 0).astype(np.uint8)
+    if mode != "automatic":
+        raise ValueError("Неизвестный режим Watershed.")
+    if not 0 < distance_threshold <= 100:
+        raise ValueError("Distance threshold должен быть в диапазоне (0, 100].")
+    _positive("Min distance", min_distance)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     dist = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
-    _, sure_fg = cv2.threshold(dist, distance_threshold / 100.0 * dist.max(), 255, 0)
-    sure_fg = np.uint8(sure_fg)
-
-    # Удаление мелких маркеров
-    if min_area > 0:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(sure_fg, connectivity=8)
-        cleaned = np.zeros_like(sure_fg, dtype=np.uint8)
-        for i in range(1, num_labels):
-            if stats[i, cv2.CC_STAT_AREA] >= min_area:
-                cleaned[labels == i] = 255
-        sure_fg = cleaned
-
-    sure_bg = cv2.dilate(binary, np.ones((3, 3), np.uint8), iterations=3)
-    unknown = cv2.subtract(sure_bg, sure_fg)
-    _, markers = cv2.connectedComponents(sure_fg)
-    markers = markers + 1
-    markers[unknown == 255] = 0
-    markers = cv2.watershed(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), markers)
-    result = np.where(markers > 1, 255, 0).astype(np.uint8)
-    return result
+    if not dist.any():
+        return np.zeros_like(gray, np.uint8)
+    peaks = peak_local_max(
+        dist,
+        min_distance=int(min_distance),
+        exclude_border=False,
+        threshold_abs=np.nextafter(float(dist.max()) * distance_threshold / 100, 0),
+        labels=(binary > 0).astype(np.uint8),
+    )
+    markers = np.zeros(gray.shape, np.int32)
+    for label, (y, x) in enumerate(peaks, 1):
+        markers[y, x] = label
+    result = watershed(-dist, markers, mask=binary > 0, watershed_line=True)
+    return np.where(result > 0, 255, 0).astype(np.uint8)
 
 
-def random_walker_segmentation(img, markers, beta=130, mode='cg_j'):
-    """
-    Random Walker segmentation.
-    img: BGR image
-    markers: integer mask with different labels for foreground/background
-    beta: edge weight parameter (default 130)
-    mode: solver mode ('cg_j', 'cg_mg', 'bf')
-    Returns: binary mask where markers == 1 are foreground
-    """
-    import warnings
+def random_walker_segmentation(img, markers, beta=130, mode="cg_j", use_color=True):
+    from importlib.util import find_spec
 
     from skimage.segmentation import random_walker
 
-    if len(img.shape) == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = _image(img)
+    if np.shape(markers) != img.shape[:2] or not np.isin(markers, [0, 1, 2]).all():
+        raise ValueError(
+            "Random Walker: нужны метки 0 (неизвестно), 1 (объект), 2 (фон)."
+        )
+    _seeds(markers == 1, markers == 2, img.shape)
+    _positive("Beta", beta, zero=True)
+    if mode not in ("cg_j", "cg_mg", "bf"):
+        raise ValueError("Неизвестный решатель Random Walker.")
+    if mode == "cg_mg" and find_spec("pyamg") is None:
+        raise ImportError("Решатель cg_mg требует pyamg. Выберите cg_j.")
+    if mode == "bf" and markers.size > 65536:
+        raise ValueError(
+            "Прямой решатель bf предназначен для небольших изображений (до 256×256). Выберите cg_j."
+        )
+    data = (
+        cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if use_color
+        else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ).astype(float) / 255
+    if np.max(np.std(data, axis=(0, 1))) == 0:
+        raise ValueError(
+            "Random Walker: изображение постоянно, цветовые границы отсутствуют."
+        )
+    labels = random_walker(
+        data,
+        markers.copy(),
+        beta=beta,
+        mode=mode,
+        channel_axis=-1 if use_color else None,
+    )
+    return np.where(labels == 1, 255, 0).astype(np.uint8)
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        labels = random_walker(img, markers, beta=beta, mode=mode)
 
-    result = np.where(labels == 1, 255, 0).astype(np.uint8)
-    return result
-
-
-def active_contour_segmentation(gray, rect, alpha=0.01, beta=0.1, gamma=0.01,
-                                max_iter=250, convergence=0.001, smooth=True,
-                                init_type="Ellipse"):
-    """
-    Active Contours (Snakes) segmentation.
-
-    Args:
-        gray: grayscale image
-        rect: (x1, y1, x2, y2) bounding box
-        alpha: elasticity parameter (tension)
-        beta: rigidity parameter (bending)
-        gamma: step size for evolution
-        max_iter: maximum iterations
-        convergence: convergence threshold
-        smooth: apply Gaussian smoothing to image
-        init_type: type of initial contour ("Rectangle", "Circle", "Ellipse")
-    Returns:
-        binary mask (0=bg, 255=fg)
-    """
+def active_contour_segmentation(
+    gray,
+    rect,
+    alpha=0.01,
+    beta=0.1,
+    gamma=0.01,
+    max_iter=250,
+    convergence=0.001,
+    smooth=True,
+    init_type="Ellipse",
+):
     from skimage.segmentation import active_contour
 
-    x1, y1, x2, y2 = rect
-
-    if smooth:
-        gray_blurred = cv2.GaussianBlur(gray, (5, 5), 2)
-    else:
-        gray_blurred = gray
-
-    gray_norm = cv2.normalize(gray_blurred.astype(np.float32), None, 0, 1, cv2.NORM_MINMAX)
-
-    cx = (x1 + x2) / 2.0
-    cy = (y1 + y2) / 2.0
-    rx = (x2 - x1) / 2.0
-    ry = (y2 - y1) / 2.0
-
-    n_points = 100
-    theta = np.linspace(0, 2 * np.pi, n_points)
-
+    x1, y1, x2, y2 = _rect(rect, gray.shape)
+    for name, value in (("Alpha", alpha), ("Beta", beta)):
+        _positive(name, value, zero=True)
+    for name, value in (
+        ("Gamma", gamma),
+        ("Max iterations", max_iter),
+        ("Convergence", convergence),
+    ):
+        _positive(name, value)
+    image = cv2.GaussianBlur(gray, (5, 5), 2) if smooth else gray
+    image = image.astype(float) / 255
+    # skimage uses (row, column), OpenCV uses (x, y).
+    cx, cy = (x1 + x2 - 1) / 2, (y1 + y2 - 1) / 2
+    rx, ry = (x2 - x1 - 1) / 2, (y2 - y1 - 1) / 2
+    theta = np.linspace(0, 2 * np.pi, 100, endpoint=False)
     if init_type == "Rectangle":
-        rect_pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32)
-        t = np.linspace(0, 1, n_points)
-        snake_init = np.zeros((n_points, 2), dtype=np.float32)
-        seg_len = n_points // 4
-        for i in range(4):
-            start = rect_pts[i]
-            end = rect_pts[(i + 1) % 4]
-            for j in range(seg_len):
-                idx = i * seg_len + j
-                if idx < n_points:
-                    frac = j / seg_len
-                    snake_init[idx] = start + frac * (end - start)
-        for idx in range(4 * seg_len, n_points):
-            snake_init[idx] = snake_init[4 * seg_len - 1]
-    elif init_type == "Circle":
-        radius = min(rx, ry)
-        snake_init = np.array([[cx + radius * np.cos(t), cy + radius * np.sin(t)] for t in theta], dtype=np.float32)
-    else:  # Ellipse
-        snake_init = np.array([[cx + rx * np.cos(t), cy + ry * np.sin(t)] for t in theta], dtype=np.float32)
-
+        corners = np.array([[y1, x1], [y1, x2 - 1], [y2 - 1, x2 - 1], [y2 - 1, x1]])
+        initial = np.concatenate(
+            [
+                a + np.arange(25)[:, None] / 25 * (b - a)
+                for a, b in zip(corners, np.roll(corners, -1, axis=0))
+            ]
+        )
+    elif init_type in ("Circle", "Ellipse"):
+        if init_type == "Circle":
+            rx = ry = min(rx, ry)
+        initial = np.column_stack((cy + ry * np.sin(theta), cx + rx * np.cos(theta)))
+    else:
+        raise ValueError("Неизвестный начальный контур.")
     snake = active_contour(
-        gray_norm,
-        snake_init,
+        image,
+        initial,
         alpha=alpha,
         beta=beta,
         gamma=gamma,
-        max_num_iter=max_iter,
-        convergence=convergence
+        max_num_iter=int(max_iter),
+        convergence=convergence,
     )
-
-    h, w = gray.shape
-    snake[:, 0] = np.clip(snake[:, 0], 0, w - 1)
-    snake[:, 1] = np.clip(snake[:, 1], 0, h - 1)
-
-    mask = np.zeros(gray.shape, dtype=np.uint8)
-    cv2.fillPoly(mask, [snake.astype(np.int32)], 255)
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-    return mask
-
-
-
-
-def supercut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1.0, lambda_val=0.5, sigma_color=10.0):
-    """
-    SuperCut using graph cut (max-flow/min-cut) on superpixels.
-    """
-    import networkx as nx
-    from skimage.segmentation import find_boundaries, slic
-
-    # Приведение размеров к целым числам
-    h, w = int(img.shape[0]), int(img.shape[1])
-    n_segments = max(50, int((h * w) / (superpixel_size * superpixel_size)))
-
-    # Сглаживание изображения
-    img_smooth = cv2.GaussianBlur(img, (0, 0), sigma) if sigma > 0 else img
-    segments = slic(img_smooth, n_segments=n_segments, compactness=compactness, start_label=0)
-
-    x1, y1, x2, y2 = rect
-
-    n_sp = len(np.unique(segments))
-    sp_centers = np.zeros((n_sp, 2), dtype=np.float32)
-    sp_colors = np.zeros((n_sp, 3), dtype=np.float32)
-    sp_in_ratio = np.zeros(n_sp, dtype=np.float32)
-
-    for seg_id in range(n_sp):
-        mask = (segments == seg_id)
-        if not np.any(mask):
-            sp_in_ratio[seg_id] = 0.0
-            continue
-        coords = np.argwhere(mask)
-        sp_centers[seg_id] = np.mean(coords, axis=0)[::-1]
-        sp_colors[seg_id] = np.mean(img_smooth[mask], axis=0)
-
-        ys, xs = coords[:, 0], coords[:, 1]
-        inside = np.sum((xs >= x1) & (xs <= x2) & (ys >= y1) & (ys <= y2))
-        total = len(xs)
-        sp_in_ratio[seg_id] = inside / total if total > 0 else 0.0
-
-    # Построение графа соседства
-    adj = [[] for _ in range(n_sp)]
-    boundaries = find_boundaries(segments, mode='inner')
-    bound_coords = np.argwhere(boundaries)
-    for y, x in bound_coords:
-        seg_id = segments[y, x]
-        neighbors = np.unique(segments[max(0, y-1):min(h, y+2), max(0, x-1):min(w, x+2)])
-        for nb in neighbors:
-            if nb != seg_id and nb not in adj[seg_id]:
-                adj[seg_id].append(nb)
-
-    # Унарные стоимости (логарифмические)
-    eps = 1e-6
-    unary_fg = np.zeros(n_sp)   # стоимость отнесения к объекту
-    unary_bg = np.zeros(n_sp)   # стоимость отнесения к фону
-    for i in range(n_sp):
-        r = sp_in_ratio[i]
-        unary_fg[i] = -lambda_val * np.log(r + eps)
-        unary_bg[i] = -lambda_val * np.log(1 - r + eps)
-
-    # Парные стоимости (цветовое расстояние)
-    def pairwise_cost(i, j):
-        color_dist = np.linalg.norm(sp_colors[i] - sp_colors[j])
-        return np.exp(- (color_dist ** 2) / (2 * sigma_color ** 2 + 1e-6))
-
-    # ---- Построение графа для min-cut ----
-    G = nx.DiGraph()
-    source = 'source'
-    sink = 'sink'
-    G.add_node(source)
-    G.add_node(sink)
-    for i in range(n_sp):
-        G.add_node(i)
-
-    # Терминальные рёбра (унарные веса)
-    for i in range(n_sp):
-        G.add_edge(source, i, capacity=unary_bg[i])
-        G.add_edge(i, sink, capacity=unary_fg[i])
-
-    # Парные рёбра (между соседями)
-    for i in range(n_sp):
-        for j in adj[i]:
-            if j <= i:
-                continue
-            w = pairwise_cost(i, j)
-            G.add_edge(i, j, capacity=w)
-            G.add_edge(j, i, capacity=w)
-
-    # Вычисление минимального разреза
-    try:
-        cut_value, partition = nx.minimum_cut(G, source, sink)
-        source_side, sink_side = partition
-    except Exception as e:
-        print(f"Ошибка при min-cut в SuperCut: {e}")
-        return np.zeros_like(segments, dtype=np.uint8)
-
-    # Формирование маски (размерность берётся из segments)
-    result = np.zeros_like(segments, dtype=np.uint8)
-    for sp_id in source_side:
-        if isinstance(sp_id, int) and 0 <= sp_id < n_sp:
-            result[segments == sp_id] = 255
-
-    # Морфологическое сглаживание (опционально)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel)
-    result = cv2.morphologyEx(result, cv2.MORPH_OPEN, kernel)
-
+    snake = np.clip(snake, [0, 0], np.array(gray.shape) - 1)
+    result = np.zeros(gray.shape, np.uint8)
+    cv2.fillPoly(result, [np.rint(snake[:, ::-1]).astype(np.int32)], 255)
     return result
 
-def onecut_segmentation(img, rect, superpixel_size=50, compactness=10, sigma=1.0,
-                        spatial_weight=1.0, data_weight=1.0, color_sigma=10.0):
-    """
-    OneCut segmentation using superpixels and graph cut.
-    - Uses color models from inside (foreground) and outside (background) bounding box.
-    - Unary costs: data_weight * log probability from GMM color models.
-    - Pairwise costs: spatial_weight * exp(-color_diff^2 / (2*color_sigma^2)).
-    """
-    import networkx as nx
-    from skimage.segmentation import find_boundaries, slic
+
+def morphological_chan_vese_segmentation(
+    gray, rect, iterations=100, smoothing=2, lambda_inside=1.0, lambda_outside=1.0
+):
+    """Region-based evolution, useful when an object has a weak edge."""
+    from skimage.segmentation import morphological_chan_vese
+
+    x1, y1, x2, y2 = _rect(rect, gray.shape)
+    for name, value in (
+        ("Iterations", iterations),
+        ("Lambda inside", lambda_inside),
+        ("Lambda outside", lambda_outside),
+    ):
+        _positive(name, value)
+    _positive("Smoothing", smoothing, zero=True)
+    initial = np.zeros(gray.shape, np.uint8)
+    initial[y1:y2, x1:x2] = 1
+    result = morphological_chan_vese(
+        gray.astype(float) / 255,
+        int(iterations),
+        initial,
+        smoothing=int(smoothing),
+        lambda1=lambda_outside,
+        lambda2=lambda_inside,
+    )
+    return result.astype(np.uint8) * 255
+
+
+def _superpixels(img, superpixel_size, compactness, sigma):
+    img = _image(img)
+    _positive("Superpixel size", superpixel_size)
+    _positive("Compactness", compactness)
+    _positive("Sigma", sigma, zero=True)
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    count = min(
+        img.shape[0] * img.shape[1],
+        max(2, round(img.shape[0] * img.shape[1] / superpixel_size**2)),
+    )
+    # SLIC's sigma is applied once, in RGB before Lab conversion.
+    segments = slic(
+        rgb,
+        n_segments=count,
+        compactness=compactness,
+        sigma=sigma,
+        start_label=0,
+        convert2lab=True,
+    )
+    _, segments = np.unique(segments, return_inverse=True)
+    segments = segments.reshape(img.shape[:2])
+    counts = np.bincount(segments.ravel())
+    colors = np.column_stack(
+        [
+            np.bincount(segments.ravel(), weights=img[..., c].ravel()) / counts
+            for c in range(3)
+        ]
+    )
+    pairs = np.concatenate(
+        (
+            np.column_stack((segments[:, :-1].ravel(), segments[:, 1:].ravel())),
+            np.column_stack((segments[:-1].ravel(), segments[1:].ravel())),
+        )
+    )
+    pairs = np.unique(np.sort(pairs, axis=1), axis=0)
+    return segments, colors, pairs[pairs[:, 0] != pairs[:, 1]]
+
+
+def _appearance_costs(colors, fg_pixels, bg_pixels):
     from sklearn.mixture import GaussianMixture
 
-    h, w = int(img.shape[0]), int(img.shape[1])
-    x1, y1, x2, y2 = rect
-    # Убедимся, что прямоугольник в пределах изображения
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
-    if x1 >= x2 or y1 >= y2:
-        raise ValueError("Некорректный прямоугольник")
-
-    # Сглаживание изображения
-    img_smooth = cv2.GaussianBlur(img, (0, 0), sigma) if sigma > 0 else img
-
-    # Суперпиксели
-    n_segments = max(50, int((h * w) / (superpixel_size * superpixel_size)))
-    segments = slic(img_smooth, n_segments=n_segments, compactness=compactness,
-                    start_label=0, convert2lab=False)
-
-    n_sp = len(np.unique(segments))
-    sp_colors = np.zeros((n_sp, 3), dtype=np.float32)   # средний цвет суперпикселя
-
-    # Сбор статистики цветов для каждого суперпикселя
-    for sp_id in range(n_sp):
-        mask = (segments == sp_id)
-        if np.any(mask):
-            sp_colors[sp_id] = np.mean(img_smooth[mask], axis=0)
-
-    # Собираем пиксели для обучения GMM: FG - внутри прямоугольника, BG - снаружи (с отступом)
-    # Для фона берём область, расширенную на 20 пикселей вокруг прямоугольника, исключая сам прямоугольник
-    fg_pixels = img_smooth[y1:y2, x1:x2].reshape(-1, 3)
-    # Фон: полоса вокруг прямоугольника (расширение на 20 пикселей), но не выходящая за границы
-    pad = 20
-    bg_x1 = max(0, x1 - pad)
-    bg_y1 = max(0, y1 - pad)
-    bg_x2 = min(w, x2 + pad)
-    bg_y2 = min(h, y2 + pad)
-    bg_mask = np.zeros((h, w), dtype=np.uint8)
-    bg_mask[bg_y1:bg_y2, bg_x1:bg_x2] = 1
-    bg_mask[y1:y2, x1:x2] = 0
-    bg_pixels = img_smooth[bg_mask == 1].reshape(-1, 3)
-
-    if len(fg_pixels) < 10 or len(bg_pixels) < 10:
-        # Если слишком мало пикселей – простой fallback
-        # Используем прямоугольник как объект, остальное фон
-        result = np.zeros((h, w), dtype=np.uint8)
-        result[y1:y2, x1:x2] = 255
-        return result
-
-    # Обучаем GMM для переднего и фонового плана (2 компоненты каждый)
-    gmm_fg = GaussianMixture(n_components=2, covariance_type='full', random_state=0)
-    gmm_bg = GaussianMixture(n_components=2, covariance_type='full', random_state=0)
-    gmm_fg.fit(fg_pixels)
-    gmm_bg.fit(bg_pixels)
-
-    # Вычисляем унарные стоимости (логарифмы вероятностей)
-    eps = 1e-6
-    unary_fg = np.zeros(n_sp)
-    unary_bg = np.zeros(n_sp)
-    for sp_id in range(n_sp):
-        color = sp_colors[sp_id].reshape(1, -1)
-        # Логарифмическая вероятность (плотность)
-        log_prob_fg = gmm_fg.score_samples(color)[0]
-        log_prob_bg = gmm_bg.score_samples(color)[0]
-        # Нормализуем в softmax стиле
-        # Стоимость = -log(вероятность) * data_weight
-        prob_fg = np.exp(log_prob_fg - np.maximum(log_prob_fg, log_prob_bg))
-        prob_bg = np.exp(log_prob_bg - np.maximum(log_prob_fg, log_prob_bg))
-        # Избегаем нулей
-        prob_fg = max(prob_fg, eps)
-        prob_bg = max(prob_bg, eps)
-        unary_fg[sp_id] = -data_weight * np.log(prob_fg)
-        unary_bg[sp_id] = -data_weight * np.log(prob_bg)
-
-    # Построение графа соседства суперпикселей (как в SuperCut)
-    adj = [[] for _ in range(n_sp)]
-    boundaries = find_boundaries(segments, mode='inner')
-    bound_coords = np.argwhere(boundaries)
-    for y, x in bound_coords:
-        seg_id = segments[y, x]
-        neighbors = np.unique(segments[max(0, y-1):min(h, y+2), max(0, x-1):min(w, x+2)])
-        for nb in neighbors:
-            if nb != seg_id and nb not in adj[seg_id]:
-                adj[seg_id].append(nb)
-
-    # Парная стоимость: spatial_weight * exp(-цвет_разница^2 / (2*color_sigma^2))
-    def pairwise_cost(i, j):
-        color_diff = np.linalg.norm(sp_colors[i] - sp_colors[j])
-        w = np.exp(- (color_diff ** 2) / (2 * color_sigma ** 2 + 1e-6))
-        return spatial_weight * w
-
-    # Построение графа (networkx)
-    G = nx.DiGraph()
-    source = 'source'
-    sink = 'sink'
-    G.add_node(source)
-    G.add_node(sink)
-    for i in range(n_sp):
-        G.add_node(i)
-
-    # Терминальные рёбра
-    for i in range(n_sp):
-        G.add_edge(source, i, capacity=unary_bg[i])
-        G.add_edge(i, sink, capacity=unary_fg[i])
-
-    # Парные рёбра
-    for i in range(n_sp):
-        for j in adj[i]:
-            if j <= i:
-                continue
-            w = pairwise_cost(i, j)
-            if w > 0:
-                G.add_edge(i, j, capacity=w)
-                G.add_edge(j, i, capacity=w)
-
-    # Вычисление минимального разреза
-    try:
-        cut_value, partition = nx.minimum_cut(G, source, sink)
-        source_side, sink_side = partition
-    except Exception as e:
-        print(f"Ошибка при min-cut в OneCut: {e}")
-        return np.zeros_like(segments, dtype=np.uint8)
-
-    # Формирование маски
-    result = np.zeros_like(segments, dtype=np.uint8)
-    for sp_id in source_side:
-        if isinstance(sp_id, int) and 0 <= sp_id < n_sp:
-            result[segments == sp_id] = 255
-
-    # Морфологическое сглаживание
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel)
-    result = cv2.morphologyEx(result, cv2.MORPH_OPEN, kernel)
-
-    return result
+    scores = []
+    for pixels in (fg_pixels, bg_pixels):
+        if len(pixels) < 2:
+            raise ValueError(
+                "Нужно минимум 2 пикселя каждого класса для цветовой модели."
+            )
+        # Bound memory/cost deterministically; constant-color marks need one component.
+        pixels = pixels[
+            np.linspace(0, len(pixels) - 1, min(len(pixels), 30000), dtype=int)
+        ]
+        components = min(5, len(np.unique(pixels, axis=0)))
+        model = GaussianMixture(n_components=components, random_state=0, reg_covar=1e-3)
+        model.fit(pixels)
+        scores.append(model.score_samples(colors))
+    scores = np.array(scores)
+    # Subtract a shared per-node constant: nonnegative costs, same optimal cut.
+    return np.max(scores, axis=0) - scores
 
 
-
-def lazy_snapping(img, fg_scribbles, bg_scribbles, superpixel_size=50, compactness=10, sigma=1.0, color_sigma=10.0):
-    """
-    Lazy Snapping using graph cut on superpixels.
-    color_sigma: sensitivity of color distance (higher = less influence of color contrast)
-    """
-    if not HAS_NETWORKX:
-        raise ImportError("Для Lazy Snapping требуется установить библиотеку networkx. Установите её командой: pip install networkx")
-
-    if img.dtype != np.uint8:
-        img = np.clip(img, 0, 255).astype(np.uint8)
-
-    h, w = int(img.shape[0]), int(img.shape[1])
-    if sigma > 0:
-        img_smooth = cv2.GaussianBlur(img, (0, 0), sigma)
-    else:
-        img_smooth = img
-
-    # 1. Суперпиксели
-    n_segments = max(30, int((h * w) / (superpixel_size * superpixel_size)))
-    segments = slic(img_smooth, n_segments=n_segments, compactness=compactness,
-                    start_label=0, convert2lab=False)
-
-    # 2. Подготовка структур
-    n_sp = len(np.unique(segments))
-    sp_colors = np.zeros((n_sp, 3), dtype=np.float32)
-    sp_fg_ratio = np.zeros(n_sp, dtype=np.float32)
-    sp_bg_ratio = np.zeros(n_sp, dtype=np.float32)
-
-    for sp_id in range(n_sp):
-        mask = (segments == sp_id)
-        if not np.any(mask):
-            continue
-        sp_colors[sp_id] = np.mean(img_smooth[mask], axis=0)
-        total = mask.sum()
-        if total > 0:
-            sp_fg_ratio[sp_id] = np.sum(fg_scribbles[mask] == 255) / total
-            sp_bg_ratio[sp_id] = np.sum(bg_scribbles[mask] == 255) / total
-
-    # 3. Соседство суперпикселей
-    boundaries = find_boundaries(segments, mode='inner')
-    bound_coords = np.argwhere(boundaries)
-    adj = {sp_id: set() for sp_id in range(n_sp)}
-    for y, x in bound_coords:
-        sp_center = segments[y, x]
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                if dy == 0 and dx == 0:
-                    continue
-                ny, nx = y + dy, x + dx
-                if 0 <= ny < h and 0 <= nx < w:
-                    nb = segments[ny, nx]
-                    if nb != sp_center:
-                        adj[sp_center].add(nb)
-    adj_list = {sp_id: list(neighbors) for sp_id, neighbors in adj.items()}
-
-    # 4. Построение графа (networkx)
+def _cut(
+    segments, colors, pairs, costs, color_sigma, spatial_weight=1.0, fg=None, bg=None
+):
     import networkx as nx
-    G = nx.DiGraph()
-    source = 'source'
-    sink = 'sink'
-    BIG = 1e6
 
-    G.add_node(source)
-    G.add_node(sink)
-    for sp_id in range(n_sp):
-        G.add_node(sp_id)
+    _positive("Color sigma", color_sigma)
+    _positive("Spatial weight", spatial_weight, zero=True)
+    if not np.isfinite(costs).all() or np.any(costs < 0):
+        raise ValueError("Некорректные унарные стоимости графа.")
+    costs = np.array(costs, copy=True)
+    weights = spatial_weight * np.exp(
+        -np.sum((colors[pairs[:, 0]] - colors[pairs[:, 1]]) ** 2, axis=1)
+        / (2 * color_sigma**2)
+    )
+    if fg is not None:
+        fg_ids, bg_ids = np.unique(segments[fg]), np.unique(segments[bg])
+        if np.intersect1d(fg_ids, bg_ids).size:
+            raise ValueError(
+                "FG и BG попали в один суперпиксель. Уменьшите Superpixel size или разнесите штрихи."
+            )
+        hard = 1 + costs.sum() + weights.sum()
+        costs[:, fg_ids] = np.array([[0], [hard]])
+        costs[:, bg_ids] = np.array([[hard], [0]])
+    graph = nx.DiGraph()
+    graph.add_nodes_from(("source", "sink"))
+    for i in range(len(colors)):
+        graph.add_edge("source", i, capacity=float(costs[1, i]))
+        graph.add_edge(i, "sink", capacity=float(costs[0, i]))
+    for (i, j), weight in zip(pairs, weights):
+        graph.add_edge(int(i), int(j), capacity=float(weight))
+        graph.add_edge(int(j), int(i), capacity=float(weight))
+    _, (foreground, _) = nx.minimum_cut(graph, "source", "sink")
+    lut = np.array(
+        [255 if i in foreground else 0 for i in range(len(colors))], np.uint8
+    )
+    return lut[segments]
 
-    # Терминальные веса
-    for sp_id in range(n_sp):
-        if sp_fg_ratio[sp_id] > 0 and sp_bg_ratio[sp_id] == 0:
-            w_fg, w_bg = BIG, 0
-        elif sp_bg_ratio[sp_id] > 0 and sp_fg_ratio[sp_id] == 0:
-            w_fg, w_bg = 0, BIG
-        else:
-            w_fg = sp_fg_ratio[sp_id] * BIG
-            w_bg = sp_bg_ratio[sp_id] * BIG
-            if w_fg == 0 and w_bg == 0:
-                w_fg = 1.0
-                w_bg = 1.0
+
+def supercut_segmentation(
+    img,
+    rect,
+    superpixel_size=50,
+    compactness=10,
+    sigma=1.0,
+    lambda_val=0.5,
+    sigma_color=10.0,
+):
+    """Project variant: ROI-occupancy prior and color-sensitive SLIC graph."""
+    x1, y1, x2, y2 = _rect(rect, img.shape)
+    _positive("Lambda", lambda_val, zero=True)
+    segments, colors, pairs = _superpixels(img, superpixel_size, compactness, sigma)
+    inside = np.zeros(img.shape[:2], np.uint8)
+    inside[y1:y2, x1:x2] = 1
+    ratio = np.bincount(segments.ravel(), weights=inside.ravel()) / np.bincount(
+        segments.ravel()
+    )
+    ratio = np.clip(ratio, 1e-6, 1 - 1e-6)
+    costs = -lambda_val * np.log(np.array([ratio, 1 - ratio]))
+    return _cut(segments, colors, pairs, costs, sigma_color)
 
 
-        G.add_edge(source, sp_id, capacity=w_fg)
-        G.add_edge(sp_id, sink, capacity=w_bg)
+def onecut_segmentation(
+    img,
+    rect,
+    superpixel_size=50,
+    compactness=10,
+    sigma=1.0,
+    spatial_weight=1.0,
+    data_weight=1.0,
+    color_sigma=10.0,
+):
+    """Project variant: GMM learned from ROI/exterior and a SLIC graph cut."""
+    x1, y1, x2, y2 = _rect(rect, img.shape)
+    _positive("Data weight", data_weight, zero=True)
+    segments, colors, pairs = _superpixels(img, superpixel_size, compactness, sigma)
+    inside = np.zeros(img.shape[:2], bool)
+    inside[y1:y2, x1:x2] = True
+    costs = data_weight * _appearance_costs(colors, img[inside], img[~inside])
+    return _cut(segments, colors, pairs, costs, color_sigma, spatial_weight)
 
-    # Парные веса
-    for sp_id in range(n_sp):
-        for nb_id in adj_list[sp_id]:
-            if nb_id <= sp_id:
-                continue
-            color_diff = np.linalg.norm(sp_colors[sp_id] - sp_colors[nb_id])
-            w = np.exp(- (color_diff ** 2) / (2 * color_sigma ** 2))
-            G.add_edge(sp_id, nb_id, capacity=w)
-            G.add_edge(nb_id, sp_id, capacity=w)
 
-    # 5. Min-cut
-    try:
-        cut_value, partition = nx.minimum_cut(G, source, sink)
-        source_side, sink_side = partition
-    except Exception as e:
-        print(f"Ошибка при min-cut: {e}")
-        return np.zeros((h, w), dtype=np.uint8)
-
-    # 6. Формирование маски
-    result = np.zeros_like(segments, dtype=np.uint8)
-    for sp_id in source_side:
-        if isinstance(sp_id, int) and 0 <= sp_id < n_sp:
-            result[segments == sp_id] = 255
-
-    # 7. Морфологическое сглаживание
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel)
-    result = cv2.morphologyEx(result, cv2.MORPH_OPEN, kernel)
-
-    return result
+def lazy_snapping(
+    img,
+    fg_scribbles,
+    bg_scribbles,
+    superpixel_size=50,
+    compactness=10,
+    sigma=1.0,
+    color_sigma=10.0,
+):
+    """Project variant: seed-trained GMM unary costs with hard superpixel seeds."""
+    fg, bg = _seeds(fg_scribbles, bg_scribbles, img.shape)
+    segments, colors, pairs = _superpixels(img, superpixel_size, compactness, sigma)
+    costs = _appearance_costs(colors, img[fg], img[bg])
+    return _cut(segments, colors, pairs, costs, color_sigma, fg=fg, bg=bg)

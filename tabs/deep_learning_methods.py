@@ -251,7 +251,9 @@ class DeepLearningWindow(QMainWindow):
             self.yolo_settings._iou,
             self.yolo_settings._imgsz,
             self.yolo_settings._save,
+            self.yolo_settings._box_otsu,
             self.custom_settings._model_path,
+            self.custom_settings._threshold,
             self.unet_settings._threshold,
             self.deeplab_settings._threshold,
         ]
@@ -306,6 +308,7 @@ class DeepLearningWindow(QMainWindow):
         if not self.ignore_ui_changes and not getattr(self, '_loading_model', False):
             segmentation_controller.invalidate_prediction(self)
         model_name = self.model_combo.currentText()
+        self.device_combo.setEnabled(model_name != "Custom ONNX")
         for cont in [self.unet_settings, self.deeplab_settings, self.segformer_settings,
                      self.sam_settings, self.yolo_settings, self.custom_settings]:
             cont.setVisible(False)
