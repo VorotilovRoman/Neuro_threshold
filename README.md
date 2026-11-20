@@ -41,6 +41,7 @@ python main.py
 - [Архитектура](Docs/Architecture.md) · [Аудит импортов](Docs/Import_Audit.md)
 - [Общий автоподбор и анализ отчётов](Docs/Unified_Autoresearch_Status.md): пороговые и градиентные методы, px-диапазоны, отмена и сохранение пресетов обеих вкладок.
 - [Новый инспектор объектов](Docs/Object_Inspector.md): таблица, поиск, свойства и копирование YOLO; отдельное поле координат удалено.
+- [Воркер YOLO и AutoBatch](Docs/YOLO_Worker_Audit.md): диагностика OOM, корректная остановка, выбранный batch и результаты текущего запуска.
 - [Проверка алгоритмов, обучения и применения](Docs/Segmentation_Methods_Audit.md): исправления интерактивных методов, Chan–Vese, ручные метки ML, Torch/ONNX и рекомендации SAM 2 / SimpleClick.
 - [Пять вкладок сегментации](Docs/Segmentation_Unification_Status.md): единые BBox/OBB/Segment, объекты, состояния масок и фоновые задачи.
 - [Выполненный план](Docs/Segmentation_Unification_Plan.md): общие UI/утилиты, пресеты v3; оба автоподбора используют общее ядро.
@@ -54,5 +55,5 @@ NEURO_RUN_GUI_TESTS=1 python -m unittest discover -s tests -v
 ```
 
 Вторая команда включает GUI offscreen, автономные запуски и небольшие проверки
-классического ML без скачивания весов. Текущий результат — 151 тест успешно (SMP/ONNX-проверки требуют соответствующих дополнительных пакетов). В PowerShell сначала задайте `$env:NEURO_RUN_GUI_TESTS="1"`.
+классического ML без скачивания весов. Текущий результат — 165 тестов успешно (SMP/ONNX-проверки требуют соответствующих дополнительных пакетов). В PowerShell сначала задайте `$env:NEURO_RUN_GUI_TESTS="1"`.
 Отдельная вкладка: `python -m tabs.threshold_methods` из корня проекта.

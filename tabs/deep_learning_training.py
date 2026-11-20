@@ -11,6 +11,7 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
+import codecs
 import json
 import os
 import sys
@@ -48,6 +49,10 @@ class YoloTrainWindow(QMainWindow):
 
         # Сохраняем параметры последнего запуска YOLO для анализа best.pt
         self.last_yolo_params = None
+        self._yolo_output_buffer = ""
+        self._yolo_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self._yolo_stop_requested = False
+        self._yolo_run_dir = None
         # Сохраняем параметры последнего запуска DeepLab для анализа моделей
         self.last_deeplab_params = None
 
@@ -151,6 +156,10 @@ class YoloTrainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", "Библиотека ultralytics не установлена.")
             return
 
+        if self.train_process and self.train_process.state() != QProcess.NotRunning:
+            self.log("Обучение YOLO уже запущено.")
+            return
+
         # Проверка обязательных параметров
         if not params.get("data"):
             QMessageBox.warning(self, "Ошибка", "Не указан YAML файл датасета.")
@@ -162,6 +171,10 @@ class YoloTrainWindow(QMainWindow):
 
         # Сохраняем параметры для последующего анализа после обучения
         self.last_yolo_params = params
+        self._yolo_output_buffer = ""
+        self._yolo_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self._yolo_stop_requested = False
+        self._yolo_run_dir = None
 
         params_json = json.dumps(params, ensure_ascii=False)
 
@@ -175,6 +188,7 @@ class YoloTrainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", "Не найден скрипт обучения train_yolo_worker.py")
             return
 
+        self.yolo_train_widget.set_running(True)
         self.log("=== Параметры обучения YOLO ===")
         for key, val in params.items():
             self.log(f"{key}: {val}")
@@ -193,12 +207,21 @@ class YoloTrainWindow(QMainWindow):
             self.yolo_train_widget.set_running(False)
             return
 
-        self.yolo_train_widget.set_running(True)
-
     def _on_yolo_output(self):
-        data = self.train_process.readAllStandardOutput()
-        text = bytes(data).decode('utf-8', errors='replace')
-        for line in text.splitlines():
+        if self.train_process is None:
+            return
+        data = bytes(self.train_process.readAllStandardOutput())
+        self._consume_yolo_output(self._yolo_decoder.decode(data))
+
+    def _consume_yolo_output(self, text, final=False):
+        # QProcess chunks may split both protocol lines and UTF-8 characters.
+        self._yolo_output_buffer += text.replace("\r", "\n")
+        lines = self._yolo_output_buffer.split("\n")
+        self._yolo_output_buffer = lines.pop()
+        if final and self._yolo_output_buffer:
+            lines.append(self._yolo_output_buffer)
+            self._yolo_output_buffer = ""
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
@@ -206,28 +229,36 @@ class YoloTrainWindow(QMainWindow):
                 parts = line.split(":")
                 if len(parts) >= 4:
                     try:
-                        percent = int(parts[1])
-                        epoch = int(parts[2])
-                        total = int(parts[3])
-                        # Обновляем прогресс-бар виджета YOLO
+                        percent, epoch, total = map(int, parts[1:4])
                         bar = self.yolo_train_widget.progress_bar
                         bar.setValue(percent)
                         bar.setFormat(f"Обучение YOLO: {percent}% ({epoch}/{total} эпох)")
                     except ValueError:
                         pass
                 continue
+            if line.startswith("RESULT_DIR:"):
+                self._yolo_run_dir = line.split(":", 1)[1]
+                self.log(f"Папка текущего запуска YOLO: {self._yolo_run_dir}")
+                continue
             self.log(line)
 
     def _on_yolo_finished(self, exit_code, exit_status):
+        self._on_yolo_output()
+        self._consume_yolo_output(self._yolo_decoder.decode(b"", final=True), final=True)
         self.yolo_train_widget.set_running(False)
 
-        if exit_code == 0 and exit_status == QProcess.NormalExit:
+        if self._yolo_stop_requested or exit_code == 130:
+            self.log("=== Обучение YOLO остановлено пользователем ===")
+        elif exit_code == 0 and exit_status == QProcess.NormalExit:
             self.log("=== Обучение YOLO успешно завершено ===")
             QMessageBox.information(self, "Обучение", "Обучение YOLO успешно завершено!")
             # Включаем кнопку открытия папки проекта
             self.yolo_train_widget.open_folder_btn.setEnabled(True)
             # Анализируем best.pt с учётом сохранённых параметров
-            if self.last_yolo_params:
+            current_best = os.path.join(self._yolo_run_dir, "weights", "best.pt") if self._yolo_run_dir else None
+            if current_best and os.path.isfile(current_best):
+                self._detect_model_info(current_best)
+            elif self.last_yolo_params:
                 proj = self.last_yolo_params.get("project")
                 name = self.last_yolo_params.get("name")
                 self._analyze_best_model_yolo(project_path=proj, experiment_name=name)
@@ -240,11 +271,13 @@ class YoloTrainWindow(QMainWindow):
         self.yolo_train_widget.progress_bar.setFormat("Готов")
 
     def on_stop_training(self):
-        if self.train_process and self.train_process.state() == QProcess.Running:
+        process = self.train_process
+        if process and process.state() == QProcess.Running:
+            self._yolo_stop_requested = True
             self.log("Останавливаем обучение YOLO...")
-            self.train_process.terminate()
-            if not self.train_process.waitForFinished(5000):
-                self.train_process.kill()
+            process.terminate()
+            if not process.waitForFinished(5000):
+                process.kill()
                 self.log("Процесс YOLO принудительно завершён.")
             else:
                 self.log("Процесс YOLO остановлен корректно.")

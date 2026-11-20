@@ -4,7 +4,7 @@
 
 Сгенерировано `python Docs/generate_reference.py` из текущих исходников. Каталог исключает саму документацию и скрытые каталоги.
 
-Проанализировано Python-модулей: **193**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
+Проанализировано Python-модулей: **194**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
 
 Для всех модулей перечислены верхнеуровневые функции и классы. Для всех каталогов утилит дополнительно перечислены сигнатуры методов классов. Вложенные локальные функции не являются отдельным API и в список не включены. Приватные имена сохранены для поиска реализации.
 
@@ -62,6 +62,7 @@
 - [tests.test_segmentation_unification](#tests-test-segmentation-unification)
 - [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch)
 - [tests.test_torch_runtime](#tests-test-torch-runtime)
+- [tests.test_yolo_worker](#tests-test-yolo-worker)
 - [ui.DL_predict_settings](#ui-DL-predict-settings)
 - [ui.DL_train_settings_base](#ui-DL-train-settings-base)
 - [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model)
@@ -740,11 +741,11 @@
 - [ui.application](#ui-application): `exec_window`
 - [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui): `setup_deep_learning_training_ui`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QProcess`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMessageBox`, `importlib.util.find_spec`, `json`, `os`, `pathlib.Path`, `sys`, `ultralytics.YOLO`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QProcess`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMessageBox`, `codecs`, `importlib.util.find_spec`, `json`, `os`, `pathlib.Path`, `sys`, `ultralytics.YOLO`.
 
 **Объявления:**
 
-- Класс [`YoloTrainWindow`](../tabs/deep_learning_training.py#L32) (`QMainWindow`)
+- Класс [`YoloTrainWindow`](../tabs/deep_learning_training.py#L33) (`QMainWindow`)
 
 <a id="tabs-demo-ensemble-methods"></a>
 
@@ -1513,6 +1514,24 @@
 **Объявления:**
 
 - Класс [`TorchRuntimeTests`](../tests/test_torch_runtime.py#L16) (`unittest.TestCase`)
+
+<a id="tests-test-yolo-worker"></a>
+
+## tests.test_yolo_worker
+
+Исходник: [tests/test_yolo_worker.py](../tests/test_yolo_worker.py#L1).
+
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+
+**Прямые локальные импорты:**
+- [utils_training.train_yolo_worker](#utils-training-train-yolo-worker): `train_yolo_worker as worker`
+
+**Внешние/stdlib импорты:** `contextlib`, `io`, `json`, `os`, `pathlib.Path`, `signal`, `subprocess`, `sys`, `tempfile`, `types.ModuleType`, `types.SimpleNamespace`, `unittest`, `unittest.mock.patch`.
+
+**Объявления:**
+
+- Класс [`YoloWorkerTests`](../tests/test_yolo_worker.py#L21) (`unittest.TestCase`)
+- Класс [`YoloWorkerGuiTests`](../tests/test_yolo_worker.py#L316) (`unittest.TestCase`)
 
 <a id="ui-DL-predict-settings"></a>
 
@@ -5291,21 +5310,24 @@
 
 Исходник: [utils_training/train_yolo_worker.py](../utils_training/train_yolo_worker.py#L1).
 
-**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+**Прямые потребители:** [tests.test_yolo_worker](#tests-test-yolo-worker).
 
 **Прямые локальные импорты:**
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
 - [utils_new.segmentation.yolo_metrics](#utils-new-segmentation-yolo-metrics): `validation_metrics`
 
-**Внешние/stdlib импорты:** `argparse`, `datetime.datetime`, `json`, `onnx`, `os`, `pathlib.Path`, `shutil`, `signal`, `sys`, `traceback`, `ultralytics`, `ultralytics.YOLO`.
+**Внешние/stdlib импорты:** `argparse`, `datetime.datetime`, `json`, `math`, `onnx`, `pathlib.Path`, `re`, `shutil`, `signal`, `sys`, `traceback`, `ultralytics`, `ultralytics.YOLO`.
 
 **Объявления:**
 
-- [`log(msg)`](../utils_training/train_yolo_worker.py#L19) — Вывод сообщения с немедленным сбросом буфера.
-- [`is_standard_yolo_model(model_path)`](../utils_training/train_yolo_worker.py#L23) — Определяет, является ли имя модели стандартным (без пути).
-- [`signal_handler(signum, frame)`](../utils_training/train_yolo_worker.py#L34)
-- [`save_model_meta(meta_dict, model_path)`](../utils_training/train_yolo_worker.py#L41) — Сохраняет JSON-файл с метаданными рядом с .pt файлом.
-- [`main()`](../utils_training/train_yolo_worker.py#L48)
+- [`log(message)`](../utils_training/train_yolo_worker.py#L26)
+- [`is_standard_yolo_model(model_path)`](../utils_training/train_yolo_worker.py#L30) — Allow downloads only for a known bare model name, never a missing user path.
+- [`signal_handler(signum, frame)`](../utils_training/train_yolo_worker.py#L41)
+- [`save_model_meta(metadata, model_path)`](../utils_training/train_yolo_worker.py#L50)
+- [`build_train_args(params)`](../utils_training/train_yolo_worker.py#L60) — Validate before loading CUDA. Do not estimate or replace the user's batch.
+- [`resolved_settings(trainer, args)`](../utils_training/train_yolo_worker.py#L152)
+- [`export_onnx(model, metadata, imgsz, run_dir=None)`](../utils_training/train_yolo_worker.py#L168) — Optional export. Its failure must not hide successful training/validation.
+- [`main(argv=None)`](../utils_training/train_yolo_worker.py#L208)
 
 <a id="utils-training-yolo2voc"></a>
 
