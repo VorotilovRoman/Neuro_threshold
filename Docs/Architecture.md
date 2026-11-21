@@ -9,7 +9,7 @@ flowchart TD
     M[main.py / ImagePlayer] --> S[main_ui.py / StartupDialog]
     M --> T[tabs: выбранные вкладки]
     T --> L[ui_tabs: интерфейс выбранной вкладки]
-    T --> U[utils / utils_ops / utils_new]
+    T --> U[utils_new / utils_ops]
     L --> W[ui: общие виджеты]
     T --> P[QProcess: workers обучения]
     U --> C[utils_new/annotations: геометрическое ядро]
@@ -62,9 +62,9 @@ Workers запускаются текущим `sys.executable`, с абсолю�
 | `dataset_analysis` → `dataset_analysis.py` | `dataset_analysis_ui.py` | `utils_new.dataset_audit`: чтение объектов, статистика, экспорт, split и ML-задачи; `ui.dataset_audit`: таблицы/графики, workers и lifecycle |
 | `sahi` → `slice_dataset_sahi.py` | `slice_dataset_sahi_ui.py` | Локальный `SliceWorker`, `sahi.slicing.slice_coco`, работа с файлами и split |
 | `yolo_train` → `deep_learning_training.py` | `deep_learning_training_ui.py` | Виджеты `ui.DL_train_settings_*`; отдельные процессы YOLO, UNet, DeepLab |
-| `yolo_demo` → `demo_ensemble_methods.py` | `demo_ensemble_methods_ui.py` | `utils.ensemble_utils`: YOLO + классические пресеты, WBF/NMS и метрики; четыре новых read-only Qt-вида |
+| `yolo_demo` → `demo_ensemble_methods.py` | `demo_ensemble_methods_ui.py` | `utils_new.annotations.boxes` + `threshold_processing`: class-aware WBF/NMS и пресеты; четыре read-only Qt-вида |
 | `yolo_sort` → `yolo_find_img.py` | `yolo_find_img_ui.py` | YOLO, фоновый поиск, список/миниатюры, копирование или перемещение |
-| `yolo_aeb` → `yolo_test_aeb.py` | `yolo_test_aeb_ui.py` | `utils_aeb.yolo_aeb_utils`, `utils_new.annotation_processing`: YOLO-объекты, AE/VAE, кропы и карты ошибок |
+| `yolo_aeb` → `yolo_test_aeb.py` | `yolo_test_aeb_ui.py` | `utils_new.segmentation.autoencoder`, `annotation_processing`, `BackgroundTask`: YOLO/AE/VAE, кропы и карты ошибок в фоне |
 | `settings` | `ui/settings_ui.py`, без ui_tabs | `ui.settings_service`: тема, палитра классов, размеры и шорткаты |
 
 ## Новая ветка обработки датасетов
@@ -118,13 +118,21 @@ ML-задачи получают снимок входных данных; см�
 
 ## Существующая старая ветка
 
-В `utils` осталось два модуля с рабочими потребителями: image_io и
-ensemble_utils. Анализ/аудит датасета перенесён в utils_new/dataset_audit,
-Qt-обёртки — в ui/dataset_audit. [Результат и контракты](Dataset_Audit_Refactor_Status.md). Анализ/подготовка
-отчётов и метрики перенесены в utils_new/autoreseach_utils. Старый набор генератора/валидации/I/O и алиасы
-settings/presets удалены после проверки графа и строковых экспортов.
-[Подробный аудит удаления](Utils_Removal_Audit.md).
-[Текущие три вкладки-потребителя](Legacy_Utils_Usage.md) проверяются через AST и строковый реестр.
+Старая `utils` больше не содержит Python-модулей. Последние три потребителя
+переведены на новые владельцы: общие I/O/cache, threshold_processing и
+annotations/boxes. Уникальные архитектуры AE/VAE перенесены из utils_aeb в
+utils_new/segmentation/autoencoder; геометрия берётся из annotation_processing.
+[Результат, алгоритмы и ограничения](Legacy_Tabs_Migration_Status.md).
+[Воспроизводимый аудит](Legacy_Utils_Usage.md) проверяет отсутствие импортов
+и строковых экспортов. Исторические удаления: [Utils_Removal_Audit](Utils_Removal_Audit.md).
+
+BackgroundTask в ui/segmentation/jobs выполняет задания через future/executor.
+На каждом модельном окне executor последовательный; закрытие/смена входа
+отменяет доставку старого результата. Короткий wait с уничтожением работающего
+QThread больше не используется этими тремя вкладками. Общий shutdown вызывается
+и из main. Миниатюры поиска декодируются вне GUI без общей папки временных файлов.
+Автономные скрипты utils_aeb и другие algorithms в utils_ops остаются отдельными
+ветками; миграция utils не означает удаления работающих обучающих скриптов.
 
 Канонические Qt-виды находятся в `ui.image_view` и `ui.annotation_review_view`;
 все потребители обновлены, прежних файлов-алиасов в utils_new нет.

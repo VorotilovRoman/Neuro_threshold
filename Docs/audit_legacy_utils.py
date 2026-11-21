@@ -78,12 +78,13 @@ def inventory():
 
 def render():
     consumers, registry, routes = inventory()
+    count = len(list((ROOT / "utils").glob("*.py")))
     lines = [
-        "# Оставшиеся потребители старой папки utils",
+        "# Аудит старой папки utils",
         "",
         "Проверка по AST импортов и строковым записям реестра. Дата: 21 ноября 2026.",
         "",
-        "В utils осталось два Python-файла. Оба используются; удалять их сейчас нельзя.",
+        f"Python-файлов в utils: **{count}**. Прямых потребителей: **{len(set(consumers))}**. Путей от вкладок: **{len(routes)}**. Старых записей реестра: **{len(registry)}**.",
         "",
         "## Прямые импорты",
         "",
@@ -93,10 +94,10 @@ def render():
     lines += [
         f"| `{path}` | {line} | `{target}` |"
         for path, line, target in sorted(set(consumers))
-    ]
+    ] or ["| Нет | — | — |"]
     lines += [
         "",
-        "## Вкладки и зависимости",
+        "## Пути от вкладок",
         "",
         "| Вкладка | Путь зависимости |",
         "| --- | --- |",
@@ -104,28 +105,34 @@ def render():
     lines += [
         f"| `{start}` | " + " → ".join(f"`{name}`" for name in chain) + " |"
         for start, chain in routes
-    ]
+    ] or ["| Нет | — |"]
     lines += [
-        "",
-        "Другие вкладки не имеют пути к utils по статическим Python-импортам. Строковые записи ленивого реестра перечислены отдельно: запись ещё не означает загрузку модуля.",
         "",
         "## Ленивый реестр",
         "",
         "| Файл | Строка | Модуль |",
         "| --- | --- | --- |",
     ]
-    lines += [f"| `{path}` | {line} | `{target}` |" for path, line, target in registry]
+    lines += [
+        f"| `{path}` | {line} | `{target}` |" for path, line, target in registry
+    ] or ["| Нет | — | — |"]
     lines += [
         "",
-        "## Следующие переносы",
+        "## Завершённые переносы",
         "",
-        "- `yolo_find_img`: нормализация и чтение снимков → dataset_files_new; отдельно проверить специализированный fallback поиска.",
-        "- `yolo_test_aeb`: LazyImageCache/read и Qt-конвертация → dataset_files_new + ui/image_conversion.",
-        "- `demo_ensemble_methods`: loader Qt-контракта и ensemble_utils; разделить вычисления ансамбля и GUI, затем проверить веса/координаты/NMS/WBF.",
-        "- После переноса актуализировать import_libs_internal и повторно запустить этот скрипт. Импорты utils_ops и utils_aeb относятся к другим папкам и в эту статистику не включены.",
+        "- `utils/image_io.py` удалён. Три вкладки используют dataset_files_new, ui/image_conversion и ui/segmentation/image_input.",
+        "- `utils/ensemble_utils.py` удалён. NMS/WBF находятся в utils_new/annotations/boxes, пороговый пресет — в threshold_processing.",
+        "- `utils_aeb/yolo_aeb_utils.py` перенесён в utils_new/segmentation/autoencoder: уникальные модели и предобработка, без старых реэкспортов геометрии.",
+        "- Старые строковые экспорты import_libs_internal удалены после проверки всех потребителей. Совместимые алиасы не оставлены.",
+        "- utils_ops и автономные скрипты utils_aeb — отдельные папки; их наличие не означает зависимости от удалённой utils.",
         "",
+        "[Сценарии, алгоритмы и проверки трёх вкладок](Legacy_Tabs_Migration_Status.md).",
+        "",
+        "Команда воспроизведения: `python Docs/audit_legacy_utils.py > Docs/Legacy_Utils_Usage.md`.",
+        "",
+        "Аудит рассматривает статические импорты и точные строковые записи реестра. Дополнительно отсутствие импортов удалённых модулей проверено регрессионным AST-тестом и запуском всех вкладок.",
     ]
-    return "\n".join(lines).rstrip()
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

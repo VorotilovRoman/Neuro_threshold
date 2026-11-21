@@ -1,5 +1,8 @@
 # Проверка удаления неиспользуемых утилит
 
+Последующие удаления: [завершение миграции последних трёх вкладок](Legacy_Tabs_Migration_Status.md). Текущее отсутствие utils проверяется [AST-аудитом](Legacy_Utils_Usage.md).
+
+
 > Дополнение: analysis/prepare/metrics_core перенесены из utils в
 > [utils_new/autoreseach_utils](Threshold_Autoresearch_Status.md), все потребители
 > и строковые экспорты обновлены. Ниже — аудит предыдущего этапа.

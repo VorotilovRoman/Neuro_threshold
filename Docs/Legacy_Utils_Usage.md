@@ -1,62 +1,37 @@
-# Оставшиеся потребители старой папки utils
+# Аудит старой папки utils
 
 Проверка по AST импортов и строковым записям реестра. Дата: 21 ноября 2026.
 
-В utils осталось два Python-файла. Оба используются; удалять их сейчас нельзя.
+Python-файлов в utils: **0**. Прямых потребителей: **0**. Путей от вкладок: **0**. Старых записей реестра: **0**.
 
 ## Прямые импорты
 
 | Файл | Строка | Старый модуль |
 | --- | --- | --- |
-| `tabs/demo_ensemble_methods.py` | 34 | `utils.ensemble_utils` |
-| `tabs/demo_ensemble_methods.py` | 38 | `utils.image_io` |
-| `tabs/yolo_find_img.py` | 40 | `utils.image_io` |
-| `tabs/yolo_test_aeb.py` | 53 | `utils.image_io` |
+| Нет | — | — |
 
-## Вкладки и зависимости
+## Пути от вкладок
 
 | Вкладка | Путь зависимости |
 | --- | --- |
-| `tabs.demo_ensemble_methods` | `tabs.demo_ensemble_methods` → `utils.ensemble_utils` |
-| `tabs.demo_ensemble_methods` | `tabs.demo_ensemble_methods` → `utils.image_io` |
-| `tabs.yolo_find_img` | `tabs.yolo_find_img` → `utils.image_io` |
-| `tabs.yolo_test_aeb` | `tabs.yolo_test_aeb` → `utils.image_io` |
-
-Другие вкладки не имеют пути к utils по статическим Python-импортам. Строковые записи ленивого реестра перечислены отдельно: запись ещё не означает загрузку модуля.
+| Нет | — |
 
 ## Ленивый реестр
 
 | Файл | Строка | Модуль |
 | --- | --- | --- |
-| `import_libs_internal.py` | 24 | `utils.image_io` |
-| `import_libs_internal.py` | 25 | `utils.image_io` |
-| `import_libs_internal.py` | 26 | `utils.image_io` |
-| `import_libs_internal.py` | 27 | `utils.image_io` |
-| `import_libs_internal.py` | 28 | `utils.image_io` |
-| `import_libs_internal.py` | 29 | `utils.image_io` |
-| `import_libs_internal.py` | 141 | `utils.image_io` |
-| `import_libs_internal.py` | 148 | `utils.image_io` |
-| `import_libs_internal.py` | 149 | `utils.image_io` |
-| `import_libs_internal.py` | 161 | `utils.ensemble_utils` |
-| `import_libs_internal.py` | 164 | `utils.ensemble_utils` |
-| `import_libs_internal.py` | 169 | `utils.ensemble_utils` |
-| `import_libs_internal.py` | 179 | `utils.image_io` |
-| `import_libs_internal.py` | 180 | `utils.image_io` |
-| `import_libs_internal.py` | 181 | `utils.image_io` |
-| `import_libs_internal.py` | 182 | `utils.image_io` |
-| `import_libs_internal.py` | 183 | `utils.image_io` |
-| `import_libs_internal.py` | 191 | `utils.image_io` |
-| `import_libs_internal.py` | 208 | `utils.image_io` |
-| `import_libs_internal.py` | 209 | `utils.image_io` |
-| `import_libs_internal.py` | 210 | `utils.image_io` |
-| `import_libs_internal.py` | 211 | `utils.image_io` |
-| `import_libs_internal.py` | 212 | `utils.ensemble_utils` |
-| `import_libs_internal.py` | 213 | `utils.image_io` |
-| `import_libs_internal.py` | 214 | `utils.image_io` |
+| Нет | — | — |
 
-## Следующие переносы
+## Завершённые переносы
 
-- `yolo_find_img`: нормализация и чтение снимков → dataset_files_new; отдельно проверить специализированный fallback поиска.
-- `yolo_test_aeb`: LazyImageCache/read и Qt-конвертация → dataset_files_new + ui/image_conversion.
-- `demo_ensemble_methods`: loader Qt-контракта и ensemble_utils; разделить вычисления ансамбля и GUI, затем проверить веса/координаты/NMS/WBF.
-- После переноса актуализировать import_libs_internal и повторно запустить этот скрипт. Импорты utils_ops и utils_aeb относятся к другим папкам и в эту статистику не включены.
+- `utils/image_io.py` удалён. Три вкладки используют dataset_files_new, ui/image_conversion и ui/segmentation/image_input.
+- `utils/ensemble_utils.py` удалён. NMS/WBF находятся в utils_new/annotations/boxes, пороговый пресет — в threshold_processing.
+- `utils_aeb/yolo_aeb_utils.py` перенесён в utils_new/segmentation/autoencoder: уникальные модели и предобработка, без старых реэкспортов геометрии.
+- Старые строковые экспорты import_libs_internal удалены после проверки всех потребителей. Совместимые алиасы не оставлены.
+- utils_ops и автономные скрипты utils_aeb — отдельные папки; их наличие не означает зависимости от удалённой utils.
+
+[Сценарии, алгоритмы и проверки трёх вкладок](Legacy_Tabs_Migration_Status.md).
+
+Команда воспроизведения: `python Docs/audit_legacy_utils.py > Docs/Legacy_Utils_Usage.md`.
+
+Аудит рассматривает статические импорты и точные строковые записи реестра. Дополнительно отсутствие импортов удалённых модулей проверено регрессионным AST-тестом и запуском всех вкладок.

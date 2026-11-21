@@ -46,40 +46,40 @@
 - [utils_training/train_unet_worker.py:162](../utils_training/train_unet_worker.py#L162) — `__init__`, 43 строк
 - [utils_training/train_unet_worker_рабочий.py:155](../utils_training/train_unet_worker_рабочий.py#L155) — `__init__`, 43 строк
 
-## 9. _validate_unified_annotation
+## 9. __init__
+
+- [utils_aeb/auto-aeb_unet.py:246](../utils_aeb/auto-aeb_unet.py#L246) — `__init__`, 33 строк
+- [utils_new/segmentation/autoencoder.py:294](../utils_new/segmentation/autoencoder.py#L294) — `__init__`, 41 строк
+
+## 10. _validate_unified_annotation
 
 - [tabs/layout_dataset.py:83](../tabs/layout_dataset.py#L83) — `_validate_unified_annotation`, 40 строк
 - [tabs/viewing_dataset.py:94](../tabs/viewing_dataset.py#L94) — `_validate_unified_annotation`, 40 строк
 
-## 10. evaluate
+## 11. evaluate
 
 - [utils_aeb/auto-aeb_def.py:330](../utils_aeb/auto-aeb_def.py#L330) — `evaluate`, 38 строк
 - [utils_aeb/auto-aeb_old.py:332](../utils_aeb/auto-aeb_old.py#L332) — `evaluate`, 38 строк
 
-## 11. get_loss_function
+## 12. __init__
+
+- [utils_aeb/auto-aeb_unet.py:208](../utils_aeb/auto-aeb_unet.py#L208) — `__init__`, 28 строк
+- [utils_new/segmentation/autoencoder.py:248](../utils_new/segmentation/autoencoder.py#L248) — `__init__`, 36 строк
+
+## 13. get_loss_function
 
 - [utils_training/train_unet_worker.py:332](../utils_training/train_unet_worker.py#L332) — `get_loss_function`, 35 строк
 - [utils_training/train_unet_worker_рабочий.py:337](../utils_training/train_unet_worker_рабочий.py#L337) — `get_loss_function`, 35 строк
 
-## 12. __init__
-
-- [utils_aeb/auto-aeb_unet.py:246](../utils_aeb/auto-aeb_unet.py#L246) — `__init__`, 33 строк
-- [utils_aeb/yolo_aeb_utils.py:259](../utils_aeb/yolo_aeb_utils.py#L259) — `__init__`, 33 строк
-
-## 13. save_training_plots
+## 14. save_training_plots
 
 - [utils_training/train_unet_worker.py:467](../utils_training/train_unet_worker.py#L467) — `save_training_plots`, 32 строк
 - [utils_training/train_unet_worker_рабочий.py:452](../utils_training/train_unet_worker_рабочий.py#L452) — `save_training_plots`, 26 строк
 
-## 14. _start_annotation_validation
+## 15. _start_annotation_validation
 
 - [tabs/layout_dataset.py:864](../tabs/layout_dataset.py#L864) — `_start_annotation_validation`, 28 строк
 - [tabs/viewing_dataset.py:854](../tabs/viewing_dataset.py#L854) — `_start_annotation_validation`, 28 строк
-
-## 15. __init__
-
-- [utils_aeb/auto-aeb_unet.py:208](../utils_aeb/auto-aeb_unet.py#L208) — `__init__`, 28 строк
-- [utils_aeb/yolo_aeb_utils.py:221](../utils_aeb/yolo_aeb_utils.py#L221) — `__init__`, 28 строк
 
 ## 16. format_annotation_display
 
@@ -113,32 +113,54 @@
 - [tabs/layout_dataset.py:128](../tabs/layout_dataset.py#L128) — `_detect_annotation_to_obb`, 22 строк
 - [tabs/viewing_dataset.py:139](../tabs/viewing_dataset.py#L139) — `_detect_annotation_to_obb`, 22 строк
 
-## 22. run
+## 22. __init__
+
+- [utils_aeb/auto-aeb_def.py:175](../utils_aeb/auto-aeb_def.py#L175) — `__init__`, 12 строк
+- [utils_aeb/auto-aeb_old.py:177](../utils_aeb/auto-aeb_old.py#L177) — `__init__`, 12 строк
+- [utils_new/segmentation/autoencoder.py:40](../utils_new/segmentation/autoencoder.py#L40) — `__init__`, 20 строк
+
+## 23. __init__
+
+- [utils_aeb/auto-aeb_def_new.py:198](../utils_aeb/auto-aeb_def_new.py#L198) — `__init__`, 12 строк
+- [utils_new/segmentation/autoencoder.py:148](../utils_new/segmentation/autoencoder.py#L148) — `__init__`, 20 строк
+
+## 24. run
 
 - [tabs/layout_dataset.py:182](../tabs/layout_dataset.py#L182) — `run`, 18 строк
 - [tabs/viewing_dataset.py:193](../tabs/viewing_dataset.py#L193) — `run`, 18 строк
 
-## 23. format_object_for_list
+## 25. format_object_for_list
 
 - [utils_new/annotation_processing.py:1233](../utils_new/annotation_processing.py#L1233) — `format_object_for_list`, 18 строк
 - [utils_ops/segmentation_ops.py:442](../utils_ops/segmentation_ops.py#L442) — `format_object_for_list`, 18 строк
 
-## 24. signal_handler
+## 26. __init__
+
+- [utils_aeb/auto-aeb_def.py:193](../utils_aeb/auto-aeb_def.py#L193) — `__init__`, 12 строк
+- [utils_aeb/auto-aeb_old.py:195](../utils_aeb/auto-aeb_old.py#L195) — `__init__`, 12 строк
+- [utils_new/segmentation/autoencoder.py:66](../utils_new/segmentation/autoencoder.py#L66) — `__init__`, 15 строк
+
+## 27. __init__
+
+- [utils_aeb/auto-aeb_def_new.py:216](../utils_aeb/auto-aeb_def_new.py#L216) — `__init__`, 12 строк
+- [utils_new/segmentation/autoencoder.py:174](../utils_new/segmentation/autoencoder.py#L174) — `__init__`, 15 строк
+
+## 28. signal_handler
 
 - [utils_training/train_unet_worker.py:139](../utils_training/train_unet_worker.py#L139) — `signal_handler`, 15 строк
 - [utils_training/train_unet_worker_рабочий.py:133](../utils_training/train_unet_worker_рабочий.py#L133) — `signal_handler`, 15 строк
 
-## 25. _confirm_label_save
+## 29. _confirm_label_save
 
 - [tabs/layout_dataset.py:2087](../tabs/layout_dataset.py#L2087) — `_confirm_label_save`, 14 строк
 - [tabs/viewing_dataset.py:990](../tabs/viewing_dataset.py#L990) — `_confirm_label_save`, 14 строк
 
-## 26. _resolve_label_path
+## 30. _resolve_label_path
 
 - [tabs/layout_dataset.py:167](../tabs/layout_dataset.py#L167) — `_resolve_label_path`, 14 строк
 - [tabs/viewing_dataset.py:178](../tabs/viewing_dataset.py#L178) — `_resolve_label_path`, 14 строк
 
-## 27. forward
+## 31. forward
 
 - [utils_aeb/auto-aeb_def.py:90](../utils_aeb/auto-aeb_def.py#L90) — `forward`, 14 строк
 - [utils_aeb/auto-aeb_def_new.py:103](../utils_aeb/auto-aeb_def_new.py#L103) — `forward`, 14 строк
@@ -146,47 +168,25 @@
 - [utils_aeb/auto-aeb_unet.py:95](../utils_aeb/auto-aeb_unet.py#L95) — `forward`, 14 строк
 - [utils_aeb/auto-aeb_unet_with_grad.py:185](../utils_aeb/auto-aeb_unet_with_grad.py#L185) — `forward`, 14 строк
 
-## 28. collect_images
+## 32. collect_images
 
 - [cluster/canonicalize_crops.py:109](../cluster/canonicalize_crops.py#L109) — `collect_images`, 13 строк
 - [cluster/canonicalize_crops_method2.py:126](../cluster/canonicalize_crops_method2.py#L126) — `collect_images`, 13 строк
 
-## 29. _log_exception
+## 33. _log_exception
 
 - [tabs/layout_dataset.py:644](../tabs/layout_dataset.py#L644) — `_log_exception`, 13 строк
 - [tabs/viewing_dataset.py:319](../tabs/viewing_dataset.py#L319) — `_log_exception`, 13 строк
 
-## 30. __getattr__
+## 34. __getattr__
 
 - [import_libs_external.py:138](../import_libs_external.py#L138) — `__getattr__`, 12 строк
-- [import_libs_internal.py:249](../import_libs_internal.py#L249) — `__getattr__`, 12 строк
-
-## 31. __init__
-
-- [utils_aeb/auto-aeb_def.py:175](../utils_aeb/auto-aeb_def.py#L175) — `__init__`, 12 строк
-- [utils_aeb/auto-aeb_old.py:177](../utils_aeb/auto-aeb_old.py#L177) — `__init__`, 12 строк
-- [utils_aeb/yolo_aeb_utils.py:39](../utils_aeb/yolo_aeb_utils.py#L39) — `__init__`, 12 строк
-
-## 32. __init__
-
-- [utils_aeb/auto-aeb_def.py:193](../utils_aeb/auto-aeb_def.py#L193) — `__init__`, 12 строк
-- [utils_aeb/auto-aeb_old.py:195](../utils_aeb/auto-aeb_old.py#L195) — `__init__`, 12 строк
-- [utils_aeb/yolo_aeb_utils.py:57](../utils_aeb/yolo_aeb_utils.py#L57) — `__init__`, 12 строк
-
-## 33. __init__
-
-- [utils_aeb/auto-aeb_def_new.py:198](../utils_aeb/auto-aeb_def_new.py#L198) — `__init__`, 12 строк
-- [utils_aeb/yolo_aeb_utils.py:134](../utils_aeb/yolo_aeb_utils.py#L134) — `__init__`, 12 строк
-
-## 34. __init__
-
-- [utils_aeb/auto-aeb_def_new.py:216](../utils_aeb/auto-aeb_def_new.py#L216) — `__init__`, 12 строк
-- [utils_aeb/yolo_aeb_utils.py:152](../utils_aeb/yolo_aeb_utils.py#L152) — `__init__`, 12 строк
+- [import_libs_internal.py:224](../import_libs_internal.py#L224) — `__getattr__`, 12 строк
 
 ## 35. __init__
 
 - [utils_aeb/auto-aeb_unet.py:309](../utils_aeb/auto-aeb_unet.py#L309) — `__init__`, 12 строк
-- [utils_aeb/yolo_aeb_utils.py:322](../utils_aeb/yolo_aeb_utils.py#L322) — `__init__`, 12 строк
+- [utils_new/segmentation/autoencoder.py:371](../utils_new/segmentation/autoencoder.py#L371) — `__init__`, 12 строк
 
 ## 36. get_optimizer
 
@@ -204,7 +204,7 @@
 
 - [utils_aeb/auto-aeb_def.py:230](../utils_aeb/auto-aeb_def.py#L230) — `__init__`, 11 строк
 - [utils_aeb/auto-aeb_old.py:232](../utils_aeb/auto-aeb_old.py#L232) — `__init__`, 11 строк
-- [utils_aeb/yolo_aeb_utils.py:94](../utils_aeb/yolo_aeb_utils.py#L94) — `__init__`, 11 строк
+- [utils_new/segmentation/autoencoder.py:106](../utils_new/segmentation/autoencoder.py#L106) — `__init__`, 11 строк
 
 ## 39. _fit
 
@@ -217,7 +217,7 @@
 ## 40. __init__
 
 - [utils_aeb/auto-aeb_unet.py:288](../utils_aeb/auto-aeb_unet.py#L288) — `__init__`, 11 строк
-- [utils_aeb/yolo_aeb_utils.py:301](../utils_aeb/yolo_aeb_utils.py#L301) — `__init__`, 11 строк
+- [utils_new/segmentation/autoencoder.py:350](../utils_new/segmentation/autoencoder.py#L350) — `__init__`, 11 строк
 
 ## 41. imwrite_safe
 
@@ -253,7 +253,7 @@
 
 - [utils_aeb/auto-aeb_def.py:211](../utils_aeb/auto-aeb_def.py#L211) — `__init__`, 9 строк
 - [utils_aeb/auto-aeb_old.py:213](../utils_aeb/auto-aeb_old.py#L213) — `__init__`, 9 строк
-- [utils_aeb/yolo_aeb_utils.py:75](../utils_aeb/yolo_aeb_utils.py#L75) — `__init__`, 9 строк
+- [utils_new/segmentation/autoencoder.py:87](../utils_new/segmentation/autoencoder.py#L87) — `__init__`, 9 строк
 
 ## 48. collect_images
 
@@ -271,4 +271,4 @@
 ## 50. median_blur
 
 - [utils_aeb/auto-aeb_unet_with_grad.py:120](../utils_aeb/auto-aeb_unet_with_grad.py#L120) — `median_blur`, 9 строк
-- [utils_aeb/yolo_aeb_utils.py:537](../utils_aeb/yolo_aeb_utils.py#L537) — `_median_blur_torch`, 9 строк
+- [utils_new/segmentation/autoencoder.py:614](../utils_new/segmentation/autoencoder.py#L614) — `_median_blur_torch`, 9 строк
