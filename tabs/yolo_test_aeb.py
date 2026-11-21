@@ -20,7 +20,7 @@
 
 Геометрия, морфология, смещения, кроп и повороты объектов вынесены в
 utils_new/annotation_processing.py. Только модели AE/VAE и их препроцессинг
-пока импортируются из utils_aeb/yolo_aeb_utils.py.
+импортируются по запросу из utils_new/segmentation/autoencoder.py.
 """
 
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
@@ -36,6 +36,8 @@ prepare_windows_torch()
 
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 
 import cv2
 import numpy as np
@@ -49,44 +51,22 @@ from PyQt5.QtWidgets import (
     QMessageBox,
 )
 
-from ui_tabs.yolo_test_aeb_ui import setup_yolo_ae_vae_ui
-from utils.image_io import LazyImageCache, load_one_image_item, numpy_to_qpixmap
+from ui.image_conversion import numpy_to_qpixmap
+from ui.segmentation.jobs import BackgroundTask
 from ui.segmentation.preset_bindings import PresetManager
 from ui.settings_service import settings
-from utils_aeb.yolo_aeb_utils import (
-    ConvAutoencoder,
-    ConvAutoencoderGN,
-    ConvDecoder,
-    ConvDecoderGN,
-    # модели AE/VAE — старые conv+BN
-    ConvEncoder,
-    # модели AE/VAE — новые conv+GN
-    ConvEncoderGN,
-    ConvVAE,
-    ConvVAEGN,
-    UNetAE,
-    UNetDecoder,
-    # модели AE/VAE — U-Net
-    UNetEncoder,
-    UNetVAE,
-    build_ae_model_from_cfg,
-    # фабрика и препроцессинг
-    detect_arch,
-    preprocess_image_for_ae,
-)
+from ui_tabs.yolo_test_aeb_ui import setup_yolo_ae_vae_ui
 from utils_new.annotation_processing import (
     aeb_transform_image,
-    apply_object_morphology,
     cls_suffix_from_detection,
-    crop_to_detection,
-    detection_to_unified,
     detections_to_unified,
     longest_edge_angle_deg,
     render_ae_error_map,
     render_unified_annotations,
-    rotate_with_optional_crop,
     yolo_result_to_detections,
 )
+from utils_new.dataset_files_new import LazyImageCache, load_one_image_item, write_image
+from utils_new.segmentation.image_session import image_paths
 
 # Защитный лимит для QPixmap/QImage и GDI на Windows.
 MAX_SAFE_SIDE = 8192
@@ -101,19 +81,16 @@ class YoloAEBPresetManager(PresetManager):
         return {
             "yolo_model_path": m.model_edit.text(),
             "ae_model_path": m.ae_model_edit.text(),
-
             "conf": float(m.conf_spin.value()),
             "iou": float(m.iou_spin.value()),
             "imgsz": int(m.imgsz_spin.value()),
             "device": m.device_combo.currentText(),
             "chk_show_boxes": bool(m.chk_show_boxes.isChecked()),
-
             "ae_perc": float(m.ae_perc_spin.value()),
             "chk_ae_use_ckpt_thr": bool(m.chk_ae_use_ckpt_thr.isChecked()),
             "chk_ae_overlay": bool(m.chk_ae_overlay.isChecked()),
             "chk_ae_show_mask": bool(m.chk_ae_show_mask.isChecked()),
             "ae_alpha": int(m.ae_alpha_slider.value()),
-
             "crop_padding": int(m.crop_padding_spin.value()),
             "crop_offset_x": int(m.crop_offset_x_spin.value()),
             "crop_offset_y": int(m.crop_offset_y_spin.value()),
@@ -121,7 +98,6 @@ class YoloAEBPresetManager(PresetManager):
             "chk_auto_crop": bool(m.chk_auto_crop.isChecked()),
             "chk_auto_rotate": bool(m.chk_auto_rotate.isChecked()),
             "fill_mode": m.fill_combo.currentData(),
-
             "morphology": m.morphology_widget.get_settings(),
             "invert_image": bool(m.invert_image_checkbox.isChecked()),
         }
@@ -132,9 +108,12 @@ class YoloAEBPresetManager(PresetManager):
         s = self.presets[name]
         m = self.main
 
-        if "conf" in s:      m.conf_spin.setValue(float(s["conf"]))
-        if "iou" in s:       m.iou_spin.setValue(float(s["iou"]))
-        if "imgsz" in s:     m.imgsz_spin.setValue(int(s["imgsz"]))
+        if "conf" in s:
+            m.conf_spin.setValue(float(s["conf"]))
+        if "iou" in s:
+            m.iou_spin.setValue(float(s["iou"]))
+        if "imgsz" in s:
+            m.imgsz_spin.setValue(int(s["imgsz"]))
         if "device" in s:
             idx = m.device_combo.findText(str(s["device"]))
             if idx >= 0:
@@ -142,7 +121,8 @@ class YoloAEBPresetManager(PresetManager):
         if "chk_show_boxes" in s:
             m.chk_show_boxes.setChecked(bool(s["chk_show_boxes"]))
 
-        if "ae_perc" in s:   m.ae_perc_spin.setValue(float(s["ae_perc"]))
+        if "ae_perc" in s:
+            m.ae_perc_spin.setValue(float(s["ae_perc"]))
         if "chk_ae_use_ckpt_thr" in s:
             m.chk_ae_use_ckpt_thr.setChecked(bool(s["chk_ae_use_ckpt_thr"]))
         if "chk_ae_overlay" in s:
@@ -171,7 +151,9 @@ class YoloAEBPresetManager(PresetManager):
 
         if "morphology" in s:
             m.morphology_widget.set_settings(s["morphology"])
-        elif any(k in s for k in ("erosion", "dilation", "kernel_shape", "contour_only")):
+        elif any(
+            k in s for k in ("erosion", "dilation", "kernel_shape", "contour_only")
+        ):
             # Старые пресеты задавали только эрозию/дилатацию в px.
             m.morphology_widget.set_legacy_yolo(
                 erosion=int(s.get("erosion", 1)),
@@ -193,8 +175,11 @@ class YoloAEBPresetManager(PresetManager):
 # ============================================================
 class YoloInspectWindow(QMainWindow):
     def __init__(self):
-        import torch
         super().__init__()
+        self._closing = False
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yolo-ae")
+        self._yolo_task = None
+        self._ae_task = None
         self.setWindowTitle("YOLO + AE/VAE")
 
         # --- Данные изображений ---
@@ -208,7 +193,7 @@ class YoloInspectWindow(QMainWindow):
         # --- AE/VAE ---
         self.ae_model = None
         self.ae_cfg = None
-        self.ae_device = torch.device("cpu")
+        self.ae_device = None
         self.ae_arch = "conv"
         self._ae_ckpt_threshold = None
         self._ae_ckpt_percentile = None
@@ -232,7 +217,7 @@ class YoloInspectWindow(QMainWindow):
         # YOLO result display now uses the same vector Qt engine and palette
         # as the dataset editor/viewer through the canonical Qt viewer.
         self.yolo_view.set_callbacks(on_selection_changed=self._on_yolo_view_selection)
-        self.yolo_view.set_display_style(label_mode='all')
+        self.yolo_view.set_display_style(label_mode="all")
         self.yolo_view.set_class_name_provider(self._name_for_yolo_class)
         self._last_yolo_pixmap_source = None
         self._syncing_yolo_selection = False
@@ -347,6 +332,7 @@ class YoloInspectWindow(QMainWindow):
     # --------------------------------------------------------
     def _resolve_device(self):
         import torch
+
         d = self.device_combo.currentText()
         if d == "auto":
             return "0" if torch.cuda.is_available() else "cpu"
@@ -354,9 +340,14 @@ class YoloInspectWindow(QMainWindow):
 
     def _resolve_torch_device(self):
         import torch
+
         d = self.device_combo.currentText()
         if d == "auto":
-            return torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+            return (
+                torch.device("cuda:0")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
         if d == "cpu":
             return torch.device("cpu")
         if d == "mps":
@@ -366,7 +357,7 @@ class YoloInspectWindow(QMainWindow):
             return torch.device("cpu")
         try:
             idx = int(d)
-            if torch.cuda.is_available() and idx < torch.cuda.device_count():
+            if torch.cuda.is_available() and 0 <= idx < torch.cuda.device_count():
                 return torch.device(f"cuda:{idx}")
         except ValueError:
             pass
@@ -411,8 +402,10 @@ class YoloInspectWindow(QMainWindow):
     # --------------------------------------------------------
     def load_images_from_dialog(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Images", "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"
+            self,
+            "Select Images",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)",
         )
         if not file_paths:
             return
@@ -425,78 +418,36 @@ class YoloInspectWindow(QMainWindow):
         self._load_images(folder)
 
     def _load_images(self, source):
-        self.log(f"Loading images from {source}...")
-
-        if isinstance(source, str) and os.path.isdir(source):
-            exts = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
-            all_files = sorted(
-                os.path.join(source, f)
-                for f in os.listdir(source)
-                if os.path.splitext(f)[1].lower() in exts
-            )
-        elif isinstance(source, list):
-            all_files = list(source)
-        else:
-            self.log("No images loaded.")
+        paths = image_paths(source)
+        if not paths:
+            self.log("В источнике нет подходящих изображений.")
             return
-
-        if not all_files:
-            self.log("No images loaded.")
-            return
-
+        self.clear_images()
         resize_enabled = self.nav_widget.is_resize_enabled()
-        max_side = 1024
-
-        if self._lazy_cache is not None:
-            self._lazy_cache.shutdown()
-            self._lazy_cache = None
-
-        loader = lambda p: load_one_image_item(
-            p,
-            resize_enabled=resize_enabled,
-            max_side=max_side,
-            safe_max_side=MAX_SAFE_SIDE,
-        )
         self._lazy_cache = LazyImageCache(
-            paths=all_files,
-            loader=loader,
-            window=8,
-            prefetch_ahead=4,
+            paths,
+            lambda path: load_one_image_item(
+                path,
+                resize_enabled=resize_enabled,
+                max_side=1024,
+                safe_max_side=MAX_SAFE_SIDE,
+                load_annotations_flag=False,
+            ),
             max_resident=16,
             max_workers=2,
         )
-
-        self.image_paths = all_files
+        self.image_paths = paths
         self.current_index = 0
-        self.original_image = None
-        self._last_yolo_pixmap_source = None
-        self.displayed_image = None
-        self.current_detections = []
-        self._manual_ops = []
-        self._clear_ae_view()
-        for view in (self.yolo_view, self.transformed_view, self.error_view):
-            view.set_pixmap(numpy_to_qpixmap(None))
-        self.objects_list.clear()
-
-        first = self._lazy_cache.get(0)
-        if first is None:
-            self.log("Не удалось загрузить первое изображение.")
-            return
-
-        total = len(self._lazy_cache)
-        self._lazy_cache.prefetch(
-            range(1, min(1 + self._lazy_cache.prefetch_ahead + 1, total))
-        )
-
-        self.log(f"Загружено {total} изображений (первое — сразу, остальное в фоне).")
         self.display_current_image()
 
     def on_resize_mode_changed(self, enabled):
         if self.image_paths:
             reply = QMessageBox.question(
-                self, "Resize Mode Changed",
+                self,
+                "Resize Mode Changed",
                 "Resize mode changed. Reload images?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
             )
             if reply == QMessageBox.Yes:
                 self._load_images(self.image_paths)
@@ -504,6 +455,10 @@ class YoloInspectWindow(QMainWindow):
                 self.clear_images()
 
     def clear_images(self):
+        self._cancel_task("_yolo_task")
+        self._cancel_task("_ae_task")
+        self.update_timer.stop()
+        self._yolo_reinfer_timer.stop()
         if self._lazy_cache is not None:
             self._lazy_cache.shutdown()
             self._lazy_cache = None
@@ -526,18 +481,15 @@ class YoloInspectWindow(QMainWindow):
             view.reset_view()
 
     def closeEvent(self, event):
-        if self._lazy_cache is not None:
-            try:
-                self._lazy_cache.shutdown()
-            except Exception:
-                pass
-            self._lazy_cache = None
-        super().closeEvent(event)
+        self.shutdown_processing()
+        event.accept()
 
     # --------------------------------------------------------
     # Основной цикл отображения
     # --------------------------------------------------------
     def display_current_image(self):
+        self._cancel_task("_yolo_task")
+        self._cancel_task("_ae_task")
         if self._lazy_cache is None or len(self._lazy_cache) == 0:
             self.clear_images()
             return
@@ -551,6 +503,15 @@ class YoloInspectWindow(QMainWindow):
 
         item = self._lazy_cache.get(idx)
         if item is None:
+            self.original_image = self.displayed_image = None
+            self._last_yolo_pixmap_source = None
+            self.current_detections = []
+            self._clear_ae_view()
+            self.objects_list.clear()
+            for view in (self.yolo_view, self.transformed_view):
+                view.set_pixmap(numpy_to_qpixmap(None))
+                view.set_annotations([], 0, 0)
+            self.processing_status.setText("Снимок не прочитан. Выберите другой файл.")
             self.log(f"Не удалось загрузить снимок: {self.image_paths[idx]}")
             self.update_navigation_state()
             return
@@ -585,21 +546,25 @@ class YoloInspectWindow(QMainWindow):
     # --------------------------------------------------------
     def load_yolo_model(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите модель YOLO", "",
-            "YOLO weights (*.pt *.onnx *.engine);;Все файлы (*)"
+            self,
+            "Выберите модель YOLO",
+            "",
+            "YOLO weights (*.pt *.onnx *.engine);;Все файлы (*)",
         )
         if not path:
             return
         self._load_yolo_model_from_path(path)
 
     def _load_yolo_model_from_path(self, path):
-        from runtime_policy import configure_ultralytics
-        configure_ultralytics()
-        from ultralytics import YOLO
         if not path or not os.path.isfile(path):
             self.log(f"[YOLO] Файл не найден: {path!r}")
             return False
         try:
+            from runtime_policy import configure_ultralytics
+
+            configure_ultralytics()
+            from ultralytics import YOLO
+
             self.model = YOLO(path)
             self.model_edit.setText(path)
             self.log(f"[YOLO] {path}")
@@ -626,48 +591,44 @@ class YoloInspectWindow(QMainWindow):
     def _run_yolo_inference(self):
         if self.model is None or self.original_image is None:
             return
+        self._cancel_task("_yolo_task")
+        self._cancel_task("_ae_task")
+        self._clear_ae_view()
+        self.current_detections = []
+        self._update_objects_list()
+        self._rebuild_yolo_view()
+        model, image = self.model, self.original_image.copy()
+        options = dict(
+            conf=float(self.conf_spin.value()),
+            iou=float(self.iou_spin.value()),
+            imgsz=int(self.imgsz_spin.value()),
+            device=self._resolve_device(),
+        )
+        names = getattr(model, "names", {})
 
-        conf = float(self.conf_spin.value())
-        iou = float(self.iou_spin.value())
-        imgsz = int(self.imgsz_spin.value())
-        device = self._resolve_device()
+        def compute(cancel):
+            if cancel.is_set():
+                return []
+            results = model(image, **options)
+            if cancel.is_set():
+                return []
+            return (
+                yolo_result_to_detections(
+                    results[0], names, angle_fn=longest_edge_angle_deg
+                )
+                if results
+                else []
+            )
 
-        QApplication.processEvents()
-
-        try:
-            results = self.model(self.original_image,
-                                 conf=conf, iou=iou, imgsz=imgsz, device=device)
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка инференса", str(e))
-            return
-
-        if not results:
-            self.current_detections = []
+        def accept(detections):
+            self.current_detections = detections
             self._update_objects_list()
             self._rebuild_yolo_view()
             self._rebuild_displayed()
-            return
-        r = results[0]
-        self.current_detections = yolo_result_to_detections(
-            r, self.model.names, angle_fn=longest_edge_angle_deg)
-        kind = self.current_detections[0]['kind'] if self.current_detections else 'detect'
-        self._update_objects_list()
-        self._rebuild_yolo_view()
-        self._rebuild_displayed()
+            self.log(f"[YOLO] Найдено объектов: {len(detections)}; {options}")
+            self._auto_apply_ae()
 
-        self.log_text.clear()
-        self.log(f"[ИНФЕРЕНС YOLO] conf={conf} iou={iou} imgsz={imgsz} device={device}")
-        self.log(f"[ТИП ВЫВОДА] {kind}")
-        self.log(f"[ФАЙЛ] {self.image_paths[self.current_index]}")
-        self.log("-" * 60)
-        for i, d in enumerate(self.current_detections):
-            x1, y1, x2, y2 = d["xyxy"]
-            ang = d.get("angle_deg")
-            ang_s = f" angle={ang:6.1f}°" if ang is not None else ""
-            self.log(f"{i+1:3d}. {d['cls_name']}  conf={d['conf']:.3f}  "
-                     f"box=({x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}){ang_s}")
-        self.log("-" * 60)
-        self.log(f"Всего объектов: {len(self.current_detections)}")
+        self._start_task("_yolo_task", compute, accept, "YOLO")
 
     def _update_objects_list(self):
         self._updating_objects_list = True
@@ -679,8 +640,10 @@ class YoloInspectWindow(QMainWindow):
                 h = max(0, y2 - y1)
                 ang = d.get("angle_deg")
                 ang_s = f"  ∠{ang:5.1f}°" if ang is not None else ""
-                text = (f"{i+1}. {d['cls_name']}  conf={d['conf']:.3f}  "
-                        f"[{int(w)}×{int(h)}]{ang_s}  ({d['kind']})")
+                text = (
+                    f"{i + 1}. {d['cls_name']}  conf={d['conf']:.3f}  "
+                    f"[{int(w)}×{int(h)}]{ang_s}  ({d['kind']})"
+                )
                 item = QListWidgetItem(text)
                 item.setData(Qt.UserRole, i)
                 self.objects_list.addItem(item)
@@ -714,7 +677,8 @@ class YoloInspectWindow(QMainWindow):
         try:
             selected = self.objects_list.currentRow()
             self.yolo_view.set_selected_index(
-                selected if self.chk_show_boxes.isChecked() else -1)
+                selected if self.chk_show_boxes.isChecked() else -1
+            )
         finally:
             self._syncing_yolo_selection = False
         if self.original_image is None:
@@ -729,10 +693,11 @@ class YoloInspectWindow(QMainWindow):
             self.schedule_update()
 
     def _name_for_yolo_class(self, cls_id):
-        names = getattr(self.model, 'names', {}) if self.model else {}
+        names = getattr(self.model, "names", {}) if self.model else {}
         try:
-            return str(names.get(cls_id, cls_id) if isinstance(names, dict)
-                       else names[cls_id])
+            return str(
+                names.get(cls_id, cls_id) if isinstance(names, dict) else names[cls_id]
+            )
         except (IndexError, KeyError, TypeError):
             return str(cls_id)
 
@@ -745,7 +710,8 @@ class YoloInspectWindow(QMainWindow):
     def _render_for_detection(self, det):
         """Shared processing pipeline for preview and export (new utility)."""
         return aeb_transform_image(
-            self.original_image, det,
+            self.original_image,
+            det,
             morphology_steps=self.morphology_widget.get_steps(),
             contour_width_px=self.morphology_widget.contour_width_px(),
             shape_name=self.morphology_widget.kernel_shape(),
@@ -775,7 +741,9 @@ class YoloInspectWindow(QMainWindow):
         )
         suf = f"_{suffix}" if suffix else ""
         self.yolo_view.set_suggested_save_name(f"aeb_yolo_{base_name}{suf}")
-        self.transformed_view.set_suggested_save_name(f"aeb_transformed_{base_name}{suf}")
+        self.transformed_view.set_suggested_save_name(
+            f"aeb_transformed_{base_name}{suf}"
+        )
         self.error_view.set_suggested_save_name(f"aeb_errmap_{base_name}{suf}")
 
     # --------------------------------------------------------
@@ -795,11 +763,13 @@ class YoloInspectWindow(QMainWindow):
         h, w = img.shape[:2]
         anns = self._detections_to_unified(w, h)
         return render_unified_annotations(
-            img, anns, settings.get_dataset_class_color,
+            img,
+            anns,
+            settings.get_dataset_class_color,
             selected_index=self.objects_list.currentRow(),
-            selected_color=settings.get_color('selected'),
-            text_color=settings.get_color('label_text'),
-            thickness=settings.current.get('line_thickness_px', 1),
+            selected_color=settings.get_color("selected"),
+            text_color=settings.get_color("label_text"),
+            thickness=settings.current.get("line_thickness_px", 1),
         )
 
     def _rebuild_yolo_view(self):
@@ -821,8 +791,9 @@ class YoloInspectWindow(QMainWindow):
         self._syncing_yolo_selection = True
         try:
             selected = self.objects_list.currentRow()
-            valid = (0 <= selected < len(annotations)
-                     and annotations[selected] is not None)
+            valid = (
+                0 <= selected < len(annotations) and annotations[selected] is not None
+            )
             self.yolo_view.set_selected_index(selected if valid else -1)
         finally:
             self._syncing_yolo_selection = False
@@ -831,17 +802,22 @@ class YoloInspectWindow(QMainWindow):
     # 3-й снимок: итоговое изображение без боксов
     # --------------------------------------------------------
     def _rebuild_displayed(self):
+        self._cancel_task("_ae_task")
+        self._clear_ae_view()
+        self._sync_processing_state()
         if self.original_image is None:
             return
         img, mode, morph_info = self._render_for_detection(
-            self._get_selected_detection())
+            self._get_selected_detection()
+        )
         if morph_info:
             self.log(
                 f"[Морфология] kind={morph_info['kind']} "
                 f"cls={morph_info['cls_name']} "
                 f"mode={morph_info['contour_mode']} "
                 f"operations={morph_info['operations']} "
-                f"mask_px={morph_info['mask_px']}")
+                f"mask_px={morph_info['mask_px']}"
+            )
         self.displayed_image = img
         self.display_mode = mode
         self.transformed_view.set_pixmap(numpy_to_qpixmap(img))
@@ -928,19 +904,21 @@ class YoloInspectWindow(QMainWindow):
         )
         suf = f"_{suffix}" if suffix else ""
         default_name = f"{base}{suf}_transformed.png"
-        default_path = os.path.join(start_dir, default_name) if start_dir else default_name
+        default_path = (
+            os.path.join(start_dir, default_name) if start_dir else default_name
+        )
 
         save_path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить снимок", default_path,
+            self,
+            "Сохранить снимок",
+            default_path,
             "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp);;"
-            "TIFF (*.tif *.tiff);;Все файлы (*)"
+            "TIFF (*.tif *.tiff);;Все файлы (*)",
         )
         if not save_path:
             return
         try:
-            ok = cv2.imwrite(save_path, self.displayed_image)
-            if not ok:
-                raise RuntimeError("cv2.imwrite вернул False")
+            write_image(save_path, self.displayed_image)
             self.log(f"Сохранён снимок: {save_path}")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить снимок:\n{e}")
@@ -948,8 +926,7 @@ class YoloInspectWindow(QMainWindow):
     def save_error_map(self):
         if self._error_bgr is None:
             QMessageBox.information(
-                self, "Нет карты дефектов",
-                "Сначала примените модель AE/VAE к снимку."
+                self, "Нет карты дефектов", "Сначала примените модель AE/VAE к снимку."
             )
             return
         start_dir, base = self._default_save_dir_and_base()
@@ -959,24 +936,26 @@ class YoloInspectWindow(QMainWindow):
         )
         suf = f"_{suffix}" if suffix else ""
         default_name = f"{base}{suf}_errmap.png"
-        default_path = os.path.join(start_dir, default_name) if start_dir else default_name
+        default_path = (
+            os.path.join(start_dir, default_name) if start_dir else default_name
+        )
 
         save_path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить карту дефектов", default_path,
+            self,
+            "Сохранить карту дефектов",
+            default_path,
             "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp);;"
-            "TIFF (*.tif *.tiff);;Все файлы (*)"
+            "TIFF (*.tif *.tiff);;Все файлы (*)",
         )
         if not save_path:
             return
         try:
-            ok = cv2.imwrite(save_path, self._error_bgr)
-            if not ok:
-                raise RuntimeError("cv2.imwrite вернул False")
+            write_image(save_path, self._error_bgr)
             self.log(f"Карта дефектов сохранена: {save_path}")
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка",
-                                 f"Не удалось сохранить карту дефектов:\n{e}")
-
+            QMessageBox.critical(
+                self, "Ошибка", f"Не удалось сохранить карту дефектов:\n{e}"
+            )
 
     def save_all_crops(self):
         """Сохранить обработанный снимок для КАЖДОГО объекта из списка.
@@ -991,8 +970,9 @@ class YoloInspectWindow(QMainWindow):
             return
         if not self.current_detections:
             QMessageBox.information(
-                self, "Нет объектов",
-                "Список найденных объектов пуст — сохранять нечего."
+                self,
+                "Нет объектов",
+                "Список найденных объектов пуст — сохранять нечего.",
             )
             return
 
@@ -1023,13 +1003,15 @@ class YoloInspectWindow(QMainWindow):
             try:
                 img = self._build_transformed_for_detection(det)
             except Exception as e:
-                self.log(f"[Сохранить все кропы] объект #{i+1}: ошибка обработки: {e}")
+                self.log(
+                    f"[Сохранить все кропы] объект #{i + 1}: ошибка обработки: {e}"
+                )
                 continue
             if img is None:
                 continue
 
             suffix = cls_suffix_from_detection(det, i + 1)
-            suf = f"_{suffix}" if suffix else f"_{i+1}"
+            suf = f"_{suffix}" if suffix else f"_{i + 1}"
             fname = f"{base_name}{suf}_transformed.png"
             fpath = os.path.join(save_dir, fname)
 
@@ -1037,10 +1019,10 @@ class YoloInspectWindow(QMainWindow):
                 msg_box = QMessageBox(self)
                 msg_box.setWindowTitle("Файл существует")
                 msg_box.setText(f"Файл уже существует:\n{fpath}\n\nПерезаписать?")
-                btn_yes    = msg_box.addButton("Да",          QMessageBox.YesRole)
-                btn_yes_all= msg_box.addButton("Да для всех", QMessageBox.YesRole)
-                btn_no     = msg_box.addButton("Нет",         QMessageBox.NoRole)
-                btn_cancel = msg_box.addButton("Отмена",      QMessageBox.RejectRole)
+                btn_yes = msg_box.addButton("Да", QMessageBox.YesRole)
+                btn_yes_all = msg_box.addButton("Да для всех", QMessageBox.YesRole)
+                btn_no = msg_box.addButton("Нет", QMessageBox.NoRole)
+                btn_cancel = msg_box.addButton("Отмена", QMessageBox.RejectRole)
                 msg_box.setDefaultButton(btn_yes)
                 msg_box.exec_()
                 clicked = msg_box.clickedButton()
@@ -1057,47 +1039,68 @@ class YoloInspectWindow(QMainWindow):
                 # btn_yes — просто продолжаем, overwrite_all остаётся False
 
             try:
-                ok = cv2.imwrite(fpath, img)
-                if not ok:
-                    raise RuntimeError("cv2.imwrite вернул False")
+                write_image(fpath, img)
                 saved += 1
                 self.log(f"[Сохранить все кропы] сохранён: {fpath}")
             except Exception as e:
                 self.log(f"[Сохранить все кропы] ошибка сохранения {fpath}: {e}")
 
         if aborted:
-            self.log(f"[Сохранить все кропы] прервано пользователем. "
-                     f"Сохранено={saved}, пропущено={skipped}")
+            self.log(
+                f"[Сохранить все кропы] прервано пользователем. "
+                f"Сохранено={saved}, пропущено={skipped}"
+            )
         else:
-            self.log(f"[Сохранить все кропы] завершено. "
-                     f"Сохранено={saved}, пропущено={skipped}, всего={total}")
+            self.log(
+                f"[Сохранить все кропы] завершено. "
+                f"Сохранено={saved}, пропущено={skipped}, всего={total}"
+            )
 
     # --------------------------------------------------------
     # Загрузка / очистка модели AE/VAE
     # --------------------------------------------------------
     def load_ae_model(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите чекпойнт AE/VAE", "",
-            "PyTorch checkpoint (*.pt *.pth);;Все файлы (*)"
+            self,
+            "Выберите чекпойнт AE/VAE",
+            "",
+            "PyTorch checkpoint (*.pt *.pth);;Все файлы (*)",
         )
         if not path:
             return
         self._load_ae_model_from_path(path)
 
     def _load_ae_model_from_path(self, path):
-        import torch
         if not path or not os.path.isfile(path):
             self.log(f"[AE/VAE] Файл не найден: {path!r}")
             return False
         try:
+            import torch
+
+            from utils_new.segmentation.autoencoder import (
+                build_ae_model_from_cfg,
+                detect_arch,
+            )
+
             try:
                 ckpt = torch.load(path, map_location="cpu", weights_only=False)
             except TypeError:
                 ckpt = torch.load(path, map_location="cpu")
 
-            if not isinstance(ckpt, dict) or "model" not in ckpt or "config" not in ckpt:
+            if (
+                not isinstance(ckpt, dict)
+                or "model" not in ckpt
+                or "config" not in ckpt
+            ):
                 raise RuntimeError("В чекпойнте нет полей 'model' и 'config'.")
 
+            threshold_value = ckpt.get("threshold_value")
+            if threshold_value is not None:
+                threshold_value = float(threshold_value)
+                if not np.isfinite(threshold_value) or threshold_value < 0:
+                    raise ValueError(
+                        "Порог чекпойнта должен быть конечным неотрицательным числом."
+                    )
             cfg = dict(ckpt["config"])
             state_dict = ckpt["model"]
 
@@ -1132,7 +1135,9 @@ class YoloInspectWindow(QMainWindow):
             try:
                 model.to(device)
             except Exception as e:
-                self.log(f"[AE/VAE] Не удалось перевести на {device}: {e}. Использую CPU.")
+                self.log(
+                    f"[AE/VAE] Не удалось перевести на {device}: {e}. Использую CPU."
+                )
                 device = torch.device("cpu")
                 model.to(device)
 
@@ -1141,7 +1146,7 @@ class YoloInspectWindow(QMainWindow):
             self.ae_device = device
             self.ae_arch = arch
             self.ae_model_edit.setText(path)
-            self._ae_ckpt_threshold = ckpt.get("threshold_value", None)
+            self._ae_ckpt_threshold = threshold_value
             self._ae_ckpt_percentile = ckpt.get("threshold_percentile", None)
 
             # Собираем сводку по модели для лога.
@@ -1160,17 +1165,23 @@ class YoloInspectWindow(QMainWindow):
             else:
                 latent_info = f"latent_dim={cfg['latent_dim']}"
             if arch == "unet_v2" and cfg.get("use_edge_channel"):
-                self.log(f"[AE/VAE] edge-канал: kernel={cfg.get('edge_kernel')}, "
-                         f"median={cfg.get('median_kernel')}, "
-                         f"lo={cfg.get('edge_lo')}, hi={cfg.get('edge_hi')}")
+                self.log(
+                    f"[AE/VAE] edge-канал: kernel={cfg.get('edge_kernel')}, "
+                    f"median={cfg.get('median_kernel')}, "
+                    f"lo={cfg.get('edge_lo')}, hi={cfg.get('edge_hi')}"
+                )
 
             self.log(f"[AE/VAE] {path}")
-            self.log(f"[AE/VAE] arch={arch}, type={cfg['model_type']}, {latent_info}, "
-                     f"size=({cfg['img_h']},{cfg['img_w']}), "
-                     f"params={n_params/1e6:.3f}M, device={device}")
+            self.log(
+                f"[AE/VAE] arch={arch}, type={cfg['model_type']}, {latent_info}, "
+                f"size=({cfg['img_h']},{cfg['img_w']}), "
+                f"params={n_params / 1e6:.3f}M, device={device}"
+            )
             if self._ae_ckpt_threshold is not None:
-                self.log(f"[AE/VAE] ckpt threshold={self._ae_ckpt_threshold:.6f} "
-                         f"@ p{self._ae_ckpt_percentile}")
+                self.log(
+                    f"[AE/VAE] ckpt threshold={self._ae_ckpt_threshold:.6f} "
+                    f"@ p{self._ae_ckpt_percentile}"
+                )
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить AE/VAE:\n{e}")
             return False
@@ -1196,13 +1207,11 @@ class YoloInspectWindow(QMainWindow):
                 self.log(f"[Пресет] AE/VAE-модель не найдена: {ae_path}")
 
     def clear_ae_model(self):
+        self._cancel_task("_ae_task")
         import torch
+
         if self.ae_model is None:
             return
-        try:
-            self.ae_model.to("cpu")
-        except Exception:
-            pass
         self.ae_model = None
         self.ae_cfg = None
         self.ae_device = torch.device("cpu")
@@ -1222,7 +1231,11 @@ class YoloInspectWindow(QMainWindow):
     # Применение AE/VAE
     # --------------------------------------------------------
     def _auto_apply_ae(self):
-        if self.ae_model is None or self.displayed_image is None:
+        if (
+            self._yolo_task is not None
+            or self.ae_model is None
+            or self.displayed_image is None
+        ):
             return
         try:
             self.apply_ae(silent=True)
@@ -1238,93 +1251,53 @@ class YoloInspectWindow(QMainWindow):
         self.error_view.set_pixmap(numpy_to_qpixmap(None))
 
     def apply_ae(self, silent=False):
-        import torch
-        if self.ae_model is None:
+        if self.ae_model is None or self.displayed_image is None:
             if not silent:
-                QMessageBox.warning(self, "Нет модели AE/VAE",
-                                    "Сначала загрузите чекпойнт AE/VAE.")
-            return
-        if self.displayed_image is None:
-            if not silent:
-                QMessageBox.warning(self, "Нет изображения",
-                                    "Сначала откройте изображение.")
-            return
-
-        target = self._resolve_torch_device()
-        if target != self.ae_device:
-            try:
-                self.ae_model.to(target)
-                self.ae_device = target
-                self.log(f"[AE/VAE] Модель переведена на {target}")
-            except Exception as e:
-                self.log(f"[AE/VAE] Не удалось перевести на {target}: {e}")
-
-        device = self.ae_device
-
-        try:
-            x, valid_region = preprocess_image_for_ae(self.displayed_image, self.ae_cfg)
-            x_t = x.unsqueeze(0).to(device)
-            with torch.no_grad():
-                recon, _ = self.ae_model(x_t)
-            recon = recon.cpu()
-            x_cpu = x.unsqueeze(0).cpu()
-        except Exception as e:
-            if not silent:
-                QMessageBox.critical(self, "Ошибка инференса AE/VAE", str(e))
-            else:
-                self.log(f"[AE/VAE auto] ошибка инференса: {e}")
-            return
-
-        # --- FIX: сравнение только по image-каналам ---
-        # x содержит [image_channels (+edge_channel)], recon — только image_channels.
-        # Edge-канал (для unet_v2) отбрасываем, иначе тензоры несовместимы.
-        in_ch = int(self.ae_cfg.get("in_channels", 3))
-        out_ch = int(self.ae_cfg.get("out_channels", in_ch))
-
-        if x_cpu.shape[1] != recon.shape[1]:
-            if x_cpu.shape[1] < recon.shape[1]:
-                raise RuntimeError(
-                    f"Каналов на входе ({x_cpu.shape[1]}) меньше, чем на выходе "
-                    f"({recon.shape[1]}). Проверьте in_channels/out_channels в cfg."
+                QMessageBox.information(
+                    self, "Нет входных данных", "Загрузите снимок и модель AE/VAE."
                 )
-            x_cpu = x_cpu[:, :recon.shape[1]]  # оставляем первые out_ch (=image) каналов
+            return
+        if self._yolo_task is not None:
+            self.log("Дождитесь результата YOLO, затем примените AE/VAE.")
+            return
+        self._cancel_task("_ae_task")
+        self._clear_ae_view()
+        image, model, cfg = (
+            self.displayed_image.copy(),
+            self.ae_model,
+            deepcopy(self.ae_cfg),
+        )
+        device = self._resolve_torch_device()
 
-        if out_ch != recon.shape[1]:
-            self.log(f"[AE/VAE] WARN: out_channels={out_ch} в cfg, "
-                     f"а модель вернула {recon.shape[1]} — использую фактическое.")
+        def compute(cancel):
+            from utils_new.segmentation.autoencoder import infer_autoencoder
 
-        err = (x_cpu - recon).abs().mean(dim=1)[0].numpy()
+            return infer_autoencoder(image, model, cfg, device, cancel)
 
-        self._ae_err_hw = err
-        self._ae_valid_region = valid_region
-        self._ae_base_bgr = self.displayed_image.copy()
-        self._ae_threshold = self._compute_threshold()
+        def accept(result):
+            self.ae_device = device
+            self._ae_err_hw = result["error"]
+            self._ae_valid_region = result["valid_region"]
+            self._ae_base_bgr = image
+            self._ae_threshold = self._compute_threshold()
+            self._render_ae_view()
+            x1, y1, x2, y2 = self._ae_valid_region
+            roi = self._ae_err_hw[y1:y2, x1:x2]
+            if roi.size:
+                self.log(
+                    f"[AE/VAE] mean={roi.mean():.6f}; max={roi.max():.6f}; threshold={self._ae_threshold:.6f}; device={device}"
+                )
 
-        self._render_ae_view()
-
-        x1, y1, x2, y2 = valid_region
-        roi = err[y1:y2, x1:x2]
-        if roi.size > 0 and not silent:
-            mean_err = float(roi.mean())
-            max_err = float(roi.max())
-            thr = self._ae_threshold
-            frac_above = float((roi > thr).mean()) * 100 if np.isfinite(thr) else 0.0
-            self.log(f"[AE/VAE] arch={self.ae_arch}  "
-                     f"input={tuple(x.shape)} → recon={tuple(recon.shape)}  "
-                     f"valid ROI: x[{x1}:{x2}] y[{y1}:{y2}]  device: {device}")
-            self.log(f"[AE/VAE] mean err={mean_err:.6f}, max={max_err:.6f}")
-            if np.isfinite(thr):
-                src = "ckpt" if (self.chk_ae_use_ckpt_thr.isChecked()
-                                 and self._ae_ckpt_threshold is not None) else "percentile"
-                self.log(f"[AE/VAE] threshold={thr:.6f} (src={src}); "
-                         f"доля пикселей выше порога: {frac_above:.3f}%")
+        self._start_task("_ae_task", compute, accept, "AE/VAE")
 
     def _compute_threshold(self):
         if self._ae_err_hw is None or self._ae_valid_region is None:
             return float("nan")
-        if (self.chk_ae_use_ckpt_thr.isChecked()
-                and self._ae_ckpt_threshold is not None
-                and np.isfinite(self._ae_ckpt_threshold)):
+        if (
+            self.chk_ae_use_ckpt_thr.isChecked()
+            and self._ae_ckpt_threshold is not None
+            and np.isfinite(self._ae_ckpt_threshold)
+        ):
             return float(self._ae_ckpt_threshold)
         x1, y1, x2, y2 = self._ae_valid_region
         roi = self._ae_err_hw[y1:y2, x1:x2]
@@ -1351,7 +1324,8 @@ class YoloInspectWindow(QMainWindow):
         if self._ae_err_hw is None or self._ae_base_bgr is None:
             return
         self._error_bgr = render_ae_error_map(
-            self._ae_err_hw, self._ae_base_bgr,
+            self._ae_err_hw,
+            self._ae_base_bgr,
             valid_region=self._ae_valid_region,
             overlay=self.chk_ae_overlay.isChecked(),
             alpha=float(self.ae_alpha_slider.value()) / 100.0,
@@ -1381,17 +1355,23 @@ class YoloInspectWindow(QMainWindow):
             self.schedule_update()
 
     def save_as_preset(self):
-        name, ok = QInputDialog.getText(self, "Сохранить пресет", "Введите имя пресета:")
+        name, ok = QInputDialog.getText(
+            self, "Сохранить пресет", "Введите имя пресета:"
+        )
         if ok and name:
             if name in self.preset_manager.get_preset_names():
                 reply = QMessageBox.question(
-                    self, "Перезаписать пресет",
+                    self,
+                    "Перезаписать пресет",
                     f"Пресет '{name}' уже существует. Перезаписать?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
                 )
                 if reply != QMessageBox.Yes:
                     return
-                self.preset_manager.presets[name] = self.preset_manager.get_current_settings()
+                self.preset_manager.presets[name] = (
+                    self.preset_manager.get_current_settings()
+                )
                 self.preset_manager.save_presets()
             else:
                 self.preset_manager.add_preset(name)
@@ -1402,14 +1382,85 @@ class YoloInspectWindow(QMainWindow):
     def delete_current_preset(self):
         current = self.preset_combo.currentText()
         reply = QMessageBox.question(
-            self, "Удалить пресет",
+            self,
+            "Удалить пресет",
             f"Удалить пресет '{current}'?",
-            QMessageBox.Yes | QMessageBox.No
+            QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
             if self.preset_manager.delete_preset(current):
                 self.update_preset_combo()
                 self.log(f"Удалён пресет: {current}")
+
+    def _cancel_task(self, attribute):
+        worker = getattr(self, attribute, None)
+        if worker:
+            worker.close()
+        setattr(self, attribute, None)
+
+    def _sync_processing_state(self):
+        busy = self._yolo_task is not None or self._ae_task is not None
+        self.btn_stop_processing.setEnabled(busy)
+        self.btn_apply_ae.setEnabled(not busy)
+
+    def _start_task(self, attribute, compute, accept, context):
+        if self._closing:
+            return
+        worker = BackgroundTask(compute)
+        setattr(self, attribute, worker)
+        self.processing_status.setText(f"{context}: обработка в фоне…")
+        self._sync_processing_state()
+
+        def current():
+            return not self._closing and getattr(self, attribute, None) is worker
+
+        def failed(message):
+            if not current():
+                return
+            setattr(self, attribute, None)
+            self._sync_processing_state()
+            self.processing_status.setText(f"{context}: {message}")
+            self.log(f"[{context}] Ошибка: {message}")
+
+        def deliver(value):
+            if not current():
+                return
+            setattr(self, attribute, None)
+            self._sync_processing_state()
+            try:
+                accept(value)
+                if self._yolo_task is None and self._ae_task is None:
+                    self.processing_status.setText(f"{context}: готово.")
+            except Exception as exc:
+                self.processing_status.setText(f"{context}: {exc}")
+                self.log(f"[{context}] Ошибка результата: {exc}")
+
+        worker.result_ready.connect(deliver)
+        worker.failed.connect(failed)
+        worker.start(self._executor)
+
+    def stop_processing(self):
+        self.update_timer.stop()
+        self._yolo_reinfer_timer.stop()
+        self._cancel_task("_yolo_task")
+        self._cancel_task("_ae_task")
+        self._sync_processing_state()
+        self.processing_status.setText(
+            "Обработка отменена. Поздний результат не применяется."
+        )
+
+    def shutdown_processing(self):
+        if self._closing:
+            return
+        self._closing = True
+        self.update_timer.stop()
+        self._yolo_reinfer_timer.stop()
+        self._cancel_task("_yolo_task")
+        self._cancel_task("_ae_task")
+        if self._lazy_cache:
+            self._lazy_cache.shutdown()
+            self._lazy_cache = None
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 if __name__ == "__main__":
@@ -1417,4 +1468,5 @@ if __name__ == "__main__":
     window = YoloInspectWindow()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

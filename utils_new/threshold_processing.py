@@ -7,6 +7,7 @@
 apply_threshold_method(gray_img, method_name, params) -> (binary, threshold)
 threshold = None у локально адаптивных методов; изображение входа uint8 grayscale.
 """
+
 from __future__ import annotations
 
 import cv2
@@ -25,27 +26,34 @@ __all__ = [
     "apply_threshold_method",
 ]
 
+
 def simple_threshold(img, thresh):
     _, binary = cv2.threshold(img, thresh, 255, cv2.THRESH_BINARY)
     return binary, thresh
+
 
 def otsu_threshold(img):
     th, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return binary, th
 
+
 def triangle_threshold(img):
     th, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)
     return binary, th
+
 
 def niblack_threshold(img, window_size=15, k=-0.2):
     if window_size < 1:
         raise ValueError("Window должен быть положительным.")
     mean = cv2.boxFilter(img.astype(np.float32), cv2.CV_32F, (window_size, window_size))
-    mean_sq = cv2.boxFilter((img.astype(np.float32))**2, cv2.CV_32F, (window_size, window_size))
+    mean_sq = cv2.boxFilter(
+        (img.astype(np.float32)) ** 2, cv2.CV_32F, (window_size, window_size)
+    )
     std = np.sqrt(np.maximum(mean_sq - mean**2, 0))
     threshold = mean + k * std
     binary = (img > threshold).astype(np.uint8) * 255
     return binary, None
+
 
 def sauvola_threshold(img, window_size=25, k=0.2, R=128):
     if not np.isfinite(R) or R <= 0:
@@ -53,11 +61,14 @@ def sauvola_threshold(img, window_size=25, k=0.2, R=128):
     if window_size < 1:
         raise ValueError("Window должен быть положительным.")
     mean = cv2.boxFilter(img.astype(np.float32), cv2.CV_32F, (window_size, window_size))
-    mean_sq = cv2.boxFilter((img.astype(np.float32))**2, cv2.CV_32F, (window_size, window_size))
+    mean_sq = cv2.boxFilter(
+        (img.astype(np.float32)) ** 2, cv2.CV_32F, (window_size, window_size)
+    )
     std = np.sqrt(np.maximum(mean_sq - mean**2, 0))
     threshold = mean * (1 + k * (std / R - 1))
     binary = (img > threshold).astype(np.uint8) * 255
     return binary, None
+
 
 def isodata_threshold(img, initial_threshold=128):
     threshold = initial_threshold
@@ -101,6 +112,7 @@ def background_symmetry_threshold(img, excess_threshold=0.2):
         threshold = 255 - threshold
     return simple_threshold(img, threshold)
 
+
 def row_adaptive_threshold(img, window_size=50, k=0.5):
     if not isinstance(window_size, (int, np.integer)) or window_size < 1:
         raise ValueError("Window должен быть положительным целым числом.")
@@ -115,33 +127,37 @@ def row_adaptive_threshold(img, window_size=50, k=0.5):
                 mean = np.mean(window)
                 std = np.std(window)
                 thresh = max(0, mean - k * std)
-                binary[row, col:end] = (row_data[col:end] > thresh).astype(np.uint8) * 255
+                binary[row, col:end] = (row_data[col:end] > thresh).astype(
+                    np.uint8
+                ) * 255
     return binary, None
+
 
 def normalize_method_name(method_name):
     """Приводит имя метода к каноническому виду для UI."""
     method_map = {
-        'otsu': 'Otsu',
-        'otsu (opencv)': 'Otsu',
-        'triangle': 'Triangle',
-        'triangle (opencv)': 'Triangle',
-        'simple threshold': 'Simple Threshold',
-        'adaptive mean': 'Adaptive Mean',
-        'adaptive gauss': 'Adaptive Gauss',
-        'niblack': 'Niblack',
-        'sauvola': 'Sauvola',
-        'isodata': 'ISODATA',
-        'background symmetry': 'Background Symmetry',
-        'row adaptive': 'Row Adaptive',
+        "otsu": "Otsu",
+        "otsu (opencv)": "Otsu",
+        "triangle": "Triangle",
+        "triangle (opencv)": "Triangle",
+        "simple threshold": "Simple Threshold",
+        "adaptive mean": "Adaptive Mean",
+        "adaptive gauss": "Adaptive Gauss",
+        "niblack": "Niblack",
+        "sauvola": "Sauvola",
+        "isodata": "ISODATA",
+        "background symmetry": "Background Symmetry",
+        "row adaptive": "Row Adaptive",
     }
     lower_name = method_name.lower().strip()
     if lower_name in method_map:
         return method_map[lower_name]
-    if lower_name.endswith(' (opencv)'):
+    if lower_name.endswith(" (opencv)"):
         base = lower_name[:-9]
         if base in method_map:
             return method_map[base]
     return method_name
+
 
 def apply_threshold_method(gray_img, method_name, params):
     """Применяет метод бинаризации по имени и параметрам."""
@@ -150,12 +166,14 @@ def apply_threshold_method(gray_img, method_name, params):
     if any(not np.isfinite(value) for value in params.values()):
         raise ValueError("Параметры должны быть конечными числами.")
     method_name = normalize_method_name(method_name)
-    if method_name in ('Adaptive Mean', 'Adaptive Gauss', 'Niblack', 'Sauvola'):
-        window = params.get('window', 25)
+    if method_name in ("Adaptive Mean", "Adaptive Gauss", "Niblack", "Sauvola"):
+        window = params.get("window", 25)
         if int(window) != window or window < 3 or window % 2 != 1:
-            raise ValueError("Размер локального окна должен быть нечётным целым числом ≥ 3.")
+            raise ValueError(
+                "Размер локального окна должен быть нечётным целым числом ≥ 3."
+            )
     if method_name == "Simple Threshold":
-        thresh = params.get('threshold', 128)
+        thresh = params.get("threshold", 128)
         binary, _ = simple_threshold(gray_img, thresh)
         return binary, thresh
     elif method_name == "Otsu":
@@ -165,40 +183,94 @@ def apply_threshold_method(gray_img, method_name, params):
         binary, thresh = triangle_threshold(gray_img)
         return binary, thresh
     elif method_name == "Adaptive Mean":
-        ws = params.get('window', 25)
-        c = params.get('c', 3)
-        binary = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                       cv2.THRESH_BINARY, ws, c)
+        ws = params.get("window", 25)
+        c = params.get("c", 3)
+        binary = cv2.adaptiveThreshold(
+            gray_img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, ws, c
+        )
         return binary, None
     elif method_name == "Adaptive Gauss":
-        ws = params.get('window', 25)
-        c = params.get('c', 3)
-        binary = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                       cv2.THRESH_BINARY, ws, c)
+        ws = params.get("window", 25)
+        c = params.get("c", 3)
+        binary = cv2.adaptiveThreshold(
+            gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, ws, c
+        )
         return binary, None
     elif method_name == "Niblack":
-        ws = params.get('window', 25)
-        k = params.get('k', -0.2)
+        ws = params.get("window", 25)
+        k = params.get("k", -0.2)
         binary, _ = niblack_threshold(gray_img, ws, k)
         return binary, None
     elif method_name == "Sauvola":
-        ws = params.get('window', 25)
-        k = params.get('k', 0.2)
-        r = params.get('r', 128)
+        ws = params.get("window", 25)
+        k = params.get("k", 0.2)
+        r = params.get("r", 128)
         binary, _ = sauvola_threshold(gray_img, ws, k, r)
         return binary, None
     elif method_name == "ISODATA":
-        init = params.get('init', 128)
+        init = params.get("init", 128)
         binary, thresh = isodata_threshold(gray_img, init)
         return binary, thresh
     elif method_name == "Background Symmetry":
-        excess = params.get('excess', 0.2)
+        excess = params.get("excess", 0.2)
         binary, thresh = background_symmetry_threshold(gray_img, excess)
         return binary, thresh
     elif method_name == "Row Adaptive":
-        ws = params.get('window', 50)
-        k = params.get('k', 0.5)
+        ws = params.get("window", 50)
+        k = params.get("k", 0.5)
         binary, _ = row_adaptive_threshold(gray_img, ws, k)
         return binary, None
     else:
         raise ValueError(f"Unknown method: {method_name}")
+
+
+def apply_threshold_preset(image, gray, preset):
+    """Canonical preset pipeline shared by preview, ensemble and research."""
+    from utils_new.morphology import apply_morphology
+    from utils_new.segmentation.postprocessing import extract_objects
+    from utils_new.segmentation.presets import validate_preset
+
+    validate_preset(preset, "threshold")
+    if image.shape[:2] != gray.shape:
+        raise ValueError("Размер снимка и grayscale различается.")
+    binary, threshold = apply_threshold_method(gray, preset["method"], preset["params"])
+    morphology = preset["morphology"]
+    mask = apply_morphology(
+        cv2.bitwise_not(binary), morphology["operations"], shape=morphology["shape"]
+    )
+    if preset["invert"]:
+        mask = cv2.bitwise_not(mask)
+    objects = extract_objects(
+        image, mask, preset["annotation_mode"], preset["use_hull"]
+    )[1]
+    return mask, objects, threshold
+
+
+def get_detections_from_preset(image, gray, preset, confidence=0.7, *, class_id=0):
+    """Return enclosing Detect boxes with a user-assigned, uncalibrated score."""
+    if not np.isfinite(confidence) or not 0 <= confidence <= 1:
+        raise ValueError("Оценка пресета должна быть в диапазоне 0..1.")
+    if int(class_id) != class_id or class_id < 0:
+        raise ValueError("ID класса должен быть целым ≥0.")
+    _, objects, _ = apply_threshold_preset(image, gray, preset)
+    detections = []
+    for obj in objects:
+        if obj[0] == "detect":
+            cx, cy, w, h = obj[2:]
+        else:
+            points = np.asarray(obj[2], dtype=float).reshape(-1, 2)
+            low, high = points.min(axis=0), points.max(axis=0)
+            cx, cy = (low + high) / 2
+            w, h = high - low
+        if w > 0 and h > 0:
+            detections.append(
+                (
+                    int(class_id),
+                    float(cx),
+                    float(cy),
+                    float(w),
+                    float(h),
+                    float(confidence),
+                )
+            )
+    return detections

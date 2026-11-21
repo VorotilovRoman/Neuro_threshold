@@ -10,13 +10,16 @@ import cv2
 from utils_new.morphology import apply_morphology
 from utils_new.segmentation.image_session import load_one_image_item
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_new.threshold_processing import apply_threshold_method
+from utils_new.threshold_processing import apply_threshold_method, apply_threshold_preset
 from .search_space import combination_count, iter_presets, search_kind, method_params
 from .gradient_processing import gradient_binary, finalize_gradient_mask
 from .ground_truth import digest_file
 
 
 def evaluate(gray, image, preset, *, raw_mask=None):
+    if raw_mask is None and preset["kind"] == "threshold":
+        mask,objects,_=apply_threshold_preset(image,gray,preset)
+        return mask,objects
     if raw_mask is not None:
         mask = raw_mask
     elif preset["kind"] == "threshold":

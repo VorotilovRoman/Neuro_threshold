@@ -21,7 +21,7 @@ from utils_new.autoreseach_utils.reports import read_report
 from utils_new.autoreseach_utils.evaluation import evaluate_dataset
 from utils_new.autoreseach_utils.ground_truth import load_ground_truth
 from utils_new.annotations.boxes import yolo_to_xyxy, xyxy_to_yolo, iou_xyxy
-from utils.ensemble_utils import non_max_suppression
+from utils_new.annotations.boxes import non_max_suppression
 
 ROOT = Path(__file__).resolve().parents[1]
 

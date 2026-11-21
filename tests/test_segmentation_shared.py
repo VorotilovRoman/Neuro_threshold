@@ -104,7 +104,7 @@ class SegmentationCommonTests(unittest.TestCase):
         import ui.annotation_review_view
         import ui.image_view
         import ui.settings_service
-        from utils.image_io import LazyImageCache
+        from tabs.yolo_test_aeb import LazyImageCache
         from utils_new.dataset_files_new import LazyImageCache as canonical
         self.assertIs(LazyImageCache, canonical)
         self.assertEqual(ui.image_view.SmartGraphicsViewNew.__module__, 'ui.image_view')

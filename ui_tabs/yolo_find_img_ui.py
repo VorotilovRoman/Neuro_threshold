@@ -37,6 +37,11 @@ class setup_yolo_find_img_ui(object):
         main_layout = QVBoxLayout(self.centralwidget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        self.scan_status = QLabel(
+            "1. Выберите папку и модель. 2. Укажите ID класса и критерии. 3. Запустите поиск и отметьте снимки для копирования/перемещения. Переносятся только снимки, без разметки."
+        )
+        self.scan_status.setWordWrap(True)
+        main_layout.addWidget(self.scan_status)
 
         # ==================== ГОРИЗОНТАЛЬНЫЙ СПЛИТТЕР ====================
         h_splitter = QSplitter(Qt.Horizontal)
@@ -56,7 +61,9 @@ class setup_yolo_find_img_ui(object):
         left_layout.addLayout(left_header)
 
         self.current_folder_label = QLabel("Папка не выбрана")
-        self.current_folder_label.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
+        self.current_folder_label.setStyleSheet(
+            "QLabel { color: #888; font-size: 11px; }"
+        )
         self.current_folder_label.setWordWrap(True)
         left_layout.addWidget(self.current_folder_label)
 
@@ -90,6 +97,8 @@ class setup_yolo_find_img_ui(object):
         self.yolo_group = QGroupBox("Параметры YOLO")
         yolo_layout = QVBoxLayout(self.yolo_group)
         self.yolo_settings = YOLOInferenceSettings()
+        self.yolo_settings._box_otsu.hide()
+        self.yolo_settings._save.hide()
         yolo_layout.addWidget(self.yolo_settings)
         settings_h_row.addWidget(self.yolo_group, 3)
 
@@ -102,7 +111,9 @@ class setup_yolo_find_img_ui(object):
         self.target_class_spin = QSpinBox()
         self.target_class_spin.setRange(0, 999)
         self.target_class_spin.setValue(0)
-        self.target_class_spin.setToolTip("ID класса, который нужно найти в изображениях")
+        self.target_class_spin.setToolTip(
+            "ID класса, который нужно найти в изображениях"
+        )
         id_layout.addWidget(self.target_class_spin)
         id_layout.addStretch()
         target_layout.addLayout(id_layout)
@@ -110,7 +121,9 @@ class setup_yolo_find_img_ui(object):
         target_layout.addWidget(QLabel("Доступные классы модели:"))
         self.class_list_widget = QListWidget()
         self.class_list_widget.setMaximumHeight(110)
-        self.class_list_widget.setToolTip("Список классов, которые умеет распознавать модель")
+        self.class_list_widget.setToolTip(
+            "Список классов, которые умеет распознавать модель"
+        )
         target_layout.addWidget(self.class_list_widget, 1)
 
         settings_h_row.addWidget(self.target_group, 2)
@@ -128,7 +141,7 @@ class setup_yolo_find_img_ui(object):
         self.edge_margin_spin.setFixedWidth(90)
         self.edge_margin_spin.setToolTip(
             "0 — критерий отключён.\n"
-            "N > 0 — бокс объекта должен быть не ближе N px "
+            "N > 0 — бокс объекта на ИСХОДНОМ снимке должен быть не ближе N px "
             "к каждому краю кадра (сверху, снизу, слева, справа)."
         )
         criteria_layout.addWidget(self.edge_margin_spin)
@@ -252,7 +265,9 @@ class setup_yolo_find_img_ui(object):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.thumbnail_container = QWidget()
-        self.thumbnail_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.thumbnail_container.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
         self.thumbnail_grid = QGridLayout(self.thumbnail_container)
         self.thumbnail_grid.setSpacing(10)
         self.thumbnail_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)

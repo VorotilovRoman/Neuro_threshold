@@ -221,6 +221,8 @@ class ImagePlayer(QMainWindow):
     def closeEvent(self, event):
         scanning = False
         for tab in getattr(self, '_tab_widgets', []):
+            shutdown_processing=getattr(tab,"shutdown_processing",None)
+            if shutdown_processing is not None:shutdown_processing()
             review = getattr(tab, 'overlap_review', None)
             if review is not None:
                 review.close_review()

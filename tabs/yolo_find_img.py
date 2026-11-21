@@ -1,4 +1,3 @@
-
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
 if __name__ == "__main__" and not __package__:
     import sys as _bootstrap_sys
@@ -11,13 +10,12 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
-import hashlib
 import os
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
-import cv2
-from PyQt5.QtCore import QDir, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt5.QtCore import QDir, Qt, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QCursor, QDesktopServices, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -36,10 +34,16 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui.image_conversion import numpy_to_qpixmap
+from ui.segmentation.jobs import BackgroundTask
 from ui_tabs.yolo_find_img_ui import setup_yolo_find_img_ui
-from utils.image_io import normalize_to_uint8, read_image_with_fallback_find
-
-TEMP_THUMB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_thumbs")
+from utils_new.annotation_processing import yolo_result_to_detections
+from utils_new.dataset_files_new import (
+    load_one_image_item,
+    normalize_to_uint8,
+    read_image_with_fallback,
+    resize_to_max_side,
+)
 
 
 # ------------------------------------------------------------
@@ -53,6 +57,7 @@ class ClickableLabel(QLabel):
       • по правому клику — вызывает context callback.
     Разделение одиночного и двойного клика — через QTimer.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._file_path = ""
@@ -109,14 +114,25 @@ class ClickableLabel(QLabel):
 # ------------------------------------------------------------
 # Поток для сканирования
 # ------------------------------------------------------------
-class ScanThread(QThread):
+class ScanThread(BackgroundTask):
     progress = pyqtSignal(int, int)
     log_msg = pyqtSignal(str)
     file_done = pyqtSignal(str, float, bool)
-    finished = pyqtSignal(list)
+    results_ready = pyqtSignal(list)
 
-    def __init__(self, root_dir, model_path, target_class, conf, iou, imgsz, device,
-                 edge_margin=0, min_object_size_percent=0.0, max_object_size_percent=0.0):
+    def __init__(
+        self,
+        root_dir,
+        model_path,
+        target_class,
+        conf,
+        iou,
+        imgsz,
+        device,
+        edge_margin=0,
+        min_object_size_percent=0.0,
+        max_object_size_percent=0.0,
+    ):
         """
         edge_margin              — мин. расстояние (px) от бокса до каждого края кадра;
                                    0 — критерий отключён.
@@ -136,10 +152,13 @@ class ScanThread(QThread):
         self.edge_margin = int(edge_margin)
         self.min_object_size_percent = float(min_object_size_percent)
         self.max_object_size_percent = float(max_object_size_percent)
-        self._is_canceled = False
+        self.error = None
+        self.checked = 0
+        self.unreadable = 0
+        self.processing_errors = 0
 
     def cancel(self):
-        self._is_canceled = True
+        super().cancel()
         self.log_msg.emit("Отмена сканирования...")
 
     def _box_meets_margin(self, x1, y1, x2, y2, w, h):
@@ -178,112 +197,95 @@ class ScanThread(QThread):
         return percent <= m
 
     def run(self):
-        from runtime_policy import configure_ultralytics
-        configure_ultralytics()
-        from ultralytics import YOLO
-        image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
-        all_images = []
-        self.log_msg.emit(f"Сбор изображений в папке: {self.root_dir}")
-        for root, dirs, files in os.walk(self.root_dir):
-            for file in files:
-                if file.lower().endswith(image_extensions):
-                    all_images.append(os.path.join(root, file))
-        total = len(all_images)
-        self.log_msg.emit(f"Найдено изображений: {total}")
-        if total == 0:
-            self.finished.emit([])
-            return
-
-        if self.edge_margin > 0:
-            self.log_msg.emit(
-                f"Доп. критерий: бокс объекта должен быть не ближе {self.edge_margin} px "
-                f"к каждому краю кадра"
-            )
-        else:
-            self.log_msg.emit("Доп. критерий отступа от краёв кадра отключён (0 px)")
-
-        if self.min_object_size_percent > 0:
-            self.log_msg.emit(
-                f"Доп. критерий: площадь бокса объекта ≥ "
-                f"{self.min_object_size_percent:.2f}% от площади кадра"
-            )
-        else:
-            self.log_msg.emit("Доп. критерий минимальной площади объекта отключён (0 %)")
-
-        if self.max_object_size_percent > 0:
-            self.log_msg.emit(
-                f"Доп. критерий: площадь бокса объекта ≤ "
-                f"{self.max_object_size_percent:.2f}% от площади кадра"
-            )
-        else:
-            self.log_msg.emit("Доп. критерий максимальной площади объекта отключён (0 %)")
-
         results = []
-        self.log_msg.emit(f"Загрузка модели YOLO: {self.model_path}")
-        model = YOLO(self.model_path)
-        self.log_msg.emit("Модель загружена, начало инференса")
+        try:
+            if self.cancelled:
+                return
+            from runtime_policy import configure_ultralytics
 
-        for idx, img_path in enumerate(all_images):
-            if self._is_canceled:
-                self.log_msg.emit("Сканирование прервано пользователем")
-                break
-            self.progress.emit(idx + 1, total)
+            configure_ultralytics()
+            from ultralytics import YOLO
 
-            try:
-                img = read_image_with_fallback_find(img_path)
-                if img is None:
-                    self.log_msg.emit(f"Не удалось загрузить: {os.path.basename(img_path)}")
-                    continue
-
-                img = normalize_to_uint8(img)
-                if len(img.shape) == 2:
-                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                elif img.shape[2] == 4:
-                    img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                elif img.shape[2] != 3:
-                    img = img[:, :, :3]
-
-                img_h, img_w = img.shape[:2]
-
-                results_yolo = model(img, conf=self.conf, iou=self.iou,
-                                     imgsz=self.imgsz, device=self.device)
-                max_conf = 0.0
-                contains_target = False
-
-                if results_yolo[0].boxes is not None:
-                    for box in results_yolo[0].boxes:
-                        cls = int(box.cls[0])
-                        conf_val = float(box.conf[0])
-                        if cls != self.target_class:
-                            continue
-
-                        xyxy = box.xyxy[0].tolist()
-                        x1, y1, x2, y2 = xyxy
-
-                        if not self._box_meets_margin(x1, y1, x2, y2, img_w, img_h):
-                            continue
-                        if not self._box_meets_min_size(x1, y1, x2, y2, img_w, img_h):
-                            continue
-                        if not self._box_meets_max_size(x1, y1, x2, y2, img_w, img_h):
-                            continue
-
-                        contains_target = True
-                        max_conf = max(max_conf, conf_val)
-
-                if contains_target:
-                    results.append((img_path, max_conf))
-                self.file_done.emit(img_path, max_conf, contains_target)
-
-            except Exception as e:
-                self.log_msg.emit(
-                    f"Критическая ошибка при обработке {os.path.basename(img_path)}: {e}"
+            all_images = []
+            for root, dirs, files in os.walk(self.root_dir):
+                if self.cancelled:
+                    break
+                dirs.sort()
+                all_images.extend(
+                    os.path.join(root, file)
+                    for file in sorted(files)
+                    if file.lower().endswith(
+                        (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
+                    )
                 )
-                continue
-
-        self.log_msg.emit(
-            f"Сканирование завершено. Найдено файлов с целевой меткой: {len(results)}"
-        )
-        self.finished.emit(results)
+            total = len(all_images)
+            self.publish(
+                self.log_msg,
+                f"Найдено снимков: {total}. Отступы измеряются на исходном снимке.",
+            )
+            if self.cancelled or not total:
+                return
+            model = YOLO(self.model_path)
+            for idx, path in enumerate(all_images):
+                if self.cancelled:
+                    break
+                try:
+                    # Do not resize: box coordinates/margins must remain in source pixels.
+                    item = load_one_image_item(
+                        path,
+                        resize_enabled=False,
+                        load_annotations_flag=False,
+                        hard_max_side=None,
+                    )
+                    if item is None:
+                        self.unreadable += 1
+                        self.publish(self.log_msg, f"Не читается: {path}")
+                        continue
+                    image = item["image"]
+                    h, w = image.shape[:2]
+                    predictions = model(
+                        image,
+                        conf=self.conf,
+                        iou=self.iou,
+                        imgsz=self.imgsz,
+                        device=self.device,
+                        verbose=False,
+                    )
+                    if self.cancelled:
+                        break
+                    detections = (
+                        yolo_result_to_detections(
+                            predictions[0], getattr(model, "names", {})
+                        )
+                        if predictions
+                        else []
+                    )
+                    accepted = []
+                    for det in detections:
+                        if det["cls_id"] != self.target_class:
+                            continue
+                        x1, y1, x2, y2 = det["xyxy"]
+                        if (
+                            self._box_meets_margin(x1, y1, x2, y2, w, h)
+                            and self._box_meets_min_size(x1, y1, x2, y2, w, h)
+                            and self._box_meets_max_size(x1, y1, x2, y2, w, h)
+                        ):
+                            accepted.append(det["conf"])
+                    confidence = max(accepted, default=0.0)
+                    if accepted:
+                        results.append((path, confidence))
+                    self.checked += 1
+                    self.publish(self.file_done, path, confidence, bool(accepted))
+                except Exception as exc:
+                    self.processing_errors += 1
+                    self.publish(self.log_msg, f"Ошибка обработки {path}: {exc}")
+                finally:
+                    self.publish(self.progress, idx + 1, total)
+        except Exception as exc:
+            self.error = str(exc)
+            self.publish(self.log_msg, f"Ошибка запуска поиска: {exc}")
+        finally:
+            self.publish(self.results_ready, results)
 
 
 # ------------------------------------------------------------
@@ -294,9 +296,15 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         super().__init__()
         self.setupUi(self)
 
+        self._closing = False
         self.scan_thread = None
+        self._class_task = None
+        self._thumb_task = None
+        self._thumb_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="yolo-thumbnails"
+        )
         self.current_root_dir = ""
-        self.result_file_paths = []          # список (file_path, max_conf)
+        self.result_file_paths = []  # список (file_path, max_conf)
         self.thumbnail_widgets = {}
         self.thumbnail_pixmaps = {}
 
@@ -324,7 +332,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self._thumb_size_px = 180
 
         # Настройка дерева файлов
-        self.file_model = QFileSystemModel()
+        self.file_model = QFileSystemModel(self)
         self.file_model.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot | QDir.Files)
         self.file_model.setNameFilters(
             ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tif", "*.tiff", "*.webp"]
@@ -340,14 +348,16 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.log = self.log_widget.log
 
         # Добавляем комбобокс устройства (если его нет в UI)
-        if hasattr(self, 'device_combo'):
-            self.device_combo = getattr(self, 'device_combo')
+        if hasattr(self, "device_combo"):
+            self.device_combo = getattr(self, "device_combo")
         else:
             self.device_combo = QComboBox()
             self.device_combo.addItems(["auto", "0", "cpu", "mps"])
             parent_layout = self.yolo_settings.layout()
             if parent_layout:
-                parent_layout.addLayout(self.yolo_settings._row("Устройство", self.device_combo))
+                parent_layout.addLayout(
+                    self.yolo_settings._row("Устройство", self.device_combo)
+                )
             else:
                 device_widget = QWidget()
                 device_layout = QHBoxLayout(device_widget)
@@ -361,9 +371,6 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.toggle_view_btn.setText("Режим: миниатюры")
         self.log_widget.setVisible(False)
 
-        self._ensure_temp_dir()
-        self._clear_temp_thumbs()
-
         # Загрузка классов текущей модели
         current_model = self.yolo_settings._model_path.text().strip()
         if current_model:
@@ -374,20 +381,6 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # --------------------------------------------------------
     # Вспомогательные
     # --------------------------------------------------------
-    def _ensure_temp_dir(self):
-        if not os.path.exists(TEMP_THUMB_DIR):
-            os.makedirs(TEMP_THUMB_DIR)
-            self.log(f"Создана временная папка для миниатюр: {TEMP_THUMB_DIR}")
-
-    def _clear_temp_thumbs(self):
-        if os.path.exists(TEMP_THUMB_DIR):
-            count = len(os.listdir(TEMP_THUMB_DIR))
-            for f in os.listdir(TEMP_THUMB_DIR):
-                try:
-                    os.remove(os.path.join(TEMP_THUMB_DIR, f))
-                except Exception:
-                    pass
-            self.log(f"Очищена временная папка (удалено {count} файлов)")
 
     def toggle_log(self, checked):
         self.log_widget.setVisible(checked)
@@ -396,7 +389,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def _on_thumb_size_changed(self, idx):
         sizes = [120, 180, 260]
         self._thumb_size_px = sizes[max(0, min(idx, len(sizes) - 1))]
-        if getattr(self, 'is_thumbnail_mode', False) and getattr(self, 'thumbnail_widgets', None):
+        if getattr(self, "is_thumbnail_mode", False) and getattr(
+            self, "thumbnail_widgets", None
+        ):
             self._rerender_thumbnails()
 
     def _rerender_thumbnails(self):
@@ -405,9 +400,11 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         for fp, (cb, label, container) in self.thumbnail_widgets.items():
             pixmap = self.thumbnail_pixmaps.get(fp)
             if pixmap and not pixmap.isNull():
-                label.setPixmap(pixmap.scaled(
-                    size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                ))
+                label.setPixmap(
+                    pixmap.scaled(
+                        size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                )
             container.setMaximumSize(size + 30, size + 90)
         self.relayout_thumbnails()
 
@@ -415,25 +412,44 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Классы модели
     # --------------------------------------------------------
     def update_model_classes(self, model_path):
-        from runtime_policy import configure_ultralytics
-        configure_ultralytics()
-        from ultralytics import YOLO
-        if not model_path or not os.path.exists(model_path):
+        if self._class_task:
+            self._class_task.close()
+        if not model_path or not os.path.isfile(model_path):
             self.class_list_widget.clear()
-            self.class_list_widget.addItem("Не удалось загрузить классы")
             return
-        try:
-            self.log(f"Загрузка классов модели: {model_path}")
-            model = YOLO(model_path)
-            names = model.names
+
+        def compute(cancel):
+            from runtime_policy import configure_ultralytics
+
+            configure_ultralytics()
+            from ultralytics import YOLO
+
+            return dict(YOLO(model_path).names)
+
+        worker = BackgroundTask(compute)
+        self._class_task = worker
+        self.class_list_widget.clear()
+        self.class_list_widget.addItem("Чтение классов…")
+
+        def current():
+            return not self._closing and self._class_task is worker
+
+        def accept(names):
+            if not current():
+                return
             self.class_list_widget.clear()
-            for idx in sorted(names.keys()):
-                self.class_list_widget.addItem(f"{idx}: {names[idx]}")
-            self.log(f"Загружено {len(names)} классов из модели")
-        except Exception as e:
-            self.class_list_widget.clear()
-            self.class_list_widget.addItem("Ошибка загрузки классов")
-            self.log(f"Не удалось загрузить классы модели: {e}")
+            for index, name in sorted(names.items()):
+                self.class_list_widget.addItem(f"{index}: {name}")
+
+        def failed(message):
+            if current():
+                self.class_list_widget.clear()
+                self.class_list_widget.addItem("Классы не загружены")
+                self.log(message)
+
+        worker.result_ready.connect(accept)
+        worker.failed.connect(failed)
+        worker.start()
 
     def on_model_path_changed(self, model_path):
         self.update_model_classes(model_path)
@@ -442,13 +458,17 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Выбор папки и дерево
     # --------------------------------------------------------
     def select_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Выберите корневую папку для поиска")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Выберите корневую папку для поиска"
+        )
         if not folder:
             return
         self.current_root_dir = folder
         self.file_tree.setRootIndex(self.file_model.index(folder))
         self.current_folder_label.setText(folder)
-        self.current_folder_label.setStyleSheet("QLabel { color: #444; font-size: 11px; }")
+        self.current_folder_label.setStyleSheet(
+            "QLabel { color: #444; font-size: 11px; }"
+        )
         self.current_folder_label.setToolTip(folder)
         self.log(f"Выбрана папка: {folder}")
 
@@ -464,7 +484,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         if file_path and os.path.exists(file_path):
             self.open_file(file_path)
         else:
-            QMessageBox.warning(self, "Файл не найден", f"Файл {file_path} не существует.")
+            QMessageBox.warning(
+                self, "Файл не найден", f"Файл {file_path} не существует."
+            )
 
     def open_file(self, file_path):
         self.log(f"Открытие файла: {file_path}")
@@ -473,9 +495,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def _open_in_explorer(self, file_path):
         try:
             folder = os.path.dirname(os.path.abspath(file_path))
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 os.startfile(folder)
-            elif sys.platform == 'darwin':
+            elif sys.platform == "darwin":
                 os.system(f'open "{folder}"')
             else:
                 os.system(f'xdg-open "{folder}"')
@@ -486,13 +508,26 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Сканирование
     # --------------------------------------------------------
     def start_scan(self):
+        if self._closing or (self.scan_thread and self.scan_thread.isRunning()):
+            return
+        if (
+            self.min_object_size_spin.value() > 0
+            and self.max_object_size_spin.value() > 0
+            and self.min_object_size_spin.value() > self.max_object_size_spin.value()
+        ):
+            QMessageBox.warning(
+                self, "Диапазон площади", "Минимальная площадь больше максимальной."
+            )
+            return
         if not self.current_root_dir:
             QMessageBox.warning(self, "Нет папки", "Сначала выберите папку для поиска.")
             return
 
         model_path = self.yolo_settings._model_path.text().strip()
         if not model_path or not os.path.exists(model_path):
-            QMessageBox.warning(self, "Нет модели", "Укажите существующий файл модели YOLO.")
+            QMessageBox.warning(
+                self, "Нет модели", "Укажите существующий файл модели YOLO."
+            )
             return
 
         target_class = self.target_class_spin.value()
@@ -518,11 +553,15 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         else:
             self.log("Критерий отступа от краёв кадра отключён")
         if min_object_size > 0:
-            self.log(f"Минимальная площадь объекта: {min_object_size:.2f}% от площади кадра")
+            self.log(
+                f"Минимальная площадь объекта: {min_object_size:.2f}% от площади кадра"
+            )
         else:
             self.log("Критерий минимальной площади объекта отключён")
         if max_object_size > 0:
-            self.log(f"Максимальная площадь объекта: {max_object_size:.2f}% от площади кадра")
+            self.log(
+                f"Максимальная площадь объекта: {max_object_size:.2f}% от площади кадра"
+            )
         else:
             self.log("Критерий максимальной площади объекта отключён")
 
@@ -567,7 +606,8 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.scan_thread.progress.connect(self.update_progress)
         self.scan_thread.log_msg.connect(self.log)
         self.scan_thread.file_done.connect(self.on_file_done)
-        self.scan_thread.finished.connect(self.on_scan_finished)
+        self.scan_thread.results_ready.connect(self.on_scan_finished)
+        self._set_scan_controls(True)
         self.scan_thread.start()
 
     def stop_scan(self):
@@ -578,22 +618,26 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
 
     def resolve_device(self, device_str):
         import torch
-        if device_str == 'auto':
-            return '0' if torch.cuda.is_available() else 'cpu'
-        elif device_str == 'mps':
-            return 'cpu' if not torch.backends.mps.is_available() else 'mps'
+
+        if device_str == "auto":
+            return "0" if torch.cuda.is_available() else "cpu"
+        elif device_str == "mps":
+            return "cpu" if not torch.backends.mps.is_available() else "mps"
         return device_str
 
     def update_progress(self, current, total):
+        if not self._accept_scan():
+            return
         percent = int(current / total * 100) if total > 0 else 0
         self.progress_bar.setValue(percent)
         self.progress_bar.setFormat(f"Сканирование: {percent}% ({current}/{total})")
-        QApplication.processEvents()
 
     # --------------------------------------------------------
     # Поступление файла во время сканирования
     # --------------------------------------------------------
     def on_file_done(self, file_path, max_conf, contains_target):
+        if not self._accept_scan():
+            return
         if not contains_target:
             return
 
@@ -616,58 +660,55 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         self.update_select_all_state()
 
     def _process_thumb_queue(self):
-        """Обрабатывает одну миниатюру за вызов, затем планирует следующий вызов."""
-        if not self._thumb_queue:
+        if self._closing or self._thumb_task is not None or not self._thumb_queue:
             return
-        file_path, conf = self._thumb_queue.pop(0)
-        self._generate_single_thumbnail(file_path, conf)
-        if self._thumb_queue:
-            QTimer.singleShot(0, self._process_thumb_queue)
+        path, confidence = self._thumb_queue.pop(0)
+        max_side = max(self._thumb_size_px, 260)
 
-    def _generate_single_thumbnail(self, file_path, confidence):
-        """Генерирует миниатюру для одного файла и добавляет её в сетку."""
-        hash_name = hashlib.md5(file_path.encode('utf-8')).hexdigest() + ".png"
-        thumb_path = os.path.join(TEMP_THUMB_DIR, hash_name)
+        def compute(cancel):
+            image = read_image_with_fallback(path)
+            if image is None:
+                raise OSError(f"Не читается миниатюра: {path}")
+            return resize_to_max_side(normalize_to_uint8(image), max_side)
 
-        if not os.path.exists(thumb_path):
-            try:
-                img = read_image_with_fallback_find(file_path)
-                if img is None:
-                    self.log(f"Не удалось загрузить: {os.path.basename(file_path)}")
-                    return
-                h, w = img.shape[:2]
-                max_side = max(self._thumb_size_px, 260)
-                scale = max_side / max(h, w)
-                if scale < 1.0:
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
-                    img_resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                else:
-                    img_resized = img
-                cv2.imwrite(thumb_path, img_resized)
-            except Exception as e:
-                self.log(f"Ошибка миниатюры для {os.path.basename(file_path)}: {e}")
-                return
+        worker = BackgroundTask(compute)
+        self._thumb_task = worker
 
-        self.add_thumbnail_widget(file_path, thumb_path, confidence)
+        def current():
+            return not self._closing and self._thumb_task is worker
+
+        def accept(image):
+            if current() and any(file == path for file, _ in self.result_file_paths):
+                self.add_thumbnail_widget(path, numpy_to_qpixmap(image), confidence)
+
+        def failed(message):
+            if current():
+                self.log(message)
+
+        def settled():
+            if current():
+                self._thumb_task = None
+                QTimer.singleShot(0, self._process_thumb_queue)
+
+        worker.result_ready.connect(accept)
+        worker.failed.connect(failed)
+        worker.settled.connect(settled)
+        worker.start(self._thumb_executor)
 
     def on_scan_finished(self, result_files):
-        self.scan_btn.setEnabled(True)
-        self.select_folder_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.toggle_view_btn.setEnabled(True)
-        self.sort_btn.setEnabled(True)
-        self.progress_bar.setFormat("Готово")
-        self.log(f"Сканирование завершено. Найдено файлов с меткой "
-                 f"{self.target_class_spin.value()}: {len(result_files)}")
-        QMessageBox.information(
-            self, "Результат",
-            f"Найдено {len(result_files)} файлов.\n"
-            f"Список и миниатюры отображены на правой панели."
+        if not self._accept_scan():
+            return
+        worker = self.scan_thread
+        self._set_scan_controls(False)
+        state = (
+            "Ошибка" if worker.error else "Отменено" if worker.cancelled else "Готово"
         )
-
-        # Миниатюры строились инкрементально по ходу поиска — здесь только
-        # финально выравниваем раскладку сетки.
+        self.progress_bar.setFormat(f"{state}: найдено {len(result_files)}")
+        summary = f"{state}. Найдено: {len(result_files)}; проверено: {worker.checked}; не читается: {worker.unreadable}; ошибок обработки: {worker.processing_errors}."
+        if worker.error:
+            summary += " " + worker.error
+        self.scan_status.setText(summary)
+        self.log(summary)
         if self.is_thumbnail_mode and self.thumbnail_widgets:
             self.relayout_thumbnails()
 
@@ -678,6 +719,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         if not self.result_file_paths:
             return
 
+        selected = set(self.get_selected_files())
         self.result_file_paths.sort(key=lambda x: x[1], reverse=True)
 
         # Перестроить список в новом порядке
@@ -687,12 +729,12 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             item = QListWidgetItem(f"{os.path.basename(file_path)} (conf: {conf:.3f})")
             item.setData(Qt.UserRole, file_path)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked)
+            item.setCheckState(Qt.Checked if file_path in selected else Qt.Unchecked)
             self.results_list.addItem(item)
         self.results_list.blockSignals(False)
 
         # Синхронизируем чекбоксы списка с чекбоксами миниатюр
-        self.sync_selection_to_list()
+        self.sync_selection_to_thumbnails()
 
         # Пересобрать сетку миниатюр в новом порядке, используя уже
         # сгенерированные виджеты (файлы миниатюр уже на диске).
@@ -729,30 +771,12 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # --------------------------------------------------------
     # Миниатюры (полная генерация — оставлена для совместимости)
     # --------------------------------------------------------
-    def generate_thumbnails_sync(self):
-        """Синхронная генерация миниатюр для всех уже найденных файлов.
-
-        Используется, если по какой-то причине инкрементальная генерация
-        не сработала (например, вызов из внешнего кода)."""
-        if not self.result_file_paths:
-            self.log("Нет файлов для генерации миниатюр.")
-            return
-
-        self.log(f"Полная генерация миниатюр для {len(self.result_file_paths)} файлов")
-        existing = set(self.thumbnail_widgets.keys())
-        for file_path, conf in self.result_file_paths:
-            if file_path in existing:
-                continue
-            self._generate_single_thumbnail(file_path, conf)
-            QApplication.processEvents()
-
-        self.relayout_thumbnails()
 
     def add_thumbnail_widget(self, file_path, thumb_path, confidence):
         if file_path in self.thumbnail_widgets:
             return
 
-        pixmap = QPixmap(thumb_path)
+        pixmap = thumb_path if isinstance(thumb_path, QPixmap) else QPixmap(thumb_path)
         if pixmap.isNull():
             self.log(f"Ошибка загрузки миниатюры для {os.path.basename(file_path)}")
             return
@@ -774,7 +798,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         layout.setSpacing(4)
 
         cb = QCheckBox()
-        cb.setChecked(False)
+        cb.setChecked(file_path in self.get_selected_files())
         cb.setFocusPolicy(Qt.NoFocus)
         cb.setToolTip("Отметить файл для копирования/перемещения")
         cb.stateChanged.connect(
@@ -783,9 +807,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         layout.addWidget(cb, alignment=Qt.AlignTop | Qt.AlignRight)
 
         label = ClickableLabel()
-        label.setPixmap(pixmap.scaled(
-            size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation
-        ))
+        label.setPixmap(
+            pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
         label.setAlignment(Qt.AlignCenter)
         label.setToolTip(
             f"{file_path}\nУверенность: {confidence:.3f}\n\n"
@@ -862,6 +886,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             self._toggle_thumbnail_by_path(file_path)
 
     def _clear_thumbnail_grid(self):
+        if self._thumb_task:
+            self._thumb_task.close()
+        self._thumb_task = None
         for i in reversed(range(self.thumbnail_grid.count())):
             widget = self.thumbnail_grid.itemAt(i).widget()
             if widget:
@@ -895,7 +922,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             if widget:
                 widget.setParent(None)
 
-        for idx, (file_path, (cb, label, container)) in enumerate(self.thumbnail_widgets.items()):
+        for idx, (file_path, (cb, label, container)) in enumerate(
+            self.thumbnail_widgets.items()
+        ):
             row = idx // cols
             col = idx % cols
             self.thumbnail_grid.addWidget(container, row, col)
@@ -937,7 +966,9 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     def sync_selection_to_list(self):
         if not self.thumbnail_widgets:
             return
-        thumb_checked = {fp: cb.isChecked() for fp, (cb, _, _) in self.thumbnail_widgets.items()}
+        thumb_checked = {
+            fp: cb.isChecked() for fp, (cb, _, _) in self.thumbnail_widgets.items()
+        }
         self.results_list.blockSignals(True)
         for i in range(self.results_list.count()):
             item = self.results_list.item(i)
@@ -968,7 +999,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             if self.results_list.item(i).checkState() == Qt.Checked:
                 checked_count += 1
 
-        new_checked = (checked_count == total)
+        new_checked = checked_count == total
         self.select_all_checkbox.blockSignals(True)
         self.select_all_checkbox.setChecked(new_checked)
         self.select_all_checkbox.blockSignals(False)
@@ -985,12 +1016,12 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             cb.blockSignals(False)
 
     def get_selected_files(self):
-        selected = []
-        for i in range(self.results_list.count()):
-            item = self.results_list.item(i)
-            if item.checkState() == Qt.Checked:
-                selected.append(item.data(Qt.UserRole))
-        return selected
+        # The list is the selection source even while thumbnails are still loading.
+        return [
+            self.results_list.item(i).data(Qt.UserRole)
+            for i in range(self.results_list.count())
+            if self.results_list.item(i).checkState() == Qt.Checked
+        ]
 
     # --------------------------------------------------------
     # Копирование/перемещение
@@ -1026,6 +1057,13 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             i += 1
 
     def _copy_move_files(self, copy=True):
+        if self.scan_thread and self.scan_thread.isRunning():
+            QMessageBox.information(
+                self,
+                "Сканирование",
+                "Завершите или остановите поиск перед копированием/перемещением.",
+            )
+            return
         target_dir = self.target_folder_edit.text().strip()
         if not target_dir:
             QMessageBox.warning(self, "Нет папки", "Укажите целевую папку.")
@@ -1054,11 +1092,10 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
         for src in selected:
             base_name = os.path.basename(src)
             dst_initial = os.path.join(target_dir, base_name)
-            dst = self._unique_dst(dst_initial)
-
-            if os.path.abspath(dst) == os.path.abspath(src):
+            if os.path.realpath(dst_initial) == os.path.realpath(src):
                 self.log(f"Пропущен (источник уже в целевой папке): {base_name}")
                 continue
+            dst = self._unique_dst(dst_initial)
 
             try:
                 if copy:
@@ -1070,26 +1107,33 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
 
                 if dst != dst_initial:
                     renamed += 1
-                    self.log(f"{'Скопирован' if copy else 'Перемещён'} "
-                             f"(переименован → {os.path.basename(dst)}): {base_name}")
+                    self.log(
+                        f"{'Скопирован' if copy else 'Перемещён'} "
+                        f"(переименован → {os.path.basename(dst)}): {base_name}"
+                    )
                 else:
                     self.log(f"{'Скопирован' if copy else 'Перемещён'}: {base_name}")
             except Exception as e:
                 self.log(f"Ошибка {base_name}: {e}")
                 errors += 1
 
-        msg_lines = [f"{operation} завершено.",
-                     f"Успешно: {success}",
-                     f"Переименовано (во избежание перезаписи): {renamed}",
-                     f"Ошибок: {errors}"]
+        msg_lines = [
+            f"{operation} завершено.",
+            f"Успешно: {success}",
+            f"Переименовано (во избежание перезаписи): {renamed}",
+            f"Ошибок: {errors}",
+        ]
         QMessageBox.information(self, "Результат", "\n".join(msg_lines))
-        self.log(f"{operation} завершено. Успешно: {success}, "
-                 f"переименовано: {renamed}, ошибок: {errors}")
+        self.log(
+            f"{operation} завершено. Успешно: {success}, "
+            f"переименовано: {renamed}, ошибок: {errors}"
+        )
 
         if not copy:
             processed_set = set(successfully_processed)
             self.result_file_paths = [
-                (fp, conf) for fp, conf in self.result_file_paths
+                (fp, conf)
+                for fp, conf in self.result_file_paths
                 if fp not in processed_set
             ]
 
@@ -1114,12 +1158,46 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Завершение
     # --------------------------------------------------------
     def closeEvent(self, event):
-        self.log("Закрытие приложения, остановка потоков...")
-        if self.scan_thread and self.scan_thread.isRunning():
-            self.scan_thread.cancel()
-            self.scan_thread.wait(2000)
-        self._clear_temp_thumbs()
+        self.shutdown_processing()
         event.accept()
+
+    def _accept_scan(self):
+        return not self._closing and (
+            self.sender() is None or self.sender() is self.scan_thread
+        )
+
+    def _set_scan_controls(self, busy):
+        for widget in (
+            self.scan_btn,
+            self.select_folder_btn,
+            self.yolo_settings,
+            self.target_class_spin,
+            self.edge_margin_spin,
+            self.min_object_size_spin,
+            self.max_object_size_spin,
+            self.copy_btn,
+            self.move_btn,
+            self.sort_btn,
+        ):
+            widget.setEnabled(not busy)
+        self.stop_btn.setEnabled(busy)
+        if busy:
+            self.scan_status.setText(
+                "Поиск выполняется. Результаты появляются по мере обработки; их можно просматривать и отмечать."
+            )
+
+    def shutdown_processing(self):
+        if self._closing:
+            return
+        self._closing = True
+        if self.scan_thread:
+            self.scan_thread.close()
+        if self._class_task:
+            self._class_task.close()
+        self._thumb_queue = []
+        if self._thumb_task:
+            self._thumb_task.close()
+        self._thumb_executor.shutdown(wait=False, cancel_futures=True)
 
 
 if __name__ == "__main__":
@@ -1127,4 +1205,5 @@ if __name__ == "__main__":
     window = FindImagesWindow()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

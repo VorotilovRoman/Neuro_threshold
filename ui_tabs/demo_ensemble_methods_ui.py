@@ -56,9 +56,21 @@ def setup_demo_ensemble_methods_ui(parent):
 
     views_config = [
         ("Исходное + истинные координаты", "preview_view", "groundtruth_analysis_text"),
-        ("YOLO инференс + координаты из модели", "model_result_view", "model_analysis_text"),
-        ("Пресет + координаты по пресету", "preset_result_view", "preset_analysis_text"),
-        ("Ансамбль + координаты по ансамблю", "ensemble_result_view", "ensemble_analysis_text")
+        (
+            "YOLO инференс + координаты из модели",
+            "model_result_view",
+            "model_analysis_text",
+        ),
+        (
+            "Пресет + координаты по пресету",
+            "preset_result_view",
+            "preset_analysis_text",
+        ),
+        (
+            "Ансамбль + координаты по ансамблю",
+            "ensemble_result_view",
+            "ensemble_analysis_text",
+        ),
     ]
 
     parent.view_widgets = {}
@@ -84,7 +96,7 @@ def setup_demo_ensemble_methods_ui(parent):
         group_layout.addLayout(btn_layout)
 
         view = DatasetReviewGraphicsView()
-        view.setMinimumSize(400, 400)
+        view.setMinimumSize(240, 160)
         view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         view.setStyleSheet("background-color: #2b2b2b;")
         group_layout.addWidget(view, stretch=1)
@@ -106,7 +118,9 @@ def setup_demo_ensemble_methods_ui(parent):
                 visible = btn.isChecked()
                 text_widget.setVisible(visible)
                 btn.setText("▲" if visible else "▼")
+
             return toggle
+
         toggle_btn.clicked.connect(make_toggle(text_edit, toggle_btn))
 
         grid.addWidget(group, row, col)
@@ -125,7 +139,8 @@ def setup_demo_ensemble_methods_ui(parent):
     # -------------------------------------------------------------
     right_scroll_area = QScrollArea()
     right_scroll_area.setWidgetResizable(True)
-    right_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    right_scroll_area.setMinimumWidth(430)
+    right_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
     right_content = QWidget()
     right_layout = QVBoxLayout(right_content)
@@ -133,13 +148,15 @@ def setup_demo_ensemble_methods_ui(parent):
     right_layout.setSpacing(8)
 
     # ----- Информация о режиме -----
-    info_label = QLabel("<b>⚠️ Внимание:</b> Данная вкладка предназначена для <b>детекции объектов</b> (bounding boxes), "
-                        "а не сегментации. Используются модели YOLO Detection.")
+    info_label = QLabel(
+        "Сравните YOLO и пороговые пресеты, затем объедините рамки объектов. OBB и Segment преобразуются в охватывающие BBox. При весе YOLO = 0 можно использовать только пресеты."
+    )
     info_label.setWordWrap(True)
     right_layout.addWidget(info_label)
 
     # MODEL SETTINGS (YOLO Inference)
     parent.yolo_settings = YOLOInferenceSettings()
+    parent.yolo_settings._box_otsu.hide()
     right_layout.addWidget(parent.yolo_settings)
 
     # Общий выбор устройства
@@ -147,7 +164,9 @@ def setup_demo_ensemble_methods_ui(parent):
     device_layout = QHBoxLayout(device_container)
     device_layout.addWidget(QLabel("Device:"))
     parent.device_combo = QComboBox()
-    parent.device_combo.addItems(["Auto (best available)", "CPU", "CUDA (GPU)", "MPS (Apple Silicon)"])
+    parent.device_combo.addItems(
+        ["Auto (best available)", "CPU", "CUDA (GPU)", "MPS (Apple Silicon)"]
+    )
     device_layout.addWidget(parent.device_combo)
     device_layout.addStretch()
     right_layout.addWidget(device_container)
@@ -164,7 +183,9 @@ def setup_demo_ensemble_methods_ui(parent):
     preset_layout.addLayout(preset_select_layout)
 
     parent.preset_info_label = QLabel("Описание пресета")
-    parent.preset_info_label.setStyleSheet("QLabel { color: #888; font-style: italic; }")
+    parent.preset_info_label.setStyleSheet(
+        "QLabel { color: #888; font-style: italic; }"
+    )
     parent.preset_info_label.setToolTip("Краткое описание выбранной конфигурации.")
     preset_layout.addWidget(parent.preset_info_label)
     right_layout.addWidget(preset_group)
@@ -193,16 +214,22 @@ def setup_demo_ensemble_methods_ui(parent):
     header_layout = QHBoxLayout()
     header_layout.addWidget(QLabel("Пресет"))
     header_layout.addWidget(QLabel("            Вес"))
-    header_layout.addWidget(QLabel("        Уверенность"))
+    header_layout.addWidget(QLabel("Оценка"))
+    header_layout.addWidget(QLabel("ID класса"))
     header_layout.addStretch()
     parent.weights_container.addLayout(header_layout)
 
+    weights_hint = QLabel(
+        "Строка пресета: вес · назначенная оценка · ID класса. Оценка классического метода не является вероятностью модели. ID должны совпадать по смыслу с классами YOLO. Нулевой вес исключает источник. Все пресеты работают на текущем размере снимка; морфология — в px."
+    )
+    weights_hint.setWordWrap(True)
+    ensemble_layout.addWidget(weights_hint)
     parent.preset_weights_container = QVBoxLayout()
     parent.weights_container.addLayout(parent.preset_weights_container)
 
     parent.total_weight_label = QLabel("Сумма весов: 0.50")
     parent.total_weight_label.setAlignment(Qt.AlignCenter)
-    #parent.total_weight_label.setStyleSheet("QLabel { font-weight: 600; color: #27ae60; }")
+    # parent.total_weight_label.setStyleSheet("QLabel { font-weight: 600; color: #27ae60; }")
     ensemble_layout.addWidget(parent.total_weight_label)
 
     parent.normalize_btn = QPushButton("Нормализовать")
@@ -221,7 +248,7 @@ def setup_demo_ensemble_methods_ui(parent):
     thresholds_row.addWidget(parent.ensemble_conf)
 
     thresholds_row.addSpacing(20)
-    thresholds_row.addWidget(QLabel("Порог IoU (NMS):"))
+    thresholds_row.addWidget(QLabel("IoU объединения:"))
     parent.ensemble_iou = QDoubleSpinBox()
     parent.ensemble_iou.setRange(0.01, 1.0)
     parent.ensemble_iou.setValue(0.5)
@@ -231,7 +258,9 @@ def setup_demo_ensemble_methods_ui(parent):
     ensemble_layout.addLayout(thresholds_row)
 
     ensemble_containment_row = QHBoxLayout()
-    parent.ensemble_use_containment = QCheckBox("Учитывать вложенность (центр одного бокса внутри другого)")
+    parent.ensemble_use_containment = QCheckBox(
+        "Объединять полностью вложенные боксы (WBF)"
+    )
     parent.ensemble_use_containment.setChecked(False)
     ensemble_containment_row.addWidget(parent.ensemble_use_containment)
     ensemble_containment_row.addStretch()
@@ -240,7 +269,9 @@ def setup_demo_ensemble_methods_ui(parent):
     ensemble_method_row = QHBoxLayout()
     ensemble_method_row.addWidget(QLabel("Метод объединения:"))
     parent.ensemble_method = QComboBox()
-    parent.ensemble_method.addItems(["WBF (Weighted Boxes Fusion)", "NMS (Non-Maximum Suppression)"])
+    parent.ensemble_method.addItems(
+        ["WBF (Weighted Boxes Fusion)", "NMS (Non-Maximum Suppression)"]
+    )
     parent.ensemble_method.currentTextChanged.connect(parent.on_ensemble_method_changed)
     ensemble_method_row.addWidget(parent.ensemble_method)
     ensemble_method_row.addStretch()
@@ -255,20 +286,26 @@ def setup_demo_ensemble_methods_ui(parent):
     source_layout.addWidget(parent.nav_widget)
     parent.current_file_label = QLabel("")
     source_layout.addWidget(parent.current_file_label)
-    right_layout.addWidget(source_group)
+    main_layout.insertWidget(0, source_group)
 
     # CONTROL BUTTONS
     btn_layout = QHBoxLayout()
     parent.run_yolo_btn = QPushButton("Запустить YOLO")
-    parent.run_yolo_btn.setStyleSheet("QPushButton { background-color: #3498db; color: white; font-weight: 600; }")
+    parent.run_yolo_btn.setStyleSheet(
+        "QPushButton { background-color: #3498db; color: white; font-weight: 600; }"
+    )
     parent.run_ensemble_btn = QPushButton("Запустить ансамбль")
-    parent.reset_zoom_all_btn = QPushButton("Reset zoom in all views")
+    parent.reset_zoom_all_btn = QPushButton("Сбросить масштаб")
     parent.reset_zoom_all_btn.setToolTip("Сбросить масштаб во всех четырёх окнах")
     btn_layout.addWidget(parent.run_yolo_btn)
     btn_layout.addWidget(parent.run_ensemble_btn)
+    parent.stop_btn = QPushButton("Остановить")
+    parent.stop_btn.setEnabled(False)
+    parent.stop_btn.clicked.connect(parent.on_stop)
+    btn_layout.addWidget(parent.stop_btn)
     btn_layout.addWidget(parent.reset_zoom_all_btn)
     btn_layout.addStretch()
-    right_layout.addLayout(btn_layout)
+    main_layout.insertLayout(1, btn_layout)
 
     # -------------------------------------------------------------
     # Log and Progress Bar (перенесены в правую панель)
@@ -302,7 +339,10 @@ def setup_demo_ensemble_methods_ui(parent):
     def toggle_log():
         visible = parent.log_toggle_btn.isChecked()
         parent.log_widget.setVisible(visible)
-        parent.log_toggle_btn.setText("▼ Лог выполнения" if visible else "► Лог выполнения")
+        parent.log_toggle_btn.setText(
+            "▼ Лог выполнения" if visible else "► Лог выполнения"
+        )
+
     parent.log_toggle_btn.clicked.connect(toggle_log)
 
     right_layout.addWidget(log_progress_widget)

@@ -19,9 +19,12 @@ class EnsembleWorkerDisplayTests(unittest.TestCase):
         from tabs.demo_ensemble_methods import YoloInferThread
 
         image = np.full((80, 160, 3), 47, np.uint8)
-        box = SimpleNamespace(cls=[3], conf=[0.91], xyxy=np.array([[40, 20, 120, 60]]))
+        class Boxes:
+            xyxy=np.array([[40,20,120,60]])
+            cls=np.array([3]);conf=np.array([.91])
+            def __len__(self):return 1
         result = SimpleNamespace(
-            boxes=[box],
+            boxes=Boxes(),
             names={3: "car"},
             plot=Mock(side_effect=AssertionError("Raster overlay is obsolete")),
         )

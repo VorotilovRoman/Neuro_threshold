@@ -136,3 +136,98 @@ class TaskController(QObject):
         self.closed = True
         self.invalidate()
         self._executor.shutdown(wait=False, cancel_futures=True)
+
+
+class BackgroundTask(QObject):
+    """Cancellable callable/worker without a destructible running QThread.
+
+    Subclasses may keep domain signals and override run(). Owner callbacks must
+    also reject detached senders: a signal can already be queued when closed.
+    An optional serial executor lets a window avoid concurrent model access.
+    """
+
+    result_ready = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    settled = pyqtSignal()
+
+    def __init__(self, compute=None):
+        super().__init__()
+        self.compute = compute
+        self.cancel_event = Event()
+        self.closed = False
+        self._running = False
+        self._executor = None
+        self._owns_executor = False
+        self._future = None
+
+    @property
+    def cancelled(self):
+        return self.cancel_event.is_set()
+
+    def publish(self, signal, *args):
+        if not self.closed:
+            try:
+                signal.emit(*args)
+            except RuntimeError:
+                pass
+
+    def run(self):
+        try:
+            if self.cancelled:
+                return
+            value = self.compute(self.cancel_event)
+            if not self.cancelled:
+                self.publish(self.result_ready, value)
+        except CancelledError:
+            pass
+        except Exception as exc:
+            self.publish(self.failed, str(exc))
+
+    def start(self, executor=None):
+        if self.closed or self._running:
+            return
+        self._running = True
+        self._owns_executor = executor is None
+        self._executor = executor or ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="image-model"
+        )
+
+        def execute():
+            try:
+                self.run()
+            except Exception as exc:
+                self.publish(self.failed, str(exc))
+            finally:
+                self._running = False
+                self.publish(self.settled)
+                if self._owns_executor:
+                    self._executor.shutdown(wait=False)
+
+        self._future = self._executor.submit(execute)
+
+    def isRunning(self):
+        return self._running
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def wait(self, milliseconds=None):
+        from concurrent.futures import TimeoutError
+
+        if self._future is None:
+            return True
+        try:
+            self._future.result(
+                timeout=None if milliseconds is None else milliseconds / 1000
+            )
+            return True
+        except TimeoutError:
+            return False
+
+    def close(self):
+        self.closed = True
+        self.cancel()
+        if self._future is not None:
+            self._future.cancel()
+        if self._executor is not None and self._owns_executor:
+            self._executor.shutdown(wait=False, cancel_futures=True)

@@ -1,4 +1,3 @@
-
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
 if __name__ == "__main__" and not __package__:
     import sys as _bootstrap_sys
@@ -13,9 +12,11 @@ prepare_windows_torch()
 import os
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 
 import cv2
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -25,39 +26,36 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QProgressDialog,
+    QSpinBox,
+    QWidget,
 )
 
 from ui.image_conversion import numpy_to_qpixmap
+from ui.segmentation.image_input import load_images_universal
+from ui.segmentation.jobs import BackgroundTask
 from ui.segmentation.preset_bindings import ThresholdPresetManager
 from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
-from utils.ensemble_utils import (
-    ensemble_detections,
+from utils_new.annotations.boxes import ensemble_detections
+from utils_new.threshold_processing import (
+    apply_threshold_preset,
     get_detections_from_preset,
-)
-from utils.image_io import load_images_universal
-from utils_new.morphology import apply_morphology
-from utils_new.segmentation.presets import validate_preset
-from utils_ops.segmentation_ops import (
-    apply_threshold_method,
-    segment_contours,
-    segment_min_area_rect,
-    segment_projections,
 )
 
 
 def print_flush(*args, **kwargs):
     print(*args, **kwargs)
     sys.stdout.flush()
+
+
 # ------------------------------------------------------------
 # Получение версии Ultralytics YOLO (для информационных целей)
 # ------------------------------------------------------------
 from importlib.util import find_spec
 
-ULTRALYTICS_AVAILABLE = find_spec('ultralytics') is not None
+ULTRALYTICS_AVAILABLE = find_spec("ultralytics") is not None
 
 
-class YoloInferThread(QThread):
+class YoloInferThread(BackgroundTask):
     log_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(int)
     result_signal = pyqtSignal(object, list)
@@ -73,76 +71,82 @@ class YoloInferThread(QThread):
         self.imgsz = imgsz
         self.device = device
         self.save = save
-        self.cancel_requested = False
-        sys.excepthook = lambda exctype, value, tb: self.log(
-            f"Unhandled exception: {value}\n{''.join(traceback.format_tb(tb))}")
-        sys.excepthook = lambda exctype, value, tb: print_flush(
-            f"Unhandled exception: {value}\n{''.join(traceback.format_tb(tb))}")
 
     def log(self, message):
-        self.log_signal.emit(message)
+        self.publish(self.log_signal, message)
 
     def stop_inference(self):
-        self.cancel_requested = True
+        self.cancel()
         self.log("Получен сигнал остановки...")
 
     def run(self):
-        from runtime_policy import configure_ultralytics
-        configure_ultralytics()
-        from ultralytics import YOLO
-        if not ULTRALYTICS_AVAILABLE:
-            self.finished_signal.emit(False, "Библиотека ultralytics не установлена.")
-            return
-
         try:
-            self.log("=== Загрузка модели ===")
-            model = YOLO(self.model_path)
-            self.log(f"Модель загружена: {self.model_path}")
-            self.progress_signal.emit(30)
-
-            if self.cancel_requested:
-                self.finished_signal.emit(False, "Инференс отменён")
+            if self.cancelled:
                 return
+            if not ULTRALYTICS_AVAILABLE:
+                raise RuntimeError("Библиотека ultralytics не установлена.")
+            from runtime_policy import configure_ultralytics
 
-            self.log("=== Выполнение инференса ===")
-            results = model(self.img, conf=self.conf, iou=self.iou, imgsz=self.imgsz,
-                            device=self.device, save=self.save)
+            configure_ultralytics()
+            from ultralytics import YOLO
 
+            model = YOLO(self.model_path)
+            self.publish(self.progress_signal, 30)
+            if self.cancelled:
+                return
+            results = model(
+                self.img,
+                conf=self.conf,
+                iou=self.iou,
+                imgsz=self.imgsz,
+                device=self.device,
+                save=self.save,
+            )
+            if self.cancelled:
+                return
+            if not results:
+                raise ValueError("Модель не вернула результата.")
             result = results[0]
-            self.class_names_signal.emit(dict(getattr(result, 'names', {}) or {}))
+            from utils_new.annotation_processing import yolo_result_to_detections
 
-            yolo_lines = []
-            if result.boxes is not None:
-                h, w = self.img.shape[:2]
-                for box in result.boxes:
-                    cls = int(box.cls[0])
-                    conf = float(box.conf[0])
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    cx = (x1 + x2) / 2.0 / w
-                    cy = (y1 + y2) / 2.0 / h
-                    bw = (x2 - x1) / w
-                    bh = (y2 - y1) / h
-                    yolo_lines.append(f"{cls} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f} {conf:.6f}")
-
-            # Qt owns the overlay; keep the image pixels free of annotations.
-            self.result_signal.emit(self.img.copy(), yolo_lines)
-            self.progress_signal.emit(100)
-            self.log("=== Инференс завершён ===")
-            self.finished_signal.emit(True, "Инференс успешно завершён!")
-
-        except Exception as e:
-            self.log(f"Ошибка: {e}")
-            self.finished_signal.emit(False, str(e))
+            detections = yolo_result_to_detections(
+                result, getattr(result, "names", {}) or {}
+            )
+            h, w = self.img.shape[:2]
+            lines = []
+            for detection in detections:
+                x1, y1, x2, y2 = detection["xyxy"]
+                lines.append(
+                    f"{detection['cls_id']} {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} {(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f} {detection['conf']:.6f}"
+                )
+            self.publish(
+                self.class_names_signal, dict(getattr(result, "names", {}) or {})
+            )
+            self.publish(self.result_signal, self.img.copy(), lines)
+            self.publish(self.progress_signal, 100)
+            self.publish(self.finished_signal, True, "Инференс завершён.")
+        except Exception as exc:
+            self.publish(self.finished_signal, False, str(exc))
 
 
-class EnsembleThread(QThread):
+class EnsembleThread(BackgroundTask):
     log_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(int)
     result_signal = pyqtSignal(list)
     finished_signal = pyqtSignal(bool, str)
 
-    def __init__(self, image, gray, yolo_detections, yolo_weight, presets_with_weights,
-                 iou_threshold, conf_threshold, use_containment, method):
+    def __init__(
+        self,
+        image,
+        gray,
+        yolo_detections,
+        yolo_weight,
+        presets_with_weights,
+        iou_threshold,
+        conf_threshold,
+        use_containment,
+        method,
+    ):
         super().__init__()
         self.image = image
         self.gray = gray
@@ -153,13 +157,12 @@ class EnsembleThread(QThread):
         self.conf_threshold = conf_threshold
         self.use_containment = use_containment
         self.method = method
-        self.cancel_requested = False
 
     def log(self, message):
-        self.log_signal.emit(message)
+        self.publish(self.log_signal, message)
 
     def stop(self):
-        self.cancel_requested = True
+        self.cancel()
         self.log("Остановка ансамбля...")
 
     def run(self):
@@ -169,35 +172,52 @@ class EnsembleThread(QThread):
             detections_list = [self.yolo_detections]
             weights = [self.yolo_weight]
 
-            for idx, (preset, weight, preset_conf) in enumerate(self.presets_with_weights):
-                if self.cancel_requested:
-                    self.finished_signal.emit(False, "Ансамбль прерван пользователем")
+            for idx, item in enumerate(self.presets_with_weights):
+                preset, weight, preset_conf = item[:3]
+                class_id = item[3] if len(item) > 3 else 0
+                if self.cancelled:
+                    self.publish(
+                        self.finished_signal, False, "Ансамбль прерван пользователем"
+                    )
                     return
-                self.log(f"Обработка пресета {idx+1}/{total_presets}...")
-                preset_dets = get_detections_from_preset(self.image, self.gray, preset, confidence=preset_conf)
+                self.log(f"Обработка пресета {idx + 1}/{total_presets}...")
+                preset_dets = get_detections_from_preset(
+                    self.image,
+                    self.gray,
+                    preset,
+                    confidence=preset_conf,
+                    class_id=class_id,
+                )
                 detections_list.append(preset_dets)
                 weights.append(weight)
                 progress = int(70 * (idx + 1) / total_presets)
-                self.progress_signal.emit(progress)
-                self.log(f"  найдено {len(preset_dets)} объектов, уверенность {preset_conf:.2f}")
+                self.publish(self.progress_signal, progress)
+                self.log(
+                    f"  найдено {len(preset_dets)} объектов, уверенность {preset_conf:.2f}"
+                )
 
-            self.progress_signal.emit(70)
+            self.publish(self.progress_signal, 70)
             self.log(f"Объединение детекций (метод: {self.method})...")
+            if self.cancelled:
+                return
             final_detections = ensemble_detections(
-                detections_list, weights,
+                detections_list,
+                weights,
                 iou_threshold=self.iou_threshold,
                 conf_threshold=self.conf_threshold,
                 use_containment=self.use_containment,
                 method=self.method,
-                verbose=True
+                verbose=True,
             )
-            self.progress_signal.emit(100)
-            self.result_signal.emit(final_detections)
+            if self.cancelled:
+                return
+            self.publish(self.progress_signal, 100)
+            self.publish(self.result_signal, final_detections)
             self.log(f"Ансамбль завершён, найдено объектов: {len(final_detections)}")
-            self.finished_signal.emit(True, "Ансамбль выполнен успешно")
+            self.publish(self.finished_signal, True, "Ансамбль выполнен успешно")
         except Exception as e:
             self.log(f"Ошибка в ансамбле: {e}")
-            self.finished_signal.emit(False, str(e))
+            self.publish(self.finished_signal, False, str(e))
 
 
 class YoloDemoWindow(QMainWindow):
@@ -209,6 +229,10 @@ class YoloDemoWindow(QMainWindow):
 
         setup_demo_ensemble_methods_ui(self)
 
+        self._closing = False
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="ensemble"
+        )
         self.current_folder = None
         self.image_paths = []
         self.images = []
@@ -224,6 +248,7 @@ class YoloDemoWindow(QMainWindow):
         self.active_preset_name = "default"
         self.update_preset_combo()
 
+        self.preset_class_spins = {}
         self.preset_weight_spins = []
         self.preset_weight_layouts = []
 
@@ -280,10 +305,11 @@ class YoloDemoWindow(QMainWindow):
 
     def resolve_device(self):
         import torch
-        if self.device == 'auto':
-            return '0' if torch.cuda.is_available() else 'cpu'
-        elif self.device == 'mps':
-            return 'cpu' if not torch.backends.mps.is_available() else 'mps'
+
+        if self.device == "auto":
+            return "0" if torch.cuda.is_available() else "cpu"
+        elif self.device == "mps":
+            return "cpu" if not torch.backends.mps.is_available() else "mps"
         return self.device
 
     # ---------- Модель YOLO ----------
@@ -296,11 +322,8 @@ class YoloDemoWindow(QMainWindow):
 
     # ---------- Автоматический запуск YOLO ----------
     def _stop_current_inference(self):
-        """Останавливает текущий инференс, если он выполняется."""
-        if self.infer_thread and self.infer_thread.isRunning():
-            self.log("Останавливаем предыдущий инференс...")
-            self.infer_thread.stop_inference()
-            self.infer_thread.wait(1000)  # ждём завершения
+        if self.infer_thread:
+            self.infer_thread.close()
         self.infer_thread = None
         self.yolo_inference_running = False
 
@@ -327,6 +350,8 @@ class YoloDemoWindow(QMainWindow):
         print_flush("=== _auto_run_yolo_if_model_loaded END ===")
 
     def _run_yolo_internal(self, manual=True):
+        if self._closing:
+            return
         print_flush(f"=== _run_yolo_internal START (manual={manual}) ===")
         model_path = self.yolo_settings._model_path.text().strip()
         if not model_path:
@@ -339,7 +364,9 @@ class YoloDemoWindow(QMainWindow):
             return
         if not ULTRALYTICS_AVAILABLE:
             if manual:
-                QMessageBox.critical(self, "Ошибка", "Библиотека ultralytics не установлена.")
+                QMessageBox.critical(
+                    self, "Ошибка", "Библиотека ultralytics не установлена."
+                )
             return
 
         img = self.prepare_image_for_inference(self.current_image)
@@ -350,30 +377,37 @@ class YoloDemoWindow(QMainWindow):
         device = self.resolve_device()
         print_flush(f"params: conf={conf}, iou={iou}, imgsz={imgsz}, device={device}")
 
-        if manual:
-            self.run_yolo_btn.setEnabled(False)
-            self.run_ensemble_btn.setEnabled(False)
+        self._stop_current_inference()
+        self.run_yolo_btn.setEnabled(False)
+        self.run_ensemble_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
         self.infer_progress.setValue(0)
         self.infer_progress.setFormat("YOLO: 0%")
 
         self.yolo_inference_running = True
-        self.infer_thread = YoloInferThread(model_path, img, conf, iou, imgsz, device, save)
+        self.infer_thread = YoloInferThread(
+            model_path, img, conf, iou, imgsz, device, save
+        )
         self.infer_thread.log_signal.connect(self.log)
         self.infer_thread.progress_signal.connect(self.update_progress)
         self.infer_thread.class_names_signal.connect(self.set_yolo_class_names)
         self.infer_thread.result_signal.connect(self.display_yolo_result)
         self.infer_thread.result_signal.connect(self.on_yolo_result_for_ensemble)
         self.infer_thread.finished_signal.connect(self.on_inference_finished)
-        self.infer_thread.start()
+        self.infer_thread.start(self._executor)
         print_flush("=== _run_yolo_internal END ===")
-
 
     def on_run_yolo(self):
         """Ручной запуск YOLO инференса (через кнопку)."""
         self._run_yolo_internal(manual=True)
 
     def on_inference_finished(self, success, message):
+        if not self._accept_worker("infer_thread"):
+            return
         self.yolo_inference_running = False
+        self.stop_btn.setEnabled(False)
+        if not success:
+            self.ensemble_mode = False
         if success:
             self.log("✅ Инференс завершён!")
         else:
@@ -395,14 +429,23 @@ class YoloDemoWindow(QMainWindow):
     # ---------- Ансамбль ----------
     def on_run_ensemble(self):
         if self.current_image is None:
-            QMessageBox.warning(self, "Нет изображения", "Сначала загрузите изображение.")
+            QMessageBox.warning(
+                self, "Нет изображения", "Сначала загрузите изображение."
+            )
+            return
+        if self.yolo_weight_spin.value() == 0:
+            self._stop_current_inference()
+            self.ensemble_yolo_detections = []
+            self._run_ensemble()
             return
         model_path = self.yolo_settings._model_path.text().strip()
         if not model_path:
             QMessageBox.warning(self, "Ошибка", "Не выбрана модель YOLO.")
             return
         if not ULTRALYTICS_AVAILABLE:
-            QMessageBox.critical(self, "Ошибка", "Библиотека ultralytics не установлена.")
+            QMessageBox.critical(
+                self, "Ошибка", "Библиотека ultralytics не установлена."
+            )
             return
 
         # Если инференс YOLO уже выполняется, останавливаем его и запускаем заново с новыми параметрами
@@ -415,13 +458,27 @@ class YoloDemoWindow(QMainWindow):
         self._run_yolo_internal(manual=True)
 
     def _run_ensemble(self):
+        if self._closing:
+            return
+        self._stop_ensemble()
+        self.ensemble_mode = True
+        self.run_yolo_btn.setEnabled(False)
+        self.run_ensemble_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
         presets_with_weights = []
         for name, weight_spin, conf_spin in self.preset_weight_spins:
             preset = self.preset_manager.presets.get(name, {})
             weight = weight_spin.value()
             preset_conf = conf_spin.value()
             if preset and weight > 0:
-                presets_with_weights.append((preset, weight, preset_conf))
+                presets_with_weights.append(
+                    (
+                        deepcopy(preset),
+                        weight,
+                        preset_conf,
+                        self.preset_class_spins[name].value(),
+                    )
+                )
 
         yolo_weight = self.yolo_weight_spin.value()
         iou_threshold = self.ensemble_iou.value()
@@ -430,9 +487,18 @@ class YoloDemoWindow(QMainWindow):
         method_text = self.ensemble_method.currentText()
         method = "wbf" if "WBF" in method_text else "nms"
 
-        self.log(f"YOLO: {len(self.ensemble_yolo_detections)} детекций, вес {yolo_weight:.3f}")
+        if not (yolo_weight > 0 or presets_with_weights):
+            self.on_ensemble_finished(
+                False, "Укажите положительный вес хотя бы одного источника."
+            )
+            return
+        self.log(
+            f"YOLO: {len(self.ensemble_yolo_detections)} детекций, вес {yolo_weight:.3f}"
+        )
         self.log(f"Пресетов участвует: {len(presets_with_weights)}")
-        self.log(f"IoU={iou_threshold}, conf_threshold={conf_threshold}, use_containment={use_containment}, метод={method}")
+        self.log(
+            f"IoU={iou_threshold}, conf_threshold={conf_threshold}, use_containment={use_containment}, метод={method}"
+        )
 
         self.infer_progress.setValue(0)
         self.infer_progress.setFormat("Ансамбль: 0%")
@@ -446,15 +512,17 @@ class YoloDemoWindow(QMainWindow):
             iou_threshold=iou_threshold,
             conf_threshold=conf_threshold,
             use_containment=use_containment,
-            method=method
+            method=method,
         )
         self.ensemble_thread.log_signal.connect(self.log)
         self.ensemble_thread.progress_signal.connect(self.update_progress)
         self.ensemble_thread.result_signal.connect(self.on_ensemble_result)
         self.ensemble_thread.finished_signal.connect(self.on_ensemble_finished)
-        self.ensemble_thread.start()
+        self.ensemble_thread.start(self._executor)
 
     def on_yolo_result_for_ensemble(self, img_with_boxes, yolo_lines):
+        if not self._accept_worker("infer_thread"):
+            return
         self.ensemble_yolo_detections = []
         for line in yolo_lines:
             parts = line.split()
@@ -464,9 +532,13 @@ class YoloDemoWindow(QMainWindow):
             else:
                 cls, cx, cy, w, h = map(float, parts)
                 self.ensemble_yolo_detections.append((int(cls), cx, cy, w, h, 1.0))
-        self.log(f"YOLO детекции получены (для ансамбля): {len(self.ensemble_yolo_detections)} объектов")
+        self.log(
+            f"YOLO детекции получены (для ансамбля): {len(self.ensemble_yolo_detections)} объектов"
+        )
 
     def on_ensemble_result(self, final_detections):
+        if not self._accept_worker("ensemble_thread"):
+            return
         self.log(f"Результат ансамбля: {len(final_detections)} объектов")
         if final_detections:
             self.log(f"Пример детекции: {final_detections[0]}")
@@ -494,8 +566,10 @@ class YoloDemoWindow(QMainWindow):
                 continue
 
             # Приводим к унифицированному формату ('detect', cls, cx, cy, w, h)
-            annotations.append(('detect', int(cls), cx, cy, w, h))
-            lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} (conf={conf:.3f})")
+            annotations.append(("detect", int(cls), cx, cy, w, h))
+            lines.append(
+                f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} (conf={conf:.3f})"
+            )
 
         self._show_image_in_view(self.ensemble_result_view, img, annotations)
 
@@ -504,8 +578,9 @@ class YoloDemoWindow(QMainWindow):
         else:
             self.ensemble_analysis_text.setText("Нет объектов")
 
-
     def on_ensemble_finished(self, success, message):
+        if not self._accept_worker("ensemble_thread"):
+            return
         self.run_yolo_btn.setEnabled(True)
         self.run_ensemble_btn.setEnabled(True)
         if success:
@@ -515,6 +590,7 @@ class YoloDemoWindow(QMainWindow):
             self.log(f"❌ Ансамбль прерван: {message}")
             QMessageBox.warning(self, "Ошибка ансамбля", message)
         self.ensemble_thread = None
+        self.stop_btn.setEnabled(False)
         self.ensemble_mode = False
 
     # ---------- Навигация с автоматическим запуском YOLO ----------
@@ -539,6 +615,8 @@ class YoloDemoWindow(QMainWindow):
         self._update_current_image_and_run()
 
     def _update_current_image_and_run(self):
+        self._stop_current_inference()
+        self._stop_ensemble()
         print_flush("=== _update_current_image_and_run START ===")
         if not self.images:
             print_flush("No images")
@@ -550,7 +628,9 @@ class YoloDemoWindow(QMainWindow):
         self.current_gray = self.gray_images[self.current_index]
         self.current_image_path = self.image_paths[self.current_index]
         self._clear_result_views()
-        print_flush(f"Current image: {self.current_image_path}, shape {self.current_image.shape}")
+        print_flush(
+            f"Current image: {self.current_image_path}, shape {self.current_image.shape}"
+        )
         try:
             self.display_current_groundtruth()
         except Exception as e:
@@ -564,7 +644,7 @@ class YoloDemoWindow(QMainWindow):
             self.update_navigation_state()
         except Exception as e:
             print_flush(f"Error in update_navigation_state: {e}")
-        if hasattr(self.nav_widget, 'set_current_index'):
+        if hasattr(self.nav_widget, "set_current_index"):
             self.nav_widget.set_current_index(self.current_index, len(self.images))
         print_flush("Calling _auto_run_yolo_if_model_loaded")
         self._auto_run_yolo_if_model_loaded()
@@ -582,14 +662,22 @@ class YoloDemoWindow(QMainWindow):
         height, width = image.shape[:2]
         view.set_annotations(list(annotations), width, height)
         view.set_pixmap(numpy_to_qpixmap(image))
-        stage = next(name for name, candidate in self.view_widgets.items() if candidate is view)
-        basename = os.path.splitext(os.path.basename(self.current_image_path or 'image'))[0]
-        view.set_suggested_save_name(f'{stage}_{basename}')
+        stage = next(
+            name for name, candidate in self.view_widgets.items() if candidate is view
+        )
+        basename = os.path.splitext(
+            os.path.basename(self.current_image_path or "image")
+        )[0]
+        view.set_suggested_save_name(f"{stage}_{basename}")
 
     def _clear_result_views(self):
-        for name in ('model_result_view', 'preset_result_view', 'ensemble_result_view'):
+        for name in ("model_result_view", "preset_result_view", "ensemble_result_view"):
             self._show_image_in_view(getattr(self, name), None)
-        for name in ('model_analysis_text', 'preset_analysis_text', 'ensemble_analysis_text'):
+        for name in (
+            "model_analysis_text",
+            "preset_analysis_text",
+            "ensemble_analysis_text",
+        ):
             getattr(self, name).clear()
         self.current_objects = []
         self.ensemble_yolo_detections = []
@@ -600,7 +688,11 @@ class YoloDemoWindow(QMainWindow):
             print_flush("No images or index out of range")
             return
         img = self.images[self.current_index].copy()
-        ann = self.annotations_list[self.current_index] if self.current_index < len(self.annotations_list) else []
+        ann = (
+            self.annotations_list[self.current_index]
+            if self.current_index < len(self.annotations_list)
+            else []
+        )
         print_flush(f"Annotations count: {len(ann)}")
         self._show_image_in_view(self.preview_view, img, ann)
 
@@ -608,16 +700,18 @@ class YoloDemoWindow(QMainWindow):
         lines = []
         for a in ann:
             typ = a[0]
-            if typ == 'detect':
+            if typ == "detect":
                 _, cls, cx, cy, w, h = a
                 lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
-            elif typ == 'obb':
+            elif typ == "obb":
                 _, cls, points = a  # 8 нормализованных координат
-                pts_str = ' '.join(f"{p:.6f}" for p in points)
+                pts_str = " ".join(f"{p:.6f}" for p in points)
                 lines.append(f"OBB {cls} {pts_str}")
-            elif typ == 'segment':
+            elif typ == "segment":
                 _, cls, points = a  # список нормализованных координат
-                pts_str = ' '.join(f"{p:.6f}" for p in points[:6]) + (' ...' if len(points) > 6 else '')
+                pts_str = " ".join(f"{p:.6f}" for p in points[:6]) + (
+                    " ..." if len(points) > 6 else ""
+                )
                 lines.append(f"SEG {cls} {pts_str}")
         text = "\n".join(lines) if lines else "Нет истинных аннотаций"
         self.groundtruth_analysis_text.setText(text)
@@ -625,15 +719,17 @@ class YoloDemoWindow(QMainWindow):
         total = len(self.images)
         if total > 0:
             self.current_file_label.setText(
-                f"{self.current_index + 1} / {total}: {os.path.basename(self.image_paths[self.current_index])}")
+                f"{self.current_index + 1} / {total}: {os.path.basename(self.image_paths[self.current_index])}"
+            )
         print_flush("=== display_current_groundtruth END ===")
-
 
     # ---------- Загрузка изображений ----------
     def load_images(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Выберите изображения",
-            "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"
+            self,
+            "Выберите изображения",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)",
         )
         if not paths:
             return
@@ -641,109 +737,47 @@ class YoloDemoWindow(QMainWindow):
         self.load_images_from_paths(paths)
 
     def load_images_from_paths(self, paths):
-        print_flush("=== load_images_from_paths START ===")
-        print_flush(f"paths count: {len(paths)}")
-        total = len(paths)
-        progress = QProgressDialog("Loading images...", "Cancel", 0, total, self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
-
-        self.image_paths = []
-        self.images = []
-        self.gray_images = []
-        self.annotations_list = []
-
-        for idx, path in enumerate(paths):
-            if progress.wasCanceled():
-                break
-            progress.setValue(idx)
-            progress.setLabelText(f"Loading {os.path.basename(path)}...")
-            try:
-                print_flush(f"Loading {path}")
-                img_paths, imgs, grays, anns = load_images_universal(
-                    source=[path],
-                    require_annotations=False,
-                    resize_enabled=self.nav_widget.is_resize_enabled(),
-                    parent=self
-                )
-                if img_paths:
-                    self.image_paths.append(img_paths[0])
-                    self.images.append(imgs[0])
-                    self.gray_images.append(grays[0])
-                    ann = anns[0] if anns and anns[0] is not None else []
-                    self.annotations_list.append(ann)
-                    print_flush(f"  -> Loaded OK, image shape {imgs[0].shape}")
-                else:
-                    print_flush(f"  -> Failed to load {path}")
-                    self.log(f"Не удалось загрузить: {path}")
-            except Exception as e:
-                print_flush(f"  -> Exception: {e}")
-                traceback.print_exc()
-                self.log(f"Ошибка загрузки {path}: {e}")
-                continue
-            QApplication.processEvents()
-        progress.close()
-        print_flush(f"Loaded {len(self.images)} images")
+        self.on_stop()
+        try:
+            values = load_images_universal(
+                paths, resize_enabled=self.nav_widget.is_resize_enabled(), parent=self
+            )
+        except Exception as exc:
+            self.log(f"Ошибка загрузки: {exc}")
+            return
+        self.image_paths, self.images, self.gray_images, self.annotations_list = values
+        self.current_index = 0
         if self.images:
-            self.current_index = 0
-            print_flush("Calling _update_current_image_and_run")
             self._update_current_image_and_run()
         else:
-            print_flush("No images loaded, resetting nav")
-            if hasattr(self.nav_widget, 'set_current_index'):
-                self.nav_widget.set_current_index(0, 0)
-        print_flush("=== load_images_from_paths END ===")
+            self.clear_images()
 
     def load_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Выберите папку с изображениями")
-        if not folder:
-            return
-        self.current_folder = folder
-
-        def progress_callback(processed, total):
-            QApplication.processEvents()
-            return True
-
-        try:
-            paths, imgs, grays, anns = load_images_universal(
-                source=folder,
-                require_annotations=False,
-                resize_enabled=self.nav_widget.is_resize_enabled(),
-                progress_callback=progress_callback,
-                parent=self  # <--- добавлено
-            )
-        except Exception as e:
-            self.log(f"Ошибка при загрузке папки: {e}")
-            return
-
-        if not paths:
-            self.log("В папке нет подходящих изображений.")
-            self.nav_widget.set_current_index(0, 0)
-            return
-        self.image_paths = paths
-        self.images = imgs
-        self.gray_images = grays
-        # Преобразуем аннотации: стандартизируем None -> []
-        self.annotations_list = [ann if ann is not None else [] for ann in anns]
-        self.current_index = 0
-        self._update_current_image_and_run()
-
+        folder = QFileDialog.getExistingDirectory(
+            self, "Выберите папку с изображениями"
+        )
+        if folder:
+            self.current_folder = folder
+            self.load_images_from_paths(folder)
 
     # ---------- Остальные методы (без изменений) ----------
     def update_navigation_state(self):
         has_images = len(self.images) > 0
         self.nav_widget.set_prev_enabled(has_images and self.current_index > 0)
-        self.nav_widget.set_next_enabled(has_images and self.current_index < len(self.images) - 1)
+        self.nav_widget.set_next_enabled(
+            has_images and self.current_index < len(self.images) - 1
+        )
 
     def on_resize_mode_changed(self, state):
         if not self.image_paths and not self.current_folder:
             return
         reply = QMessageBox.question(
-            self, "Resize Mode Changed",
+            self,
+            "Resize Mode Changed",
             "Resize mode changed. To apply, you need to reload images.\n"
             "Do you want to reload images now?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
         )
         if reply == QMessageBox.Yes:
             if self.current_folder:
@@ -756,6 +790,7 @@ class YoloDemoWindow(QMainWindow):
             self.clear_images()
 
     def clear_images(self):
+        self._stop_ensemble()
         self.image_paths = []
         self.images = []
         self.gray_images = []
@@ -779,7 +814,7 @@ class YoloDemoWindow(QMainWindow):
     def reset_all_zooms(self):
         """Сбрасывает масштаб во всех четырёх графических представлениях."""
         for view in self.view_widgets.values():
-            if hasattr(view, 'reset_view'):
+            if hasattr(view, "reset_view"):
                 view.reset_view()
         self.log("Масштаб всех изображений сброшен")
 
@@ -787,43 +822,63 @@ class YoloDemoWindow(QMainWindow):
     def update_ensemble_weights_ui(self):
         # Detach layout items before deleting their widgets/layouts. Otherwise
         # Qt may visit a destroyed row during the next layout/paint pass.
+        previous = {
+            name: (weight.value(), conf.value(), self.preset_class_spins[name].value())
+            for name, weight, conf in self.preset_weight_spins
+        }
         self._clear_layout(self.preset_weights_container)
         self.preset_weight_layouts.clear()
         self.preset_weight_spins.clear()
+        self.preset_class_spins = {}
 
         preset_names = self.preset_manager.get_preset_names()
         for name in preset_names:
             preset = self.preset_manager.presets.get(name, {})
-            preset_conf = preset.get('preset_conf', 0.7)
+            preset_conf = preset.get("preset_conf", 0.7)
 
-            row_layout = QHBoxLayout()
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
 
             label = QLabel(name)
-            label.setMinimumWidth(120)
+            label.setMinimumWidth(70)
+            label.setWordWrap(True)
             row_layout.addWidget(label)
 
             weight_spin = QDoubleSpinBox()
             weight_spin.setRange(0.0, 1.0)
             weight_spin.setSingleStep(0.05)
-            weight_spin.setValue(0.1)
+            weight_spin.setValue(previous.get(name, (0.1, 0.7, 0))[0])
             weight_spin.valueChanged.connect(self.update_total_weight)
             row_layout.addWidget(weight_spin)
 
             conf_spin = QDoubleSpinBox()
             conf_spin.setRange(0.0, 1.0)
             conf_spin.setSingleStep(0.05)
-            conf_spin.setValue(preset_conf)
+            conf_spin.setValue(previous.get(name, (0.1, preset_conf, 0))[1])
             conf_spin.valueChanged.connect(self.update_total_weight)
             row_layout.addWidget(conf_spin)
 
+            class_spin = QSpinBox()
+            class_spin.setRange(0, 9999)
+            class_spin.setPrefix("ID ")
+            class_spin.setValue(previous.get(name, (0.1, 0.7, 0))[2])
+            class_spin.setToolTip(
+                "ID класса пресета должен соответствовать классу модели YOLO."
+            )
+            class_spin.valueChanged.connect(self.schedule_preset_update)
+            self.preset_class_spins[name] = class_spin
+            row_layout.addWidget(class_spin)
             row_layout.addStretch()
 
-            self.preset_weights_container.addLayout(row_layout)
-            self.preset_weight_layouts.append(row_layout)
+            self.preset_weights_container.addWidget(row_widget)
+            self.preset_weight_layouts.append(row_widget)
             self.preset_weight_spins.append((name, weight_spin, conf_spin))
 
         if not preset_names:
-            empty_label = QLabel("Нет доступных пресетов. Сохраните пресеты в главном окне.")
+            empty_label = QLabel(
+                "Нет доступных пресетов. Сохраните пресеты в главном окне."
+            )
             empty_label.setStyleSheet("QLabel { color: #888; font-style: italic; }")
             self.preset_weights_container.addWidget(empty_label)
             self.preset_weight_layouts.append(empty_label)
@@ -850,7 +905,11 @@ class YoloDemoWindow(QMainWindow):
         for name in self.preset_manager.get_preset_names():
             self.preset_combo.addItem(name)
         if self.active_preset_name not in self.preset_manager.presets:
-            self.active_preset_name = self.preset_manager.get_preset_names()[0] if self.preset_manager.presets else "default"
+            self.active_preset_name = (
+                self.preset_manager.get_preset_names()[0]
+                if self.preset_manager.presets
+                else "default"
+            )
         self.preset_combo.setCurrentText(self.active_preset_name)
         self.preset_combo.blockSignals(False)
 
@@ -869,15 +928,15 @@ class YoloDemoWindow(QMainWindow):
             self.schedule_preset_update()
 
     def _update_preset_info_label(self, preset_name):
-        if hasattr(self, 'preset_info_label'):
+        if hasattr(self, "preset_info_label"):
             preset = self.preset_manager.presets.get(preset_name, {})
-            if 'params' in preset:
+            if "params" in preset:
                 flat = preset.copy()
-                flat.update(preset['params'])
-                del flat['params']
+                flat.update(preset["params"])
+                del flat["params"]
                 preset = flat
-            method = preset.get('method', 'Simple Threshold')
-            draw_mode = preset.get('annotation_mode', 'none')
+            method = preset.get("method", "Simple Threshold")
+            draw_mode = preset.get("annotation_mode", "none")
             info_text = f"Метод: {method} | Отрисовка: {draw_mode}"
             self.preset_info_label.setText(info_text)
 
@@ -891,48 +950,23 @@ class YoloDemoWindow(QMainWindow):
         if self.current_image is None:
             return
         try:
-            original = self.current_image
-            gray = self.current_gray
-            preset = self.get_current_preset_settings()
-            validate_preset(preset, 'threshold')
-            method = preset['method']
-            params = preset['params']
-
-            # 1. Бинаризация
-            binary, thresh = apply_threshold_method(gray, method, params)
-
-            # 2. Принудительная инверсия (как в ThresholdWindow)
-            binary = cv2.bitwise_not(binary)
-
-            # 3. Морфология
-            morphology = preset['morphology']
-            processed = apply_morphology(binary, morphology['operations'], shape=morphology['shape'])
-
-            # 4. Опциональная инверсия результата (аналог invert_checkbox)
-            if preset.get('invert', False):
-                processed = cv2.bitwise_not(processed)
-
-            # 5. Получение объектов без рисования (draw=False)
-            draw_mode = preset.get('annotation_mode', 'none')
-            use_hull = preset.get('use_hull', False)
-
-            if draw_mode == 'none':
-                objects = []
-            elif draw_mode == 'segment':
-                _, objects = segment_contours(original.copy(), processed, use_hull, draw=False)
-            elif draw_mode == 'detect':
-                _, objects = segment_projections(original.copy(), processed, draw=False)
-            elif draw_mode == 'obb':
-                _, objects = segment_min_area_rect(original.copy(), processed, use_hull, draw=False)
-            else:
-                objects = []
-
-            self.current_objects = objects
-            self.display_preset_result(original, processed)
-            self.update_preset_analysis(thresh, len(objects))
-        except Exception as e:
-            self.log(f"Ошибка при применении пресета: {e}")
-            traceback.print_exc()
+            processed, self.current_objects, threshold = apply_threshold_preset(
+                self.current_image,
+                self.current_gray,
+                self.get_current_preset_settings(),
+            )
+            class_spin = self.preset_class_spins.get(self.active_preset_name)
+            if class_spin is not None:
+                self.current_objects = [
+                    (obj[0], class_spin.value(), *obj[2:])
+                    for obj in self.current_objects
+                ]
+            self.display_preset_result(self.current_image, processed)
+            self.update_preset_analysis(threshold, len(self.current_objects))
+        except Exception as exc:
+            self._show_image_in_view(self.preset_result_view, None)
+            self.preset_analysis_text.setPlainText(f"Пресет не применён: {exc}")
+            self.log(f"Ошибка пресета: {exc}")
 
     def display_preset_result(self, original, binary):
         # Подготовка цветного изображения
@@ -962,32 +996,32 @@ class YoloDemoWindow(QMainWindow):
         super().focusInEvent(event)
 
     def update_preset_analysis(self, threshold, object_count):
-        preset = self.get_current_preset_settings()
-        method = preset.get('method', 'Simple Threshold')
-        draw_mode = preset.get('annotation_mode', 'none')
-
         yolo_lines = []
         if self.current_image is not None:
             img_h, img_w = self.current_image.shape[:2]
             for obj in self.current_objects:
                 # Унифицированный формат
-                if isinstance(obj, (tuple, list)) and len(obj) >= 2 and obj[0] in ('detect', 'obb', 'segment'):
+                if (
+                    isinstance(obj, (tuple, list))
+                    and len(obj) >= 2
+                    and obj[0] in ("detect", "obb", "segment")
+                ):
                     typ = obj[0]
-                    if typ == 'detect':
+                    if typ == "detect":
                         _, cls, cx, cy, w, h = obj
                         yolo_lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
-                    elif typ == 'obb':
+                    elif typ == "obb":
                         _, cls, points = obj
                         # Для OBB выводим все 8 координат
-                        pts_str = ' '.join(f"{p:.6f}" for p in points)
+                        pts_str = " ".join(f"{p:.6f}" for p in points)
                         yolo_lines.append(f"{cls} {pts_str} (OBB)")
-                    elif typ == 'segment':
+                    elif typ == "segment":
                         _, cls, points = obj
                         # Для сегментации выводим все координаты (может быть много, ограничим первыми 6)
                         if len(points) > 6:
-                            pts_str = ' '.join(f"{p:.6f}" for p in points[:6]) + ' ...'
+                            pts_str = " ".join(f"{p:.6f}" for p in points[:6]) + " ..."
                         else:
-                            pts_str = ' '.join(f"{p:.6f}" for p in points)
+                            pts_str = " ".join(f"{p:.6f}" for p in points)
                         yolo_lines.append(f"{cls} {pts_str} (SEG)")
                 else:
                     # Старый формат (для обратной совместимости)
@@ -997,7 +1031,9 @@ class YoloDemoWindow(QMainWindow):
                         cy_norm = (y + h / 2) / img_h
                         w_norm = w / img_w
                         h_norm = h / img_h
-                        yolo_lines.append(f"0 {cx_norm:.6f} {cy_norm:.6f} {w_norm:.6f} {h_norm:.6f}")
+                        yolo_lines.append(
+                            f"0 {cx_norm:.6f} {cy_norm:.6f} {w_norm:.6f} {h_norm:.6f}"
+                        )
                     # len(obj)==5 для OBB старого формата не обрабатываем, но при желании можно добавить
 
         analysis_text = ""
@@ -1008,12 +1044,17 @@ class YoloDemoWindow(QMainWindow):
 
         self.preset_analysis_text.setText(analysis_text)
 
-
     def set_yolo_class_names(self, names):
+        if not self._accept_worker("infer_thread"):
+            return
         labels = dict(names)
-        self.model_result_view.set_class_name_provider(lambda class_id: labels.get(class_id, str(class_id)))
+        self.model_result_view.set_class_name_provider(
+            lambda class_id: labels.get(class_id, str(class_id))
+        )
 
     def display_yolo_result(self, image, yolo_lines):
+        if not self._accept_worker("infer_thread"):
+            return
         print_flush("=== display_yolo_result START ===")
         lines = []
         annotations = []
@@ -1021,18 +1062,19 @@ class YoloDemoWindow(QMainWindow):
             parts = line.split()
             if len(parts) == 6:
                 cls, cx, cy, w, h, conf = map(float, parts)
-                annotations.append(('detect', int(cls), cx, cy, w, h))
-                lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} (conf={conf:.3f})")
+                annotations.append(("detect", int(cls), cx, cy, w, h))
+                lines.append(
+                    f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} (conf={conf:.3f})"
+                )
             elif len(parts) == 5:
                 cls, cx, cy, w, h = map(float, parts)
-                annotations.append(('detect', int(cls), cx, cy, w, h))
+                annotations.append(("detect", int(cls), cx, cy, w, h))
                 lines.append(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
         text = "\n".join(lines) if lines else "Нет детекций"
         self._show_image_in_view(self.model_result_view, image, annotations)
         self.model_analysis_text.setText(text)
         print_flush(f"YOLO detections: {len(lines)}")
         print_flush("=== display_yolo_result END ===")
-
 
     def prepare_image_for_inference(self, img):
         if len(img.shape) == 2:
@@ -1045,17 +1087,20 @@ class YoloDemoWindow(QMainWindow):
 
     def update_progress(self, percent):
         self.infer_progress.setValue(percent)
-        QApplication.processEvents()
 
     def update_total_weight(self):
         total = self.yolo_weight_spin.value()
         for name, weight_spin, conf_spin in self.preset_weight_spins:
             total += weight_spin.value()
         self.total_weight_label.setText(f"Сумма весов: {total:.2f}")
-        if abs(total - 1.0) > 0.01:
-            self.total_weight_label.setStyleSheet("QLabel { font-weight: bold; color: #e74c3c; }")
+        if total <= 0:
+            self.total_weight_label.setStyleSheet(
+                "QLabel { font-weight: bold; color: #e74c3c; }"
+            )
         else:
-            self.total_weight_label.setStyleSheet("QLabel { font-weight: bold; color: #27ae60; }")
+            self.total_weight_label.setStyleSheet(
+                "QLabel { font-weight: bold; color: #27ae60; }"
+            )
 
     def normalize_weights(self):
         total = self.yolo_weight_spin.value()
@@ -1069,13 +1114,15 @@ class YoloDemoWindow(QMainWindow):
 
     def log(self, message):
         self.log_widget.log(message)
-        QApplication.processEvents()
 
     def on_stop(self):
-        if self.infer_thread and self.infer_thread.isRunning():
-            self.log("Останавливаем инференс...")
-            self.stop_btn.setEnabled(False)
-            self.infer_thread.stop_inference()
+        self._stop_current_inference()
+        self._stop_ensemble()
+        self.run_yolo_btn.setEnabled(True)
+        self.run_ensemble_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.infer_progress.setFormat("Отменено")
+        self.log("Остановка запрошена. Поздний результат не применяется.")
 
     def on_ensemble_method_changed(self, method_text):
         is_wbf = "WBF" in method_text
@@ -1084,6 +1131,35 @@ class YoloDemoWindow(QMainWindow):
             self.ensemble_use_containment.setChecked(False)
             self.log("Режим NMS не поддерживает учёт вложенности. Флаг сброшен.")
 
+    def _accept_worker(self, attribute):
+        sender = self.sender()
+        return not self._closing and (
+            sender is None or sender is getattr(self, attribute, None)
+        )
+
+    def _stop_ensemble(self):
+        if self.ensemble_thread:
+            self.ensemble_thread.close()
+        self.ensemble_thread = None
+        self.ensemble_mode = False
+        if not self.yolo_inference_running and not self._closing:
+            self.run_yolo_btn.setEnabled(True)
+            self.run_ensemble_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)
+
+    def shutdown_processing(self):
+        if self._closing:
+            return
+        self._closing = True
+        self.update_timer.stop()
+        self._stop_current_inference()
+        self._stop_ensemble()
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def closeEvent(self, event):
+        self.shutdown_processing()
+        event.accept()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -1091,4 +1167,5 @@ if __name__ == "__main__":
     window = YoloDemoWindow()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

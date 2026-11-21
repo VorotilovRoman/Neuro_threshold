@@ -116,7 +116,7 @@ class PixelPresetTests(unittest.TestCase):
                 self.assertFalse(REMOVED.intersection(names), f"{path}:{node.lineno}")
 
     def test_ensemble_executes_pixel_erosion_from_shared_threshold_presets(self):
-        from utils.ensemble_utils import get_detections_from_preset
+        from utils_new.threshold_processing import get_detections_from_preset
 
         gray = np.full((80, 120), 255, np.uint8)
         gray[20:60, 30:90] = 0
@@ -232,7 +232,7 @@ from PyQt5.QtCore import QTimer
 from main import ImagePlayer
 from ui.application import exec_window
 from utils_new.segmentation.presets import make_preset
-import tabs.demo_ensemble_methods as module
+import utils_new.morphology as morphology_module
 app=QApplication([])
 w=ImagePlayer([('yolo_demo','Ensemble')]);owner=w._tab_widgets[0]
 gray=np.full((80,120),255,np.uint8);gray[20:60,30:90]=0
@@ -241,7 +241,7 @@ preset=make_preset('threshold',method='Simple Threshold',params={'threshold':127
 preset['morphology']['operations'][2]['kernel_px']=13
 owner.preset_manager.presets={'pixels':preset};owner.active_preset_name='pixels'
 assert owner.get_current_preset_settings()['params']=={'threshold':127}
-with patch.object(module,'apply_morphology',wraps=module.apply_morphology) as morphology,patch.object(owner,'log') as log:
+with patch.object(morphology_module,'apply_morphology',wraps=morphology_module.apply_morphology) as morphology,patch.object(owner,'log') as log:
     owner.apply_preset_to_image()
     morphology.assert_called_once()
     assert morphology.call_args.args[1]==preset['morphology']['operations']

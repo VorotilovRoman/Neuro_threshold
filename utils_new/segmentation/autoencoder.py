@@ -1,4 +1,5 @@
-# utils_aeb/yolo_aeb_utils.py
+"""AE/VAE architectures and preprocessing. Torch is loaded only by model operations."""
+
 """
 Утилиты для вкладки YOLO + AE/VAE.
 
@@ -40,13 +41,21 @@ class ConvEncoder(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1),
-            nn.BatchNorm2d(32), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
             nn.Conv2d(32, 64, 3, padding=1),
-            nn.BatchNorm2d(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
             nn.Conv2d(64, 128, 3, padding=1),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
             nn.Conv2d(128, 128, 3, padding=1),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
         )
 
     def forward(self, x):
@@ -58,11 +67,14 @@ class ConvDecoder(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.ConvTranspose2d(128, 128, 2, stride=2),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
             nn.ConvTranspose2d(128, 64, 2, stride=2),
-            nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
             nn.ConvTranspose2d(64, 32, 2, stride=2),
-            nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
             nn.ConvTranspose2d(32, in_channels, 2, stride=2),
             nn.Sigmoid(),
         )
@@ -105,6 +117,8 @@ class ConvVAE(nn.Module):
 
     def reparameterize(self, mu, logvar):
         logvar = torch.clamp(logvar, -10.0, 10.0)
+        if not self.training and getattr(self, "deterministic_eval", False):
+            return mu, logvar
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std, logvar
@@ -135,13 +149,21 @@ class ConvEncoderGN(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1),
-            _gn(32), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            _gn(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
             nn.Conv2d(32, 64, 3, padding=1),
-            _gn(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            _gn(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
             nn.Conv2d(64, 128, 3, padding=1),
-            _gn(128), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            _gn(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
             nn.Conv2d(128, 64, 3, padding=1),
-            _gn(64), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            _gn(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
         )
 
     def forward(self, x):
@@ -153,11 +175,14 @@ class ConvDecoderGN(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.ConvTranspose2d(64, 128, 2, stride=2),
-            _gn(128), nn.ReLU(inplace=True),
+            _gn(128),
+            nn.ReLU(inplace=True),
             nn.ConvTranspose2d(128, 64, 2, stride=2),
-            _gn(64), nn.ReLU(inplace=True),
+            _gn(64),
+            nn.ReLU(inplace=True),
             nn.ConvTranspose2d(64, 32, 2, stride=2),
-            _gn(32), nn.ReLU(inplace=True),
+            _gn(32),
+            nn.ReLU(inplace=True),
             nn.ConvTranspose2d(32, in_channels, 2, stride=2),
             nn.Sigmoid(),
         )
@@ -200,6 +225,8 @@ class ConvVAEGN(nn.Module):
 
     def reparameterize(self, mu, logvar):
         logvar = torch.clamp(logvar, -10.0, 10.0)
+        if not self.training and getattr(self, "deterministic_eval", False):
+            return mu, logvar
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std, logvar
@@ -223,27 +250,35 @@ class UNetEncoder(nn.Module):
         b = base
         self.enc0 = nn.Sequential(
             nn.Conv2d(in_channels, b, 3, padding=1),
-            nn.BatchNorm2d(b), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b),
+            nn.ReLU(inplace=True),
             nn.Conv2d(b, b, 3, padding=1),
-            nn.BatchNorm2d(b), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b),
+            nn.ReLU(inplace=True),
         )
         self.enc1 = nn.Sequential(
             nn.Conv2d(b, b * 2, 3, padding=1),
-            nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 2),
+            nn.ReLU(inplace=True),
             nn.Conv2d(b * 2, b * 2, 3, padding=1),
-            nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 2),
+            nn.ReLU(inplace=True),
         )
         self.enc2 = nn.Sequential(
             nn.Conv2d(b * 2, b * 4, 3, padding=1),
-            nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 4),
+            nn.ReLU(inplace=True),
             nn.Conv2d(b * 4, b * 4, 3, padding=1),
-            nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 4),
+            nn.ReLU(inplace=True),
         )
         self.enc3 = nn.Sequential(
             nn.Conv2d(b * 4, b * 8, 3, padding=1),
-            nn.BatchNorm2d(b * 8), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 8),
+            nn.ReLU(inplace=True),
             nn.Conv2d(b * 8, b * 8, 3, padding=1),
-            nn.BatchNorm2d(b * 8), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 8),
+            nn.ReLU(inplace=True),
         )
         self.pool = nn.MaxPool2d(2)
 
@@ -261,39 +296,53 @@ class UNetDecoder(nn.Module):
         b = base
         self.up2 = nn.Sequential(
             nn.ConvTranspose2d(b * 8, b * 4, 2, stride=2),
-            nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 4),
+            nn.ReLU(inplace=True),
         )
         self.dec2 = nn.Sequential(
             nn.Conv2d(b * 4 + b * 4, b * 4, 3, padding=1),
-            nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 4),
+            nn.ReLU(inplace=True),
             nn.Conv2d(b * 4, b * 4, 3, padding=1),
-            nn.BatchNorm2d(b * 4), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 4),
+            nn.ReLU(inplace=True),
         )
         self.up1 = nn.Sequential(
             nn.ConvTranspose2d(b * 4, b * 2, 2, stride=2),
-            nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 2),
+            nn.ReLU(inplace=True),
         )
         self.dec1 = nn.Sequential(
             nn.Conv2d(b * 2 + b * 2, b * 2, 3, padding=1),
-            nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 2),
+            nn.ReLU(inplace=True),
             nn.Conv2d(b * 2, b * 2, 3, padding=1),
-            nn.BatchNorm2d(b * 2), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b * 2),
+            nn.ReLU(inplace=True),
         )
         self.up0 = nn.Sequential(
             nn.ConvTranspose2d(b * 2, b, 2, stride=2),
-            nn.BatchNorm2d(b), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b),
+            nn.ReLU(inplace=True),
         )
         self.dec0 = nn.Sequential(
             nn.Conv2d(b + b, b, 3, padding=1),
-            nn.BatchNorm2d(b), nn.ReLU(inplace=True),
+            nn.BatchNorm2d(b),
+            nn.ReLU(inplace=True),
             nn.Conv2d(b, out_channels, 3, padding=1),
             nn.Sigmoid(),
         )
 
     def forward(self, h, f0, f1, f2):
-        d = self.up2(h);  d = torch.cat([d, f2], dim=1); d = self.dec2(d)
-        d = self.up1(d);  d = torch.cat([d, f1], dim=1); d = self.dec1(d)
-        d = self.up0(d);  d = torch.cat([d, f0], dim=1); d = self.dec0(d)
+        d = self.up2(h)
+        d = torch.cat([d, f2], dim=1)
+        d = self.dec2(d)
+        d = self.up1(d)
+        d = torch.cat([d, f1], dim=1)
+        d = self.dec1(d)
+        d = self.up0(d)
+        d = torch.cat([d, f0], dim=1)
+        d = self.dec0(d)
         return d
 
 
@@ -334,6 +383,8 @@ class UNetVAE(nn.Module):
 
     def reparameterize(self, mu, logvar):
         logvar = torch.clamp(logvar, -10.0, 10.0)
+        if not self.training and getattr(self, "deterministic_eval", False):
+            return mu, logvar
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std, logvar
@@ -387,14 +438,18 @@ class ConvBlockV2(nn.Module):
 class DilatedResidualV2(nn.Module):
     def __init__(self, c, dilations=(2, 4), norm_type="gn"):
         super().__init__()
-        self.blocks = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(c, c, 3, padding=d, dilation=d),
-                _norm_v2(c, norm_type), _act_v2(),
-                nn.Conv2d(c, c, 3, padding=d, dilation=d),
-                _norm_v2(c, norm_type),
-            ) for d in dilations
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(c, c, 3, padding=d, dilation=d),
+                    _norm_v2(c, norm_type),
+                    _act_v2(),
+                    nn.Conv2d(c, c, 3, padding=d, dilation=d),
+                    _norm_v2(c, norm_type),
+                )
+                for d in dilations
+            ]
+        )
         self.act = _act_v2()
 
     def forward(self, x):
@@ -407,10 +462,10 @@ class UNetEncoderV2(nn.Module):
     def __init__(self, in_channels, base=32, dilations=(2, 4), norm_type="gn"):
         super().__init__()
         b = base
-        self.enc0 = ConvBlockV2(in_channels, b,     stride=1, norm_type=norm_type)
-        self.enc1 = ConvBlockV2(b,          b * 2,  stride=2, norm_type=norm_type)
-        self.enc2 = ConvBlockV2(b * 2,      b * 4,  stride=2, norm_type=norm_type)
-        self.enc3 = ConvBlockV2(b * 4,      b * 8,  stride=2, norm_type=norm_type)
+        self.enc0 = ConvBlockV2(in_channels, b, stride=1, norm_type=norm_type)
+        self.enc1 = ConvBlockV2(b, b * 2, stride=2, norm_type=norm_type)
+        self.enc2 = ConvBlockV2(b * 2, b * 4, stride=2, norm_type=norm_type)
+        self.enc3 = ConvBlockV2(b * 4, b * 8, stride=2, norm_type=norm_type)
         self.bottleneck = DilatedResidualV2(b * 8, dilations, norm_type=norm_type)
 
     def forward(self, x):
@@ -436,8 +491,9 @@ class DecoderBlockV2(nn.Module):
     def forward(self, x, skip):
         x = self.act(self.norm_up(self.up(x)))
         if x.shape[-2:] != skip.shape[-2:]:
-            x = F.interpolate(x, size=skip.shape[-2:],
-                              mode="bilinear", align_corners=False)
+            x = F.interpolate(
+                x, size=skip.shape[-2:], mode="bilinear", align_corners=False
+            )
         x = torch.cat([x, skip], dim=1)
         x = self.act(self.n1(self.conv1(x)))
         x = self.act(self.n2(self.conv2(x)))
@@ -450,7 +506,7 @@ class UNetDecoderV2(nn.Module):
         b = base
         self.dec2 = DecoderBlockV2(b * 8, b * 4, b * 4, norm_type)
         self.dec1 = DecoderBlockV2(b * 4, b * 2, b * 2, norm_type)
-        self.dec0 = DecoderBlockV2(b * 2, b,     b,     norm_type)
+        self.dec0 = DecoderBlockV2(b * 2, b, b, norm_type)
         self.head = nn.Sequential(
             nn.Conv2d(b, out_channels, 3, padding=1),
             nn.Sigmoid(),
@@ -464,8 +520,17 @@ class UNetDecoderV2(nn.Module):
 
 
 class UNetAEV2(nn.Module):
-    def __init__(self, in_channels, out_channels, latent_channels,
-                 img_h, img_w, base=32, dilations=(2, 4), norm_type="gn"):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        latent_channels,
+        img_h,
+        img_w,
+        base=32,
+        dilations=(2, 4),
+        norm_type="gn",
+    ):
         super().__init__()
         assert img_h % 8 == 0 and img_w % 8 == 0
         self.in_channels = in_channels
@@ -488,9 +553,19 @@ class UNetAEV2(nn.Module):
 
 
 class UNetVAEV2(nn.Module):
-    def __init__(self, in_channels, out_channels, latent_channels,
-                 img_h, img_w, base=32, dilations=(2, 4), norm_type="gn",
-                 logvar_min=-10.0, logvar_max=10.0):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        latent_channels,
+        img_h,
+        img_w,
+        base=32,
+        dilations=(2, 4),
+        norm_type="gn",
+        logvar_min=-10.0,
+        logvar_max=10.0,
+    ):
         super().__init__()
         assert img_h % 8 == 0 and img_w % 8 == 0
         self.in_channels = in_channels
@@ -509,6 +584,8 @@ class UNetVAEV2(nn.Module):
 
     def reparameterize(self, mu, logvar):
         logvar = torch.clamp(logvar, self.logvar_min, self.logvar_max)
+        if not self.training and getattr(self, "deterministic_eval", False):
+            return mu, logvar
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std, logvar
@@ -526,12 +603,12 @@ class UNetVAEV2(nn.Module):
 # ============================================================
 # Edge-map для инференса (численно совпадает с auto-aeb_unet_with_grad)
 # ============================================================
-_EDGE_SCHARR = torch.tensor([[ 3.,  0., -3.],
-                             [10.,  0.,-10.],
-                             [ 3.,  0., -3.]], dtype=torch.float32)
-_EDGE_SOBEL  = torch.tensor([[-1.,  0.,  1.],
-                             [-2.,  0.,  2.],
-                             [-1.,  0.,  1.]], dtype=torch.float32)
+_EDGE_SCHARR = torch.tensor(
+    [[3.0, 0.0, -3.0], [10.0, 0.0, -10.0], [3.0, 0.0, -3.0]], dtype=torch.float32
+)
+_EDGE_SOBEL = torch.tensor(
+    [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], dtype=torch.float32
+)
 
 
 def _median_blur_torch(x, k=3):
@@ -545,8 +622,9 @@ def _median_blur_torch(x, k=3):
     return patches.median(dim=-1).values
 
 
-def compute_edge_map_torch(img_tensor, edge_kernel="scharr", median_kernel=3,
-                           edge_lo=0.10, edge_hi=0.35):
+def compute_edge_map_torch(
+    img_tensor, edge_kernel="scharr", median_kernel=3, edge_lo=0.10, edge_hi=0.35
+):
     """
     img_tensor: [C,H,W] или [B,C,H,W], float32 в [0,1].
     Возвращает [1,H,W] или [B,1,H,W] — сохраняет batch-мерность.
@@ -557,9 +635,11 @@ def compute_edge_map_torch(img_tensor, edge_kernel="scharr", median_kernel=3,
         squeeze = True
 
     if img_tensor.size(1) == 3:
-        g = (0.299 * img_tensor[:, 0:1]
-             + 0.587 * img_tensor[:, 1:2]
-             + 0.114 * img_tensor[:, 2:3])
+        g = (
+            0.299 * img_tensor[:, 0:1]
+            + 0.587 * img_tensor[:, 1:2]
+            + 0.114 * img_tensor[:, 2:3]
+        )
     else:
         g = img_tensor
 
@@ -599,8 +679,8 @@ def detect_arch_from_state_dict(state_dict):
     if any(k.startswith("encoder.enc0.") for k in keys):
         return "unet"
     if any(k.endswith("running_mean") for k in keys):
-        return "conv"          # старая архитектура (BatchNorm, enc_c=128)
-    return "conv_gn"           # новая (GroupNorm, enc_c=64)
+        return "conv"  # старая архитектура (BatchNorm, enc_c=128)
+    return "conv_gn"  # новая (GroupNorm, enc_c=64)
 
 
 def detect_arch(cfg, state_dict=None):
@@ -629,10 +709,12 @@ def detect_arch(cfg, state_dict=None):
             return detected
 
     # 2) специфичные маркеры unet_v2 в cfg
-    if ("use_edge_channel" in cfg
-            or "bottleneck_dilations" in cfg
-            or "model_in_channels" in cfg
-            or "norm_type" in cfg):
+    if (
+        "use_edge_channel" in cfg
+        or "bottleneck_dilations" in cfg
+        or "model_in_channels" in cfg
+        or "norm_type" in cfg
+    ):
         return "unet_v2"
 
     # 3) явный arch
@@ -648,7 +730,6 @@ def detect_arch(cfg, state_dict=None):
     return "conv"
 
 
-
 def build_ae_model_from_cfg(cfg, arch=None):
     """
     Собирает модель AE/VAE по config чекпойнта.
@@ -657,6 +738,27 @@ def build_ae_model_from_cfg(cfg, arch=None):
     if arch is None:
         arch = detect_arch(cfg)
 
+    if arch not in ("conv", "conv_gn", "unet", "unet_v2"):
+        raise ValueError(f"Неизвестная архитектура AE/VAE: {arch}")
+    if cfg.get("model_type") not in ("ae", "vae"):
+        raise ValueError("model_type должен быть ae или vae.")
+    stride = 16 if arch in ("conv", "conv_gn") else 8
+    for key in ("img_h", "img_w"):
+        value = cfg.get(key)
+        if (
+            not isinstance(value, (int, float))
+            or not np.isfinite(value)
+            or int(value) != value
+            or value < stride
+            or value % stride
+        ):
+            raise ValueError(
+                f"{key} должен быть положительным целым, кратным {stride}."
+            )
+    if cfg.get("in_channels") not in (1, 3):
+        raise ValueError(
+            "in_channels должен быть 1 или 3 (без дополнительного edge-канала)."
+        )
     model_type = cfg["model_type"]
     in_channels = int(cfg["in_channels"])
     img_h = int(cfg["img_h"])
@@ -675,14 +777,25 @@ def build_ae_model_from_cfg(cfg, arch=None):
 
         if model_type == "vae":
             return UNetVAEV2(
-                model_in_channels, out_channels, latent_channels,
-                img_h, img_w, base=base, dilations=dilations,
+                model_in_channels,
+                out_channels,
+                latent_channels,
+                img_h,
+                img_w,
+                base=base,
+                dilations=dilations,
                 norm_type=norm_type,
-                logvar_min=logvar_min, logvar_max=logvar_max,
+                logvar_min=logvar_min,
+                logvar_max=logvar_max,
             )
         return UNetAEV2(
-            model_in_channels, out_channels, latent_channels,
-            img_h, img_w, base=base, dilations=dilations,
+            model_in_channels,
+            out_channels,
+            latent_channels,
+            img_h,
+            img_w,
+            base=base,
+            dilations=dilations,
             norm_type=norm_type,
         )
 
@@ -726,7 +839,8 @@ def preprocess_image_for_ae(img_bgr, cfg):
     if img_bgr is None or not isinstance(img_bgr, np.ndarray) or img_bgr.size == 0:
         raise ValueError("Пустое изображение для AE/VAE")
 
-    H = int(cfg["img_h"]); W = int(cfg["img_w"])
+    H = int(cfg["img_h"])
+    W = int(cfg["img_w"])
     keep_aspect = bool(cfg.get("keep_aspect", True))
     pad_value = int(cfg.get("pad_value", 0))
     in_channels = int(cfg.get("in_channels", 3))
@@ -745,13 +859,20 @@ def preprocess_image_for_ae(img_bgr, cfg):
         if img.dtype == np.uint16:
             f = img.astype(np.float32)
             mx = float(f.max()) if f.size else 0.0
-            img = np.zeros(img.shape, dtype=np.uint8) if mx <= 0 else \
-                np.clip(f * (255.0 / mx), 0, 255).astype(np.uint8)
+            img = (
+                np.zeros(img.shape, dtype=np.uint8)
+                if mx <= 0
+                else np.clip(f * (255.0 / mx), 0, 255).astype(np.uint8)
+            )
         else:
             f = img.astype(np.float32)
-            mn = float(f.min()); mx = float(f.max())
-            img = np.zeros(img.shape, dtype=np.uint8) if mx - mn < 1e-9 else \
-                np.clip((f - mn) / (mx - mn) * 255.0, 0, 255).astype(np.uint8)
+            mn = float(f.min())
+            mx = float(f.max())
+            img = (
+                np.zeros(img.shape, dtype=np.uint8)
+                if mx - mn < 1e-9
+                else np.clip((f - mn) / (mx - mn) * 255.0, 0, 255).astype(np.uint8)
+            )
 
     if in_channels == 1:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -772,7 +893,7 @@ def preprocess_image_for_ae(img_bgr, cfg):
             canvas = np.full((H, W, 3), pad_value, dtype=np.uint8)
         ox = (W - nw) // 2
         oy = (H - nh) // 2
-        canvas[oy:oy + nh, ox:ox + nw] = resized
+        canvas[oy : oy + nh, ox : ox + nw] = resized
         padded = canvas
         valid_region = (ox, oy, ox + nw, oy + nh)
     else:
@@ -810,14 +931,58 @@ def preprocess_image_for_ae(img_bgr, cfg):
 # New applications should import directly from utils_new.annotation_processing.
 # All neural model code above remains unchanged.
 # ============================================================================
-from utils_new.annotation_processing import (
-    apply_object_morphology,
-    build_detection_mask,
-    cls_suffix_from_detection,
-    crop_to_detection,
-    fill_outside_object,
-    limit_image_size,
-    longest_edge_angle_deg,
-    morph_image_in_mask,
-    rotate_with_optional_crop,
-)
+
+
+def infer_autoencoder(image, model, cfg, device, cancel=None):
+    """Validated reconstruction/error on the model grid; no widgets or Qt."""
+    from concurrent.futures import CancelledError
+
+    def checkpoint():
+        if cancel is not None and cancel.is_set():
+            raise CancelledError()
+
+    checkpoint()
+    model.to(device)
+    model.eval()
+    model.deterministic_eval = bool(cfg.get("vae_use_mean", False))
+    x, valid_region = preprocess_image_for_ae(image, cfg)
+    with torch.inference_mode():
+        output = model(x.unsqueeze(0).to(device))
+        reconstruction = output[0] if isinstance(output, (tuple, list)) else output
+        if (
+            not isinstance(reconstruction, torch.Tensor)
+            or reconstruction.ndim != 4
+            or reconstruction.shape[0] != 1
+        ):
+            raise ValueError(
+                "AE/VAE должен вернуть Tensor [1,C,H,W] либо tuple с таким первым элементом."
+            )
+        in_channels = int(cfg.get("in_channels", 3))
+        expected = int(cfg.get("out_channels", in_channels))
+        if (
+            reconstruction.shape[1] != expected
+            or expected > in_channels
+            or reconstruction.shape[2:] != x.shape[1:]
+        ):
+            raise ValueError(
+                f"Выход AE/VAE {tuple(reconstruction.shape)} не соответствует image-каналам входа {tuple(x.shape)} и out_channels={expected}."
+            )
+        reconstruction = reconstruction.float().cpu()
+        if not torch.isfinite(reconstruction).all():
+            raise ValueError("Реконструкция содержит NaN/Inf.")
+        error = (
+            (x[:expected].unsqueeze(0).cpu() - reconstruction)
+            .abs()
+            .mean(dim=1)[0]
+            .numpy()
+        )
+    checkpoint()
+    if not np.isfinite(error).all():
+        raise ValueError("Карта ошибки содержит NaN/Inf.")
+    return {
+        "error": error,
+        "valid_region": valid_region,
+        "input_shape": tuple(x.shape),
+        "output_shape": tuple(reconstruction.shape),
+        "device": str(device),
+    }

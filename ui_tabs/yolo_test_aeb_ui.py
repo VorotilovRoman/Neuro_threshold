@@ -11,6 +11,7 @@ UI-слой вкладки YOLO + AE/VAE.
   • правая панель управления в QScrollArea;
   • лог с кнопкой переключения — в правой половине, под настройками.
 """
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -33,10 +34,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
 from ui.morphology_ui import MorphologyWidget
-from ui.annotation_review_view import DatasetReviewGraphicsView
 
 
 def setup_yolo_ae_vae_ui(parent):
@@ -68,7 +69,6 @@ def setup_yolo_ae_vae_ui(parent):
         "QPushButton { background-color: #16a085; color: white; font-weight: 600; }"
     )
 
-
     # NEW: сохранить все кропы
     parent.btn_save_all_crops = QPushButton("📁 Сохранить все кропы")
     parent.btn_save_all_crops.setToolTip(
@@ -83,12 +83,27 @@ def setup_yolo_ae_vae_ui(parent):
 
     top_layout = QHBoxLayout()
     top_layout.addWidget(parent.nav_widget)
-    top_layout.addWidget(parent.btn_save_image)
-    top_layout.addWidget(parent.btn_save_errmap)
-    top_layout.addWidget(parent.btn_save_all_crops)
-    top_layout.addWidget(parent.reset_zoom_button)
+    save_row = QHBoxLayout()
+    save_row.addWidget(parent.btn_save_image)
+    save_row.addWidget(parent.btn_save_errmap)
+    save_row.addWidget(parent.btn_save_all_crops)
+    save_row.addWidget(parent.reset_zoom_button)
+    save_row.addStretch()
     top_layout.addStretch()
     main_layout.addLayout(top_layout)
+    main_layout.addLayout(save_row)
+
+    status_row = QHBoxLayout()
+    parent.processing_status = QLabel(
+        "Загрузите снимок и модель YOLO; AE/VAE можно применить и к снимку целиком."
+    )
+    parent.processing_status.setWordWrap(True)
+    status_row.addWidget(parent.processing_status, 1)
+    parent.btn_stop_processing = QPushButton("Остановить обработку")
+    parent.btn_stop_processing.setEnabled(False)
+    parent.btn_stop_processing.clicked.connect(parent.stop_processing)
+    status_row.addWidget(parent.btn_stop_processing)
+    main_layout.addLayout(status_row)
 
     # ---------- Основной сплиттер ----------
     main_splitter = QSplitter(Qt.Horizontal)
@@ -108,7 +123,9 @@ def setup_yolo_ae_vae_ui(parent):
 
     # Низ слева: обработанный снимок.
     parent.transformed_view = DatasetReviewGraphicsView()
-    parent.transformed_view.selection_enabled = False  # only pan/zoom, not object selection
+    parent.transformed_view.selection_enabled = (
+        False  # only pan/zoom, not object selection
+    )
     parent.transformed_view.setMinimumSize(400, 300)
     parent.transformed_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     grid.addWidget(parent.transformed_view, 1, 0)
@@ -133,6 +150,7 @@ def setup_yolo_ae_vae_ui(parent):
     # ----- Правая панель с прокруткой -----
     right_scroll_area = QScrollArea()
     right_scroll_area.setWidgetResizable(True)
+    right_scroll_area.setMinimumWidth(430)
     right_scroll_area.setFrameShape(QFrame.NoFrame)
 
     right_content = QWidget()
@@ -143,16 +161,16 @@ def setup_yolo_ae_vae_ui(parent):
     controls_layout = QVBoxLayout()
 
     # --- Пресеты ---
-    presets_layout = QHBoxLayout()
-    presets_layout.addWidget(QLabel("Пресеты:"))
+    presets_layout = QGridLayout()
+    presets_layout.addWidget(QLabel("Пресеты:"), 0, 0)
     parent.preset_combo = QComboBox()
     parent.preset_combo.setEditable(False)
     parent.preset_combo.setMinimumWidth(150)
-    presets_layout.addWidget(parent.preset_combo)
-    parent.save_preset_btn = QPushButton("Сохранить как пресет")
-    presets_layout.addWidget(parent.save_preset_btn)
-    parent.delete_preset_btn = QPushButton("Удалить пресет")
-    presets_layout.addWidget(parent.delete_preset_btn)
+    presets_layout.addWidget(parent.preset_combo, 0, 1)
+    parent.save_preset_btn = QPushButton("Сохранить пресет")
+    presets_layout.addWidget(parent.save_preset_btn, 1, 0)
+    parent.delete_preset_btn = QPushButton("Удалить")
+    presets_layout.addWidget(parent.delete_preset_btn, 1, 1)
     controls_layout.addLayout(presets_layout)
 
     # --- Модель YOLO ---
@@ -223,15 +241,20 @@ def setup_yolo_ae_vae_ui(parent):
     ae_btns.addWidget(parent.btn_apply_ae)
     controls_layout.addLayout(ae_btns)
 
+    ae_hint = QLabel(
+        "Карта показывает ошибку реконструкции. Перцентиль текущего снимка — относительный отбор, а не калиброванный порог дефекта. Порог из чекпойнта применяйте с теми же предобработкой и режимом VAE, что при обучении."
+    )
+    ae_hint.setWordWrap(True)
+    controls_layout.addWidget(ae_hint)
     # --- Параметры AE/VAE ---
-    ae_row1 = QHBoxLayout()
-    ae_row1.addWidget(QLabel("Порог, перцентиль:"))
+    ae_row1 = QGridLayout()
+    ae_row1.addWidget(QLabel("Порог, перцентиль:"), 0, 0)
     parent.ae_perc_spin = QDoubleSpinBox()
     parent.ae_perc_spin.setRange(50.0, 100.0)
     parent.ae_perc_spin.setSingleStep(0.5)
     parent.ae_perc_spin.setDecimals(1)
     parent.ae_perc_spin.setValue(99.0)
-    ae_row1.addWidget(parent.ae_perc_spin)
+    ae_row1.addWidget(parent.ae_perc_spin, 0, 1)
 
     parent.chk_ae_use_ckpt_thr = QCheckBox("Порог из чекпойнта")
     parent.chk_ae_use_ckpt_thr.setChecked(True)
@@ -239,15 +262,14 @@ def setup_yolo_ae_vae_ui(parent):
         "Если в чекпойнте есть готовый порог (threshold_value),\n"
         "использовать его. Иначе — перцентиль слева."
     )
-    ae_row1.addWidget(parent.chk_ae_use_ckpt_thr)
+    ae_row1.addWidget(parent.chk_ae_use_ckpt_thr, 1, 0, 1, 2)
 
     parent.chk_ae_overlay = QCheckBox("Наложить на снимок")
     parent.chk_ae_overlay.setChecked(True)
-    ae_row1.addWidget(parent.chk_ae_overlay)
+    ae_row1.addWidget(parent.chk_ae_overlay, 2, 0)
 
     parent.chk_ae_show_mask = QCheckBox("Подсветить > порога")
-    ae_row1.addWidget(parent.chk_ae_show_mask)
-    ae_row1.addStretch()
+    ae_row1.addWidget(parent.chk_ae_show_mask, 2, 1)
     controls_layout.addLayout(ae_row1)
 
     ae_row2 = QHBoxLayout()
@@ -268,14 +290,14 @@ def setup_yolo_ae_vae_ui(parent):
     parent.objects_list.setMinimumHeight(120)
     controls_layout.addWidget(parent.objects_list)
 
-    pad_row = QHBoxLayout()
-    pad_row.addWidget(QLabel("Отступ (px):"))
+    pad_row = QGridLayout()
+    pad_row.addWidget(QLabel("Отступ (px):"), 0, 0)
     parent.crop_padding_spin = QSpinBox()
     parent.crop_padding_spin.setRange(-500, 500)
     parent.crop_padding_spin.setValue(0)
-    pad_row.addWidget(parent.crop_padding_spin)
+    pad_row.addWidget(parent.crop_padding_spin, 0, 1)
 
-    pad_row.addWidget(QLabel("Смещ. X:"))
+    pad_row.addWidget(QLabel("Смещ. X:"), 1, 0)
     parent.crop_offset_x_spin = QSpinBox()
     parent.crop_offset_x_spin.setRange(-2000, 2000)
     parent.crop_offset_x_spin.setValue(0)
@@ -283,9 +305,9 @@ def setup_yolo_ae_vae_ui(parent):
         "Смещение области обрезки по горизонтали в пикселях.\n"
         "Может быть отрицательным (влево) или положительным (вправо)."
     )
-    pad_row.addWidget(parent.crop_offset_x_spin)
+    pad_row.addWidget(parent.crop_offset_x_spin, 1, 1)
 
-    pad_row.addWidget(QLabel("Смещ. Y:"))
+    pad_row.addWidget(QLabel("Смещ. Y:"), 2, 0)
     parent.crop_offset_y_spin = QSpinBox()
     parent.crop_offset_y_spin.setRange(-2000, 2000)
     parent.crop_offset_y_spin.setValue(0)
@@ -293,10 +315,10 @@ def setup_yolo_ae_vae_ui(parent):
         "Смещение области обрезки по вертикали в пикселях.\n"
         "Может быть отрицательным (вверх) или положительным (вниз)."
     )
-    pad_row.addWidget(parent.crop_offset_y_spin)
+    pad_row.addWidget(parent.crop_offset_y_spin, 2, 1)
 
     # NEW: точный доворот кадра вокруг его центра
-    pad_row.addWidget(QLabel("Поворот (°):"))
+    pad_row.addWidget(QLabel("Поворот (°):"), 3, 0)
     parent.crop_rotation_spin = QDoubleSpinBox()
     parent.crop_rotation_spin.setRange(-90.0, 90.0)
     parent.crop_rotation_spin.setSingleStep(1.0)
@@ -307,16 +329,13 @@ def setup_yolo_ae_vae_ui(parent):
         "Диапазон: -90°..+90°. Положительное значение — по часовой\n"
         "стрелке, отрицательное — против часовой."
     )
-    pad_row.addWidget(parent.crop_rotation_spin)
+    pad_row.addWidget(parent.crop_rotation_spin, 3, 1)
 
     # NEW: сброс отступа и смещений
     parent.btn_reset_offsets = QPushButton("Сбросить смещения")
-    parent.btn_reset_offsets.setToolTip(
-        "Обнулить отступ и смещения по X и Y."
-    )
-    pad_row.addWidget(parent.btn_reset_offsets)
+    parent.btn_reset_offsets.setToolTip("Обнулить отступ и смещения по X и Y.")
+    pad_row.addWidget(parent.btn_reset_offsets, 4, 0, 1, 2)
 
-    pad_row.addStretch()
     controls_layout.addLayout(pad_row)
 
     # --- Авто-действия ---
@@ -358,7 +377,9 @@ def setup_yolo_ae_vae_ui(parent):
 
     # Общая морфология: 4 операции и порядок, применяется ТОЛЬКО к выбранному объекту.
     parent.morphology_widget = MorphologyWidget(
-        parent, contour_available=True, contour_default=True,
+        parent,
+        contour_available=True,
+        contour_default=True,
         initial_order=("erode", "dilate", "close", "open"),
         title="Морфология внутри выбранного объекта",
     )

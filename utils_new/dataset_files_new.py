@@ -159,15 +159,15 @@ def convert_to_grayscale(img):
 
 def load_one_image_item(image_path, resize_enabled=True, max_side=1024,
                         safe_max_side=None, load_annotations_flag=True,
-                        format_hint='auto'):
+                        format_hint='auto', hard_max_side=HARD_MAX_SIDE):
     """Qt-free lazy cache record used by both dataset tabs."""
     from utils_new.dataset_yolo_labels_new import load_annotations
     image = read_image_with_fallback(image_path)
     if image is None:
         return None
     image = normalize_to_uint8(image)
-    if max(image.shape[:2]) > HARD_MAX_SIDE:
-        image = resize_to_max_side(image, HARD_MAX_SIDE)
+    if hard_max_side is not None and max(image.shape[:2]) > hard_max_side:
+        image = resize_to_max_side(image, hard_max_side)
     if resize_enabled:
         image = resize_to_max_side(image, max_side)
     if safe_max_side is not None:
