@@ -1,5 +1,7 @@
 """Dataset analysis UI page construction."""
 
+from ui.dataset_source import DatasetSourceWidget, make_source_button
+
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -29,7 +31,7 @@ def build_models(parent):
     parent.audit_model_edit = QLineEdit()
     parent.audit_model_edit.setReadOnly(True)
     parent.audit_model_edit.setPlaceholderText("Модель не выбрана")
-    parent.btn_load_audit_model = QPushButton("Загрузить модель")
+    parent.btn_load_audit_model = make_source_button("model_yolo")
     model_row.addWidget(QLabel("YOLO:"))
     model_row.addWidget(parent.audit_model_edit, 1)
     model_row.addWidget(parent.btn_load_audit_model)
@@ -104,14 +106,16 @@ def build_models(parent):
     val_sep = QLabel("<hr><b>Валидация модели на тестовом датасете (YOLO val)</b>")
     ac.addWidget(val_sep)
 
-    val_row = QHBoxLayout()
+    parent.validation_source = DatasetSourceWidget(
+        ("dataset_root", "yolo_yaml"), title="Датасет валидации YOLO"
+    )
     parent.val_data_edit = QLineEdit()
-    parent.val_data_edit.setPlaceholderText("Путь к data.yaml или к папке датасета")
-    parent.btn_browse_val_data = QPushButton("Обзор…")
-    val_row.addWidget(QLabel("Test data:"))
-    val_row.addWidget(parent.val_data_edit, 1)
-    val_row.addWidget(parent.btn_browse_val_data)
-    ac.addLayout(val_row)
+    parent.val_data_edit.setPlaceholderText("data.yaml или папка с data.yaml")
+    parent.validation_source.add_path_field("Источник:", parent.val_data_edit)
+    parent.btn_browse_val_data = parent.validation_source.button("yolo_yaml")
+    parent.btn_browse_val_folder = parent.validation_source.button("dataset_root")
+    parent.btn_browse_val_folder.clicked.connect(parent.browse_val_folder)
+    ac.addWidget(parent.validation_source)
 
     val_params_row = QHBoxLayout()
     parent.val_split_combo = QComboBox()

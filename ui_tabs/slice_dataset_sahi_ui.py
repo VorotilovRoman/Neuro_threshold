@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -21,6 +22,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ui.dataset_source import DatasetSourceWidget
 
 
 def setup_sahi_slicer_ui(parent):
@@ -34,52 +37,22 @@ def setup_sahi_slicer_ui(parent):
     # ============================================================
     # TOP TOOLBAR — COCO + YOLO + прогресс
     # ============================================================
+    parent.dataset_source = DatasetSourceWidget(
+        ("folder", "labels", "yolo_yaml", "coco", "add_coco"),
+        types=(0,),
+        formats=True,
+        profile="sahi",
+    )
+    parent.btn_folder = parent.dataset_source.button("folder")
+    parent.btn_labels = parent.dataset_source.button("labels")
+    parent.btn_load_yaml = parent.dataset_source.button("yolo_yaml")
+    parent.btn_load_coco = parent.dataset_source.button("coco")
+    parent.btn_add_coco = parent.dataset_source.button("add_coco")
+    parent.dataset_type_combo = parent.dataset_source.type_combo
+    parent.input_format_combo = parent.dataset_source.format_combo
+    main_layout.addWidget(parent.dataset_source)
+    parent.btn_images = parent.btn_folder
     top_layout = QHBoxLayout()
-
-    parent.btn_images = QPushButton("Load Images")
-    parent.btn_labels = QPushButton("Load Labels")
-    parent.btn_load_yaml = QPushButton("Load YOLO YAML")
-    parent.btn_load_coco = QPushButton("Load COCO")
-    parent.btn_add_coco = QPushButton("+ Add COCO")
-
-    parent.btn_images.setToolTip("Выбрать папку с изображениями")
-    parent.btn_labels.setToolTip("Выбрать папку с YOLO .txt")
-    parent.btn_load_yaml.setToolTip(
-        "Загрузить YOLO-датасет из data.yaml")
-    parent.btn_load_coco.setToolTip("Загрузить COCO JSON")
-    parent.btn_add_coco.setToolTip("Добавить COCO JSON к текущему")
-
-    top_layout.addWidget(parent.btn_images)
-    top_layout.addWidget(parent.btn_labels)
-    top_layout.addWidget(parent.btn_load_yaml)
-    top_layout.addWidget(parent.btn_load_coco)
-    top_layout.addWidget(parent.btn_add_coco)
-
-    parent.dataset_type_combo = QComboBox()
-    parent.dataset_type_combo.addItem("Метки (bbox, obb, seg)", 0)
-    parent.dataset_type_combo.setCurrentIndex(0)
-    parent.dataset_type_combo.setToolTip(
-        "SAHI поддерживает только метки (COCO / YOLO).")
-    top_layout.addWidget(QLabel("Input type:"))
-    top_layout.addWidget(parent.dataset_type_combo)
-
-    parent.input_format_combo = QComboBox()
-    parent.input_format_combo.addItem("YOLO fmt: Auto", "auto")
-    parent.input_format_combo.addItem("detect (5 токенов)", "detect")
-    parent.input_format_combo.addItem("OBB — 4 угла (9 токенов)", "obb_corners")
-    parent.input_format_combo.addItem("OBB — xywhr (6 токенов)", "obb_xywhr")
-    parent.input_format_combo.addItem("segment (чётные)", "segment")
-    parent.input_format_combo.addItem("mixed (per-line)", "mixed")
-    parent.input_format_combo.setCurrentIndex(0)
-    parent.input_format_combo.setToolTip(
-        "Формат .txt при загрузке YOLO:\n"
-        "• Auto — по числу токенов в строке;\n"
-        "• явный выбор убирает неоднозначность.")
-    top_layout.addWidget(QLabel("Input fmt:"))
-    top_layout.addWidget(parent.input_format_combo)
-
-    top_layout.addStretch()
-
     parent.progress_bar = QProgressBar()
     parent.progress_bar.setMinimumWidth(220)
     parent.progress_bar.setMaximumWidth(360)
@@ -116,7 +89,8 @@ def setup_sahi_slicer_ui(parent):
     parent.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
     parent.file_list.setToolTip(
         "Ctrl+C — скопировать выделенные строки.\n"
-        "Двойной клик — открыть снимок валидации.")
+        "Двойной клик — открыть снимок валидации."
+    )
     left_layout.addWidget(parent.file_list, 1)
 
     parent.pair_count_label = QLabel("Всего пар: 0")
@@ -127,24 +101,22 @@ def setup_sahi_slicer_ui(parent):
     parent.validation_progress_label = QLabel("")
     parent.validation_progress_label.setWordWrap(True)
     parent.validation_progress_label.setStyleSheet(
-        "color: #0055aa; font-weight: bold; font-size: 11pt;")
+        "color: #0055aa; font-weight: bold; font-size: 11pt;"
+    )
     parent.validation_progress_label.setVisible(False)
     left_layout.addWidget(parent.validation_progress_label)
 
     parent.validation_warning_label = QLabel("")
     parent.validation_warning_label.setWordWrap(True)
-    parent.validation_warning_label.setTextInteractionFlags(
-        Qt.TextSelectableByMouse)
+    parent.validation_warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     parent.validation_warning_label.setStyleSheet("color: #b00000;")
     parent.validation_warning_label.setVisible(False)
     left_layout.addWidget(parent.validation_warning_label)
 
     parent.color_stats_label = QLabel("")
     parent.color_stats_label.setWordWrap(True)
-    parent.color_stats_label.setTextInteractionFlags(
-        Qt.TextSelectableByMouse)
-    parent.color_stats_label.setStyleSheet(
-        "font-weight: bold; color: #333;")
+    parent.color_stats_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    parent.color_stats_label.setStyleSheet("font-weight: bold; color: #333;")
     left_layout.addWidget(parent.color_stats_label)
 
     labels_group = QGroupBox("Class Labels")
@@ -152,15 +124,16 @@ def setup_sahi_slicer_ui(parent):
     parent.class_table = QTableWidget()
     parent.class_table.setColumnCount(5)
     parent.class_table.setHorizontalHeaderLabels(
-        ["New ID", "Original ID", "Name", "Mask pixel", "Include"])
-    parent.class_table.horizontalHeader().setSectionResizeMode(
-        QHeaderView.Stretch)
+        ["New ID", "Original ID", "Name", "Mask pixel", "Include"]
+    )
+    parent.class_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     parent.class_table.setColumnHidden(3, True)
     parent.class_table.setMaximumHeight(160)
     labels_vbox.addWidget(parent.class_table)
 
     parent.include_empty_annotations = QCheckBox(
-        "Include images with empty annotations")
+        "Include images with empty annotations"
+    )
     parent.include_empty_annotations.setChecked(False)
     labels_vbox.addWidget(parent.include_empty_annotations)
 
@@ -192,10 +165,8 @@ def setup_sahi_slicer_ui(parent):
 
     parent.validation_summary_label = QLabel("")
     parent.validation_summary_label.setWordWrap(True)
-    parent.validation_summary_label.setTextInteractionFlags(
-        Qt.TextSelectableByMouse)
-    parent.validation_summary_label.setStyleSheet(
-        "font-weight: bold; color: #333;")
+    parent.validation_summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    parent.validation_summary_label.setStyleSheet("font-weight: bold; color: #333;")
     ds_form.addRow(parent.validation_summary_label)
 
     right_layout.addWidget(ds_group)
@@ -265,8 +236,7 @@ def setup_sahi_slicer_ui(parent):
     parent.annotation_format_combo = QComboBox()
     parent.annotation_format_combo.addItem("auto (по содержимому)", "auto")
     parent.annotation_format_combo.addItem("bbox (HBB)", "bbox")
-    parent.annotation_format_combo.addItem(
-        "segmentation (полигон)", "segmentation")
+    parent.annotation_format_combo.addItem("segmentation (полигон)", "segmentation")
     parent.annotation_format_combo.setCurrentIndex(0)
     parent.annotation_format_combo.setToolTip(
         "Что писать в YOLO .txt и как чистить sliced_coco.json:\n\n"
@@ -277,7 +247,8 @@ def setup_sahi_slicer_ui(parent):
         "      – из sliced_coco.json удаляется поле segmentation;\n"
         "      – остаются только bbox-координаты.\n\n"
         "  • segmentation — class x1 y1 ... xn yn:\n"
-        "      – sliced_coco.json сохраняется как есть (segmentation остаётся).")
+        "      – sliced_coco.json сохраняется как есть (segmentation остаётся)."
+    )
     par_form.addRow("Формат YOLO:", parent.annotation_format_combo)
 
     parent.channels_combo = QComboBox()
@@ -301,17 +272,16 @@ def setup_sahi_slicer_ui(parent):
     parent.btn_generate = QPushButton("Сгенерировать новый датасет")
     parent.btn_generate.setStyleSheet(
         "background-color: #4CAF50; color: white; "
-        "font-weight: bold; padding: 10px; font-size: 12pt;")
+        "font-weight: bold; padding: 10px; font-size: 12pt;"
+    )
     parent.btn_generate.setEnabled(False)
     right_layout.addWidget(parent.btn_generate)
 
     parent.log_view = QTextEdit()
     parent.log_view.setReadOnly(True)
     parent.log_view.setMaximumHeight(180)
-    parent.log_view.setStyleSheet(
-        "font-family: Consolas, monospace; font-size: 10pt;")
-    parent.log_view.setPlaceholderText(
-        "Лог операций появится здесь при генерации.")
+    parent.log_view.setStyleSheet("font-family: Consolas, monospace; font-size: 10pt;")
+    parent.log_view.setPlaceholderText("Лог операций появится здесь при генерации.")
     parent.log_view.setVisible(False)
     right_layout.addWidget(parent.log_view)
 
@@ -319,7 +289,12 @@ def setup_sahi_slicer_ui(parent):
     parent.status_label.setStyleSheet("color: #333; font-weight: bold;")
     right_layout.addWidget(parent.status_label)
 
-    h_splitter.addWidget(right_widget)
+    # Keep source controls and image navigation visible on smaller displays.
+    controls_scroll = QScrollArea()
+    controls_scroll.setWidgetResizable(True)
+    controls_scroll.setWidget(right_widget)
+    controls_scroll.setMinimumWidth(340)
+    h_splitter.addWidget(controls_scroll)
     h_splitter.setSizes([420, 780])
 
     # ============================================================

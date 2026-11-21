@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Filesystem image I/O, Unicode-safe and independent of Qt."""
+
 from pathlib import Path
 
 import cv2
@@ -19,14 +20,12 @@ def _read_with_fallback(path, flags):
         return None
 
 
-
 def read_image(path):
     """Read BGR image, keeping existing generator's 3-channel convention."""
     image = _read_with_fallback(path, cv2.IMREAD_COLOR)
     if image is None:
-        raise OSError(f'Cannot read image: {path}')
+        raise OSError(f"Cannot read image: {path}")
     return image
-
 
 
 def normalize_index_mask_shape(mask, *, path=None):
@@ -41,10 +40,10 @@ def normalize_index_mask_shape(mask, *, path=None):
     if mask.ndim == 3 and mask.shape[2] == 1:
         mask = mask[:, :, 0]
     if mask.ndim != 2 or not np.issubdtype(mask.dtype, np.integer):
-        suffix = f': {path}' if path is not None else ''
+        suffix = f": {path}" if path is not None else ""
         raise ValueError(
-            f'Expected single-channel integer class mask{suffix} '
-            f'(shape={mask.shape}, dtype={mask.dtype})'
+            f"Expected single-channel integer class mask{suffix} "
+            f"(shape={mask.shape}, dtype={mask.dtype})"
         )
     return mask
 
@@ -53,9 +52,8 @@ def read_index_mask(path):
     """Read indexed PNG as 2D integer array; accept decoder's (H,W,1)."""
     mask = _read_with_fallback(path, cv2.IMREAD_UNCHANGED)
     if mask is None:
-        raise OSError(f'Cannot read mask: {path}')
+        raise OSError(f"Cannot read mask: {path}")
     return normalize_index_mask_shape(mask, path=path)
-
 
 
 def write_image(path, image):
@@ -65,19 +63,19 @@ def write_image(path, image):
     if cv2.imwrite(str(path), image):
         return
     try:
-        success, payload = cv2.imencode(path.suffix or '.png', image)
+        success, payload = cv2.imencode(path.suffix or ".png", image)
         if success:
             payload.tofile(str(path))
             return
     except (OSError, ValueError, cv2.error):
         pass
-    raise OSError(f'Failed writing image: {path}')
-
+    raise OSError(f"Failed writing image: {path}")
 
 
 # Read/display compatibility required by the viewer and the annotation editor.
 # Unlike read_image(), these functions do not discard source bit depth.
 HARD_MAX_SIDE = 16384
+
 
 def read_image_with_fallback(path):
     """Read image with original depth, TIFF and Unicode-path support.
@@ -87,9 +85,10 @@ def read_image_with_fallback(path):
     """
     path = str(path)
     suffix = Path(path).suffix.lower()
-    if suffix in ('.tif', '.tiff'):
+    if suffix in (".tif", ".tiff"):
         try:
             from PIL import Image
+
             with Image.open(path) as source:
                 arr = np.asarray(source)
             if arr.ndim == 2:
@@ -105,6 +104,7 @@ def read_image_with_fallback(path):
         return result
     try:
         from PIL import Image
+
         with Image.open(path) as source:
             arr = np.asarray(source)
         if arr.ndim == 3 and arr.shape[2] == 4:
@@ -128,12 +128,13 @@ def image_size_from_file(path):
     """Full-resolution (width,height), without decoding image pixels if possible."""
     try:
         from PIL import Image
+
         with Image.open(path) as image:
             return int(image.width), int(image.height)
     except (ImportError, OSError, ValueError):
         image = read_image_with_fallback(path)
         if image is None:
-            raise OSError(f'Cannot read image dimensions: {path}')
+            raise OSError(f"Cannot read image dimensions: {path}")
         return int(image.shape[1]), int(image.shape[0])
 
 
@@ -142,26 +143,38 @@ def resize_to_max_side(img, max_side=1024):
         return img
     h, w = img.shape[:2]
     factor = float(max_side) / max(w, h)
-    return cv2.resize(img, (max(1, round(w*factor)), max(1, round(h*factor))),
-                      interpolation=cv2.INTER_AREA)
+    return cv2.resize(
+        img,
+        (max(1, round(w * factor)), max(1, round(h * factor))),
+        interpolation=cv2.INTER_AREA,
+    )
 
 
 def normalize_to_uint8(img):
     """Use the already-shared ImageStats conversion, not a second algorithm."""
     from utils_new.dataset_image_stats_new import ImageStats
+
     return ImageStats.to_uint8(img)
 
 
 def convert_to_grayscale(img):
     from utils_new.dataset_image_stats_new import ImageStats
+
     return ImageStats.to_gray(img)
 
 
-def load_one_image_item(image_path, resize_enabled=True, max_side=1024,
-                        safe_max_side=None, load_annotations_flag=True,
-                        format_hint='auto', hard_max_side=HARD_MAX_SIDE):
+def load_one_image_item(
+    image_path,
+    resize_enabled=True,
+    max_side=1024,
+    safe_max_side=None,
+    load_annotations_flag=True,
+    format_hint="auto",
+    hard_max_side=HARD_MAX_SIDE,
+):
     """Qt-free lazy cache record used by both dataset tabs."""
     from utils_new.dataset_yolo_labels_new import load_annotations
+
     image = read_image_with_fallback(image_path)
     if image is None:
         return None
@@ -182,13 +195,18 @@ def load_one_image_item(image_path, resize_enabled=True, max_side=1024,
         image = image[:, :, :3]
     annotations = []
     if load_annotations_flag:
-        label_path = Path(image_path).with_suffix('.txt')
+        label_path = Path(image_path).with_suffix(".txt")
         if label_path.exists():
             width, height = image_size_from_file(image_path)
-            annotations = load_annotations(label_path, width, height,
-                                           format_hint=format_hint)
-    return {'image': image, 'gray': convert_to_grayscale(image),
-            'annotations': annotations, 'path': str(image_path)}
+            annotations = load_annotations(
+                label_path, width, height, format_hint=format_hint
+            )
+    return {
+        "image": image,
+        "gray": convert_to_grayscale(image),
+        "annotations": annotations,
+        "path": str(image_path),
+    }
 
 
 import threading
@@ -197,8 +215,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 class LazyImageCache:
-    def __init__(self, paths, loader, window=8, prefetch_ahead=4,
-                 max_resident=16, max_workers=2):
+    def __init__(
+        self, paths, loader, window=8, prefetch_ahead=4, max_resident=16, max_workers=2
+    ):
         self.paths = list(paths)
         self.loader = loader
         self.window = window
@@ -209,8 +228,9 @@ class LazyImageCache:
         self._lock = threading.RLock()
         self._in_flight = set()
         self._events = {}
-        self._pool = ThreadPoolExecutor(max_workers=max_workers,
-                                        thread_name_prefix="img-load")
+        self._pool = ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="img-load"
+        )
         self._shutdown = False
 
     def __len__(self):
@@ -332,3 +352,38 @@ class LazyImageCache:
                 ev.set()
             self._events.clear()
 
+
+IMAGE_EXTENSIONS = frozenset(
+    (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+)
+
+
+def collect_image_paths(source, *, recursive=False):
+    """Ordered, deduplicated image inputs; recursion is explicit, never implicit."""
+    if isinstance(source, (str, Path)):
+        path = Path(source)
+        if path.is_dir():
+            entries = path.rglob("*") if recursive else path.iterdir()
+            values = sorted(
+                (
+                    str(p)
+                    for p in entries
+                    if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+                ),
+                key=str.casefold,
+            )
+        elif path.suffix.lower() in IMAGE_EXTENSIONS:
+            values = [str(path)]
+        else:
+            return []
+    elif isinstance(source, (tuple, list)):
+        values = [str(p) for p in source]
+    else:
+        return []
+    # Preserve user-selected order and the original spelling of the first path.
+    import os
+
+    unique = {}
+    for path in values:
+        unique.setdefault(os.path.normcase(os.path.abspath(path)), path)
+    return list(unique.values())

@@ -12,6 +12,8 @@ UI-слой вкладки YOLO + AE/VAE.
   • лог с кнопкой переключения — в правой половине, под настройками.
 """
 
+from ui.dataset_source import make_source_button
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -47,7 +49,7 @@ def setup_yolo_ae_vae_ui(parent):
     main_layout.setContentsMargins(0, 0, 0, 0)
 
     # ---------- Верхняя панель: навигация + сохранение ----------
-    parent.nav_widget = ImageNavigationWidget()
+    parent.nav_widget = ImageNavigationWidget(profile="yolo_aeb")
     parent.reset_zoom_button = QPushButton("Reset zoom")
 
     # Кнопки сохранения — сразу после блока загрузки изображений.
@@ -81,16 +83,13 @@ def setup_yolo_ae_vae_ui(parent):
         "QPushButton { background-color: #2980b9; color: white; font-weight: 600; }"
     )
 
-    top_layout = QHBoxLayout()
-    top_layout.addWidget(parent.nav_widget)
+    main_layout.addWidget(parent.nav_widget)
     save_row = QHBoxLayout()
     save_row.addWidget(parent.btn_save_image)
     save_row.addWidget(parent.btn_save_errmap)
     save_row.addWidget(parent.btn_save_all_crops)
     save_row.addWidget(parent.reset_zoom_button)
     save_row.addStretch()
-    top_layout.addStretch()
-    main_layout.addLayout(top_layout)
     main_layout.addLayout(save_row)
 
     status_row = QHBoxLayout()
@@ -178,8 +177,8 @@ def setup_yolo_ae_vae_ui(parent):
     model_row = QHBoxLayout()
     parent.model_edit = QLineEdit()
     parent.model_edit.setReadOnly(True)
-    parent.model_edit.setPlaceholderText("Путь к .pt-файлу YOLO…")
-    parent.btn_load_model = QPushButton("Загрузить")
+    parent.model_edit.setPlaceholderText("Путь к .pt / .onnx / .engine YOLO…")
+    parent.btn_load_model = make_source_button("model_yolo")
     model_row.addWidget(parent.model_edit, 1)
     model_row.addWidget(parent.btn_load_model)
     controls_layout.addLayout(model_row)
@@ -229,7 +228,7 @@ def setup_yolo_ae_vae_ui(parent):
     parent.ae_model_edit = QLineEdit()
     parent.ae_model_edit.setReadOnly(True)
     parent.ae_model_edit.setPlaceholderText("Путь к чекпойнту AE/VAE…")
-    parent.btn_load_ae = QPushButton("Загрузить AE/VAE")
+    parent.btn_load_ae = make_source_button("model_torch")
     ae_row.addWidget(parent.ae_model_edit, 1)
     ae_row.addWidget(parent.btn_load_ae)
     controls_layout.addLayout(ae_row)

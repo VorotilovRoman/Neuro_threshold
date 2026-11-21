@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from ui.dataset_source import TAB_DESCRIPTIONS
+
 # Список всех возможных вкладок (внутреннее имя, отображаемое название)
 ALL_TABS = [
     ("threshold", "Пороговые методы"),
@@ -25,12 +27,13 @@ ALL_TABS = [
     ("yolo_demo", "Демонстрация результата"),
     ("yolo_sort", "Сортировка с YOLO"),
     ("yolo_aeb", "YOLO + AE/VAE"),
-    ("settings", "Настройки")
+    ("settings", "Настройки"),
 ]
 
 
 class StartupDialog(QDialog):
     """Диалог выбора вкладок, которые будут отображаться в главном окне."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Выбор вкладок Threshold‑Researcher")
@@ -47,6 +50,7 @@ class StartupDialog(QDialog):
         for tab_id, tab_name in ALL_TABS:
             cb = QCheckBox(tab_name)
             cb.setObjectName(tab_id)
+            cb.setToolTip(TAB_DESCRIPTIONS[tab_id])
             self.checkboxes[tab_id] = cb
             group_layout.addWidget(cb)
 

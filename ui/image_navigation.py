@@ -9,9 +9,11 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QTabWidget,
     QTextEdit,
+    QVBoxLayout,
     QWidget,
 )
 
+from ui.dataset_source import DatasetSourceWidget
 from ui.settings_service import settings
 
 
@@ -20,47 +22,69 @@ class ImageNavigationWidget(QWidget):
     load_folder = pyqtSignal()
     prev = pyqtSignal()
     next = pyqtSignal()
-    goto_page = pyqtSignal(int)   # новый сигнал для перехода к конкретному изображению (индекс с 1)
+    goto_page = pyqtSignal(
+        int
+    )  # новый сигнал для перехода к конкретному изображению (индекс с 1)
     resize_toggled = pyqtSignal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        source_actions=("images", "folder"),
+        profile=None,
+        resize_limit=None,
+    ):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
-
-        self._load_images_btn = QPushButton("Load Images")
-        self._load_folder_btn = QPushButton("Load Folder")
-        self._prev_btn = QPushButton("◀ Previous")
-        self._next_btn = QPushButton("Next ▶")
-        self._page_spin = QSpinBox()
-        self._page_spin.setRange(1, 1)          # будет обновляться при загрузке изображений
-        self._page_spin.setFixedWidth(160)
-        self._page_spin.setAlignment(Qt.AlignCenter)
-        self._page_spin.setSuffix(" / ?")       # временный суффикс, обновится при set_total
-        self._resize_cb = QCheckBox("Resize to max 1024px")
-        self._resize_cb.setChecked(True)
-
-        layout.addWidget(self._load_images_btn)
-        layout.addWidget(self._load_folder_btn)
-        layout.addWidget(self._prev_btn)
-        layout.addWidget(self._page_spin)
-        layout.addWidget(self._next_btn)
-        layout.addWidget(self._resize_cb)
-        layout.addStretch()
-
-        # Сигналы
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(4)
+        self.source_widget = DatasetSourceWidget(
+            source_actions, profile=profile, parent=self
+        )
+        root.addWidget(self.source_widget)
+        self._load_images_btn = self.source_widget.button("images")
+        self._load_folder_btn = self.source_widget.button("folder")
         self._load_images_btn.clicked.connect(self.load_images.emit)
         self._load_folder_btn.clicked.connect(self.load_folder.emit)
+        layout = self.navigation_layout = QHBoxLayout()
+        root.addLayout(layout)
+        self._prev_btn = QPushButton("◀ Предыдущий")
+        self._next_btn = QPushButton("Следующий ▶")
+        self._page_spin = QSpinBox()
+        self._page_spin.setRange(1, 1)
+        self._page_spin.setFixedWidth(120)
+        self._page_spin.setAlignment(Qt.AlignCenter)
+        self._page_spin.setSuffix(" / 0")
+        self.resize_limit = resize_limit or (
+            640 if profile == "traditional_ml" else 1024
+        )
+        self._resize_cb = QCheckBox(f"Рабочий размер до {self.resize_limit} px")
+        self._resize_cb.setChecked(True)
+        self._resize_cb.setToolTip(
+            "Меняет рабочее разрешение обработки и просмотра. Пиксельные параметры применяются на рабочей сетке; исходный файл не перезаписывается."
+        )
+        for widget in (
+            self._prev_btn,
+            self._page_spin,
+            self._next_btn,
+            self._resize_cb,
+        ):
+            layout.addWidget(widget)
+        layout.addStretch()
         self._prev_btn.clicked.connect(self.prev.emit)
         self._next_btn.clicked.connect(self.next.emit)
         self._page_spin.valueChanged.connect(self._on_page_changed)
         self._resize_cb.toggled.connect(self.resize_toggled.emit)
-
         self._total = 0
-        self._current = 0   # индекс с 0
+        self._current = 0
+        self.set_current_index(0, 0)
 
     def _on_page_changed(self, value):
         """При изменении номера страницы (с 1) испускаем сигнал goto_page."""
-        if value != self._current + 1:   # предотвращаем рекурсию при программной установке
+        if (
+            value != self._current + 1
+        ):  # предотвращаем рекурсию при программной установке
             self.goto_page.emit(value)
 
     def set_navigation_enabled(self, enabled):
@@ -123,7 +147,7 @@ def parse_key_spec(spec):
     for prefix in ("num+", "numpad+", "keypad+", "kp+"):
         if low.startswith(prefix):
             requires_keypad = True
-            s = s[len(prefix):]
+            s = s[len(prefix) :]
             low = s.lower()
             break
 
@@ -154,6 +178,7 @@ class NavigationShortcutInstaller(QObject):
         игнорируются, чтобы не мешать вводу;
       • настройки перечитываются по сигналу settings.settings_changed.
     """
+
     def __init__(self, tab_widget, prev_callback, next_callback, parent=None):
         super().__init__(parent or tab_widget)
         self._tab = tab_widget
@@ -198,6 +223,7 @@ class NavigationShortcutInstaller(QObject):
     @staticmethod
     def _focus_is_text_input():
         from PyQt5.QtWidgets import QAbstractSpinBox
+
         w = QApplication.focusWidget()
         return isinstance(w, (QLineEdit, QTextEdit, QAbstractSpinBox))
 

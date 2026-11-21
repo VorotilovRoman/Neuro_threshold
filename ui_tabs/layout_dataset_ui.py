@@ -16,15 +16,17 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QPushButton,
     QSizePolicy,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
+from ui.dataset_source import make_source_button
 from ui.image_navigation import ImageNavigationWidget
-from ui.log_widget import LogWidget
 from ui.image_view import SmartGraphicsViewNew
+from ui.log_widget import LogWidget
 from utils_ops.segmentation_ops import get_class_color
 
 
@@ -37,27 +39,16 @@ def setup_layout_dataset_ui(parent):
     # ============================================================
     # Верхняя панель: навигация + загрузка + инструменты + сохранение
     # ============================================================
-    parent.nav_widget = ImageNavigationWidget()
+    parent.nav_widget = ImageNavigationWidget(
+        source_actions=("images", "folder", "labels", "yolo_yaml", "coco", "unet_yaml"),
+        profile="labeler",
+    )
+    main_layout.addWidget(parent.nav_widget)
 
-    parent.btn_load_labels = QPushButton("Load Labels")
-    parent.btn_load_yaml = QPushButton("Load YAML")
-    parent.btn_load_yaml.setToolTip(
-        "Загрузить YOLO-датасет из data.yaml.\n"
-        "Поддерживаются images/... + labels/... и txt-списки,\n"
-        "valid/validation, несколько папок на split."
-    )
-    parent.btn_load_coco = QPushButton("Load COCO")
-    parent.btn_load_coco.setToolTip(
-        "Загрузить COCO JSON. Можно несколько файлов сразу (train/val/test).\n"
-        "bbox → detect; segmentation → segment или obb (эвристика).\n"
-        "Категории объединяются по имени."
-    )
-    parent.btn_load_unet = QPushButton("Load U-Net YAML")
-    parent.btn_load_unet.setToolTip(
-        "Загрузить U-Net-датасет (masks_data.yaml).\n"
-        "Маски будут конвертированы в полигоны (findContours).\n"
-        "Это lossy — дырки и тонкие структуры теряются."
-    )
+    parent.btn_load_labels = parent.nav_widget.source_widget.button("labels")
+    parent.btn_load_yaml = parent.nav_widget.source_widget.button("yolo_yaml")
+    parent.btn_load_coco = parent.nav_widget.source_widget.button("coco")
+    parent.btn_load_unet = parent.nav_widget.source_widget.button("unet_yaml")
     parent.save_button = QPushButton("Save Labels")
     parent.btn_save_all = QPushButton("Save All")
     parent.btn_save_all.setToolTip(
@@ -71,7 +62,6 @@ def setup_layout_dataset_ui(parent):
         "Изменения затрагивают только память — не забудьте Save All."
     )
 
-
     # --- Группа эксклюзивных инструментов рисования ---
     parent.tool_group = QButtonGroup(parent)
     parent.tool_group.setExclusive(True)
@@ -81,7 +71,6 @@ def setup_layout_dataset_ui(parent):
 
     parent.btn_tool_segment = QPushButton("✏️ Segment")
     parent.btn_tool_segment.setToolTip("Рисовать полигон сегментации (segment)")
-
 
     # NEW: свободное рисование сегмента
     parent.btn_tool_segment_line = QPushButton("📏 Segment Line")
@@ -95,8 +84,12 @@ def setup_layout_dataset_ui(parent):
     parent.btn_tool_obb = QPushButton("🔷 OBB")
     parent.btn_tool_obb.setToolTip("Рисовать ориентированный прямоугольник (OBB)")
 
-    for b in (parent.btn_tool_rect, parent.btn_tool_segment,
-              parent.btn_tool_obb, parent.btn_tool_segment_line):
+    for b in (
+        parent.btn_tool_rect,
+        parent.btn_tool_segment,
+        parent.btn_tool_obb,
+        parent.btn_tool_segment_line,
+    ):
         b.setCheckable(True)
         parent.tool_group.addButton(b)
 
@@ -108,7 +101,7 @@ def setup_layout_dataset_ui(parent):
 
     # --- Чекбокс формата сохранения OBB ---
     parent.chk_obb_xywhr = QCheckBox("OBB → xywhr")
-    parent.chk_obb_xywhr.setChecked(False)   # по умолчанию — 4 угла (текущий формат)
+    parent.chk_obb_xywhr.setChecked(False)  # по умолчанию — 4 угла (текущий формат)
     parent.chk_obb_xywhr.setToolTip(
         "Формат записи OBB при сохранении в .txt:\n"
         "☐  class_index x1 y1 x2 y2 x3 y3 x4 y4   (по умолчанию)\n"
@@ -116,11 +109,6 @@ def setup_layout_dataset_ui(parent):
     )
 
     top_layout = QHBoxLayout()
-    top_layout.addWidget(parent.nav_widget)
-    top_layout.addWidget(parent.btn_load_labels)
-    top_layout.addWidget(parent.btn_load_yaml)
-    top_layout.addWidget(parent.btn_load_coco)
-    top_layout.addWidget(parent.btn_load_unet)
     top_layout.addStretch()
     top_layout.addWidget(parent.btn_tool_rect)
     top_layout.addWidget(parent.btn_tool_segment)
@@ -169,7 +157,7 @@ def setup_layout_dataset_ui(parent):
     parent.auto_model_edit = QLineEdit()
     parent.auto_model_edit.setReadOnly(True)
     parent.auto_model_edit.setPlaceholderText("Путь к .pt / .onnx…")
-    parent.btn_load_auto_model = QPushButton("Загрузить")
+    parent.btn_load_auto_model = make_source_button("model_yolo")
     auto_model_row.addWidget(parent.auto_model_edit, 1)
     auto_model_row.addWidget(parent.btn_load_auto_model)
     auto_layout.addLayout(auto_model_row)
@@ -217,9 +205,7 @@ def setup_layout_dataset_ui(parent):
     auto_layout.addWidget(parent.chk_auto_replace)
 
     # NEW: сглаживание сегментации (convex hull)
-    parent.chk_auto_convex_hull = QCheckBox(
-        "Выпуклая форма сегментации (convex hull)"
-    )
+    parent.chk_auto_convex_hull = QCheckBox("Выпуклая форма сегментации (convex hull)")
     parent.chk_auto_convex_hull.setChecked(False)
     parent.chk_auto_convex_hull.setToolTip(
         "Применить выпуклую оболочку (convex hull) к контурам сегментации.\n"
@@ -268,8 +254,7 @@ def setup_layout_dataset_ui(parent):
     parent.btn_hide_labels = QPushButton("Скрыть метки")
     parent.btn_hide_labels.setCheckable(True)
     parent.btn_hide_labels.setToolTip(
-        "Скрыть с отображения метки классов.\n"
-        "Рамки объектов при этом остаются видны."
+        "Скрыть с отображения метки классов.\nРамки объектов при этом остаются видны."
     )
 
     parent.btn_fill_objects = QPushButton("Закрасить объекты")
@@ -280,7 +265,9 @@ def setup_layout_dataset_ui(parent):
     )
 
     parent.btn_fill_color = QPushButton("Цвет: #FFFFFF")
-    parent.btn_fill_color.setToolTip("Выбрать цвет заливки объектов (по умолчанию белый).")
+    parent.btn_fill_color.setToolTip(
+        "Выбрать цвет заливки объектов (по умолчанию белый)."
+    )
     view_ctrl_row.setSpacing(4)
     view_ctrl_row.addWidget(parent.btn_hide_frames)
     view_ctrl_row.addWidget(parent.btn_hide_labels)
@@ -302,7 +289,9 @@ def setup_layout_dataset_ui(parent):
     parent.validation_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     parent.validation_status_label.setVisible(False)
     # Максимальная высота, чтобы длинные списки не «раздували» правую панель
-    parent.validation_status_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+    parent.validation_status_label.setSizePolicy(
+        QSizePolicy.Preferred, QSizePolicy.Maximum
+    )
     right_layout.addWidget(parent.validation_status_label)
 
     # --- Список объектов ---
@@ -311,8 +300,11 @@ def setup_layout_dataset_ui(parent):
     parent.object_list = QListWidget()
     parent.object_list.setSelectionMode(QAbstractItemView.SingleSelection)
     from ui.annotation_review import AnnotationReviewWidget
+
     parent.overlap_review = AnnotationReviewWidget(parent.object_list, parent=parent)
-    parent.overlap_review.image_selected.connect(lambda index: parent.goto_image(index + 1))
+    parent.overlap_review.image_selected.connect(
+        lambda index: parent.goto_image(index + 1)
+    )
     parent.overlap_review.changed.connect(parent._apply_validation_colors_to_list)
     objects_layout.addWidget(parent.overlap_review)
 
@@ -343,7 +335,12 @@ def setup_layout_dataset_ui(parent):
     parent.log_text = parent.log_widget.text
     right_layout.addWidget(parent.log_widget, 1)
 
-    main_splitter.addWidget(right_widget)
+    # Keep source controls and image navigation visible on smaller displays.
+    controls_scroll = QScrollArea()
+    controls_scroll.setWidgetResizable(True)
+    controls_scroll.setWidget(right_widget)
+    controls_scroll.setMinimumWidth(340)
+    main_splitter.addWidget(controls_scroll)
     main_splitter.setSizes([800, 400])
     main_layout.addWidget(main_splitter, 1)
 

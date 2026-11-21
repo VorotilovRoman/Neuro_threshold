@@ -16,9 +16,9 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
-from ui.annotation_review_view import DatasetReviewGraphicsView
 
 
 def setup_viewing_dataset_ui(parent):
@@ -32,39 +32,37 @@ def setup_viewing_dataset_ui(parent):
     top_layout = QHBoxLayout()
 
     # Виджет навигации (загрузка папки/изображений, Prev/Next, resize)
-    parent.nav_widget = ImageNavigationWidget()
-    top_layout.addWidget(parent.nav_widget)
+    parent.nav_widget = ImageNavigationWidget(
+        source_actions=(
+            "images",
+            "folder",
+            "labels",
+            "yolo_yaml",
+            "coco",
+            "unet_yaml",
+            "masks",
+        ),
+        profile="test",
+    )
+    main_layout.addWidget(parent.nav_widget)
 
     # Кнопки загрузки
-    parent.btn_load_labels = QPushButton("Load Labels")
-    parent.btn_load_masks = QPushButton("Load Masks")
-    parent.btn_load_yaml = QPushButton("Load YAML")
-    parent.btn_load_yaml.setToolTip(
-        "Загрузить YOLO-датасет из data.yaml.\n"
-        "Поддерживаются images/... + labels/..., txt-списки, valid/validation.\n"
-        "Маски (если есть) подхватятся автоматически."
-    )
-    parent.btn_load_coco = QPushButton("Load COCO")
-    parent.btn_load_coco.setToolTip(
-        "Загрузить COCO JSON. Можно несколько файлов сразу (train/val/test).\n"
-        "bbox → detect; segmentation → segment или obb.\n"
-        "Категории объединяются по имени."
-    )
-    parent.btn_load_unet = QPushButton("Load U-Net YAML")
-    parent.btn_load_unet.setToolTip(
-        "Загрузить U-Net-датасет (masks_data.yaml).\n"
-        "Маски конвертируются в polygon-аннотации (findContours).\n"
-        "Оригинальные маски остаются для отображения."
-    )
+    parent.btn_load_labels = parent.nav_widget.source_widget.button("labels")
+    parent.btn_load_masks = parent.nav_widget.source_widget.button("masks")
+    parent.btn_load_yaml = parent.nav_widget.source_widget.button("yolo_yaml")
+    parent.btn_load_coco = parent.nav_widget.source_widget.button("coco")
+    parent.btn_load_unet = parent.nav_widget.source_widget.button("unet_yaml")
     parent.btn_save = QPushButton("Save Labels")
     parent.btn_save_all = QPushButton("Save All")
     parent.btn_save_all.setToolTip(
         "Сохранить аннотации всех уже просмотренных или изменённых изображений. "
-        "Неоткрытые изображения не перезаписываются.")
+        "Неоткрытые изображения не перезаписываются."
+    )
     parent.chk_obb_xywhr = QCheckBox("OBB → xywhr")
     parent.chk_obb_xywhr.setChecked(False)
     parent.chk_obb_xywhr.setToolTip(
-        "Формат сохранения OBB: 4 угла (выключено) или cx cy w h angle (включено).")
+        "Формат сохранения OBB: 4 угла (выключено) или cx cy w h angle (включено)."
+    )
 
     parent.btn_convert_all_to_obb = QPushButton("All Box → OBB")
     parent.btn_convert_all_to_obb.setToolTip(
@@ -73,11 +71,6 @@ def setup_viewing_dataset_ui(parent):
         "Изменения затрагивают только память — не забудьте Save Labels."
     )
 
-    top_layout.addWidget(parent.btn_load_labels)
-    top_layout.addWidget(parent.btn_load_masks)
-    top_layout.addWidget(parent.btn_load_yaml)
-    top_layout.addWidget(parent.btn_load_coco)
-    top_layout.addWidget(parent.btn_load_unet)
     top_layout.addWidget(parent.chk_obb_xywhr)
     top_layout.addWidget(parent.btn_save)
     top_layout.addWidget(parent.btn_save_all)
@@ -162,14 +155,17 @@ def setup_viewing_dataset_ui(parent):
     parent.view_mode_combo.addItem("3 · Выбранный объект и список", 3)
     parent.view_mode_combo.setToolTip(
         "Выбранный в списке объект показывается во втором окне "
-        "с отступом, без поворота и без изменения исходных пикселей.")
+        "с отступом, без поворота и без изменения исходных пикселей."
+    )
     objects_layout.addWidget(parent.view_mode_combo)
     # Кнопка выбора режима и отступ в одном компактном блоке справа.
     mode_row.addWidget(QLabel("Отступ (px):"))
     parent.crop_padding_spin = QSpinBox()
     parent.crop_padding_spin.setRange(0, 1000)
     parent.crop_padding_spin.setValue(10)
-    parent.crop_padding_spin.setToolTip("Отступ от границ аннотации в пикселях исходного снимка.")
+    parent.crop_padding_spin.setToolTip(
+        "Отступ от границ аннотации в пикселях исходного снимка."
+    )
     mode_row.addWidget(parent.crop_padding_spin)
     parent.crop_detail_label = QLabel("Выберите объект в списке")
     parent.crop_detail_label.setWordWrap(True)
@@ -183,16 +179,25 @@ def setup_viewing_dataset_ui(parent):
     parent.btn_hide_frames = QPushButton("Скрыть рамки")
     parent.btn_hide_labels = QPushButton("Скрыть метки")
     parent.btn_fill_objects = QPushButton("Закрасить объекты")
-    for btn in (parent.btn_hide_frames, parent.btn_hide_labels,
-                parent.btn_fill_objects):
+    for btn in (
+        parent.btn_hide_frames,
+        parent.btn_hide_labels,
+        parent.btn_fill_objects,
+    ):
         btn.setCheckable(True)
     visibility_row.addWidget(parent.btn_hide_frames)
     visibility_row.addWidget(parent.btn_hide_labels)
-    parent.btn_hide_frames.setToolTip("Скрыть постоянные контуры, оставив подписи и выделение.")
+    parent.btn_hide_frames.setToolTip(
+        "Скрыть постоянные контуры, оставив подписи и выделение."
+    )
     parent.btn_hide_labels.setToolTip("Скрыть только подписи классов.")
-    parent.btn_fill_objects.setToolTip("Залить области объектов выбранным цветом. Исходное изображение не изменяется.")
+    parent.btn_fill_objects.setToolTip(
+        "Залить области объектов выбранным цветом. Исходное изображение не изменяется."
+    )
     parent.btn_fill_color = QPushButton("Цвет: #FFFFFF")
-    parent.btn_fill_color.setToolTip("Выбрать цвет заливки объектов (по умолчанию белый).")
+    parent.btn_fill_color.setToolTip(
+        "Выбрать цвет заливки объектов (по умолчанию белый)."
+    )
     visibility_row.setSpacing(4)
     visibility_row.addWidget(parent.btn_fill_objects)
     visibility_row.addWidget(parent.btn_fill_color)
@@ -203,13 +208,18 @@ def setup_viewing_dataset_ui(parent):
     parent.coord_list = QListWidget()
     parent.coord_list.setSelectionMode(QAbstractItemView.SingleSelection)
     from ui.annotation_review import AnnotationReviewWidget
+
     parent.overlap_review = AnnotationReviewWidget(parent.coord_list, parent=parent)
-    parent.overlap_review.image_selected.connect(lambda index: parent.goto_image(index + 1))
+    parent.overlap_review.image_selected.connect(
+        lambda index: parent.goto_image(index + 1)
+    )
     parent.overlap_review.changed.connect(parent._apply_validation_colors_to_list)
     objects_layout.addWidget(parent.overlap_review)
-    hint = QLabel("Ctrl+0…9 — присвоить класс выбранному объекту.  "
-                  "Красный объект в списке — некорректная разметка "
-                  "или пересечение ≥70% площади меньшего объекта.")
+    hint = QLabel(
+        "Ctrl+0…9 — присвоить класс выбранному объекту.  "
+        "Красный объект в списке — некорректная разметка "
+        "или пересечение ≥70% площади меньшего объекта."
+    )
     hint.setWordWrap(True)
     objects_layout.addWidget(hint)
 
@@ -220,7 +230,7 @@ def setup_viewing_dataset_ui(parent):
     parent.toggle_log_btn.setCheckable(True)
     button_row.addWidget(parent.btn_delete)
     button_row.addWidget(parent.toggle_log_btn)
-    button_row.addStretch()          # прижимает кнопки к левому краю (опционально)
+    button_row.addStretch()  # прижимает кнопки к левому краю (опционально)
     objects_layout.addLayout(button_row)
     objects_group.setLayout(objects_layout)
     right_layout.addWidget(objects_group, 2)  # растягивается

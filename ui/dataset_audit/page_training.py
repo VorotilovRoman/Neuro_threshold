@@ -1,5 +1,7 @@
 """Dataset analysis UI page construction."""
 
+from ui.dataset_source import make_source_button
+
 from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -26,7 +28,7 @@ def build_training(parent):
     parent.training_results_edit.setPlaceholderText(
         "Папка run/ с результатами обучения не выбрана"
     )
-    parent.btn_browse_training_results = QPushButton("Обзор…")
+    parent.btn_browse_training_results = make_source_button("training_run")
     parent.btn_load_training_results = QPushButton("Загрузить")
     tr_row.addWidget(QLabel("Папка run/:"))
     tr_row.addWidget(parent.training_results_edit, 1)

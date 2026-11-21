@@ -1,13 +1,14 @@
+from ui.dataset_source import DatasetSourceWidget
+
 """Dataset analysis source, filters and export controls."""
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QFrame,
     QGridLayout,
-    QGroupBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QListWidget,
@@ -37,47 +38,26 @@ def build_source(parent):
     # ============================================================
     # ВЕРХНЯЯ ПАНЕЛЬ
     # ============================================================
-    top_box = QGroupBox("1. Источник датасета")
-    top_layout = QGridLayout(top_box)
-    parent.btn_folder = QPushButton("Папка снимков")
-    parent.btn_labels = QPushButton("Папка разметки")
-    parent.btn_load_yaml = QPushButton("YOLO YAML")
-    parent.btn_load_coco = QPushButton("COCO JSON")
-    parent.btn_add_coco = QPushButton("Добавить COCO")
-    parent.btn_load_unet = QPushButton("U-Net YAML")
-    for index, button in enumerate(
-        (
-            parent.btn_folder,
-            parent.btn_labels,
-            parent.btn_load_yaml,
-            parent.btn_load_coco,
-            parent.btn_add_coco,
-            parent.btn_load_unet,
-        )
-    ):
-        top_layout.addWidget(button, index // 3, index % 3)
-
-    parent.dataset_type_combo = QComboBox()
-    parent.dataset_type_combo.addItem("Метки (bbox, obb, seg)", 0)
-    parent.dataset_type_combo.addItem("Маски (masks)", 1)
-    parent.dataset_type_combo.addItem("Только изображения", 2)
-    top_layout.addWidget(QLabel("Тип данных"), 2, 0)
-    top_layout.addWidget(parent.dataset_type_combo, 2, 1, 1, 2)
-
-    parent.input_format_combo = QComboBox()
-    parent.input_format_combo.addItem("Auto (по содержимому)", "auto")
-    parent.input_format_combo.addItem("YOLO detect (5 токенов)", "detect")
-    parent.input_format_combo.addItem("YOLO OBB — 4 угла (9 токенов)", "obb_corners")
-    parent.input_format_combo.addItem("YOLO OBB — xywhr (6 токенов)", "obb_xywhr")
-    parent.input_format_combo.addItem("YOLO segment (≥7 токенов, чётные)", "segment")
-    parent.input_format_combo.addItem("Mixed (per-line эвристика)", "mixed")
-    top_layout.addWidget(QLabel("Формат разметки"), 3, 0)
-    top_layout.addWidget(parent.input_format_combo, 3, 1, 1, 2)
-
+    parent.dataset_source = DatasetSourceWidget(
+        ("folder", "labels", "yolo_yaml", "coco", "add_coco", "unet_yaml"),
+        types=(0, 1, 2),
+        formats=True,
+        profile="dataset_analysis",
+    )
+    parent.btn_folder = parent.dataset_source.button("folder")
+    parent.btn_labels = parent.dataset_source.button("labels")
+    parent.btn_load_yaml = parent.dataset_source.button("yolo_yaml")
+    parent.btn_load_coco = parent.dataset_source.button("coco")
+    parent.btn_add_coco = parent.dataset_source.button("add_coco")
+    parent.dataset_type_combo = parent.dataset_source.type_combo
+    parent.input_format_combo = parent.dataset_source.format_combo
+    main_layout.addWidget(parent.dataset_source)
+    parent.btn_load_unet = parent.dataset_source.button("unet_yaml")
+    top_layout = QHBoxLayout()
     parent.toggle_log_btn = QPushButton("Показать лог")
     parent.toggle_log_btn.setCheckable(True)
-    top_layout.addWidget(parent.toggle_log_btn, 4, 2)
-    main_layout.addWidget(top_box)
+    top_layout.addWidget(parent.toggle_log_btn)
+    main_layout.addLayout(top_layout)
 
     # ============================================================
     # СПЛИТТЕРЫ

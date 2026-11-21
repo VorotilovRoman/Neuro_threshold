@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
 )
 
 from main_ui import StartupDialog
+from ui.dataset_source import TAB_DESCRIPTIONS
 from ui.image_navigation import NavigationShortcutInstaller
 from ui.settings_service import apply_theme, settings
 
@@ -44,7 +45,7 @@ class ImagePlayer(QMainWindow):
 
         # Хранилища для виджетов
         self.demo_window = None
-        self.demo_tab_index = -1          # индекс вкладки демо
+        self.demo_tab_index = -1  # индекс вкладки демо
         self.yolo_sort_window = None
         self.viewing_dataset_window = None
         self.ThresholdWindow_window = None
@@ -52,7 +53,7 @@ class ImagePlayer(QMainWindow):
         self.InteractiveMethodsWindow_window = None
         self.TraditionalMLWindow_window = None
         self.DeepLearningWindow_window = None
-        self.yolo_aeb_window = None       # ← вкладка YOLO + AE/VAE
+        self.yolo_aeb_window = None  # ← вкладка YOLO + AE/VAE
 
         # Держим ссылки на QShortcut, чтобы они не удалялись GC.
         # Ключ — виджет (content вкладки), значение — список шорткатов.
@@ -75,7 +76,7 @@ class ImagePlayer(QMainWindow):
     # ------------------------------------------------------------------
     def _add_tab(self, widget, title):
         """Embed the complete window so dialogs, controls and ownership stay intact."""
-        if not hasattr(self, '_tab_widgets'):
+        if not hasattr(self, "_tab_widgets"):
             self._tab_widgets = []
         self._tab_widgets.append(widget)
 
@@ -87,19 +88,21 @@ class ImagePlayer(QMainWindow):
         content = widget
 
         index = self.tab_widget.addTab(content, title)
+        tab_id = self.selected_tabs[index][0]
+        self.tab_widget.setTabToolTip(index, TAB_DESCRIPTIONS.get(tab_id, ""))
         if widget is self.demo_window:
             self.demo_tab_index = index
 
         # --- Горячие клавиши навигации (Num+4 / Num+6) ---
-        prev_cb = getattr(widget, 'prev_image', None) or getattr(widget, 'prev', None)
-        next_cb = getattr(widget, 'next_image', None) or getattr(widget, 'next', None)
+        prev_cb = getattr(widget, "prev_image", None) or getattr(widget, "prev", None)
+        next_cb = getattr(widget, "next_image", None) or getattr(widget, "next", None)
         if callable(prev_cb) and callable(next_cb):
             NavigationShortcutInstaller(content, prev_cb, next_cb, parent=self)
 
         # --- Ctrl+0..9 — смена класса выделенного объекта ---
         # QShortcut on the embedded window works even when a child control
         # has focus; keep its context limited to the active tab.
-        class_cb = getattr(widget, '_set_class_of_selected', None)
+        class_cb = getattr(widget, "_set_class_of_selected", None)
         if callable(class_cb):
             self._install_class_shortcuts(content, class_cb)
 
@@ -125,65 +128,79 @@ class ImagePlayer(QMainWindow):
         for tab_id, tab_title in self.selected_tabs:
             if tab_id == "threshold":
                 from tabs.threshold_methods import ThresholdWindow
+
                 self.ThresholdWindow_window = ThresholdWindow()
                 self._add_tab(self.ThresholdWindow_window, tab_title)
 
             elif tab_id == "gradient":
                 from tabs.gradient_methods import GradientMethodsWindow
+
                 self.GradientMethodsWindow_window = GradientMethodsWindow()
                 self._add_tab(self.GradientMethodsWindow_window, tab_title)
 
             elif tab_id == "interactive":
                 from tabs.interactive_methods import InteractiveMethodsWindow
+
                 self.InteractiveMethodsWindow_window = InteractiveMethodsWindow()
                 self._add_tab(self.InteractiveMethodsWindow_window, tab_title)
 
             elif tab_id == "traditional_ml":
                 from tabs.traditional_ml_methods import TraditionalMLWindow
+
                 self.TraditionalMLWindow_window = TraditionalMLWindow()
                 self._add_tab(self.TraditionalMLWindow_window, tab_title)
 
             elif tab_id == "deep_learning":
                 from tabs.deep_learning_methods import DeepLearningWindow
+
                 self.DeepLearningWindow_window = DeepLearningWindow()
                 self._add_tab(self.DeepLearningWindow_window, tab_title)
 
             elif tab_id == "reports":
                 from tabs.model_research import ModelResearchApp
+
                 self._add_tab(ModelResearchApp(), tab_title)
 
             elif tab_id == "labeler":
                 from tabs.layout_dataset import Labeler
+
                 self._add_tab(Labeler(), tab_title)
 
             elif tab_id == "test":
                 from tabs.viewing_dataset import ViewingDataset
+
                 self.viewing_dataset_window = ViewingDataset()
                 self._add_tab(self.viewing_dataset_window, tab_title)
 
             elif tab_id == "dataset":
                 from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+
                 self._add_tab(DatasetPreparationWindow(), tab_title)
 
             elif tab_id == "dataset_analysis":
                 from tabs.dataset_analysis import DatasetAnalysisWindow
+
                 self._add_tab(DatasetAnalysisWindow(), tab_title)
 
             elif tab_id == "sahi":
                 from tabs.slice_dataset_sahi import SahiSlicerWindow
+
                 self._add_tab(SahiSlicerWindow(), tab_title)
 
             elif tab_id == "yolo_train":
                 from tabs.deep_learning_training import YoloTrainWindow
+
                 self._add_tab(YoloTrainWindow(), tab_title)
 
             elif tab_id == "yolo_demo":
                 from tabs.demo_ensemble_methods import YoloDemoWindow
+
                 self.demo_window = YoloDemoWindow()
                 self._add_tab(self.demo_window, tab_title)
 
             elif tab_id == "yolo_sort":
                 from tabs.yolo_find_img import FindImagesWindow
+
                 self.yolo_sort_window = FindImagesWindow()
                 self._add_tab(self.yolo_sort_window, tab_title)
 
@@ -191,25 +208,27 @@ class ImagePlayer(QMainWindow):
             elif tab_id == "yolo_aeb":
                 try:
                     from tabs.yolo_test_aeb import YoloInspectWindow
+
                     self.yolo_aeb_window = YoloInspectWindow()
                     self._add_tab(self.yolo_aeb_window, tab_title)
                 except ImportError as e:
                     QMessageBox.warning(
-                        self, "YOLO + AE/VAE",
+                        self,
+                        "YOLO + AE/VAE",
                         f"Не удалось загрузить вкладку:\n{e}\n\n"
                         f"Убедитесь, что установлены torch, ultralytics, PyQt5 "
                         f"и что файлы yolo_test_aeb.py / yolo_test_aeb_ui.py "
-                        f"лежат в корне проекта."
+                        f"лежат в корне проекта.",
                     )
                 except Exception as e:
                     QMessageBox.critical(
-                        self, "YOLO + AE/VAE",
-                        f"Ошибка инициализации вкладки:\n{e}"
+                        self, "YOLO + AE/VAE", f"Ошибка инициализации вкладки:\n{e}"
                     )
             # =================================================
 
             elif tab_id == "settings":
                 from ui.settings_ui import SettingsWidget
+
                 self._add_tab(SettingsWidget(), tab_title)
 
             else:
@@ -220,19 +239,20 @@ class ImagePlayer(QMainWindow):
     # ------------------------------------------------------------------
     def closeEvent(self, event):
         scanning = False
-        for tab in getattr(self, '_tab_widgets', []):
-            shutdown_processing=getattr(tab,"shutdown_processing",None)
-            if shutdown_processing is not None:shutdown_processing()
-            review = getattr(tab, 'overlap_review', None)
+        for tab in getattr(self, "_tab_widgets", []):
+            shutdown_processing = getattr(tab, "shutdown_processing", None)
+            if shutdown_processing is not None:
+                shutdown_processing()
+            review = getattr(tab, "overlap_review", None)
             if review is not None:
                 review.close_review()
-            stop_review = getattr(tab, 'shutdown_annotation_review', None)
+            stop_review = getattr(tab, "shutdown_annotation_review", None)
             if stop_review is not None:
                 stop_review()
-            stop_analysis = getattr(tab, 'shutdown_analysis', None)
+            stop_analysis = getattr(tab, "shutdown_analysis", None)
             if stop_analysis is not None:
                 stop_analysis()
-            shutdown = getattr(tab, 'shutdown_audit', None)
+            shutdown = getattr(tab, "shutdown_audit", None)
             if shutdown is not None:
                 shutdown()
                 scanning = scanning or tab._scan_busy
@@ -240,12 +260,18 @@ class ImagePlayer(QMainWindow):
             event.ignore()
             return
         # Проверяем глобальный флаг через переменную окружения
-        collect_info = os.environ.get('COLLECT_LIBS_INFO', '0').lower() in ('1', 'true', 'yes')
+        collect_info = os.environ.get("COLLECT_LIBS_INFO", "0").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if collect_info:
             print("Сбор информации о библиотеках включён. Сохраняем libs_info.txt...")
             self._save_libs_info()
         else:
-            print("Сбор информации о библиотеках отключён. Файл libs_info.txt не создан.")
+            print(
+                "Сбор информации о библиотеках отключён. Файл libs_info.txt не создан."
+            )
         event.accept()
 
     def _save_libs_info(self):
@@ -254,31 +280,48 @@ class ImagePlayer(QMainWindow):
         from importlib.metadata import PackageNotFoundError, version
 
         packages = (
-            'opencv-python-headless', 'opencv-python', 'torch', 'torchvision',
-            'numpy', 'albumentations', 'ultralytics', 'matplotlib', 'scikit-learn',
-            'scikit-image', 'Pillow', 'PyYAML', 'onnxruntime', 'PyQt5', 'pandas',
-            'seaborn', 'requests', 'tqdm', 'networkx', 'joblib', 'scipy',
+            "opencv-python-headless",
+            "opencv-python",
+            "torch",
+            "torchvision",
+            "numpy",
+            "albumentations",
+            "ultralytics",
+            "matplotlib",
+            "scikit-learn",
+            "scikit-image",
+            "Pillow",
+            "PyYAML",
+            "onnxruntime",
+            "PyQt5",
+            "pandas",
+            "seaborn",
+            "requests",
+            "tqdm",
+            "networkx",
+            "joblib",
+            "scipy",
         )
         libs = {}
         for name in packages:
             try:
                 libs[name] = version(name)
             except PackageNotFoundError:
-                libs[name] = 'not installed'
-        libs['Python'] = sys.version
-        libs['OS'] = platform.platform()
+                libs[name] = "not installed"
+        libs["Python"] = sys.version
+        libs["OS"] = platform.platform()
         # Reporting installed versions must not load Torch during shutdown.
-        torch_module = sys.modules.get('torch')
+        torch_module = sys.modules.get("torch")
         if torch_module is None:
-            libs['CUDA available'] = 'not probed (torch not loaded)'
+            libs["CUDA available"] = "not probed (torch not loaded)"
         else:
             try:
-                libs['CUDA available'] = torch_module.cuda.is_available()
-                if libs['CUDA available']:
-                    libs['CUDA version'] = torch_module.version.cuda
-                    libs['GPU device'] = torch_module.cuda.get_device_name(0)
+                libs["CUDA available"] = torch_module.cuda.is_available()
+                if libs["CUDA available"]:
+                    libs["CUDA version"] = torch_module.version.cuda
+                    libs["GPU device"] = torch_module.cuda.get_device_name(0)
             except Exception as exc:
-                libs['CUDA available'] = f'probe failed: {exc}'
+                libs["CUDA available"] = f"probe failed: {exc}"
 
         lines = [f"Library versions collected at {datetime.now()}"]
         lines.append("=" * 50)
@@ -286,10 +329,10 @@ class ImagePlayer(QMainWindow):
             lines.append(f"{name}: {ver}")
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        file_path = os.path.join(base_dir, 'libs_info.txt')
+        file_path = os.path.join(base_dir, "libs_info.txt")
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(lines))
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
             print(f"Library versions saved to {file_path}")
         except Exception as e:
             print(f"Failed to write libs_info.txt: {e}")
@@ -302,14 +345,18 @@ def main():
     splash_pixmap.fill(Qt.white)
     painter = QPainter(splash_pixmap)
     painter.setPen(QColor(50, 50, 50))
-    painter.drawText(splash_pixmap.rect(), Qt.AlignCenter,
-                     "Threshold‑Researcher\nЗагрузка модулей...")
+    painter.drawText(
+        splash_pixmap.rect(),
+        Qt.AlignCenter,
+        "Threshold‑Researcher\nЗагрузка модулей...",
+    )
     painter.end()
 
     splash = QSplashScreen(splash_pixmap)
     splash.show()
-    splash.showMessage("Инициализация приложения...",
-                       Qt.AlignBottom | Qt.AlignCenter, Qt.black)
+    splash.showMessage(
+        "Инициализация приложения...", Qt.AlignBottom | Qt.AlignCenter, Qt.black
+    )
     app.processEvents()
 
     dialog = StartupDialog()
@@ -318,12 +365,18 @@ def main():
 
     selected = dialog.get_selected_tabs()
     if not selected:
-        QMessageBox.warning(None, "Предупреждение",
-                            "Не выбрано ни одной вкладки. Приложение будет закрыто.")
+        QMessageBox.warning(
+            None,
+            "Предупреждение",
+            "Не выбрано ни одной вкладки. Приложение будет закрыто.",
+        )
         sys.exit(0)
 
-    splash.showMessage("Загрузка выбранных вкладок...\nЭто может занять некоторое время",
-                       Qt.AlignBottom | Qt.AlignCenter, Qt.black)
+    splash.showMessage(
+        "Загрузка выбранных вкладок...\nЭто может занять некоторое время",
+        Qt.AlignBottom | Qt.AlignCenter,
+        Qt.black,
+    )
     app.processEvents()
 
     window = ImagePlayer(selected)
@@ -334,6 +387,7 @@ def main():
     window.showMaximized()
 
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))
 
 

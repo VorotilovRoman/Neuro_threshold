@@ -10,7 +10,6 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QPixmap
 from PyQt5.QtWidgets import (
     QDialog,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -19,6 +18,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from ui import dataset_source as source_dialogs
 from ui.dataset_audit.lifecycle import stale
 from ui.dataset_audit.workers import YoloValidationWorker
 from utils_new.dataset_audit.objects import load_pair_annotations
@@ -27,12 +27,7 @@ from utils_new.dataset_files_new import read_image, read_index_mask
 
 class DatasetModelController:
     def load_audit_model(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Модель YOLO",
-            "",
-            "YOLO weights (*.pt *.onnx *.engine);;Все файлы (*)",
-        )
+        path, _ = source_dialogs.get_open_file(self, "model_yolo")
         if not path:
             return
         self._audit_model_path = path
@@ -490,14 +485,12 @@ class DatasetModelController:
         dlg.exec_()
 
     def browse_val_data(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "data.yaml тестового датасета",
-            "",
-            "YAML (*.yaml *.yml);;Все файлы (*)",
-        )
-        if not path:
-            path = QFileDialog.getExistingDirectory(self, "Папка тестового датасета")
+        path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
+        if path:
+            self.val_data_edit.setText(path)
+
+    def browse_val_folder(self):
+        path = source_dialogs.get_directory(self, "dataset_root")
         if path:
             self.val_data_edit.setText(path)
 

@@ -21,7 +21,6 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -30,6 +29,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui import dataset_source as source_dialogs
 from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation.image_input import load_images_universal
 from ui.segmentation.jobs import BackgroundTask
@@ -725,12 +725,7 @@ class YoloDemoWindow(QMainWindow):
 
     # ---------- Загрузка изображений ----------
     def load_images(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Выберите изображения",
-            "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)",
-        )
+        paths, _ = source_dialogs.get_open_file(self, "images", multiple=True)
         if not paths:
             return
         self.current_folder = None
@@ -753,9 +748,7 @@ class YoloDemoWindow(QMainWindow):
             self.clear_images()
 
     def load_folder(self):
-        folder = QFileDialog.getExistingDirectory(
-            self, "Выберите папку с изображениями"
-        )
+        folder = source_dialogs.get_directory(self, "folder")
         if folder:
             self.current_folder = folder
             self.load_images_from_paths(folder)

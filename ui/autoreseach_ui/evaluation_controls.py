@@ -1,9 +1,10 @@
+from ui.dataset_source import DatasetSourceWidget, annotation_format_combo
+
 """Guided inputs and comparison controls with explicit next-action hints."""
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
@@ -33,36 +34,17 @@ def setup_evaluation_controls(owner, layout):
             "Выберите эталон: изображения с правильными рамками или контурами. Программа сравнит методы с этой разметкой."
         )
     )
-    buttons = QHBoxLayout()
-    owner.btn_truth_yaml = QPushButton("YOLO YAML…")
-    owner.btn_truth_folder = QPushButton("Папка датасета…")
-    owner.btn_truth_yaml.setToolTip(
-        "Файл YOLO data.yaml с путями к снимкам и TXT. Все перечисленные split входят в эталон."
-    )
-    owner.btn_truth_folder.setToolTip(
-        "Папка images + labels либо снимки с одноимёнными TXT. Если есть только TXT, размеры будут взяты из отчётов."
-    )
-    buttons.addWidget(owner.btn_truth_yaml)
-    buttons.addWidget(owner.btn_truth_folder)
-    box.addLayout(buttons)
+    owner.reference_source = DatasetSourceWidget(("reference_folder", "yolo_yaml"))
+    owner.btn_truth_yaml = owner.reference_source.button("yolo_yaml")
+    owner.btn_truth_folder = owner.reference_source.button("reference_folder")
+    box.addWidget(owner.reference_source)
     owner.truth_path = QLineEdit()
     owner.truth_path.setReadOnly(True)
     owner.truth_path.setPlaceholderText("Эталон ещё не выбран")
     box.addWidget(owner.truth_path)
     format_row = QHBoxLayout()
     format_row.addWidget(QLabel("Формат разметки:"))
-    owner.truth_format = QComboBox()
-    for title, key in [
-        ("Автоматически", "auto"),
-        ("BBox — осевые рамки", "detect"),
-        ("OBB — четыре угла", "obb_corners"),
-        ("OBB — XYWHR", "obb_xywhr"),
-        ("Segment — контуры", "segment"),
-    ]:
-        owner.truth_format.addItem(title, key)
-    owner.truth_format.setToolTip(
-        "Обычно подходит «Автоматически». Для четырёхточечного Segment выберите формат явно. Пустой существующий TXT — снимок без объектов; отсутствующий TXT — ошибка."
-    )
+    owner.truth_format = annotation_format_combo(mixed=False)
     format_row.addWidget(owner.truth_format, 1)
     box.addLayout(format_row)
     owner.lbl_truth = hint(
@@ -77,22 +59,13 @@ def setup_evaluation_controls(owner, layout):
             "Добавьте готовые отчёты для тех же изображений. Можно сравнить пороговые и градиентные методы вместе."
         )
     )
-    buttons = QHBoxLayout()
-    owner.btn_report_files = QPushButton("Добавить отчёты…")
-    owner.btn_select = QPushButton("Папка отчётов…")
-    owner.btn_clear_reports = QPushButton("Очистить")
-    owner.btn_report_files.setToolTip(
-        "Выберите один или несколько готовых *_full_report.txt и *_gradient_report.txt. Новые файлы дополняют уже загруженные."
-    )
-    owner.btn_select.setToolTip(
-        "Найти готовые отчёты в папке и вложенных каталогах. Незавершённые partial-файлы не загружаются."
-    )
-    owner.btn_clear_reports.setToolTip(
-        "Убрать загруженные отчёты из сравнения. Файлы на диске остаются на месте."
-    )
-    for button in (owner.btn_report_files, owner.btn_select, owner.btn_clear_reports):
-        buttons.addWidget(button)
-    box.addLayout(buttons)
+    owner.report_source = DatasetSourceWidget(("reports", "report_folder"))
+    owner.btn_report_files = owner.report_source.button("reports")
+    owner.btn_select = owner.report_source.button("report_folder")
+    owner.btn_clear_reports = QPushButton("Очистить отчёты")
+    box.addWidget(owner.report_source)
+    box.addWidget(owner.btn_clear_reports)
+
     owner.lbl_reports = hint("Отчёты ещё не загружены.")
     box.addWidget(owner.lbl_reports)
     box.addWidget(

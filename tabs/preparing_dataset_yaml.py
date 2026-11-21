@@ -54,7 +54,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
         setup_preparing_dataset_yaml_ui(self)
 
-        self.log("DatasetGenerator_new: utils_new/annotations, без зависимости от Ultralytics")
+        self.log(
+            "DatasetGenerator_new: utils_new/annotations, без зависимости от Ultralytics"
+        )
 
         # --- Пути и пары ---
         self.images_folder = None
@@ -75,11 +77,11 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
         # --- Режим ---
         self.dataset_type = 0
-        self.input_format = 'auto'
+        self.input_format = "auto"
         self.mask_pixel_offset_in = 1
 
         # --- Валидатор ---
-        self.validator = PairValidator(dataset_type=0, input_format='auto')
+        self.validator = PairValidator(dataset_type=0, input_format="auto")
 
         # --- Статистика ---
         self.color_type_stats = ImageStats.empty_color_stats()
@@ -99,7 +101,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.progress_bar.setFormat("Готово: %p%")
 
         # --- Инициализация UI ---
-        self.update_split(self.train_slider.value(), 'train')
+        self.update_split(self.train_slider.value(), "train")
 
         self.flip_horizontal.stateChanged.connect(self.update_multiplier_slider_state)
         self.flip_vertical.stateChanged.connect(self.update_multiplier_slider_state)
@@ -115,12 +117,18 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.test_slider.valueChanged.connect(self.update_split_counts)
 
         self.toggle_log_btn.clicked.connect(self.toggle_log)
-        self.dataset_type_combo.currentIndexChanged.connect(self._on_dataset_type_changed)
-        self.input_format_combo.currentIndexChanged.connect(self._on_input_format_changed)
+        self.dataset_type_combo.currentIndexChanged.connect(
+            self._on_dataset_type_changed
+        )
+        self.input_format_combo.currentIndexChanged.connect(
+            self._on_input_format_changed
+        )
         self.class_table.itemChanged.connect(self.on_class_table_item_changed)
         self.out_masks_offset.valueChanged.connect(self._on_out_masks_offset_changed)
 
-        self.include_empty_annotations.stateChanged.connect(self._on_include_empty_toggled)
+        self.include_empty_annotations.stateChanged.connect(
+            self._on_include_empty_toggled
+        )
 
         self.file_list.itemDoubleClicked.connect(self._on_file_list_double_clicked)
 
@@ -128,11 +136,15 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self._copy_shortcut.setContext(Qt.WidgetShortcut)
         self._copy_shortcut.activated.connect(self._copy_selected_rows_to_clipboard)
 
-        if hasattr(self, 'btn_convert_gray'):
-            self.btn_convert_gray.clicked.connect(lambda: self.convert_all_images('gray'))
-        if hasattr(self, 'btn_convert_rgb'):
-            self.btn_convert_rgb.clicked.connect(lambda: self.convert_all_images('color'))
-        if hasattr(self, 'btn_convert_8bit_png'):
+        if hasattr(self, "btn_convert_gray"):
+            self.btn_convert_gray.clicked.connect(
+                lambda: self.convert_all_images("gray")
+            )
+        if hasattr(self, "btn_convert_rgb"):
+            self.btn_convert_rgb.clicked.connect(
+                lambda: self.convert_all_images("color")
+            )
+        if hasattr(self, "btn_convert_8bit_png"):
             self.btn_convert_8bit_png.clicked.connect(self.convert_to_8bit_png)
 
         self.update_multiplier_slider_state()
@@ -140,7 +152,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         # Первичная синхронизация UI — после того, как все атрибуты
         # (dataset_type, input_format, validator, ...) установлены.
         try:
-            if hasattr(self, '_sync_all_states'):
+            if hasattr(self, "_sync_all_states"):
                 self._sync_all_states()
         except Exception as e:
             self._log_exception("Ошибка первичной синхронизации UI", e)
@@ -165,14 +177,14 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             return
         for row in range(self.class_table.rowCount()):
             original = self.class_table.item(row, 1)
-            if original is None or original.text().strip() != '0':
+            if original is None or original.text().strip() != "0":
                 continue
             checkbox = self.class_table.cellWidget(row, 4)
             if checkbox is not None:
                 checkbox.blockSignals(True)
                 checkbox.setChecked(False)
                 checkbox.setEnabled(False)
-                checkbox.setToolTip('Пиксель 0 является фоном, не классом объекта.')
+                checkbox.setToolTip("Пиксель 0 является фоном, не классом объекта.")
                 checkbox.blockSignals(False)
             self.update_included_classes()
             return
@@ -187,8 +199,13 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             if pixel_item is None:
                 continue
             pixel = int(pixel_item.text())
-            rows.append((pixel, name_item.text() if name_item else str(pixel),
-                         bool(checkbox and checkbox.isChecked())))
+            rows.append(
+                (
+                    pixel,
+                    name_item.text() if name_item else str(pixel),
+                    bool(checkbox and checkbox.isChecked()),
+                )
+            )
         return mask_classes_from_rows(rows)
 
     def _after_load_hook(self):
@@ -208,13 +225,13 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     def _update_color_stats_label(self):
         """Override: дополнительно включает/выключает кнопки конвертации."""
-        if not hasattr(self, 'color_stats_label'):
+        if not hasattr(self, "color_stats_label"):
             return
         text, enabled = ImageStats.format_stats_text(
-            self.color_type_stats, self.bit_type_stats, bool(self.pairs))
+            self.color_type_stats, self.bit_type_stats, bool(self.pairs)
+        )
         self.color_stats_label.setText(text)
-        for name in ('btn_convert_gray', 'btn_convert_rgb',
-                     'btn_convert_8bit_png'):
+        for name in ("btn_convert_gray", "btn_convert_rgb", "btn_convert_8bit_png"):
             if hasattr(self, name):
                 getattr(self, name).setEnabled(enabled)
 
@@ -222,24 +239,26 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         """Override: другой tooltip для invalid-пар."""
         item = QListWidgetItem(text)
         include_empty = self._is_include_empty()
-        if tag == 'invalid':
+        if tag == "invalid":
             item.setForeground(QColor(220, 0, 0))
-            item.setToolTip(f"❌ Некорректная пара: {error_msg}\n\n"
-                            f"Двойной клик — всё равно открыть.")
-        elif tag == 'empty':
+            item.setToolTip(
+                f"❌ Некорректная пара: {error_msg}\n\n"
+                f"Двойной клик — всё равно открыть."
+            )
+        elif tag == "empty":
             if include_empty:
                 item.setForeground(QColor(0, 140, 0))
                 item.setToolTip("Пустая аннотация — будет включена как негатив.")
             else:
                 item.setForeground(QColor(200, 120, 0))
                 item.setToolTip("Пустая аннотация — будет пропущена.")
-        elif tag == 'error':
+        elif tag == "error":
             item.setForeground(QColor(200, 0, 0))
             item.setToolTip("Ошибка чтения аннотации.")
-        elif tag == 'mixed':
+        elif tag == "mixed":
             item.setForeground(QColor(160, 0, 200))
             item.setToolTip("Смешанные типы аннотаций в файле.")
-        elif tag == 'unknown':
+        elif tag == "unknown":
             item.setForeground(QColor(120, 120, 120))
             item.setToolTip("Неизвестный формат аннотации.")
         return item
@@ -255,7 +274,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
         Колонка показывается только при input=masks или out_masks=True.
         """
-        input_type = getattr(self, 'dataset_type', 0)
+        input_type = getattr(self, "dataset_type", 0)
         try:
             out_masks = self.out_masks.isChecked()
         except Exception:
@@ -282,16 +301,19 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                 source_item = self.class_table.item(row, 1)
                 source_value = int(source_item.text()) if source_item else -1
                 if input_type == 1 and source_value == 0:
-                    pixel_text = 'Фон (0)'
+                    pixel_text = "Фон (0)"
                 else:
                     try:
                         new_id = int(new_id_item.text())
                     except (ValueError, TypeError):
-                        pixel_text = '-'
+                        pixel_text = "-"
                     else:
                         if input_type == 1:
-                            pixel_text = (str(self.mask_class_remap[source_value] + 1)
-                                          if source_value in self.mask_class_remap else '-')
+                            pixel_text = (
+                                str(self.mask_class_remap[source_value] + 1)
+                                if source_value in self.mask_class_remap
+                                else "-"
+                            )
                         else:
                             pixel_text = str(new_id + max(offset, 1))
 
@@ -328,7 +350,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     # YAML-патч для channels
     # ==================================================================
     def _get_selected_channels(self):
-        if hasattr(self, 'channels_combo'):
+        if hasattr(self, "channels_combo"):
             try:
                 return int(self.channels_combo.currentText().split()[0])
             except (ValueError, IndexError, AttributeError):
@@ -338,13 +360,13 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     def _find_dataset_yaml(self, folder, max_depth=4):
         if not folder or not os.path.isdir(folder):
             return None
-        candidates = ('data.yaml', 'data.yml', 'dataset.yaml', 'dataset.yml')
+        candidates = ("data.yaml", "data.yml", "dataset.yaml", "dataset.yml")
         for name in candidates:
             p = os.path.join(folder, name)
             if os.path.exists(p):
                 return p
         for root, dirs, files in os.walk(folder):
-            depth = root[len(folder):].count(os.sep)
+            depth = root[len(folder) :].count(os.sep)
             if depth > max_depth:
                 dirs[:] = []
                 continue
@@ -355,13 +377,15 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
     def _inject_channels_into_yaml(self, yaml_path, channels):
         try:
-            with open(yaml_path, 'r', encoding='utf-8') as f:
+            with open(yaml_path, "r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
-            old = cfg.get('channels', '—')
-            cfg['channels'] = int(channels)
-            with open(yaml_path, 'w', encoding='utf-8') as f:
+            old = cfg.get("channels", "—")
+            cfg["channels"] = int(channels)
+            with open(yaml_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, allow_unicode=True, sort_keys=False)
-            self.log(f"✅ {os.path.basename(yaml_path)}: channels = {channels} (было: {old})")
+            self.log(
+                f"✅ {os.path.basename(yaml_path)}: channels = {channels} (было: {old})"
+            )
             self._last_patched_yaml = yaml_path
             return True
         except Exception as e:
@@ -371,22 +395,28 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     # Массовая конвертация
     # ==================================================================
-    def convert_all_images(self, target='gray'):
+    def convert_all_images(self, target="gray"):
         if not self.pairs:
             return
         to_convert = select_pairs_for_conversion(self.pairs, self.validator, target)
         if not to_convert:
-            QMessageBox.information(self, "Конвертация не требуется",
-                                     "Все изображения уже соответствуют формату.")
+            QMessageBox.information(
+                self,
+                "Конвертация не требуется",
+                "Все изображения уже соответствуют формату.",
+            )
             return
 
-        target_label = "ЧБ (1 канал)" if target == 'gray' else "RGB (3 канала)"
+        target_label = "ЧБ (1 канал)" if target == "gray" else "RGB (3 канала)"
         reply = QMessageBox.question(
-            self, "Конвертация изображений",
+            self,
+            "Конвертация изображений",
             f"Будет перезаписано {len(to_convert)} из {len(self.pairs)} "
             f"изображений (в {target_label}).\n"
             f"Действие необратимо. Продолжить?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
         if reply != QMessageBox.Yes:
             return
 
@@ -398,16 +428,17 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         def on_progress(current, tot):
             percent = int(current / tot * 100)
             self.validation_progress_label.setText(
-                f"⏳ Конвертация: {current}/{tot} ({percent}%)")
+                f"⏳ Конвертация: {current}/{tot} ({percent}%)"
+            )
             QApplication.processEvents()
 
         converted, errors = convert_pairs_color(
-            to_convert, target, progress_cb=on_progress, log_cb=self.log)
+            to_convert, target, progress_cb=on_progress, log_cb=self.log
+        )
 
         self.validation_progress_label.setVisible(False)
         self.validation_progress_label.setText("")
-        self.log(f"Конвертация завершена: перезаписано {converted}, "
-                 f"ошибок {errors}")
+        self.log(f"Конвертация завершена: перезаписано {converted}, ошибок {errors}")
 
         self.validator.clear_cache()
         self._recompute_color_stats()
@@ -417,10 +448,12 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         if not self.pairs:
             return
         all_convert, need_convert = select_pairs_for_8bit_png(
-            self.pairs, self.validator)
+            self.pairs, self.validator
+        )
         if not need_convert:
-            QMessageBox.information(self, "Нечего конвертировать",
-                                     "Все изображения уже 8-битные PNG.")
+            QMessageBox.information(
+                self, "Нечего конвертировать", "Все изображения уже 8-битные PNG."
+            )
             return
 
         box = QMessageBox(self)
@@ -432,8 +465,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             f"Маски не конвертируются (остаются в своём dtype)."
         )
         btn_all = box.addButton(f"Все ({len(all_convert)})", QMessageBox.AcceptRole)
-        btn_only = box.addButton(f"Только не-8bit-PNG ({len(need_convert)})",
-                                  QMessageBox.AcceptRole)
+        btn_only = box.addButton(
+            f"Только не-8bit-PNG ({len(need_convert)})", QMessageBox.AcceptRole
+        )
         btn_cancel = box.addButton("Отмена", QMessageBox.RejectRole)
         box.setDefaultButton(btn_only)
         box.exec_()
@@ -451,13 +485,14 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         def on_progress(current, tot):
             percent = int(current / tot * 100)
             self.validation_progress_label.setText(
-                f"⏳ Конвертация: {current}/{tot} ({percent}%)")
+                f"⏳ Конвертация: {current}/{tot} ({percent}%)"
+            )
             QApplication.processEvents()
 
-        skip_masks = (self.dataset_type == 1)
+        skip_masks = self.dataset_type == 1
         converted, errors, path_map = convert_pairs_to_8bit_png(
-            to_convert, progress_cb=on_progress, log_cb=self.log,
-            skip_masks=skip_masks)
+            to_convert, progress_cb=on_progress, log_cb=self.log, skip_masks=skip_masks
+        )
 
         self.validation_progress_label.setVisible(False)
         self.validation_progress_label.setText("")
@@ -468,8 +503,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             for pair in self.pairs:
                 img_path = pair[0]
                 if img_path in path_map:
-                    new_pairs.append((path_map[img_path],
-                                       pair[1] if len(pair) > 1 else None))
+                    new_pairs.append(
+                        (path_map[img_path], pair[1] if len(pair) > 1 else None)
+                    )
                 else:
                     new_pairs.append(pair)
             self.pairs = new_pairs
@@ -485,18 +521,25 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self._refresh_mask_pixel_column()
 
     def update_multiplier_slider_state(self):
-        is_masks = (getattr(self, 'dataset_type', 0) == 1)
-        any_aug = (self.flip_horizontal.isChecked() or
-                   self.flip_vertical.isChecked() or
-                   self.rotate_90.isChecked() or
-                   (not is_masks and (self.random_rotate.isChecked() or
-                                       self.random_crop.isChecked() or
-                                       self.shear.isChecked())))
+        is_masks = getattr(self, "dataset_type", 0) == 1
+        any_aug = (
+            self.flip_horizontal.isChecked()
+            or self.flip_vertical.isChecked()
+            or self.rotate_90.isChecked()
+            or (
+                not is_masks
+                and (
+                    self.random_rotate.isChecked()
+                    or self.random_crop.isChecked()
+                    or self.shear.isChecked()
+                )
+            )
+        )
         self.aug_multiplier_slider.setEnabled(any_aug)
         if not any_aug:
             # The slider keeps the user's last choice; without active
             # augmentations the actual generation multiplier is always 1.
-            self.aug_multiplier_label.setText('—')
+            self.aug_multiplier_label.setText("—")
         else:
             discrete_count = 0
             if self.flip_horizontal.isChecked():
@@ -506,33 +549,42 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             if self.rotate_90.isChecked():
                 discrete_count += 2
             if is_masks:
-                max_unique = 2 ** discrete_count if discrete_count > 0 else 1
+                max_unique = 2**discrete_count if discrete_count > 0 else 1
                 max_unique = min(max_unique, 8)
                 if self.aug_multiplier_slider.value() > max_unique:
-                    self.log(f"⚠️ При input=masks максимум {max_unique} "
-                             f"уникальных вариантов (только flip и rotate 90).")
+                    self.log(
+                        f"⚠️ При input=masks максимум {max_unique} "
+                        f"уникальных вариантов (только flip и rotate 90)."
+                    )
             else:
-                if self.random_rotate.isChecked() or self.random_crop.isChecked() \
-                        or self.shear.isChecked():
+                if (
+                    self.random_rotate.isChecked()
+                    or self.random_crop.isChecked()
+                    or self.shear.isChecked()
+                ):
                     pass
                 else:
-                    max_unique = 2 ** discrete_count if discrete_count > 0 else 1
+                    max_unique = 2**discrete_count if discrete_count > 0 else 1
                     if self.aug_multiplier_slider.value() > max_unique:
-                        self.log(f"⚠️ Множитель {self.aug_multiplier_slider.value()} "
-                                 f"может дать дубликаты: максимум уникальных "
-                                 f"вариантов — {max_unique}.")
+                        self.log(
+                            f"⚠️ Множитель {self.aug_multiplier_slider.value()} "
+                            f"может дать дубликаты: максимум уникальных "
+                            f"вариантов — {max_unique}."
+                        )
         self.update_multiplier_label(self.aug_multiplier_slider.value())
 
     def update_multiplier_label(self, value):
         active = self.aug_multiplier_slider.isEnabled()
-        self.aug_multiplier_label.setText(f"{value}×" if active else '—')
-        if hasattr(self, 'augmentation_mode_hint'):
+        self.aug_multiplier_label.setText(f"{value}×" if active else "—")
+        if hasattr(self, "augmentation_mode_hint"):
             if not active:
-                message = 'Аугментации отключены. На выходе один экземпляр каждого снимка.'
+                message = (
+                    "Аугментации отключены. На выходе один экземпляр каждого снимка."
+                )
             elif int(value) == 1:
-                message = '1× — каждый исходный снимок заменяется одним аугментированным; дополнительных копий нет.'
+                message = "1× — каждый исходный снимок заменяется одним аугментированным; дополнительных копий нет."
             else:
-                message = f'{int(value)}× — исходный снимок и до {int(value)-1} дополнительных аугментированных вариантов.'
+                message = f"{int(value)}× — исходный снимок и до {int(value) - 1} дополнительных аугментированных вариантов."
             self.augmentation_mode_hint.setText(message)
         self.update_split_counts()
 
@@ -544,7 +596,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             train = self.train_slider.value()
             val = self.val_slider.value()
             test = self.test_slider.value()
-            if source == 'train':
+            if source == "train":
                 if val + test == 0:
                     new_val = 50
                     new_test = 50
@@ -558,14 +610,14 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                     new_val = (100 - train) - new_test
                 self.val_slider.setValue(new_val)
                 self.test_slider.setValue(new_test)
-            elif source == 'val':
+            elif source == "val":
                 new_test = 100 - train - value
                 if new_test < 0:
                     new_test = 0
                     value = 100 - train
                 self.test_slider.setValue(new_test)
                 self.val_slider.setValue(value)
-            elif source == 'test':
+            elif source == "test":
                 new_val = 100 - train - value
                 if new_val < 0:
                     new_val = 0
@@ -592,8 +644,11 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         train_pct = self.train_slider.value() / 100.0
         val_pct = self.val_slider.value() / 100.0
         test_pct = self.test_slider.value() / 100.0
-        multiplier = (self.aug_multiplier_slider.value()
-                       if self.aug_multiplier_slider.isEnabled() else 1)
+        multiplier = (
+            self.aug_multiplier_slider.value()
+            if self.aug_multiplier_slider.isEnabled()
+            else 1
+        )
         total_generated = total_pairs * multiplier
         train_count = int(total_generated * train_pct)
         val_count = int(total_generated * val_pct)
@@ -602,14 +657,16 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.val_count_label.setText(str(val_count))
         self.test_count_label.setText(str(test_count))
         self.total_count_with_multiplier.setText(
-            f"Итоговое кол-во снимков: {total_generated}")
+            f"Итоговое кол-во снимков: {total_generated}"
+        )
 
     # ==================================================================
     # Выходная папка
     # ==================================================================
     def select_output_folder(self):
         folder = QFileDialog.getExistingDirectory(
-            self, "Select folder to save YAML and dataset")
+            self, "Select folder to save YAML and dataset"
+        )
         if folder:
             self.output_folder = folder
             self.output_path_display.setText(folder)
@@ -619,9 +676,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
     def open_output_folder(self):
         if self.output_folder and os.path.exists(self.output_folder):
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 os.startfile(self.output_folder)
-            elif sys.platform == 'darwin':
+            elif sys.platform == "darwin":
                 os.system(f'open "{self.output_folder}"')
             else:
                 os.system(f'xdg-open "{self.output_folder}"')
@@ -631,10 +688,12 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     def update_generate_button_state(self):
         has_pairs = len(self.pairs) > 0
         has_output = bool(self.output_folder)
-        any_out = (self.out_yolo_txt.isChecked()
-                   or self.out_masks.isChecked()
-                   or self.out_coco.isChecked()
-                   or self.dataset_type == 2)
+        any_out = (
+            self.out_yolo_txt.isChecked()
+            or self.out_masks.isChecked()
+            or self.out_coco.isChecked()
+            or self.dataset_type == 2
+        )
         self.generate_btn.setEnabled(has_pairs and has_output and any_out)
 
     # ==================================================================
@@ -649,11 +708,11 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             return
 
         input_type = self.dataset_type
-        input_format = self.input_format_combo.currentData() or 'auto'
+        input_format = self.input_format_combo.currentData() or "auto"
 
         out_yolo_txt = self.out_yolo_txt.isChecked()
-        out_yolo_subtype = self.out_yolo_subtype.currentData() or 'keep'
-        out_yolo_obb_format = self.out_yolo_obb_format.currentData() or 'corners'
+        out_yolo_subtype = self.out_yolo_subtype.currentData() or "keep"
+        out_yolo_obb_format = self.out_yolo_obb_format.currentData() or "corners"
         out_masks = self.out_masks.isChecked()
         out_masks_offset = int(self.out_masks_offset.value())
         out_unet_yaml = self.out_unet_yaml.isChecked()
@@ -661,16 +720,21 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
         if input_type != 2 and not any([out_yolo_txt, out_masks, out_coco]):
             QMessageBox.warning(
-                self, "Форматы вывода",
+                self,
+                "Форматы вывода",
                 "Не выбран ни один формат вывода:\n"
-                "включите YOLO labels, U-Net masks или COCO.")
+                "включите YOLO labels, U-Net masks или COCO.",
+            )
             return
         if out_unet_yaml and not out_masks:
             reply = QMessageBox.question(
-                self, "U-Net YAML без масок",
+                self,
+                "U-Net YAML без масок",
                 "masks_data.yaml без масок бессмысленен.\n"
                 "Включить U-Net masks автоматически?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
             if reply == QMessageBox.Yes:
                 out_masks = True
                 self.out_masks.setChecked(True)
@@ -679,7 +743,8 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
 
         if input_type == 1 and (out_yolo_txt or out_coco):
             reply = QMessageBox.question(
-                self, "⚠️ Lossy-конвертация из масок",
+                self,
+                "⚠️ Lossy-конвертация из масок",
                 "Маски будут преобразованы в полигоны через findContours.\n"
                 "Это НЕ воспроизведёт маску пиксель в пиксель:\n"
                 "  • дырки внутри объектов теряются;\n"
@@ -687,41 +752,54 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                 "  • границы смещаются на 1–2 пикселя.\n\n"
                 "Исходные маски в masks/{split} останутся нетронутыми.\n\n"
                 "Продолжить?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
             if reply != QMessageBox.Yes:
                 return
 
         _, invalid_count = self._validate_all_pairs()
         if invalid_count > 0:
             reply = QMessageBox.question(
-                self, "Некорректные пары",
+                self,
+                "Некорректные пары",
                 f"Обнаружено {invalid_count} некорректных пар.\n"
                 f"Они будут исключены из датасета. Продолжить?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
             if reply != QMessageBox.Yes:
                 return
 
         error_msg = PairValidator.check_pair_type_consistency()
         if error_msg:
             reply = QMessageBox.question(
-                self, "Несоответствие типа",
+                self,
+                "Несоответствие типа",
                 f"{error_msg}\nВсё равно продолжить?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
             if reply == QMessageBox.No:
                 return
 
-        non_8bit = (self.bit_type_stats.get('uint16', 0) +
-                    self.bit_type_stats.get('int16', 0) +
-                    self.bit_type_stats.get('float', 0) +
-                    self.bit_type_stats.get('other', 0))
+        non_8bit = (
+            self.bit_type_stats.get("uint16", 0)
+            + self.bit_type_stats.get("int16", 0)
+            + self.bit_type_stats.get("float", 0)
+            + self.bit_type_stats.get("other", 0)
+        )
         if non_8bit > 0 and input_type != 1:
             reply = QMessageBox.question(
-                self, "Не-8bit изображения",
+                self,
+                "Не-8bit изображения",
                 f"В датасете {non_8bit} изображений не являются 8-битными.\n"
                 f"YOLO может упасть с ошибкой CV_16U.\n"
                 f"Рекомендуется «Перевести в 8 бит PNG».\n\n"
                 f"Всё равно продолжить?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
             if reply != QMessageBox.Yes:
                 return
 
@@ -740,19 +818,21 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             target_size = self.resize_size.value()
 
         augmentations = {
-            'horizontal_flip': self.flip_horizontal.isChecked(),
-            'vertical_flip': self.flip_vertical.isChecked(),
-            'rotate_90': self.rotate_90.isChecked(),
-            'random_rotate': self.random_rotate.isChecked() and input_type != 1,
-            'random_rotate_angle': self.random_rotate_angle.value(),
-            'random_crop': self.random_crop.isChecked() and input_type != 1,
-            'shear': self.shear.isChecked() and input_type != 1,
-            'shear_angle': self.shear_angle.value(),
+            "horizontal_flip": self.flip_horizontal.isChecked(),
+            "vertical_flip": self.flip_vertical.isChecked(),
+            "rotate_90": self.rotate_90.isChecked(),
+            "random_rotate": self.random_rotate.isChecked() and input_type != 1,
+            "random_rotate_angle": self.random_rotate_angle.value(),
+            "random_crop": self.random_crop.isChecked() and input_type != 1,
+            "shear": self.shear.isChecked() and input_type != 1,
+            "shear_angle": self.shear_angle.value(),
         }
-        has_augmentations = any(v for k, v in augmentations.items()
-                                 if k not in ['random_rotate_angle', 'shear_angle'])
-        aug_multiplier = (self.aug_multiplier_slider.value()
-                           if has_augmentations else 1)
+        has_augmentations = any(
+            v
+            for k, v in augmentations.items()
+            if k not in ["random_rotate_angle", "shear_angle"]
+        )
+        aug_multiplier = self.aug_multiplier_slider.value() if has_augmentations else 1
 
         selected_channels = self._get_selected_channels()
         class_names = self.get_class_names_from_table()
@@ -765,12 +845,15 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             try:
                 mask_class_remap, class_names = self._mask_generation_classes()
             except (TypeError, ValueError) as exc:
-                QMessageBox.critical(self, 'Классы маски', str(exc))
+                QMessageBox.critical(self, "Классы маски", str(exc))
                 return
             included_orig_ids = set(mask_class_remap)
             if not mask_class_remap and not self.include_empty_annotations.isChecked():
-                QMessageBox.warning(self, 'Классы маски',
-                                    'Не выбран ни один класс объекта (пиксель > 0).')
+                QMessageBox.warning(
+                    self,
+                    "Классы маски",
+                    "Не выбран ни один класс объекта (пиксель > 0).",
+                )
                 return
         num_classes = len(class_names)
 
@@ -788,35 +871,47 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                 skipped_invalid += 1
 
         if not pairs_for_generation:
-            QMessageBox.critical(self, "Ошибка",
-                                  "Все пары некорректны. Генерация невозможна.")
+            QMessageBox.critical(
+                self, "Ошибка", "Все пары некорректны. Генерация невозможна."
+            )
             return
 
         norm_pairs = normalize_generation_pairs(pairs_for_generation, input_type)
 
         self.log("=== Dataset generation started ===")
         self.log(f"Input: type={input_type}, format={input_format}")
-        self.log(f"Outputs: yolo_txt={out_yolo_txt} (subtype={out_yolo_subtype}, "
-                 f"obb={out_yolo_obb_format}), masks={out_masks} "
-                 f"(offset={out_masks_offset}), unet_yaml={out_unet_yaml}, "
-                 f"coco={out_coco}")
-        self.log(f"Split: train={train_pct*100:.0f}%, val={val_pct*100:.0f}%, "
-                 f"test={test_pct*100:.0f}%")
-        self.log(f"Image size: {'keep' if target_size is None else target_size} "
-                 f"(mode={resize_mode})")
+        self.log(
+            f"Outputs: yolo_txt={out_yolo_txt} (subtype={out_yolo_subtype}, "
+            f"obb={out_yolo_obb_format}), masks={out_masks} "
+            f"(offset={out_masks_offset}), unet_yaml={out_unet_yaml}, "
+            f"coco={out_coco}"
+        )
+        self.log(
+            f"Split: train={train_pct * 100:.0f}%, val={val_pct * 100:.0f}%, "
+            f"test={test_pct * 100:.0f}%"
+        )
+        self.log(
+            f"Image size: {'keep' if target_size is None else target_size} "
+            f"(mode={resize_mode})"
+        )
         self.log(f"Augmentation: {'enabled' if has_augmentations else 'disabled'}")
         if has_augmentations:
             self.log(f"Augmentation multiplier: {aug_multiplier}x")
         self.log(f"Classes: {num_classes}")
         if skipped_invalid:
             self.log(f"Пропущено некорректных пар: {skipped_invalid}")
-        self.log(f"Min annotation area: {min_ann_area_px} px² "
-                 f"({'off' if min_ann_area_px <= 0 else 'on'})")
+        self.log(
+            f"Min annotation area: {min_ann_area_px} px² "
+            f"({'off' if min_ann_area_px <= 0 else 'on'})"
+        )
         self._set_generate_button_active(True)
         self.cancel_btn.setEnabled(True)
 
-        bg_color = ((0, 0, 0) if self.bg_color_combo.currentText() == "Black"
-                    else (255, 255, 255))
+        bg_color = (
+            (0, 0, 0)
+            if self.bg_color_combo.currentText() == "Black"
+            else (255, 255, 255)
+        )
 
         # class_mapping и mask_class_remap уже сформированы выше на
         # основании включённых строк таблицы с исключением фона.
@@ -832,10 +927,16 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             labels_path,
             self.output_folder,
             norm_pairs,
-            train_pct, val_pct, test_pct,
+            train_pct,
+            val_pct,
+            test_pct,
             target_size,
-            augmentations, has_augmentations, aug_multiplier,
-            class_names, class_mapping, bg_color,
+            augmentations,
+            has_augmentations,
+            aug_multiplier,
+            class_names,
+            class_mapping,
+            bg_color,
             input_type,
             self.masks_folder,
             num_classes,
@@ -857,8 +958,11 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             mask_pixel_offset_in=self.mask_pixel_offset_in,
             min_ann_area_px=min_ann_area_px,
             split_by_source=self.group_augmentations_by_source.isChecked(),
-            random_seed=(self.random_seed_spin.value()
-                         if self.use_random_seed.isChecked() else None),
+            random_seed=(
+                self.random_seed_spin.value()
+                if self.use_random_seed.isChecked()
+                else None
+            ),
         )
 
         self.generator_thread.log_signal.connect(self.log)
@@ -871,7 +975,8 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             self.generate_btn.setEnabled(False)
             self.generate_btn.setText("Генерация...")
             self.generate_btn.setStyleSheet(
-                "background-color: orange; color: black; font-weight: bold;")
+                "background-color: orange; color: black; font-weight: bold;"
+            )
         else:
             self.generate_btn.setEnabled(True)
             self.generate_btn.setText("Generate Dataset")
@@ -903,8 +1008,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             if self.out_yolo_txt.isChecked():
                 yaml_path = self._find_dataset_yaml(self.output_folder)
                 if yaml_path:
-                    self._inject_channels_into_yaml(yaml_path,
-                                                     self._get_selected_channels())
+                    self._inject_channels_into_yaml(
+                        yaml_path, self._get_selected_channels()
+                    )
                 else:
                     self.log("⚠️ data.yaml не найден — channels не прописан")
 
@@ -931,8 +1037,9 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                 self.log("Исходные файлы удалены, список пар очищен.")
         else:
             self.progress_bar.setValue(0)
-            QMessageBox.critical(self, "Ошибка",
-                                  f"Ошибка генерации датасета:\n{message}")
+            QMessageBox.critical(
+                self, "Ошибка", f"Ошибка генерации датасета:\n{message}"
+            )
         self.log(message)
 
 
@@ -941,4 +1048,5 @@ if __name__ == "__main__":
     window = DatasetPreparationWindow()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

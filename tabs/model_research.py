@@ -11,13 +11,16 @@ prepare_windows_torch()
 
 import sys
 from pathlib import Path
+
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox
-from ui.autoreseach_ui.model_research_ui import setup_model_research_ui
+
+from ui import dataset_source as source_dialogs
 from ui.autoreseach_ui.evaluation_controller import EvaluationController
+from ui.autoreseach_ui.model_research_ui import setup_model_research_ui
 from ui.segmentation.preset_bindings import (
-    ThresholdPresetManager,
     GradientPresetManager,
+    ThresholdPresetManager,
 )
 from utils_new.autoreseach_utils.evaluation_export import export_evaluation
 from utils_new.autoreseach_utils.workflow import input_guidance, selected_presets
@@ -128,29 +131,17 @@ class ModelResearchApp(QMainWindow):
         self._invalidate_evaluation()
 
     def select_truth_yaml(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Выберите правильную ручную разметку: YOLO YAML",
-            "",
-            "YOLO YAML (*.yaml *.yml)",
-        )
+        path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
         if path:
             self.set_ground_truth_source(path)
 
     def select_truth_folder(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "Выберите папку эталонных изображений с TXT или папку только с TXT"
-        )
+        path = source_dialogs.get_directory(self, "reference_folder")
         if path:
             self.set_ground_truth_source(path)
 
     def select_report_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Добавьте готовые пороговые и градиентные отчёты",
-            "",
-            "Готовые отчёты (*_full_report.txt *_gradient_report.txt);;Текстовые файлы (*.txt)",
-        )
+        paths, _ = source_dialogs.get_open_file(self, "reports", multiple=True)
         if paths:
             self._load_report_paths(paths)
 
@@ -166,10 +157,7 @@ class ModelResearchApp(QMainWindow):
         return accepted
 
     def select_folder(self):
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Выберите папку готовых отчётов; вложенные каталоги тоже будут прочитаны",
-        )
+        folder = source_dialogs.get_directory(self, "report_folder")
         if folder and not self.evaluation_controller.busy:
             self._invalidate_evaluation()
             self.evaluation_controller.load_folder(folder, self._report_paths)

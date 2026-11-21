@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui.dataset_source import DatasetSourceWidget
 from ui.DL_predict_settings import YOLOInferenceSettings
 from ui.log_widget import LogWidget
 
@@ -56,8 +57,9 @@ class setup_yolo_find_img_ui(object):
         left_header = QHBoxLayout()
         left_header.addWidget(QLabel("Файловая система"))
         left_header.addStretch()
-        self.select_folder_btn = QPushButton("Выбрать папку…")
-        left_header.addWidget(self.select_folder_btn)
+        self.dataset_source = DatasetSourceWidget(("folder",), profile="yolo_sort")
+        self.select_folder_btn = self.dataset_source.button("folder")
+        left_layout.addWidget(self.dataset_source)
         left_layout.addLayout(left_header)
 
         self.current_folder_label = QLabel("Папка не выбрана")

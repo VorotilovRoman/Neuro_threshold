@@ -4,6 +4,7 @@
 UI attribute/callback contract stays compatible with the old mixin. Does not
 modify other tabs. All label decoding/conversion is via utils_new.
 """
+
 import os
 import tempfile
 import traceback
@@ -13,20 +14,18 @@ from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
-    QFileDialog,
-    QLabel,
     QListWidgetItem,
     QMessageBox,
     QTableWidgetItem,
 )
 
+from ui import dataset_source as source_dialogs
 from ui.pair_validation_dialog_new import PairValidationDialog
 from utils_new.dataset_catalog_new import (
     CatalogSourceError,
     collect_label_classes,
     collect_mask_classes,
     dense_class_remap,
-    discover_coco_json,
     import_coco_catalog,
     load_unet_catalog,
     load_yolo_catalog,
@@ -40,7 +39,6 @@ from utils_new.dataset_pair_tools_new import (
     scan_image_only_pairs,
     scan_segmentation_pairs,
 )
-from utils_new.dataset_pair_validator_new import PairValidator
 from utils_new.dataset_unet_new import is_unet_yaml
 
 
@@ -83,21 +81,14 @@ class DatasetLoaderMixin:
         Подготовка переопределяет (там ещё output-group и аугментации)."""
         input_type = self.dataset_type_combo.currentData()
         self.input_format_combo.setEnabled(input_type == 0)
-        if input_type == 0:
-            self.btn_labels.setText("Load Labels")
-            self.btn_labels.setEnabled(True)
-        elif input_type == 1:
-            self.btn_labels.setText("Load Masks")
-            self.btn_labels.setEnabled(True)
-        else:
-            self.btn_labels.setText("No labels (images only)")
-            self.btn_labels.setEnabled(False)
+        if hasattr(self, "dataset_source"):
+            self.dataset_source.set_dataset_type(input_type)
         self._refresh_mask_pixel_column()
 
     def _refresh_mask_pixel_column(self):
         """Дефолт: колонка Mask pixel видна только при input=masks.
         Подготовка переопределяет (там ещё out_masks и заполнение значений)."""
-        input_type = getattr(self, 'dataset_type', 0)
+        input_type = getattr(self, "dataset_type", 0)
         try:
             self.class_table.setColumnHidden(3, input_type != 1)
         except Exception:
@@ -153,7 +144,7 @@ class DatasetLoaderMixin:
 
     # ---------------- выбор папок ----------------
     def select_images_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select folder with images")
+        folder = source_dialogs.get_directory(self, "folder")
         if folder:
             self._yaml_mode = False
             self._source_yaml_path = None
@@ -165,37 +156,43 @@ class DatasetLoaderMixin:
     def select_labels_folder(self):
         if self.dataset_type == 2:
             return
+        kind = "labels" if self.dataset_type == 0 else "masks"
+        folder = source_dialogs.get_directory(self, kind)
+        if not folder:
+            return
         self._yaml_mode = False
         self._source_yaml_path = None
         self.validator.clear_cache()
         if self.dataset_type == 0:
-            folder = QFileDialog.getExistingDirectory(self, "Select folder with label files")
-            if folder:
-                self.labels_folder = folder
-                self.masks_folder = None
-                self.log(f"Labels folder: {folder}")
-                self.scan_pairs()
+            self.labels_folder = folder
+            self.masks_folder = None
         else:
-            folder = QFileDialog.getExistingDirectory(self, "Select folder with mask images")
-            if folder:
-                self.masks_folder = folder
-                self.labels_folder = folder
-                self.log(f"Masks folder: {folder}")
-                self.scan_pairs()
+            self.masks_folder = folder
+            self.labels_folder = None
+        self.log(f"{source_dialogs.ACTIONS[kind][0]} {folder}")
+        self.scan_pairs()
 
     # ---------------- YOLO YAML ----------------
     def load_from_yaml(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select YOLO data.yaml", "",
-            "YAML files (*.yaml *.yml);;All files (*)")
+        file_path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
         if not file_path:
             return
         if is_unet_yaml(file_path):
+            if self.dataset_type_combo.findData(1) < 0:
+                QMessageBox.warning(
+                    self,
+                    "Неподдерживаемый источник",
+                    "Эта вкладка не принимает индексные маски. Выберите YOLO YAML с TXT или COCO.",
+                )
+                return
             reply = QMessageBox.question(
-                self, "Похоже на U-Net YAML",
+                self,
+                "Похоже на U-Net YAML",
                 f"Файл {os.path.basename(file_path)} похож на U-Net-датасет "
                 f"(есть masks-поля). Загрузить его как U-Net?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
             if reply == QMessageBox.Yes:
                 self._load_unet_from_path(file_path)
                 return
@@ -207,22 +204,25 @@ class DatasetLoaderMixin:
             pairs = catalog.pairs
             names = catalog.class_names
             root = catalog.root
-            splits_info = catalog.metadata['split_counts']
+            splits_info = catalog.metadata["split_counts"]
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать YAML:\n{e}")
             return
 
         if not pairs:
-            QMessageBox.warning(self, "Ошибка",
-                                "В YAML не найдено ни одной существующей папки с изображениями.")
+            QMessageBox.warning(
+                self,
+                "Ошибка",
+                "В YAML не найдено ни одной существующей папки с изображениями.",
+            )
             return
 
         missing = sum(1 for _, lbl in pairs if lbl is None)
         with_labels = [(img, lbl) for img, lbl in pairs if lbl is not None]
         if not with_labels:
             QMessageBox.warning(
-                self, "Ошибка",
-                f"Найдено {len(pairs)} изображений, но ни одного .txt.")
+                self, "Ошибка", f"Найдено {len(pairs)} изображений, но ни одного .txt."
+            )
             return
 
         self._yaml_mode = True
@@ -237,7 +237,7 @@ class DatasetLoaderMixin:
         self._apply_loaded_pairs(
             pairs=with_labels,
             input_type=0,
-            input_format='auto',
+            input_format="auto",
             class_names_from_yaml=names,
             source_label=f"YAML: {file_path}",
             source_yaml=file_path,
@@ -258,50 +258,15 @@ class DatasetLoaderMixin:
         self._handle_load_coco(replace=False)
 
     def _handle_load_coco(self, replace):
-        choice = self._ask_coco_source()
-        if choice is None:
-            return
-        if choice == 'files':
-            paths, _ = QFileDialog.getOpenFileNames(
-                self, "Select COCO JSON(s)", "", "JSON files (*.json);;All files (*)")
-            if not paths:
-                return
-        else:
-            folder = QFileDialog.getExistingDirectory(self, "Select folder with COCO JSONs")
-            if not folder:
-                return
-            paths = self._find_coco_json_in_folder(folder)
-            if not paths:
-                QMessageBox.warning(self, "COCO", f"В папке не найдено COCO JSON.\n{folder}")
-                return
-            self.log(f"[COCO] Найдено {len(paths)} JSON в {folder}")
-        self._load_coco_from_paths(paths, replace=replace)
-
-    def _ask_coco_source(self):
-        box = QMessageBox(self)
-        box.setWindowTitle("COCO")
-        box.setText("Как выбрать COCO JSON?")
-        btn_files = box.addButton("Select files...", QMessageBox.AcceptRole)
-        btn_folder = box.addButton("Select folder...", QMessageBox.AcceptRole)
-        box.addButton("Отмена", QMessageBox.RejectRole)
-        box.setDefaultButton(btn_files)
-        box.exec_()
-        clicked = box.clickedButton()
-        if clicked is btn_files:
-            return 'files'
-        if clicked is btn_folder:
-            return 'folder'
-        return None
-
-    def _find_coco_json_in_folder(self, folder):
-        return discover_coco_json(folder)
-
+        paths = source_dialogs.choose_coco_sources(self)
+        if paths:
+            self._load_coco_from_paths(paths, replace=replace)
 
     def _get_coco_tmp_labels_dir(self, first_json_path=None):
-        existing = getattr(self, '_coco_tmp_labels_dir', None)
+        existing = getattr(self, "_coco_tmp_labels_dir", None)
         if existing:
             return existing
-        tmp = tempfile.mkdtemp(prefix='threshold_coco_labels_')
+        tmp = tempfile.mkdtemp(prefix="threshold_coco_labels_")
         self._coco_tmp_labels_dir = tmp
         return tmp
 
@@ -328,22 +293,28 @@ class DatasetLoaderMixin:
         try:
             catalog = import_coco_catalog(json_paths, existing_names, log_cb=self.log)
         except CatalogSourceError as exc:
-            QMessageBox.critical(self, 'Ошибка COCO', f'Не удалось загрузить:\n{exc}')
+            QMessageBox.critical(self, "Ошибка COCO", f"Не удалось загрузить:\n{exc}")
             return
         if not catalog.sources:
-            QMessageBox.warning(self, 'COCO', 'Не найдено ни одного изображения.')
+            QMessageBox.warning(self, "COCO", "Не найдено ни одного изображения.")
             return
         tmp_dir = self._get_coco_tmp_labels_dir(catalog.sources[0].path)
         new_pairs = []
         for source in catalog.sources:
-            prefix = f'j{self._coco_json_counter:03d}_'
+            prefix = f"j{self._coco_json_counter:03d}_"
             self._coco_json_counter += 1
             try:
-                new_pairs.extend(write_yolo_txt_for_coco_items(
-                    source.items, tmp_dir, class_remap=None,
-                    log_cb=self.log, name_prefix=prefix))
+                new_pairs.extend(
+                    write_yolo_txt_for_coco_items(
+                        source.items,
+                        tmp_dir,
+                        class_remap=None,
+                        log_cb=self.log,
+                        name_prefix=prefix,
+                    )
+                )
             except Exception as exc:
-                self._log_exception(f'Ошибка записи .txt из {source.path}', exc)
+                self._log_exception(f"Ошибка записи .txt из {source.path}", exc)
                 return
         class_names = catalog.class_names
         self.pairs = new_pairs if replace else base_pairs + new_pairs
@@ -351,14 +322,14 @@ class DatasetLoaderMixin:
         self.labels_folder = tmp_dir
         self.masks_folder = None
         self.dataset_type = 0
-        self.input_format = 'auto'
+        self.input_format = "auto"
         self.validator.set_dataset_type(0)
-        self.validator.set_input_format('auto')
+        self.validator.set_input_format("auto")
         self.dataset_type_combo.blockSignals(True)
         self.input_format_combo.blockSignals(True)
         try:
             self.dataset_type_combo.setCurrentIndex(0)
-            idx = self.input_format_combo.findData('auto')
+            idx = self.input_format_combo.findData("auto")
             if idx >= 0:
                 self.input_format_combo.setCurrentIndex(idx)
         finally:
@@ -370,36 +341,42 @@ class DatasetLoaderMixin:
         self._recompute_color_stats()
         self._fill_class_table_from_dict(class_names, preserve_include=True)
         self._rebuild_file_list_display(pairs=self.pairs)
-        action = 'Загрузка' if replace else 'Добавление'
-        self.log(f'=== {action} COCO ({len(catalog.sources)} файлов) ===')
+        action = "Загрузка" if replace else "Добавление"
+        self.log(f"=== {action} COCO ({len(catalog.sources)} файлов) ===")
         for source in catalog.sources:
-            self.log(f'  • {os.path.basename(source.path)}: images={len(source.items)}')
-        self.log(f'Итого: пар={len(self.pairs)}, классов={len(class_names)}')
-        extra = f'  [COCO: {len(catalog.sources)} json, {action.lower()}]'
+            self.log(f"  • {os.path.basename(source.path)}: images={len(source.items)}")
+        self.log(f"Итого: пар={len(self.pairs)}, классов={len(class_names)}")
+        extra = f"  [COCO: {len(catalog.sources)} json, {action.lower()}]"
         if invalid_count > 0:
-            extra += f'  ⚠️ некорректных: {invalid_count}'
+            extra += f"  ⚠️ некорректных: {invalid_count}"
         self._update_pair_count_label(extra, error=invalid_count > 0)
         self._after_load_hook()
 
-
     # ---------------- U-Net YAML ----------------
     def load_from_unet_yaml(self):
-        yaml_path, _ = QFileDialog.getOpenFileName(
-            self, "Select U-Net YAML", "", "YAML files (*.yaml *.yml);;All files (*)")
+        yaml_path, _ = source_dialogs.get_open_file(self, "unet_yaml")
         if not yaml_path:
             return
         self._load_unet_from_path(yaml_path)
 
     def _load_unet_from_path(self, yaml_path):
+        if self.dataset_type_combo.findData(1) < 0:
+            QMessageBox.warning(
+                self,
+                "Неподдерживаемый источник",
+                "Эта вкладка не принимает YAML с индексными масками.",
+            )
+            return
         try:
             catalog = load_unet_catalog(yaml_path, log_cb=self.log)
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка U-Net YAML",
-                                 f"Не удалось загрузить:\n{e}")
+            QMessageBox.critical(
+                self, "Ошибка U-Net YAML", f"Не удалось загрузить:\n{e}"
+            )
             return
 
         pairs = catalog.pairs
-        mask_offset = catalog.metadata['mask_class_offset']
+        mask_offset = catalog.metadata["mask_class_offset"]
         root = catalog.root
 
         if not pairs:
@@ -417,22 +394,30 @@ class DatasetLoaderMixin:
         self._apply_loaded_pairs(
             pairs=ui_pairs,
             input_type=1,
-            input_format='auto',
+            input_format="auto",
             class_names_override=pixel_class_names,
             source_label=f"U-Net YAML: {yaml_path}",
             source_yaml=yaml_path,
         )
         self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")
         self.log(f"Root: {root}")
-        self.log(f"Пар: {len(pairs)}, классов: {len(pixel_class_names)}, "
-                 f"mask_class_offset: {mask_offset}")
+        self.log(
+            f"Пар: {len(pairs)}, классов: {len(pixel_class_names)}, "
+            f"mask_class_offset: {mask_offset}"
+        )
 
     # ---------------- общая инициализация после загрузки ----------------
-    def _apply_loaded_pairs(self, pairs, input_type, input_format,
-                            class_names_from_yaml=None,
-                            class_names_override=None,
-                            source_label="", source_yaml=None):
-        self._source_yaml_path=source_yaml
+    def _apply_loaded_pairs(
+        self,
+        pairs,
+        input_type,
+        input_format,
+        class_names_from_yaml=None,
+        class_names_override=None,
+        source_label="",
+        source_yaml=None,
+    ):
+        self._source_yaml_path = source_yaml
         if input_type != 0 or class_names_override is None:
             self._coco_tmp_labels_dir = None
             self._coco_json_counter = 0
@@ -477,8 +462,10 @@ class DatasetLoaderMixin:
         if invalid_count > 0:
             extra += f"  ⚠️ некорректных: {invalid_count}"
         self._update_pair_count_label(extra, error=invalid_count > 0)
-        self.log(f"Пар: {len(self.pairs)} (корректных: {valid_count}, "
-                 f"некорректных: {invalid_count})")
+        self.log(
+            f"Пар: {len(self.pairs)} (корректных: {valid_count}, "
+            f"некорректных: {invalid_count})"
+        )
 
         self._after_load_hook()
 
@@ -513,8 +500,11 @@ class DatasetLoaderMixin:
                     return
                 self.log("=== Сканирование пар (детекция) ===")
                 self.pairs, self.annotation_types_stats = scan_detection_pairs(
-                    self.images_folder, self.labels_folder,
-                    log_cb=self.log, format_hint=self.input_format)
+                    self.images_folder,
+                    self.labels_folder,
+                    log_cb=self.log,
+                    format_hint=self.input_format,
+                )
             elif dataset_type_idx == 1:
                 if not self.masks_folder:
                     self.log("Папка с масками не выбрана.")
@@ -522,7 +512,8 @@ class DatasetLoaderMixin:
                     return
                 self.log("=== Сканирование пар (сегментация) ===")
                 self.pairs = scan_segmentation_pairs(
-                    self.images_folder, self.masks_folder, log_cb=self.log)
+                    self.images_folder, self.masks_folder, log_cb=self.log
+                )
             else:
                 self.log("=== Сканирование изображений (без меток) ===")
                 self.pairs = scan_image_only_pairs(self.images_folder)
@@ -534,12 +525,16 @@ class DatasetLoaderMixin:
 
             extra_info = ""
             if self.annotation_types_stats:
-                type_str = ", ".join(f"{k}:{v}" for k, v in self.annotation_types_stats.items())
+                type_str = ", ".join(
+                    f"{k}:{v}" for k, v in self.annotation_types_stats.items()
+                )
                 extra_info = f"  [{type_str}]"
             if invalid_count > 0:
                 extra_info += f"  ⚠️ некорректных: {invalid_count}"
             self._update_pair_count_label(extra_info, error=invalid_count > 0)
-            self.log(f"Валидация: корректных={valid_count}, некорректных={invalid_count}")
+            self.log(
+                f"Валидация: корректных={valid_count}, некорректных={invalid_count}"
+            )
 
             self.collect_classes()
             self._rebuild_file_list_display(pairs=self.pairs)
@@ -559,10 +554,13 @@ class DatasetLoaderMixin:
         def on_progress(current, tot):
             percent = int(current / tot * 100)
             self.validation_progress_label.setText(
-                f"⏳ Проверка пар: {current}/{tot} ({percent}%)")
+                f"⏳ Проверка пар: {current}/{tot} ({percent}%)"
+            )
             QApplication.processEvents()
 
-        valid, invalid = self.validator.validate_all(self.pairs, progress_cb=on_progress)
+        valid, invalid = self.validator.validate_all(
+            self.pairs, progress_cb=on_progress
+        )
 
         self.validation_progress_label.setVisible(False)
         self.validation_progress_label.setText("")
@@ -571,16 +569,19 @@ class DatasetLoaderMixin:
 
     def _recompute_color_stats(self):
         try:
-            self.color_type_stats, self.bit_type_stats = self.validator.recompute_stats(self.pairs)
+            self.color_type_stats, self.bit_type_stats = self.validator.recompute_stats(
+                self.pairs
+            )
         except Exception:
             pass
 
     def _update_color_stats_label(self):
-        if not hasattr(self, 'color_stats_label'):
+        if not hasattr(self, "color_stats_label"):
             return
         try:
             text, _ = ImageStats.format_stats_text(
-                self.color_type_stats, self.bit_type_stats, bool(self.pairs))
+                self.color_type_stats, self.bit_type_stats, bool(self.pairs)
+            )
             self.color_stats_label.setText(text)
         except Exception:
             pass
@@ -597,40 +598,45 @@ class DatasetLoaderMixin:
                     aux_path = pair[1]
 
             if not img_path or not os.path.exists(str(img_path)):
-                QMessageBox.warning(self, "Файл не найден",
-                                    f"Изображение не существует:\n{img_path}")
+                QMessageBox.warning(
+                    self, "Файл не найден", f"Изображение не существует:\n{img_path}"
+                )
                 return
 
             dlg = PairValidationDialog(
-                self, (str(img_path), str(aux_path) if aux_path else None),
-                self.dataset_type, self.validator)
+                self,
+                (str(img_path), str(aux_path) if aux_path else None),
+                self.dataset_type,
+                self.validator,
+            )
             dlg.exec_()
         except Exception as e:
             self._log_exception("Ошибка валидации пары", e)
-            QMessageBox.critical(self, "Ошибка валидации",
-                                 f"{type(e).__name__}: {e}\n\nСм. лог.")
+            QMessageBox.critical(
+                self, "Ошибка валидации", f"{type(e).__name__}: {e}\n\nСм. лог."
+            )
 
     # ---------------- отрисовка списка пар ----------------
     def _make_list_item(self, text, tag=None, error_msg=""):
         item = QListWidgetItem(text)
         include_empty = self._is_include_empty()
-        if tag == 'invalid':
+        if tag == "invalid":
             item.setForeground(QColor(220, 0, 0))
             item.setToolTip(f"❌ Некорректная пара: {error_msg}")
-        elif tag == 'empty':
+        elif tag == "empty":
             if include_empty:
                 item.setForeground(QColor(0, 140, 0))
                 item.setToolTip("Пустая аннотация — будет включена как негатив.")
             else:
                 item.setForeground(QColor(200, 120, 0))
                 item.setToolTip("Пустая аннотация — будет пропущена.")
-        elif tag == 'error':
+        elif tag == "error":
             item.setForeground(QColor(200, 0, 0))
             item.setToolTip("Ошибка чтения аннотации.")
-        elif tag == 'mixed':
+        elif tag == "mixed":
             item.setForeground(QColor(160, 0, 200))
             item.setToolTip("Смешанные типы аннотаций.")
-        elif tag == 'unknown':
+        elif tag == "unknown":
             item.setForeground(QColor(120, 120, 120))
             item.setToolTip("Неизвестный формат аннотации.")
         return item
@@ -662,38 +668,48 @@ class DatasetLoaderMixin:
 
         for idx, pair in enumerate(pairs):
             try:
-                info = build_pair_display(pair, self.validator, self.dataset_type, include_empty)
+                info = build_pair_display(
+                    pair, self.validator, self.dataset_type, include_empty
+                )
             except Exception as e:
                 self._log_exception(f"build_pair_display упал на паре #{idx}", e)
                 info = {
-                    'text': f"<ошибка: {pair!r}>", 'tag': 'error',
-                    'err': f"{type(e).__name__}: {e}",
-                    'is_valid': False, 'name': f"pair#{idx}",
-                    'color_type': None, 'bit_type': None,
+                    "text": f"<ошибка: {pair!r}>",
+                    "tag": "error",
+                    "err": f"{type(e).__name__}: {e}",
+                    "is_valid": False,
+                    "name": f"pair#{idx}",
+                    "color_type": None,
+                    "bit_type": None,
                 }
 
-            if info['is_valid']:
+            if info["is_valid"]:
                 valid_count += 1
             else:
                 invalid_count += 1
-                invalid_names.append(info['name'])
+                invalid_names.append(info["name"])
 
-            item = self._make_list_item(info['text'], tag=info['tag'], error_msg=info['err'])
+            item = self._make_list_item(
+                info["text"], tag=info["tag"], error_msg=info["err"]
+            )
 
             img_path = pair[0] if isinstance(pair, (tuple, list)) and pair else None
-            aux_path = (pair[1] if isinstance(pair, (tuple, list)) and len(pair) > 1 else None)
+            aux_path = (
+                pair[1] if isinstance(pair, (tuple, list)) and len(pair) > 1 else None
+            )
             item.setData(Qt.UserRole, img_path)
             item.setData(Qt.UserRole + 1, (img_path, aux_path))
-            item.setData(Qt.UserRole + 2, 'valid' if info['is_valid'] else 'invalid')
-            item.setData(Qt.UserRole + 3, info['color_type'])
-            item.setData(Qt.UserRole + 4, info['bit_type'])
+            item.setData(Qt.UserRole + 2, "valid" if info["is_valid"] else "invalid")
+            item.setData(Qt.UserRole + 3, info["color_type"])
+            item.setData(Qt.UserRole + 4, info["bit_type"])
 
             self.file_list.addItem(item)
 
             if (idx + 1) % step == 0 or idx == total - 1:
                 percent = int((idx + 1) / total * 100)
                 self.validation_progress_label.setText(
-                    f"⏳ Построение списка: {idx + 1}/{total} ({percent}%)")
+                    f"⏳ Построение списка: {idx + 1}/{total} ({percent}%)"
+                )
                 QApplication.processEvents()
 
         self.file_list.blockSignals(False)
@@ -705,26 +721,32 @@ class DatasetLoaderMixin:
             more = "" if invalid_count <= 5 else f" и ещё {invalid_count - 5}"
             self.validation_warning_label.setText(
                 f"⚠️ Обнаружено {invalid_count} некорректных пар: {preview}{more}. "
-                f"Они НЕ будут включены в датасет.")
+                f"Они НЕ будут включены в датасет."
+            )
             self.validation_warning_label.setVisible(True)
         else:
             self.validation_warning_label.setVisible(False)
 
         self._update_color_stats_label()
-        if not hasattr(self, '_overlap_review_panel'):
+        if not hasattr(self, "_overlap_review_panel"):
             from ui.annotation_review import AnnotationReviewWidget
-            self._overlap_review_panel = AnnotationReviewWidget(external_images=self.file_list, parent=self)
+
+            self._overlap_review_panel = AnnotationReviewWidget(
+                external_images=self.file_list, parent=self
+            )
             layout = self.file_list.parentWidget().layout()
             if layout is not None:
                 layout.insertWidget(0, self._overlap_review_panel)
-        self._overlap_review_panel.set_dataset(self.pairs, self.dataset_type, self.input_format)
+        self._overlap_review_panel.set_dataset(
+            self.pairs, self.dataset_type, self.input_format
+        )
 
     def closeEvent(self, event):
         self.shutdown_annotation_review()
         super().closeEvent(event)
 
     def shutdown_annotation_review(self):
-        if hasattr(self, '_overlap_review_panel'):
+        if hasattr(self, "_overlap_review_panel"):
             self._overlap_review_panel.close_review()
 
     def _is_include_empty(self):
@@ -764,7 +786,7 @@ class DatasetLoaderMixin:
     def _on_input_format_changed(self, idx):
         fmt = self.input_format_combo.currentData()
         if fmt is None:
-            fmt = 'auto'
+            fmt = "auto"
         self.input_format = fmt
         self.validator.set_input_format(fmt)
         if self.pairs:
@@ -820,7 +842,6 @@ class DatasetLoaderMixin:
     def _get_yaml_name_for_id(self, cid):
         return resolve_class_name(self._yaml_names, cid)
 
-
     def collect_classes(self):
         if not self.pairs:
             self._updating_class_table = True
@@ -864,7 +885,8 @@ class DatasetLoaderMixin:
 
         elif self.dataset_type == 1:
             all_vals, valid_pairs_for_classes = collect_mask_classes(
-                self.pairs, log_cb=self.log)
+                self.pairs, log_cb=self.log
+            )
             if not valid_pairs_for_classes:
                 self.original_ids = []
                 self._updating_class_table = True
@@ -911,7 +933,7 @@ class DatasetLoaderMixin:
             self.update_included_classes()
 
     def update_included_classes(self):
-        if getattr(self, '_updating_class_table', False):
+        if getattr(self, "_updating_class_table", False):
             return
 
         self._updating_class_table = True
@@ -931,7 +953,9 @@ class DatasetLoaderMixin:
                             continue
 
                 included_rows.sort(key=lambda t: t[1])
-                self.class_remap = dense_class_remap(orig for _row, orig in included_rows)
+                self.class_remap = dense_class_remap(
+                    orig for _row, orig in included_rows
+                )
                 included_set = set()
                 for row, orig in included_rows:
                     new_id = self.class_remap[orig]
@@ -972,8 +996,11 @@ class DatasetLoaderMixin:
                         item = self.class_table.item(row, 0)
                         if item is None:
                             continue
-                        new_text = str(self.mask_class_remap[orig_id]) \
-                            if orig_id in self.mask_class_remap else "-"
+                        new_text = (
+                            str(self.mask_class_remap[orig_id])
+                            if orig_id in self.mask_class_remap
+                            else "-"
+                        )
                         if item.text() != new_text:
                             item.setText(new_text)
                     except (ValueError, TypeError, AttributeError):
@@ -991,7 +1018,7 @@ class DatasetLoaderMixin:
         self._refresh_mask_pixel_column()
 
     def on_class_table_item_changed(self, item):
-        if getattr(self, '_updating_class_table', False):
+        if getattr(self, "_updating_class_table", False):
             return
         if item.column() == 0:
             self.update_included_classes()
@@ -1005,4 +1032,3 @@ class DatasetLoaderMixin:
             self.pair_count_label.setStyleSheet("color: red; font-weight: bold;")
         else:
             self.pair_count_label.setStyleSheet("")
-

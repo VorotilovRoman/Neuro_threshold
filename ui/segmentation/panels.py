@@ -16,8 +16,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.annotation_objects import AnnotationObjectsWidget
+from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
 from ui.segmentation.histogram import HistogramCanvas
@@ -106,16 +106,15 @@ def begin_layout(owner, kind):
     owner.setCentralWidget(central)
     root = QVBoxLayout(central)
     root.setContentsMargins(0, 0, 0, 0)
-    row = QHBoxLayout()
-    owner.nav_widget = ImageNavigationWidget()
-    row.addWidget(owner.nav_widget)
+    owner.nav_widget = ImageNavigationWidget(profile=kind)
+    root.addWidget(owner.nav_widget)
+    row = owner.nav_widget.navigation_layout
     owner.reset_zoom_button = QPushButton("Сбросить масштаб")
-    row.addWidget(owner.reset_zoom_button)
-    root.addLayout(row)
+    row.insertWidget(row.count() - 1, owner.reset_zoom_button)
     if kind == "interactive":
         owner.pan_zoom_btn = QPushButton("Pan/Zoom")
         owner.pan_zoom_btn.setCheckable(True)
-        row.addWidget(owner.pan_zoom_btn)
+        row.insertWidget(row.count() - 1, owner.pan_zoom_btn)
     splitter = QSplitter(Qt.Horizontal)
     root.addWidget(splitter, 1)
     left = QWidget()

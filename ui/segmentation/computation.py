@@ -4,8 +4,9 @@ from functools import wraps
 from pathlib import Path
 
 import numpy as np
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtWidgets import QMessageBox
 
+from ui import dataset_source as source_dialogs
 from ui.segmentation import errors, presentation, session
 from utils_new.segmentation import operations
 from utils_new.segmentation.result import ResultStatus, SegmentationResult, binary_mask
@@ -46,9 +47,12 @@ def run_interactive(owner):
         return
     method = owner.method_combo.currentText()
     widget = owner.params_widget
-    if method in ("SuperCut", "OneCut", "Active Contours", "Morphological Chan–Vese") and not errors.require(
-        owner, owner.rect is not None, "Нарисуйте ROI."
-    ):
+    if method in (
+        "SuperCut",
+        "OneCut",
+        "Active Contours",
+        "Morphological Chan–Vese",
+    ) and not errors.require(owner, owner.rect is not None, "Нарисуйте ROI."):
         return
     fg = (
         np.zeros(frame.gray.shape, np.uint8)
@@ -234,7 +238,9 @@ def train_ml(owner):
             owner._update_model_path_display()
             owner._update_apply_button_status()
             owner.check_settings_match_model()
-            owner.log(f"Модель {spec['model_type']} обучена на {len(x)} образцах. Источник: {spec['training_source']}.")
+            owner.log(
+                f"Модель {spec['model_type']} обучена на {len(x)} образцах. Источник: {spec['training_source']}."
+            )
             owner._reset_for_new_image()
 
         owner.jobs.start(
@@ -246,7 +252,9 @@ def train_ml(owner):
 
     owner.jobs.start(
         "Подготовка обучающих данных",
-        lambda cancel: operations.prepare_training(images, grays, spec, cancel, paths=paths),
+        lambda cancel: operations.prepare_training(
+            images, grays, spec, cancel, paths=paths
+        ),
         prepared,
         frame_sensitive=False,
     )
@@ -312,7 +320,9 @@ def load_dl(owner, name):
         try:
             metadata = getattr(model, "metadata", None)
             if metadata and name == "Custom ONNX":
-                owner.custom_settings._threshold.setValue(metadata.get("threshold", .5))
+                owner.custom_settings._threshold.setValue(
+                    metadata.get("threshold", 0.5)
+                )
             if metadata and name == "U-Net":
                 owner._update_unet_ui_from_metadata(metadata)
             elif metadata and name in ("DeepLabV3", "DeepLabV3+"):
@@ -338,9 +348,7 @@ def load_ml(owner, path=None):
     if owner.jobs.busy or getattr(owner, "_loading_model", False):
         return
     if path is None:
-        path = QFileDialog.getOpenFileName(
-            owner, "Загрузить модель", "", "Model files (*.pkl *.joblib)"
-        )[0]
+        path = source_dialogs.get_open_file(owner, "model_ml")[0]
     if not path:
         return
     if not errors.require(owner, Path(path).is_file(), "Файл модели не найден."):

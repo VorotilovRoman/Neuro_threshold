@@ -34,11 +34,13 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui import dataset_source as source_dialogs
 from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation.jobs import BackgroundTask
 from ui_tabs.yolo_find_img_ui import setup_yolo_find_img_ui
 from utils_new.annotation_processing import yolo_result_to_detections
 from utils_new.dataset_files_new import (
+    collect_image_paths,
     load_one_image_item,
     normalize_to_uint8,
     read_image_with_fallback,
@@ -207,17 +209,11 @@ class ScanThread(BackgroundTask):
             from ultralytics import YOLO
 
             all_images = []
-            for root, dirs, files in os.walk(self.root_dir):
+            for root, dirs, _ in os.walk(self.root_dir):
                 if self.cancelled:
                     break
                 dirs.sort()
-                all_images.extend(
-                    os.path.join(root, file)
-                    for file in sorted(files)
-                    if file.lower().endswith(
-                        (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
-                    )
-                )
+                all_images.extend(collect_image_paths(root))
             total = len(all_images)
             self.publish(
                 self.log_msg,
@@ -458,9 +454,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
     # Выбор папки и дерево
     # --------------------------------------------------------
     def select_folder(self):
-        folder = QFileDialog.getExistingDirectory(
-            self, "Выберите корневую папку для поиска"
-        )
+        folder = source_dialogs.get_directory(self, "folder")
         if not folder:
             return
         self.current_root_dir = folder

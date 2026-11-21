@@ -51,6 +51,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
 )
 
+from ui import dataset_source as source_dialogs
 from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation.jobs import BackgroundTask
 from ui.segmentation.preset_bindings import PresetManager
@@ -401,18 +402,13 @@ class YoloInspectWindow(QMainWindow):
     # Загрузка изображений
     # --------------------------------------------------------
     def load_images_from_dialog(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Images",
-            "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)",
-        )
+        file_paths, _ = source_dialogs.get_open_file(self, "images", multiple=True)
         if not file_paths:
             return
         self._load_images(file_paths)
 
     def load_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
+        folder = source_dialogs.get_directory(self, "folder")
         if not folder:
             return
         self._load_images(folder)
@@ -547,12 +543,7 @@ class YoloInspectWindow(QMainWindow):
     # YOLO-инференс
     # --------------------------------------------------------
     def load_yolo_model(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Выберите модель YOLO",
-            "",
-            "YOLO weights (*.pt *.onnx *.engine);;Все файлы (*)",
-        )
+        path, _ = source_dialogs.get_open_file(self, "model_yolo")
         if not path:
             return
         self._load_yolo_model_from_path(path)
@@ -1062,12 +1053,7 @@ class YoloInspectWindow(QMainWindow):
     # Загрузка / очистка модели AE/VAE
     # --------------------------------------------------------
     def load_ae_model(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Выберите чекпойнт AE/VAE",
-            "",
-            "PyTorch checkpoint (*.pt *.pth);;Все файлы (*)",
-        )
+        path, _ = source_dialogs.get_open_file(self, "model_torch")
         if not path:
             return
         self._load_ae_model_from_path(path)

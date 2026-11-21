@@ -22,6 +22,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from ui import dataset_source as source_dialogs
+
 
 class BaseTrainWidget(QWidget):
     run_training = pyqtSignal(dict)
@@ -43,7 +45,7 @@ class BaseTrainWidget(QWidget):
     def add_dataset_structure_hint(self, hint_text):
         hint_widget = QLabel(hint_text)
         hint_widget.setWordWrap(True)
-        #hint_widget.setStyleSheet("background-color: #f0f0f0; padding: 8px; border-radius: 4px; font-family: monospace;")
+        # hint_widget.setStyleSheet("background-color: #f0f0f0; padding: 8px; border-radius: 4px; font-family: monospace;")
         self.form_layout.addRow(hint_widget)
 
     def add_experiment_name_field(self):
@@ -62,7 +64,9 @@ class BaseTrainWidget(QWidget):
         self.form_layout.addRow("📁 Папка проекта:", row)
 
     def _browse_project(self):
-        path = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения результатов")
+        path = QFileDialog.getExistingDirectory(
+            self, "Выберите папку для сохранения результатов"
+        )
         if path:
             self.project_path.setText(path)
 
@@ -117,7 +121,7 @@ class BaseTrainWidget(QWidget):
 
     def _update_open_folder_button_state(self):
         """Включает/отключает кнопку открытия папки в зависимости от наличия пути."""
-        if hasattr(self, 'open_folder_btn'):
+        if hasattr(self, "open_folder_btn"):
             self.open_folder_btn.setEnabled(bool(self.project_path.text().strip()))
 
     def add_progress_bar(self):
@@ -127,7 +131,7 @@ class BaseTrainWidget(QWidget):
         self.form_layout.addRow("Прогресс:", self.progress_bar)
 
     def _on_run(self):
-        if hasattr(self, 'dataset_path') and self.dataset_path.text().strip():
+        if hasattr(self, "dataset_path") and self.dataset_path.text().strip():
             if not os.path.exists(self.dataset_path.text().strip()):
                 QMessageBox.warning(self, "Ошибка", "Папка датасета не существует")
                 return
@@ -141,11 +145,13 @@ class BaseTrainWidget(QWidget):
     def _open_project_folder(self):
         folder = self.project_path.text().strip()
         if not folder or not os.path.exists(folder):
-            QMessageBox.warning(self, "Ошибка", "Папка проекта не выбрана или не существует")
+            QMessageBox.warning(
+                self, "Ошибка", "Папка проекта не выбрана или не существует"
+            )
             return
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             os.startfile(folder)
-        elif sys.platform == 'darwin':
+        elif sys.platform == "darwin":
             os.system(f'open "{folder}"')
         else:
             os.system(f'xdg-open "{folder}"')
@@ -182,26 +188,26 @@ class YOLOTrainWidget(BaseTrainWidget):
         self.add_dataset_structure_hint(hint)
 
         # Выбор датасета: папка или YAML
+        self.dataset_source = source_dialogs.DatasetSourceWidget(
+            ("dataset_root", "yolo_yaml"), profile="yolo_train"
+        )
         self.dataset_folder = QLineEdit()
         self.dataset_folder.setPlaceholderText("Корневая папка датасета")
-        self.browse_folder_btn = QPushButton("Обзор папки")
-        self.browse_folder_btn.clicked.connect(lambda: self._browse_dataset_folder())
-        folder_row = QHBoxLayout()
-        folder_row.addWidget(self.dataset_folder)
-        folder_row.addWidget(self.browse_folder_btn)
-        self.form_layout.addRow("Папка датасета:", folder_row)
-
         self.dataset_yaml = QLineEdit()
-        self.dataset_yaml.setPlaceholderText("Или YAML-файл датасета")
-        self.browse_yaml_btn = QPushButton("Обзор YAML")
-        self.browse_yaml_btn.clicked.connect(lambda: self._browse_dataset_yaml())
-        yaml_row = QHBoxLayout()
-        yaml_row.addWidget(self.dataset_yaml)
-        yaml_row.addWidget(self.browse_yaml_btn)
-        self.form_layout.addRow("YAML файл:", yaml_row)
-
-        self.dataset_folder.textChanged.connect(lambda: self.dataset_yaml.clear() if self.dataset_folder.text() else None)
-        self.dataset_yaml.textChanged.connect(lambda: self.dataset_folder.clear() if self.dataset_yaml.text() else None)
+        self.dataset_yaml.setPlaceholderText("YAML датасета выбранного типа")
+        self.dataset_source.add_path_field("Папка:", self.dataset_folder)
+        self.dataset_source.add_path_field("YAML:", self.dataset_yaml)
+        self.browse_folder_btn = self.dataset_source.button("dataset_root")
+        self.browse_yaml_btn = self.dataset_source.button("yolo_yaml")
+        self.browse_folder_btn.clicked.connect(self._browse_dataset_folder)
+        self.browse_yaml_btn.clicked.connect(self._browse_dataset_yaml)
+        self.form_layout.addRow(self.dataset_source)
+        self.dataset_folder.textChanged.connect(
+            lambda: self.dataset_yaml.clear() if self.dataset_folder.text() else None
+        )
+        self.dataset_yaml.textChanged.connect(
+            lambda: self.dataset_folder.clear() if self.dataset_yaml.text() else None
+        )
 
         self.add_project_field()
         self.add_experiment_name_field()
@@ -214,13 +220,13 @@ class YOLOTrainWidget(BaseTrainWidget):
         self._update_preview()
 
     def _browse_dataset_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Выберите корневую папку датасета")
+        path = source_dialogs.get_directory(self, "dataset_root")
         if path:
             self.dataset_folder.setText(path)
             self.dataset_yaml.clear()
 
     def _browse_dataset_yaml(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите YAML-файл датасета", "", "YAML files (*.yaml *.yml)")
+        path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
         if path:
             self.dataset_yaml.setText(path)
             self.dataset_folder.clear()
@@ -244,7 +250,9 @@ class YOLOTrainWidget(BaseTrainWidget):
         file_row = QHBoxLayout(self.file_widget)
         self.custom_model_path = QLineEdit()
         self.custom_model_path.setPlaceholderText("Путь к .pt файлу")
-        self.browse_custom_btn = QPushButton("Обзор")
+        self.browse_custom_btn = source_dialogs.make_source_button(
+            "model_yolo_train", self
+        )
         file_row.addWidget(self.custom_model_path)
         file_row.addWidget(self.browse_custom_btn)
         self.form_layout.addRow(self.file_widget)
@@ -264,7 +272,7 @@ class YOLOTrainWidget(BaseTrainWidget):
         self.file_widget.setVisible(not is_preset)
 
     def _browse_custom_model(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель YOLO", "", "PyTorch models (*.pt)")
+        path, _ = source_dialogs.get_open_file(self, "model_yolo_train")
         if path:
             self.custom_model_path.setText(path)
 
@@ -344,7 +352,9 @@ class YOLOTrainWidget(BaseTrainWidget):
         self.form_layout.addRow("lrf:", self.lrf)
 
         self.optimizer = QComboBox()
-        self.optimizer.addItems(["auto", "SGD", "AdamW", "MuSGD", "Adam", "NAdam", "RMSProp"])
+        self.optimizer.addItems(
+            ["auto", "SGD", "AdamW", "MuSGD", "Adam", "NAdam", "RMSProp"]
+        )
         self.form_layout.addRow("optimizer:", self.optimizer)
 
     def get_params(self):
@@ -373,11 +383,15 @@ class YOLOTrainWidget(BaseTrainWidget):
                 data_path = os.path.join(data_path, "data.yaml")
 
         if not data_path:
-            QMessageBox.warning(self, "Ошибка", "Не указан датасет (папка или YAML-файл)")
+            QMessageBox.warning(
+                self, "Ошибка", "Не указан датасет (папка или YAML-файл)"
+            )
             return None
 
         if not os.path.exists(data_path):
-            QMessageBox.warning(self, "Ошибка", f"YAML-файл датасета не найден:\n{data_path}")
+            QMessageBox.warning(
+                self, "Ошибка", f"YAML-файл датасета не найден:\n{data_path}"
+            )
             return None
 
         return {
@@ -393,7 +407,9 @@ class YOLOTrainWidget(BaseTrainWidget):
             "lr0": self.lr0.value(),
             "lrf": self.lrf.value(),
             "disable_aug": self.disable_aug.isChecked(),
-            "close_mosaic": self.close_mosaic.value() if self.enable_mosaic.isChecked() else 0,
+            "close_mosaic": self.close_mosaic.value()
+            if self.enable_mosaic.isChecked()
+            else 0,
             "mosaic": self.mosaic.value() if self.enable_mosaic.isChecked() else 0.0,
         }
 
@@ -424,29 +440,20 @@ class UNetTrainWidget(BaseTrainWidget):
         self.add_dataset_structure_hint(hint)
 
         # --- Папка датасета ---
-        self.dataset_path = QLineEdit()
-        self.dataset_path.setPlaceholderText("Корневая папка датасета (содержит images/ и masks/)")
-        self.browse_dataset_btn = QPushButton("Обзор")
-        self.browse_dataset_btn.clicked.connect(self._browse_dataset)
-        row = QHBoxLayout()
-        row.addWidget(self.dataset_path)
-        row.addWidget(self.browse_dataset_btn)
-        self.form_layout.addRow("📁 Папка датасета:", row)
-
-        # --- U-Net YAML (masks_data.yaml) ---
-        # Если указан — воркер читает path/num_classes/class_names/пути сплитов из него.
-        # Поля «Папка датасета» и «Количество классов» заполняются автоматически.
-        self.unet_yaml = QLineEdit()
-        self.unet_yaml.setPlaceholderText(
-            "Или masks_data.yaml — переопределит path и num_classes"
+        self.dataset_source = source_dialogs.DatasetSourceWidget(
+            ("dataset_root", "unet_yaml"), profile="yolo_train"
         )
-        self.browse_yaml_btn = QPushButton("Обзор YAML")
+        self.dataset_path = QLineEdit()
+        self.dataset_path.setPlaceholderText("Корневая папка датасета")
+        self.unet_yaml = QLineEdit()
+        self.unet_yaml.setPlaceholderText("YAML датасета выбранного типа")
+        self.dataset_source.add_path_field("Папка:", self.dataset_path)
+        self.dataset_source.add_path_field("YAML:", self.unet_yaml)
+        self.browse_dataset_btn = self.dataset_source.button("dataset_root")
+        self.browse_yaml_btn = self.dataset_source.button("unet_yaml")
+        self.browse_dataset_btn.clicked.connect(self._browse_dataset)
         self.browse_yaml_btn.clicked.connect(self._browse_unet_yaml)
-        yaml_row = QHBoxLayout()
-        yaml_row.addWidget(self.unet_yaml)
-        yaml_row.addWidget(self.browse_yaml_btn)
-        self.form_layout.addRow("📄 U-Net YAML:", yaml_row)
-
+        self.form_layout.addRow(self.dataset_source)
         yaml_hint = QLabel(
             "Если указан YAML — его поля <code>path</code>, <code>num_classes</code> и "
             "пути сплитов (<code>train_images</code>, <code>val_masks</code> и т.п.) "
@@ -470,16 +477,13 @@ class UNetTrainWidget(BaseTrainWidget):
         self.unet_yaml.textChanged.connect(self._on_unet_yaml_changed)
 
     def _browse_dataset(self):
-        path = QFileDialog.getExistingDirectory(self, "Выберите корневую папку датасета")
+        path = source_dialogs.get_directory(self, "dataset_root")
         if path:
             self.dataset_path.setText(path)
             self.unet_yaml.clear()
 
     def _browse_unet_yaml(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите masks_data.yaml", "",
-            "YAML files (*.yaml *.yml);;All files (*)"
-        )
+        path, _ = source_dialogs.get_open_file(self, "unet_yaml")
         if path:
             self.unet_yaml.setText(path)
             # Авто-заполнение полей ниже — через сигнал textChanged
@@ -491,7 +495,8 @@ class UNetTrainWidget(BaseTrainWidget):
             return
         try:
             import yaml
-            with open(path, 'r', encoding='utf-8') as f:
+
+            with open(path, "r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
         except Exception as e:
             # Тихо игнорируем — детальная валидация будет в _validate_unet_params
@@ -499,7 +504,7 @@ class UNetTrainWidget(BaseTrainWidget):
             return
 
         # 1. path → dataset_path
-        root = cfg.get('path', '')
+        root = cfg.get("path", "")
         if root:
             if not os.path.isabs(root):
                 root = os.path.normpath(os.path.join(os.path.dirname(path), root))
@@ -508,7 +513,7 @@ class UNetTrainWidget(BaseTrainWidget):
                 self.dataset_path.setText(root)
 
         # 2. num_classes → спинбокс (только если валидно и >= 2)
-        nc = cfg.get('num_classes')
+        nc = cfg.get("num_classes")
         try:
             nc_int = int(nc) if nc is not None else None
         except (ValueError, TypeError):
@@ -519,7 +524,9 @@ class UNetTrainWidget(BaseTrainWidget):
     def _add_model_selection(self):
         group = QGroupBox("Источник модели")
         layout = QVBoxLayout()
-        self.model_from_preset = QRadioButton("Использовать предустановленную U-Net (backbone)")
+        self.model_from_preset = QRadioButton(
+            "Использовать предустановленную U-Net (backbone)"
+        )
         self.model_from_file = QRadioButton("Загрузить свою модель (.pth)")
         self.model_from_preset.setChecked(True)
         layout.addWidget(self.model_from_preset)
@@ -535,7 +542,7 @@ class UNetTrainWidget(BaseTrainWidget):
         file_row = QHBoxLayout(self.file_widget)
         self.custom_model_path = QLineEdit()
         self.custom_model_path.setPlaceholderText("Путь к .pth файлу")
-        self.browse_custom_btn = QPushButton("Обзор")
+        self.browse_custom_btn = source_dialogs.make_source_button("model_torch", self)
         file_row.addWidget(self.custom_model_path)
         file_row.addWidget(self.browse_custom_btn)
         self.form_layout.addRow(self.file_widget)
@@ -555,19 +562,23 @@ class UNetTrainWidget(BaseTrainWidget):
         self.file_widget.setVisible(not is_preset)
 
     def _browse_custom_model(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель U-Net", "", "PyTorch models (*.pth)")
+        path, _ = source_dialogs.get_open_file(self, "model_torch")
         if path:
             self.custom_model_path.setText(path)
 
     # В методе _add_preset_unet_fields (класс UNetTrainWidget):
     def _add_preset_unet_fields(self):
         self.encoder = QComboBox()
-        self.encoder.addItems(["resnet18", "resnet34", "resnet50", "efficientnet-b0", "vgg16"])
+        self.encoder.addItems(
+            ["resnet18", "resnet34", "resnet50", "efficientnet-b0", "vgg16"]
+        )
         self.preset_layout.addRow("Энкодер (backbone):", self.encoder)
         # --- ДОБАВЛЯЕМ ВЫБОР АРХИТЕКТУРЫ ---
         self.architecture = QComboBox()
         self.architecture.addItems(["U-Net", "U-Net++"])
-        self.architecture.setToolTip("Выбор архитектуры сегментации: классический U-Net или UNet++")
+        self.architecture.setToolTip(
+            "Выбор архитектуры сегментации: классический U-Net или UNet++"
+        )
         self.preset_layout.addRow("Архитектура:", self.architecture)
         # -----------------------------------
         self.input_size = QComboBox()
@@ -609,7 +620,9 @@ class UNetTrainWidget(BaseTrainWidget):
         self.form_layout.addRow("Dropout:", self.dropout)
 
         self.scheduler = QComboBox()
-        self.scheduler.addItems(["None", "ReduceLROnPlateau", "CosineAnnealing", "StepLR"])
+        self.scheduler.addItems(
+            ["None", "ReduceLROnPlateau", "CosineAnnealing", "StepLR"]
+        )
         self.scheduler.setToolTip(
             "Планировщик learning rate.\n"
             "«ReduceLROnPlateau» — самый безопасный вариант:\n"
@@ -658,11 +671,13 @@ class UNetTrainWidget(BaseTrainWidget):
 
         prep_layout.addWidget(QLabel("Режим приведения кадра к input_size:"))
         self.resize_mode_combo = QComboBox()
-        self.resize_mode_combo.addItems([
-            "hard (жёсткий ресайз)",
-            "keep_aspect_pad (AR + padding)",
-            "random_crop (только для обучения)",
-        ])
+        self.resize_mode_combo.addItems(
+            [
+                "hard (жёсткий ресайз)",
+                "keep_aspect_pad (AR + padding)",
+                "random_crop (только для обучения)",
+            ]
+        )
         self.resize_mode_combo.setCurrentIndex(0)
         self.resize_mode_combo.setToolTip(
             "Способ приведения кадра к input_size × input_size:\n\n"
@@ -737,22 +752,19 @@ class UNetTrainWidget(BaseTrainWidget):
         # Должен быть указан хотя бы один источник: папка или YAML.
         if not dataset_path and not unet_yaml:
             QMessageBox.warning(
-                self, "Ошибка",
-                "Укажите либо папку датасета, либо U-Net YAML (masks_data.yaml)."
+                self,
+                "Ошибка",
+                "Укажите либо папку датасета, либо U-Net YAML (masks_data.yaml).",
             )
             return None
 
         if unet_yaml and not os.path.isfile(unet_yaml):
-            QMessageBox.warning(
-                self, "Ошибка",
-                f"U-Net YAML не найден:\n{unet_yaml}"
-            )
+            QMessageBox.warning(self, "Ошибка", f"U-Net YAML не найден:\n{unet_yaml}")
             return None
 
         if dataset_path and not os.path.isdir(dataset_path):
             QMessageBox.warning(
-                self, "Ошибка",
-                f"Папка датасета не существует:\n{dataset_path}"
+                self, "Ошибка", f"Папка датасета не существует:\n{dataset_path}"
             )
             return None
 
@@ -768,7 +780,9 @@ class UNetTrainWidget(BaseTrainWidget):
             "optimizer": self.optimizer.currentText(),
             "lr": self.lr.value(),
             "encoder": self.encoder.currentText(),
-            "architecture": "unet++" if self.architecture.currentText() == "U-Net++" else "unet",
+            "architecture": "unet++"
+            if self.architecture.currentText() == "U-Net++"
+            else "unet",
             "input_size": int(self.input_size.currentText()),
             "num_classes": self.num_classes.value(),
             "loss": self.loss.currentText(),

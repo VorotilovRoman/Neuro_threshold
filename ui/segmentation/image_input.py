@@ -3,8 +3,9 @@
 from pathlib import Path
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QFileDialog, QProgressDialog
+from PyQt5.QtWidgets import QProgressDialog
 
+from ui import dataset_source as source_dialogs
 from ui.image_conversion import numpy_to_qpixmap
 from utils_new.segmentation.image_session import (
     create_cache,
@@ -14,19 +15,14 @@ from utils_new.segmentation.image_session import (
 
 
 def choose_images(owner, load):
-    paths, _ = QFileDialog.getOpenFileNames(
-        owner,
-        "Select Images",
-        "",
-        "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)",
-    )
+    paths, _ = source_dialogs.get_open_file(owner, "images", multiple=True)
     if paths:
         owner.log(f"Loading {len(paths)} images...")
         load(paths)
 
 
 def choose_folder(owner, load):
-    path = QFileDialog.getExistingDirectory(owner, "Select Folder")
+    path = source_dialogs.get_directory(owner, "folder")
     if path:
         owner.log(f"Loading folder: {path}")
         load(path)

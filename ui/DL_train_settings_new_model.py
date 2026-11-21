@@ -1,14 +1,11 @@
 # widgets/DL_train_settings_new_model.py
 import ast
 import os
-import sys
 
-from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -21,6 +18,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ui import dataset_source as source_dialogs
 
 from .DL_train_settings_base import BaseTrainWidget
 
@@ -66,8 +65,11 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         "class_weights": None,
         "output_activation": "argmax",
         "augmentations": {
-            "hflip": False, "vflip": False,
-            "rotate": False, "scale": False, "noise": False,
+            "hflip": False,
+            "vflip": False,
+            "rotate": False,
+            "scale": False,
+            "noise": False,
         },
     }
 
@@ -96,38 +98,20 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
 
         # ========== 3. Датасет: папка + YAML ==========
         # Папка датасета
+        self.dataset_source = source_dialogs.DatasetSourceWidget(
+            ("dataset_root", "unet_yaml"), profile="yolo_train"
+        )
         self.dataset_path = QLineEdit()
-        self.dataset_path.setPlaceholderText("Корневая папка датасета (VOCdevkit/VOC2007 или с images/, masks/)")
-        self.browse_dataset_btn = QPushButton("Обзор")
-        self.browse_dataset_btn.clicked.connect(self._browse_dataset)
-        row = QHBoxLayout()
-        row.addWidget(self.dataset_path)
-        row.addWidget(self.browse_dataset_btn)
-        self.form_layout.addRow("📁 Папка датасета:", row)
-
-        # YAML с точными путями
+        self.dataset_path.setPlaceholderText("Корневая папка датасета")
         self.deeplab_yaml = QLineEdit()
-        self.deeplab_yaml.setPlaceholderText(
-            "Или YAML с путями (переопределит папку и num_classes)"
-        )
-        self.browse_yaml_btn = QPushButton("Обзор YAML")
+        self.deeplab_yaml.setPlaceholderText("YAML датасета выбранного типа")
+        self.dataset_source.add_path_field("Папка:", self.dataset_path)
+        self.dataset_source.add_path_field("YAML:", self.deeplab_yaml)
+        self.browse_dataset_btn = self.dataset_source.button("dataset_root")
+        self.browse_yaml_btn = self.dataset_source.button("unet_yaml")
+        self.browse_dataset_btn.clicked.connect(self._browse_dataset)
         self.browse_yaml_btn.clicked.connect(self._browse_deeplab_yaml)
-        yaml_row = QHBoxLayout()
-        yaml_row.addWidget(self.deeplab_yaml)
-        yaml_row.addWidget(self.browse_yaml_btn)
-        self.form_layout.addRow("📄 DeepLab YAML:", yaml_row)
-
-        yaml_hint = QLabel(
-            "Если указан YAML — поля <code>path</code>, <code>num_classes</code> "
-            "и пути сплитов (<code>train_txt</code>/<code>train_images</code> и т.п.) "
-            "переопределяют значения из формы. Удобно, когда датасет сгенерирован "
-            "утилитой и уже имеет готовый YAML с точными путями."
-        )
-        yaml_hint.setWordWrap(True)
-        yaml_hint.setStyleSheet("color: #666; font-size: 11px;")
-        self.form_layout.addRow(yaml_hint)
-
-        # Взаимная очистка
+        self.form_layout.addRow(self.dataset_source)
         self.dataset_path.textChanged.connect(
             lambda: self.deeplab_yaml.clear() if self.dataset_path.text() else None
         )
@@ -150,7 +134,9 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.ignore_index = QSpinBox()
         self.ignore_index.setRange(-1, 255)
         self.ignore_index.setValue(255)
-        self.ignore_index.setToolTip("Игнорируемый класс (255 для VOC, -1 = не игнорировать)")
+        self.ignore_index.setToolTip(
+            "Игнорируемый класс (255 для VOC, -1 = не игнорировать)"
+        )
         self.form_layout.addRow("Игнор. класс (ignore_index):", self.ignore_index)
 
         self._add_two_phase_fields()
@@ -182,7 +168,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         preset_layout.addWidget(self.preset_path)
 
         # Кнопка выбора файла через стандартный диалог
-        self.browse_preset_btn = QPushButton("Выбрать файл…")
+        self.browse_preset_btn = source_dialogs.make_source_button("preset", self)
         self.browse_preset_btn.setToolTip("Открыть диалог выбора файла пресета")
         self.browse_preset_btn.clicked.connect(self._browse_preset_file)
         preset_layout.addWidget(self.browse_preset_btn)
@@ -201,10 +187,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.form_layout.addRow(preset_group)
 
     def _browse_preset_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите файл пресета", "",
-            "Preset files (*.txt *.yaml *.yml);;All files (*)"
-        )
+        path, _ = source_dialogs.get_open_file(self, "preset")
         if path:
             self.preset_path.setText(path)
 
@@ -212,18 +195,13 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
     # Датасет
     # ------------------------------------------------------------------
     def _browse_dataset(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "Выберите корневую папку датасета (VOCdevkit или с images/, masks/)"
-        )
+        path = source_dialogs.get_directory(self, "dataset_root")
         if path:
             self.dataset_path.setText(path)
             self.deeplab_yaml.clear()
 
     def _browse_deeplab_yaml(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите YAML с путями датасета", "",
-            "YAML files (*.yaml *.yml);;All files (*)"
-        )
+        path, _ = source_dialogs.get_open_file(self, "unet_yaml")
         if path:
             self.deeplab_yaml.setText(path)
             self.dataset_path.clear()
@@ -250,7 +228,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         file_row = QHBoxLayout(self.file_widget)
         self.custom_model_path = QLineEdit()
         self.custom_model_path.setPlaceholderText("Путь к .pth файлу")
-        self.browse_custom_btn = QPushButton("Обзор")
+        self.browse_custom_btn = source_dialogs.make_source_button("model_torch", self)
         file_row.addWidget(self.custom_model_path)
         file_row.addWidget(self.browse_custom_btn)
         self.form_layout.addRow(self.file_widget)
@@ -268,9 +246,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.file_widget.setVisible(not is_preset)
 
     def _browse_custom_model(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите модель DeepLabV3/V3+", "", "PyTorch models (*.pth)"
-        )
+        path, _ = source_dialogs.get_open_file(self, "model_torch")
         if path:
             self.custom_model_path.setText(path)
 
@@ -297,7 +273,9 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.output_activation = QComboBox()
         self.output_activation.addItems(["argmax", "softmax", "sigmoid"])
         self.output_activation.setEnabled(False)
-        self.output_activation.setToolTip("Определяется числом классов: sigmoid для одного канала; softmax для двух; argmax для многоклассовой маски. Обучение использует логиты.")
+        self.output_activation.setToolTip(
+            "Определяется числом классов: sigmoid для одного канала; softmax для двух; argmax для многоклассовой маски. Обучение использует логиты."
+        )
         arch_layout.addWidget(QLabel("  Активация:"))
         arch_layout.addWidget(self.output_activation)
 
@@ -338,35 +316,42 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.class_weights_file.setEnabled(False)
         cw_layout.addWidget(self.class_weights_file)
 
-        self.browse_weights_btn = QPushButton("Обзор")
+        self.browse_weights_btn = source_dialogs.make_source_button(
+            "class_weights", self
+        )
         self.browse_weights_btn.clicked.connect(self._browse_weights_file)
         self.browse_weights_btn.setEnabled(False)
         cw_layout.addWidget(self.browse_weights_btn)
         cw_layout.addStretch()
         self.form_layout.addRow(" ", cw_layout)
 
-        self.class_weights_mode.currentTextChanged.connect(self._on_class_weights_mode_changed)
+        self.class_weights_mode.currentTextChanged.connect(
+            self._on_class_weights_mode_changed
+        )
 
     def _on_class_weights_mode_changed(self, mode):
-        is_file = (mode == "From file")
+        is_file = mode == "From file"
         self.class_weights_file.setEnabled(is_file)
         self.browse_weights_btn.setEnabled(is_file)
 
     def _browse_weights_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите файл весов классов", "",
-            "JSON (*.json);;TXT (*.txt);;Все файлы (*.*)"
-        )
+        path, _ = source_dialogs.get_open_file(self, "class_weights")
         if path:
             self.class_weights_file.setText(path)
 
     def _add_loss_fields(self):
         loss_layout = QHBoxLayout()
         self.loss = QComboBox()
-        self.loss.addItems([
-            "CrossEntropy", "Dice", "Focal",
-            "CrossEntropy+Dice", "CrossEntropy+Focal", "Dice+Focal"
-        ])
+        self.loss.addItems(
+            [
+                "CrossEntropy",
+                "Dice",
+                "Focal",
+                "CrossEntropy+Dice",
+                "CrossEntropy+Focal",
+                "Dice+Focal",
+            ]
+        )
         loss_layout.addWidget(QLabel("Loss:"))
         loss_layout.addWidget(self.loss)
 
@@ -500,7 +485,11 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.num_classes = QSpinBox()
         self.num_classes.setRange(1, 100)
         self.num_classes.setValue(21)
-        self.num_classes.valueChanged.connect(lambda value: self.output_activation.setCurrentText('sigmoid' if value == 1 else 'softmax' if value == 2 else 'argmax'))
+        self.num_classes.valueChanged.connect(
+            lambda value: self.output_activation.setCurrentText(
+                "sigmoid" if value == 1 else "softmax" if value == 2 else "argmax"
+            )
+        )
         sched_layout.addWidget(QLabel("  Классов:"))
         sched_layout.addWidget(self.num_classes)
         sched_layout.addStretch()
@@ -580,8 +569,13 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.aug_rotate = QCheckBox("Rotate")
         self.aug_scale = QCheckBox("Scale")
         self.aug_noise = QCheckBox("Noise")
-        for cb in (self.aug_hflip, self.aug_vflip, self.aug_rotate,
-                   self.aug_scale, self.aug_noise):
+        for cb in (
+            self.aug_hflip,
+            self.aug_vflip,
+            self.aug_rotate,
+            self.aug_scale,
+            self.aug_noise,
+        ):
             cb.setChecked(False)
             aug_layout.addWidget(cb)
         aug_layout.addStretch()
@@ -592,16 +586,16 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
     # ------------------------------------------------------------------
     def _parse_preset_file(self, path):
         data = {}
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
-                if ':' not in line:
+                if ":" not in line:
                     continue
-                key, val = line.split(':', 1)
+                key, val = line.split(":", 1)
                 key = key.strip()
-                val = val.split('#', 1)[0].strip()
+                val = val.split("#", 1)[0].strip()
                 try:
                     data[key] = ast.literal_eval(val)
                 except Exception:
@@ -627,7 +621,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             return
         try:
             data = self._collect_preset_dict()
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(path, "w", encoding="utf-8") as f:
                 for k, v in data.items():
                     f.write(f"{k}: {v}\n")
             QMessageBox.information(self, "Пресет", f"Пресет сохранён в {path}")
@@ -635,7 +629,11 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить пресет:\n{e}")
 
     def _collect_preset_dict(self):
-        arch = "deeplabv3plus" if self.architecture.currentText() == "DeepLabV3+" else "deeplabv3"
+        arch = (
+            "deeplabv3plus"
+            if self.architecture.currentText() == "DeepLabV3+"
+            else "deeplabv3"
+        )
         two_phase = self.two_phase_check.isChecked()
         if two_phase:
             total_epochs = self.freeze_epochs.value() + self.unfreeze_epochs.value()
@@ -651,11 +649,18 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             "output_stride": int(self.output_stride.currentText()),
             "input_size": self.input_size.value(),
             "atrous_rates": self.atrous_rates.text().strip(),
-            "output_activation": "sigmoid" if self.num_classes.value() == 1 else "softmax" if self.num_classes.value() == 2 else "argmax",
+            "output_activation": "sigmoid"
+            if self.num_classes.value() == 1
+            else "softmax"
+            if self.num_classes.value() == 2
+            else "argmax",
             "num_classes": self.num_classes.value(),
-            "ignore_index": self.ignore_index.value() if self.ignore_index.value() != -1 else None,
+            "ignore_index": self.ignore_index.value()
+            if self.ignore_index.value() != -1
+            else None,
             "class_weights": (
-                "auto" if self.class_weights_mode.currentText() == "Auto (Dynamic)"
+                "auto"
+                if self.class_weights_mode.currentText() == "Auto (Dynamic)"
                 else (self.class_weights_file.text().strip() or None)
             ),
             # Loss
@@ -691,7 +696,11 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             "use_layerwise_lr": self.use_layerwise_lr.isChecked(),
             "layerwise_decay": self.layerwise_decay.value(),
             "multi_scale_infer": self.multi_scale_infer.isChecked(),
-            "infer_scales": [float(s.strip()) for s in self.infer_scales.text().split(',') if s.strip()],
+            "infer_scales": [
+                float(s.strip())
+                for s in self.infer_scales.text().split(",")
+                if s.strip()
+            ],
             "threshold": self.threshold.value(),
             # Аугментации
             "augmentations": {
@@ -712,7 +721,11 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
 
         # Архитектура
         if "architecture" in d:
-            arch_text = "DeepLabV3+" if str(d["architecture"]).lower() in ("deeplabv3plus", "deeplabv3+") else "DeepLabV3"
+            arch_text = (
+                "DeepLabV3+"
+                if str(d["architecture"]).lower() in ("deeplabv3plus", "deeplabv3+")
+                else "DeepLabV3"
+            )
             self.architecture.setCurrentText(arch_text)
         if "backbone" in d:
             idx = self.backbone.findText(str(d["backbone"]))
@@ -735,7 +748,13 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
 
         if "num_classes" in d:
             self.num_classes.setValue(int(d["num_classes"]))
-        self.output_activation.setCurrentText('sigmoid' if self.num_classes.value() == 1 else 'softmax' if self.num_classes.value() == 2 else 'argmax')
+        self.output_activation.setCurrentText(
+            "sigmoid"
+            if self.num_classes.value() == 1
+            else "softmax"
+            if self.num_classes.value() == 2
+            else "argmax"
+        )
         if "ignore_index" in d:
             val = d["ignore_index"]
             self.ignore_index.setValue(int(val) if val is not None else -1)
@@ -853,7 +872,9 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         else:
             model_path = self.custom_model_path.text().strip()
             if not model_path:
-                QMessageBox.warning(self, "Ошибка", "Не указан файл модели DeepLabV3/V3+")
+                QMessageBox.warning(
+                    self, "Ошибка", "Не указан файл модели DeepLabV3/V3+"
+                )
                 return None
 
         dataset_path = self.dataset_path.text().strip()
@@ -861,15 +882,20 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
 
         if not dataset_path and not deeplab_yaml:
             QMessageBox.warning(
-                self, "Ошибка",
-                "Укажите либо папку датасета, либо DeepLab YAML с путями."
+                self,
+                "Ошибка",
+                "Укажите либо папку датасета, либо DeepLab YAML с путями.",
             )
             return None
         if deeplab_yaml and not os.path.isfile(deeplab_yaml):
-            QMessageBox.warning(self, "Ошибка", f"DeepLab YAML не найден:\n{deeplab_yaml}")
+            QMessageBox.warning(
+                self, "Ошибка", f"DeepLab YAML не найден:\n{deeplab_yaml}"
+            )
             return None
         if dataset_path and not os.path.isdir(dataset_path):
-            QMessageBox.warning(self, "Ошибка", f"Папка датасета не существует:\n{dataset_path}")
+            QMessageBox.warning(
+                self, "Ошибка", f"Папка датасета не существует:\n{dataset_path}"
+            )
             return None
 
         # class_weights
@@ -880,7 +906,9 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         elif cw_mode == "From file":
             fpath = self.class_weights_file.text().strip()
             if not fpath:
-                QMessageBox.warning(self, "Ошибка", "Выбран 'From file', но файл не указан")
+                QMessageBox.warning(
+                    self, "Ошибка", "Выбран 'From file', но файл не указан"
+                )
                 return None
             class_weights = fpath
 
@@ -900,17 +928,33 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         atrous_rates = None
         if atrous_str:
             try:
-                atrous_rates = [int(x.strip()) for x in atrous_str.split(",") if x.strip()]
+                atrous_rates = [
+                    int(x.strip()) for x in atrous_str.split(",") if x.strip()
+                ]
             except ValueError:
-                QMessageBox.warning(self, "Ошибка", "atrous_rates должны быть целыми числами через запятую")
+                QMessageBox.warning(
+                    self,
+                    "Ошибка",
+                    "atrous_rates должны быть целыми числами через запятую",
+                )
                 return None
 
-        arch = "deeplabv3plus" if self.architecture.currentText() == "DeepLabV3+" else "deeplabv3"
+        arch = (
+            "deeplabv3plus"
+            if self.architecture.currentText() == "DeepLabV3+"
+            else "deeplabv3"
+        )
 
         try:
-            infer_scales = [float(s.strip()) for s in self.infer_scales.text().split(",") if s.strip()]
+            infer_scales = [
+                float(s.strip())
+                for s in self.infer_scales.text().split(",")
+                if s.strip()
+            ]
         except ValueError:
-            QMessageBox.warning(self, "Ошибка", "infer_scales должны быть числами через запятую")
+            QMessageBox.warning(
+                self, "Ошибка", "infer_scales должны быть числами через запятую"
+            )
             return None
 
         return {
@@ -922,31 +966,33 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             "epochs": total_epochs,
             "batch_size": -1 if self.auto_batch.isChecked() else self.batch.value(),
             "device": self.device_combo.currentText(),
-
             "architecture": arch,
             "backbone": self.backbone.currentText(),
             "output_stride": int(self.output_stride.currentText()),
             "atrous_rates": atrous_rates,
-            "output_activation": "sigmoid" if self.num_classes.value() == 1 else "softmax" if self.num_classes.value() == 2 else "argmax",
+            "output_activation": "sigmoid"
+            if self.num_classes.value() == 1
+            else "softmax"
+            if self.num_classes.value() == 2
+            else "argmax",
             "input_size": self.input_size.value(),
-
             "class_weights": class_weights,
-
             "loss": self.loss.currentText(),
             "loss_weights": {
                 "ce": self.loss_weight_ce.value(),
                 "dice": self.loss_weight_dice.value(),
                 "focal": self.loss_weight_focal.value(),
             },
-
-            "ignore_index": self.ignore_index.value() if self.ignore_index.value() != -1 else None,
-
+            "ignore_index": self.ignore_index.value()
+            if self.ignore_index.value() != -1
+            else None,
             "two_phase_training": two_phase,
             "freeze_epochs": freeze_epochs,
             "unfreeze_epochs": unfreeze_epochs,
-            "unfreeze_last_n_stages": self.unfreeze_last_n_stages.value() if self.unfreeze_last_n_stages.value() != -1 else None,
+            "unfreeze_last_n_stages": self.unfreeze_last_n_stages.value()
+            if self.unfreeze_last_n_stages.value() != -1
+            else None,
             "freeze_bn_second_phase": self.freeze_bn_second_phase.isChecked(),
-
             "num_classes": self.num_classes.value(),
             "optimizer": self.optimizer.currentText(),
             "lr": self.lr.value(),
@@ -954,10 +1000,8 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             "weight_decay": self.weight_decay.value(),
             "scheduler": self.scheduler.currentText(),
             "poly_power": self.poly_power.value(),
-
             "normalize": self.normalize_checkbox.isChecked(),
             "resize_mode": self.resize_mode_combo.currentText(),
-
             "use_amp": self.use_amp.isChecked(),
             "accum_steps": self.accum_steps.value(),
             "use_ema": self.use_ema.isChecked(),
@@ -967,7 +1011,6 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             "multi_scale_infer": self.multi_scale_infer.isChecked(),
             "infer_scales": infer_scales,
             "threshold": self.threshold.value(),
-
             "augmentations": {
                 "hflip": self.aug_hflip.isChecked(),
                 "vflip": self.aug_vflip.isChecked(),
@@ -976,6 +1019,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
                 "noise": self.aug_noise.isChecked(),
             },
         }
+
 
 # =============================================================================
 # SegFormer Training Widget
@@ -996,14 +1040,14 @@ class SegFormerTrainWidget(BaseTrainWidget):
         )
         self.add_dataset_structure_hint(hint)
 
+        self.dataset_source = source_dialogs.DatasetSourceWidget(
+            ("dataset_root",), profile="yolo_train"
+        )
         self.dataset_path = QLineEdit()
-        self.dataset_path.setPlaceholderText("Корневая папка датасета (содержит img_dir и ann_dir)")
-        self.browse_dataset_btn = QPushButton("Обзор")
+        self.dataset_source.add_path_field("Папка:", self.dataset_path)
+        self.browse_dataset_btn = self.dataset_source.button("dataset_root")
         self.browse_dataset_btn.clicked.connect(self._browse_dataset)
-        row = QHBoxLayout()
-        row.addWidget(self.dataset_path)
-        row.addWidget(self.browse_dataset_btn)
-        self.form_layout.addRow("📁 Папка датасета:", row)
+        self.form_layout.addRow(self.dataset_source)
 
         self.add_project_field()
         self.add_experiment_name_field()
@@ -1015,14 +1059,16 @@ class SegFormerTrainWidget(BaseTrainWidget):
         self.add_progress_bar()
 
     def _browse_dataset(self):
-        path = QFileDialog.getExistingDirectory(self, "Выберите корневую папку датасета")
+        path = source_dialogs.get_directory(self, "dataset_root")
         if path:
             self.dataset_path.setText(path)
 
     def _add_model_selection(self):
         group = QGroupBox("Источник модели")
         layout = QVBoxLayout()
-        self.model_from_preset = QRadioButton("Использовать предустановленную SegFormer")
+        self.model_from_preset = QRadioButton(
+            "Использовать предустановленную SegFormer"
+        )
         self.model_from_file = QRadioButton("Загрузить свою модель (.pth)")
         self.model_from_preset.setChecked(True)
         layout.addWidget(self.model_from_preset)
@@ -1038,7 +1084,7 @@ class SegFormerTrainWidget(BaseTrainWidget):
         file_row = QHBoxLayout(self.file_widget)
         self.custom_model_path = QLineEdit()
         self.custom_model_path.setPlaceholderText("Путь к .pth файлу")
-        self.browse_custom_btn = QPushButton("Обзор")
+        self.browse_custom_btn = source_dialogs.make_source_button("model_torch", self)
         file_row.addWidget(self.custom_model_path)
         file_row.addWidget(self.browse_custom_btn)
         self.form_layout.addRow(self.file_widget)
@@ -1058,13 +1104,15 @@ class SegFormerTrainWidget(BaseTrainWidget):
         self.file_widget.setVisible(not is_preset)
 
     def _browse_custom_model(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель SegFormer", "", "PyTorch models (*.pth)")
+        path, _ = source_dialogs.get_open_file(self, "model_torch")
         if path:
             self.custom_model_path.setText(path)
 
     def _add_preset_segformer_fields(self):
         self.variant = QComboBox()
-        self.variant.addItems(["mit-b0", "mit-b1", "mit-b2", "mit-b3", "mit-b4", "mit-b5"])
+        self.variant.addItems(
+            ["mit-b0", "mit-b1", "mit-b2", "mit-b3", "mit-b4", "mit-b5"]
+        )
         self.preset_layout.addRow("Variant:", self.variant)
 
     def _add_segformer_specific(self):
@@ -1131,14 +1179,14 @@ class SAMTrainWidget(BaseTrainWidget):
         )
         self.add_dataset_structure_hint(hint)
 
+        self.dataset_source = source_dialogs.DatasetSourceWidget(
+            ("dataset_root",), profile="yolo_train"
+        )
         self.dataset_path = QLineEdit()
-        self.dataset_path.setPlaceholderText("Корневая папка датасета (содержит train/, val/ с images/ и labels/)")
-        self.browse_dataset_btn = QPushButton("Обзор")
+        self.dataset_source.add_path_field("Папка:", self.dataset_path)
+        self.browse_dataset_btn = self.dataset_source.button("dataset_root")
         self.browse_dataset_btn.clicked.connect(self._browse_dataset)
-        row = QHBoxLayout()
-        row.addWidget(self.dataset_path)
-        row.addWidget(self.browse_dataset_btn)
-        self.form_layout.addRow("📁 Папка датасета:", row)
+        self.form_layout.addRow(self.dataset_source)
 
         self.add_project_field()
         self.add_experiment_name_field()
@@ -1150,7 +1198,7 @@ class SAMTrainWidget(BaseTrainWidget):
         self.add_progress_bar()
 
     def _browse_dataset(self):
-        path = QFileDialog.getExistingDirectory(self, "Выберите корневую папку датасета SAM")
+        path = source_dialogs.get_directory(self, "dataset_root")
         if path:
             self.dataset_path.setText(path)
 
@@ -1173,7 +1221,7 @@ class SAMTrainWidget(BaseTrainWidget):
         file_row = QHBoxLayout(self.file_widget)
         self.custom_model_path = QLineEdit()
         self.custom_model_path.setPlaceholderText("Путь к .pth файлу")
-        self.browse_custom_btn = QPushButton("Обзор")
+        self.browse_custom_btn = source_dialogs.make_source_button("model_torch", self)
         file_row.addWidget(self.custom_model_path)
         file_row.addWidget(self.browse_custom_btn)
         self.form_layout.addRow(self.file_widget)
@@ -1193,7 +1241,7 @@ class SAMTrainWidget(BaseTrainWidget):
         self.file_widget.setVisible(not is_preset)
 
     def _browse_custom_model(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите модель SAM", "", "PyTorch models (*.pth)")
+        path, _ = source_dialogs.get_open_file(self, "model_torch")
         if path:
             self.custom_model_path.setText(path)
 

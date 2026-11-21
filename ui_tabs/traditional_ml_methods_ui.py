@@ -1,3 +1,4 @@
+from ui.dataset_source import make_source_button
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -140,7 +141,7 @@ def setup_traditional_ml_ui(parent):
     # Кнопки обучения, загрузки, сохранения
     train_layout = QHBoxLayout()
     parent.train_button = QPushButton("Train Model")
-    parent.load_model_button = QPushButton("Load Model")
+    parent.load_model_button=make_source_button('model_ml')
     parent.save_model_btn = QPushButton("Save Model")
     train_layout.addWidget(parent.train_button)
     train_layout.addWidget(parent.load_model_button)

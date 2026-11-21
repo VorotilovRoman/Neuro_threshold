@@ -5,7 +5,7 @@ import os
 import cv2
 import numpy as np
 
-from utils_new.dataset_files_new import _read_with_fallback, write_image
+from utils_new.dataset_files_new import _read_with_fallback, collect_image_paths, write_image
 from utils_new.dataset_image_stats_new import ImageStats
 from utils_new.dataset_pair_validator_new import (
     IMG_EXTENSIONS,
@@ -16,13 +16,8 @@ from utils_new.dataset_pair_validator_new import (
 
 
 def _list_images(folder):
-    result = {}
-    for f in os.listdir(folder):
-        name, ext = os.path.splitext(f)
-        if ext.lower() in IMG_EXTENSIONS:
-            result[name] = os.path.join(folder, f)
-    return result
-
+    return {os.path.splitext(os.path.basename(path))[0]: path
+            for path in collect_image_paths(folder)}
 
 
 def scan_detection_pairs(images_folder, labels_folder, log_cb=None,

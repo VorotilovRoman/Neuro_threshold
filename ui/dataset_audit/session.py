@@ -14,11 +14,6 @@ get_class_color = settings.get_dataset_class_color
 class DatasetSessionController:
     def _sync_all_states(self, *args):
         super()._sync_all_states(*args)
-        self.btn_labels.setText(
-            {0: "Папка разметки", 1: "Папка масок", 2: "Без разметки"}.get(
-                self.dataset_type_combo.currentData(), "Папка разметки"
-            )
-        )
 
     def _invalidate_analysis_results(self):
         self._dataset_revision += 1

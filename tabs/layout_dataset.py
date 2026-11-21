@@ -1,4 +1,3 @@
-
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
 if __name__ == "__main__" and not __package__:
     import sys as _bootstrap_sys
@@ -12,9 +11,9 @@ from runtime_torch import prepare_windows_torch
 prepare_windows_torch()
 
 import os
-from pathlib import Path
 import sys
 import traceback
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -26,7 +25,6 @@ from PyQt5.QtWidgets import (
     QColorDialog,
     QDialog,
     QDialogButtonBox,
-    QFileDialog,
     QFormLayout,
     QLabel,
     QLineEdit,
@@ -38,8 +36,10 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from ui_tabs.layout_dataset_ui import setup_layout_dataset_ui
+from ui import dataset_source as source_dialogs
+from ui.image_view import numpy_to_qpixmap, set_fill_color_button_preview
 from ui.settings_service import settings
+from ui_tabs.layout_dataset_ui import setup_layout_dataset_ui
 from utils_new.dataset_catalog_new import import_coco_catalog
 from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
 
@@ -47,13 +47,10 @@ from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
 # The UI import above is intentionally left unchanged.
 from utils_new.dataset_files_new import (
     LazyImageCache,
-    convert_to_grayscale,
-    image_size_from_file,
+    collect_image_paths,
     load_one_image_item,
     normalize_to_uint8,
     read_image_with_fallback,
-    read_mask_with_fallback,
-    resize_to_max_side,
 )
 from utils_new.dataset_unet_new import (
     load_unet_yaml_pairs,
@@ -61,19 +58,15 @@ from utils_new.dataset_unet_new import (
 )
 from utils_new.dataset_yaml_new import (
     build_yolo_save_target_map,
-    find_mask_for_image,
     load_yolo_yaml,
 )
 from utils_new.dataset_yolo_labels_new import (
     build_label_save_plan,
     canonicalize_obb_corners,
     format_label_save_confirmation,
-    load_annotations,
     load_annotations_for_image,
-    save_annotations,
     save_annotations_for_image,
 )
-from ui.image_view import numpy_to_qpixmap, set_fill_color_button_preview
 from utils_ops.segmentation_ops import update_annotation_list
 
 
@@ -84,7 +77,7 @@ def _validate_unified_annotation(ann):
     """Возвращает (is_valid, err_msg)."""
     try:
         typ = ann[0]
-        if typ == 'detect':
+        if typ == "detect":
             _, cls, cx, cy, w, h = ann
             if not isinstance(cls, int) or cls < 0:
                 return False, f"некорректный class id {cls!r}"
@@ -94,7 +87,7 @@ def _validate_unified_annotation(ann):
                 return False, f"неположительный размер ({w:.3f}x{h:.3f})"
             if w > 1 or h > 1:
                 return False, f"размер ({w:.3f}x{h:.3f}) > 1"
-        elif typ == 'obb':
+        elif typ == "obb":
             _, cls, points = ann
             if not isinstance(cls, int) or cls < 0:
                 return False, f"некорректный class id {cls!r}"
@@ -103,7 +96,7 @@ def _validate_unified_annotation(ann):
             for i in range(0, 8, 2):
                 if not (0.0 <= points[i] <= 1.0) or not (0.0 <= points[i + 1] <= 1.0):
                     return False, f"OBB: точка {i // 2 + 1} вне [0,1]"
-        elif typ == 'segment':
+        elif typ == "segment":
             _, cls, points = ann
             if not isinstance(cls, int) or cls < 0:
                 return False, f"некорректный class id {cls!r}"
@@ -132,7 +125,7 @@ def _detect_annotation_to_obb(ann):
     что возвращает SmartGraphicsView._obb_to_points при angle=0:
     BR → BL → TL → TR (по часовой от правого-нижнего).
     """
-    if not ann or ann[0] != 'detect':
+    if not ann or ann[0] != "detect":
         return ann
     _, cls, cx, cy, w, h = ann
     x1 = float(cx) - float(w) / 2.0
@@ -146,13 +139,14 @@ def _detect_annotation_to_obb(ann):
         corners = canonicalize_obb_corners(corners)
     except Exception:
         pass
-    return ('obb', int(cls), corners)
+    return ("obb", int(cls), corners)
 
 
 class LabelValidationThread(QThread):
     """Фоновая валидация всех аннотаций загруженного набора."""
+
     progress = pyqtSignal(int, int)
-    finished_signal = pyqtSignal(dict)   # {idx: [(valid, err), ...]}
+    finished_signal = pyqtSignal(dict)  # {idx: [(valid, err), ...]}
 
     def __init__(self, image_paths, yaml_label_map, label_folder):
         super().__init__()
@@ -171,10 +165,10 @@ class LabelValidationThread(QThread):
                 return lp
         if self.label_folder:
             base = os.path.splitext(os.path.basename(img_path))[0]
-            cand = os.path.join(self.label_folder, base + '.txt')
+            cand = os.path.join(self.label_folder, base + ".txt")
             if os.path.exists(cand):
                 return cand
-        cand = os.path.splitext(img_path)[0] + '.txt'
+        cand = os.path.splitext(img_path)[0] + ".txt"
         if os.path.exists(cand):
             return cand
         return None
@@ -213,12 +207,12 @@ class Labeler(QMainWindow):
         self._yaml_label_map = {}
         self._label_folder = None
         self._save_label_map = {}
-        self._save_source_kind = 'images'
+        self._save_source_kind = "images"
 
         self.img_w = 0
         self.img_h = 0
-        self.all_annotations = []          # список аннотаций на каждое изображение (лениво)
-        self.current_annotations = []      # аннотации текущего изображения
+        self.all_annotations = []  # список аннотаций на каждое изображение (лениво)
+        self.current_annotations = []  # аннотации текущего изображения
 
         # Для работы с YAML (маски не нужны)
         self.mask_folder = None
@@ -227,7 +221,7 @@ class Labeler(QMainWindow):
         self.mask_opacity = 0.5
 
         # Валидация аннотаций
-        self._validation_per_image = {}     # idx -> [(valid, err), ...]
+        self._validation_per_image = {}  # idx -> [(valid, err), ...]
         self._validation_thread = None
 
         # Модель авторазметки
@@ -276,9 +270,9 @@ class Labeler(QMainWindow):
         # --- Auto-label (YOLO) ---
         self.btn_load_auto_model.clicked.connect(self.load_auto_model)
         self.btn_auto_current.clicked.connect(
-            lambda: self.run_auto_label(all_images=False))
-        self.btn_auto_all.clicked.connect(
-            lambda: self.run_auto_label(all_images=True))
+            lambda: self.run_auto_label(all_images=False)
+        )
+        self.btn_auto_all.clicked.connect(lambda: self.run_auto_label(all_images=True))
 
         # --- Список объектов ---
         self.delete_button.clicked.connect(self.delete_selected_object)
@@ -286,7 +280,9 @@ class Labeler(QMainWindow):
         self.object_list.currentItemChanged.connect(self.on_object_selection_changed)
         self.object_list.itemDoubleClicked.connect(self.on_object_double_clicked)
         self.object_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.object_list.customContextMenuRequested.connect(self.show_object_context_menu)
+        self.object_list.customContextMenuRequested.connect(
+            self.show_object_context_menu
+        )
 
         # --- Отображение аннотаций (только векторный слой Qt) ---
         self.btn_hide_frames.toggled.connect(self._update_annotation_display_options)
@@ -324,8 +320,9 @@ class Labeler(QMainWindow):
         keep_row == -1 (или None) — current row снимается."""
         self.object_list.blockSignals(True)
         try:
-            update_annotation_list(self.object_list, self.current_annotations,
-                                   self.img_w, self.img_h)
+            update_annotation_list(
+                self.object_list, self.current_annotations, self.img_w, self.img_h
+            )
             if keep_row is not None and 0 <= keep_row < self.object_list.count():
                 self.object_list.setCurrentRow(keep_row)
             else:
@@ -343,14 +340,18 @@ class Labeler(QMainWindow):
             return "segment"
         if self.btn_tool_obb.isChecked():
             return "obb"
-        if self.btn_tool_segment_line.isChecked():   # NEW
+        if self.btn_tool_segment_line.isChecked():  # NEW
             return "segment_line"
         return None
 
     def _uncheck_all_tools(self):
         self.tool_group.setExclusive(False)
-        for b in (self.btn_tool_rect, self.btn_tool_segment,
-                  self.btn_tool_obb, self.btn_tool_segment_line):   # NEW
+        for b in (
+            self.btn_tool_rect,
+            self.btn_tool_segment,
+            self.btn_tool_obb,
+            self.btn_tool_segment_line,
+        ):  # NEW
             b.setChecked(False)
         self.tool_group.setExclusive(True)
 
@@ -361,7 +362,7 @@ class Labeler(QMainWindow):
             tool = "segment"
         elif btn is self.btn_tool_obb:
             tool = "obb"
-        elif btn is self.btn_tool_segment_line:      # NEW
+        elif btn is self.btn_tool_segment_line:  # NEW
             tool = "segment_line"
         else:
             return
@@ -406,27 +407,18 @@ class Labeler(QMainWindow):
     #  Формат сохранения OBB
     # ----------------------------------------------------------------------
     def on_obb_format_toggled(self, checked):
-        fmt = "xywhr (cx cy w h angle_rad)" if checked else \
-              "corners (x1 y1 x2 y2 x3 y3 x4 y4)"
+        fmt = (
+            "xywhr (cx cy w h angle_rad)"
+            if checked
+            else "corners (x1 y1 x2 y2 x3 y3 x4 y4)"
+        )
         self.log(f"Формат сохранения OBB: {fmt}")
 
     # ----------------------------------------------------------------------
     #  Ленивая загрузка изображений
     # ----------------------------------------------------------------------
     def _load_images(self, source, label_map=None):
-        if isinstance(source, str) and os.path.isdir(source):
-            exts = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp')
-            all_files = sorted(
-                os.path.join(source, f)
-                for f in os.listdir(source)
-                if os.path.splitext(f)[1].lower() in exts
-            )
-        elif isinstance(source, list):
-            all_files = list(source)
-        else:
-            self.log("No images loaded.")
-            self.nav_widget.set_current_index(0, 0)
-            return
+        all_files = collect_image_paths(source)
 
         if not all_files:
             self.log("No images loaded.")
@@ -462,7 +454,7 @@ class Labeler(QMainWindow):
         self._yaml_label_map = dict(label_map) if label_map else {}
         self._label_folder = None
         self._save_label_map = {}
-        self._save_source_kind = 'images'
+        self._save_source_kind = "images"
 
         self.image_view.set_annotations([], 0, 0)
         self.image_view.set_selected_index(-1)
@@ -490,17 +482,14 @@ class Labeler(QMainWindow):
         self._start_annotation_validation()
 
     def load_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
+        folder = source_dialogs.get_directory(self, "folder")
         if not folder:
             return
         self.log(f"Loading folder: {folder}")
         self._load_images(folder)
 
     def load_images(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Images", "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"
-        )
+        file_paths, _ = source_dialogs.get_open_file(self, "images", multiple=True)
         if not file_paths:
             return
         self.log(f"Loading {len(file_paths)} images...")
@@ -524,16 +513,20 @@ class Labeler(QMainWindow):
     def on_resize_mode_changed(self, enabled):
         if self.image_paths:
             reply = QMessageBox.question(
-                self, "Resize Mode Changed",
+                self,
+                "Resize Mode Changed",
                 "Resize mode changed. To apply, you need to reload images.\n"
                 "Do you want to reload images now?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
             )
             if reply == QMessageBox.Yes:
                 self.reload_current_images()
             else:
                 self.clear_images()
-                self.log("Resize mode changed, images cleared. Please load images again.")
+                self.log(
+                    "Resize mode changed, images cleared. Please load images again."
+                )
 
     def clear_images(self):
         self.overlap_review.set_dataset([])
@@ -547,7 +540,7 @@ class Labeler(QMainWindow):
         self._yaml_label_map = {}
         self._label_folder = None
         self._save_label_map = {}
-        self._save_source_kind = 'images'
+        self._save_source_kind = "images"
         self._validation_per_image = {}
         self.validation_status_label.setVisible(False)
         self.validation_status_label.setText("")
@@ -581,9 +574,11 @@ class Labeler(QMainWindow):
     # ----------------------------------------------------------------------
     def load_labels_folder(self):
         if not self.image_paths:
-            QMessageBox.warning(self, "Нет изображений", "Сначала загрузите изображения.")
+            QMessageBox.warning(
+                self, "Нет изображений", "Сначала загрузите изображения."
+            )
             return
-        folder = QFileDialog.getExistingDirectory(self, "Select folder with label files")
+        folder = source_dialogs.get_directory(self, "labels")
         if not folder:
             return
         self.log(f"Загрузка меток из {folder}")
@@ -591,13 +586,13 @@ class Labeler(QMainWindow):
         self._yaml_label_map = {}
         self._label_folder = folder
         self._save_label_map = {}
-        self._save_source_kind = 'labels'
+        self._save_source_kind = "labels"
 
         self.all_annotations = [[] for _ in self.image_paths]
         count = 0
         for i, img_path in enumerate(self.image_paths):
             base = os.path.splitext(os.path.basename(img_path))[0]
-            label_path = os.path.join(folder, base + '.txt')
+            label_path = os.path.join(folder, base + ".txt")
             if os.path.exists(label_path):
                 ann = load_annotations_for_image(label_path, img_path)
                 self.all_annotations[i] = ann
@@ -608,14 +603,11 @@ class Labeler(QMainWindow):
         self._start_annotation_validation()
 
     def load_yaml(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select YAML file", "", "YAML files (*.yaml *.yml)"
-        )
+        file_path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
         if not file_path:
             return
         try:
-            pairs, names, root, splits_info = load_yolo_yaml(
-                file_path, log_cb=self.log)
+            pairs, names, root, splits_info = load_yolo_yaml(file_path, log_cb=self.log)
             if not pairs:
                 QMessageBox.warning(self, "Ошибка", "Не найдено изображений в YAML.")
                 return
@@ -623,19 +615,21 @@ class Labeler(QMainWindow):
             image_paths = [p for p, _ in pairs]
             label_map = {p: lp for p, lp in pairs if lp is not None}
             save_target_map = build_yolo_save_target_map(
-                file_path, image_paths, root=root)
+                file_path, image_paths, root=root
+            )
 
             self._load_images(image_paths, label_map=label_map)
             self._save_label_map = save_target_map
-            self._save_source_kind = 'yolo'
+            self._save_source_kind = "yolo"
             self.log(f"=== Загрузка YAML: {file_path} ===")
             self.log(f"Root: {root}")
             for split, n in splits_info.items():
                 if n:
                     self.log(f"  • {split}: {n} изображений")
             self.log(f"Загружено {len(image_paths)} изображений.")
-            QMessageBox.information(self, "Успех",
-                                    f"Загружено {len(image_paths)} изображений.")
+            QMessageBox.information(
+                self, "Успех", f"Загружено {len(image_paths)} изображений."
+            )
         except Exception as e:
             self.log(f"Ошибка загрузки YAML: {e}")
             self._log_exception("Ошибка загрузки YAML", e)
@@ -655,11 +649,8 @@ class Labeler(QMainWindow):
         except Exception:
             pass
 
-
     def load_coco_json(self):
-        json_paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select COCO JSON(s) — можно несколько",
-            "", "JSON files (*.json);;All files (*)")
+        json_paths = source_dialogs.choose_coco_sources(self)
         if not json_paths:
             return
         try:
@@ -676,30 +667,38 @@ class Labeler(QMainWindow):
         if not catalog.sources:
             QMessageBox.warning(self, "COCO", "Не найдено ни одного изображения.")
             return
-        tmp_dir = os.path.join(os.path.dirname(str(json_paths[0])), '_coco_labels_tmp')
+        tmp_dir = os.path.join(os.path.dirname(str(json_paths[0])), "_coco_labels_tmp")
         os.makedirs(tmp_dir, exist_ok=True)
         pairs = []
         for idx, source in enumerate(catalog.sources):
-            pairs.extend(write_yolo_txt_for_coco_items(
-                source.items, tmp_dir, class_remap=None,
-                log_cb=self.log, name_prefix=f'j{idx:03d}_'))
+            pairs.extend(
+                write_yolo_txt_for_coco_items(
+                    source.items,
+                    tmp_dir,
+                    class_remap=None,
+                    log_cb=self.log,
+                    name_prefix=f"j{idx:03d}_",
+                )
+            )
         image_paths = [img for img, _ in pairs]
         label_map = {img: label for img, label in pairs}
         self._load_images(image_paths, label_map=label_map)
         self._save_label_map = dict(label_map)
-        self._save_source_kind = 'coco'
+        self._save_source_kind = "coco"
         self.log(f"=== Загрузка COCO ({len(catalog.sources)} JSON) ===")
-        self.log(f"Изображений: {len(image_paths)}, классов: {len(catalog.class_names)}")
+        self.log(
+            f"Изображений: {len(image_paths)}, классов: {len(catalog.class_names)}"
+        )
         self.log(f"Временные labels: {tmp_dir}")
         QMessageBox.information(
-            self, "COCO", f"Загружено изображений: {len(image_paths)}\n"
-            f"Классов: {len(catalog.class_names)}\nВременные labels: {tmp_dir}")
-
+            self,
+            "COCO",
+            f"Загружено изображений: {len(image_paths)}\n"
+            f"Классов: {len(catalog.class_names)}\nВременные labels: {tmp_dir}",
+        )
 
     def load_unet_yaml(self):
-        yaml_path, _ = QFileDialog.getOpenFileName(
-            self, "Select U-Net YAML", "",
-            "YAML files (*.yaml *.yml);;All files (*)")
+        yaml_path, _ = source_dialogs.get_open_file(self, "unet_yaml")
         if not yaml_path:
             return
         try:
@@ -711,15 +710,22 @@ class Labeler(QMainWindow):
     def _load_unet_into_labeler(self, yaml_path):
         """Import U-Net via the shared mask-to-annotation service."""
         pairs_raw, class_names, mask_offset, root, _ = load_unet_yaml_pairs(
-            yaml_path, log_cb=self.log)
+            yaml_path, log_cb=self.log
+        )
         if not pairs_raw:
             QMessageBox.warning(self, "U-Net", "Не найдено ни одной пары.")
             return
-        tmp_dir = os.path.join(os.path.dirname(os.path.abspath(yaml_path)),
-                               '_unet_labels_tmp')
+        tmp_dir = os.path.join(
+            os.path.dirname(os.path.abspath(yaml_path)), "_unet_labels_tmp"
+        )
         pairs = write_yolo_txt_for_unet_pairs(
-            pairs_raw, tmp_dir, class_names=class_names,
-            mask_offset=mask_offset, include_empty=True, log_cb=self.log)
+            pairs_raw,
+            tmp_dir,
+            class_names=class_names,
+            mask_offset=mask_offset,
+            include_empty=True,
+            log_cb=self.log,
+        )
         if not pairs:
             QMessageBox.warning(self, "U-Net", "Не удалось сконвертировать маски.")
             return
@@ -727,16 +733,21 @@ class Labeler(QMainWindow):
         label_map = {img: label for img, label in pairs}
         self._load_images(image_paths, label_map=label_map)
         self._save_label_map = dict(label_map)
-        self._save_source_kind = 'unet'
+        self._save_source_kind = "unet"
         self.log(f"=== Загрузка U-Net YAML: {yaml_path} ===")
-        self.log(f"Root: {root}, пар: {len(image_paths)}, "
-                 f"classes: {len(class_names)}, offset={mask_offset}")
+        self.log(
+            f"Root: {root}, пар: {len(image_paths)}, "
+            f"classes: {len(class_names)}, offset={mask_offset}"
+        )
         self.log(f"Временные labels (из масок): {tmp_dir}")
         QMessageBox.information(
-            self, "U-Net YAML", f"Загружено изображений: {len(image_paths)}\n"
+            self,
+            "U-Net YAML",
+            f"Загружено изображений: {len(image_paths)}\n"
             f"Классов: {len(class_names)}\n"
             "Маски сконвертированы в polygon-аннотации.\n"
-            f"Временные labels: {tmp_dir}")
+            f"Временные labels: {tmp_dir}",
+        )
 
     # ----------------------------------------------------------------------
     #  Отображение текущего изображения
@@ -760,8 +771,11 @@ class Labeler(QMainWindow):
         self.update_histogram(gray)
 
         if (idx >= len(self.all_annotations)) or (self.all_annotations[idx] is None):
-            label_path = self._yaml_label_map.get(self.image_paths[idx]) \
-                if self._yaml_label_map else None
+            label_path = (
+                self._yaml_label_map.get(self.image_paths[idx])
+                if self._yaml_label_map
+                else None
+            )
             if label_path and os.path.exists(label_path):
                 anns = load_annotations_for_image(label_path, self.image_paths[idx])
             else:
@@ -772,7 +786,9 @@ class Labeler(QMainWindow):
 
         self.current_annotations = list(self.all_annotations[idx])
 
-        self.image_view.set_annotations(self.current_annotations, self.img_w, self.img_h)
+        self.image_view.set_annotations(
+            self.current_annotations, self.img_w, self.img_h
+        )
         self.image_view.set_selected_index(-1)
 
         # Новый снимок — выделения в списке быть не должно.
@@ -801,7 +817,7 @@ class Labeler(QMainWindow):
         item = self._lazy_cache.get(self.current_index)
         if item is None:
             return
-        img = item['image']
+        img = item["image"]
         if img is None:
             return
 
@@ -811,10 +827,18 @@ class Labeler(QMainWindow):
         self.image_view.set_annotations(self.current_annotations, img_w, img_h)
 
         # Новую QPixmap создаём только при смене изображения или его буфера.
-        image_key = (id(self._lazy_cache), self.current_index,
-                     self.image_paths[self.current_index], id(img), img_w, img_h)
-        if image_key != getattr(self, '_last_display_image_key', None) \
-                or self.image_view._current_pixmap is None:
+        image_key = (
+            id(self._lazy_cache),
+            self.current_index,
+            self.image_paths[self.current_index],
+            id(img),
+            img_w,
+            img_h,
+        )
+        if (
+            image_key != getattr(self, "_last_display_image_key", None)
+            or self.image_view._current_pixmap is None
+        ):
             self.image_view.set_pixmap(numpy_to_qpixmap(img))
             self._last_display_image_key = image_key
         else:
@@ -822,7 +846,7 @@ class Labeler(QMainWindow):
 
     def choose_fill_color(self):
         """Цвет применится к Qt-слою, а не к исходному изображению."""
-        color = QColorDialog.getColor(self._fill_color, self, 'Цвет заливки объектов')
+        color = QColorDialog.getColor(self._fill_color, self, "Цвет заливки объектов")
         if not color.isValid():
             return
         self._fill_color = QColor(color)
@@ -845,8 +869,9 @@ class Labeler(QMainWindow):
 
     def update_histogram(self, gray_img):
         self.hist_ax.clear()
-        self.hist_ax.hist(gray_img.ravel(), bins=256, range=(0, 256),
-                          color='black', alpha=0.7)
+        self.hist_ax.hist(
+            gray_img.ravel(), bins=256, range=(0, 256), color="black", alpha=0.7
+        )
         self.hist_ax.set_title("Grayscale Histogram")
         self.hist_ax.set_xlabel("Pixel intensity")
         self.hist_ax.set_ylabel("Frequency")
@@ -866,7 +891,11 @@ class Labeler(QMainWindow):
         for path in self.image_paths:
             label = self._yaml_label_map.get(path)
             if not label:
-                label = str(Path(self._label_folder) / (Path(path).stem + '.txt')) if self._label_folder else str(Path(path).with_suffix('.txt'))
+                label = (
+                    str(Path(self._label_folder) / (Path(path).stem + ".txt"))
+                    if self._label_folder
+                    else str(Path(path).with_suffix(".txt"))
+                )
             pairs.append((path, label))
         self.overlap_review.set_dataset(pairs)
         self._apply_validation_colors_to_list()
@@ -892,7 +921,9 @@ class Labeler(QMainWindow):
 
     def _on_validation_progress(self, done, total):
         if total > 0:
-            self.validation_status_label.setText(f"⏳ Проверка разметки: {done}/{total}")
+            self.validation_status_label.setText(
+                f"⏳ Проверка разметки: {done}/{total}"
+            )
             self.validation_status_label.setStyleSheet(
                 "color: #0055aa; font-weight: bold; padding: 4px;"
             )
@@ -927,7 +958,7 @@ class Labeler(QMainWindow):
         self.validation_status_label.setVisible(True)
 
     def _apply_validation_colors_to_list(self):
-        if not hasattr(self, 'object_list'):
+        if not hasattr(self, "object_list"):
             return
         per_file = self._validation_per_image.get(self.current_index, [])
         for row in range(self.object_list.count()):
@@ -947,7 +978,9 @@ class Labeler(QMainWindow):
                     item.setText(base_text + f"  [INVALID: {err}]")
                     item.setToolTip(f"❌ {err}")
 
-        self._overlap_warnings = self.overlap_review.set_current(self.current_index, self.current_annotations, self.img_w, self.img_h)
+        self._overlap_warnings = self.overlap_review.set_current(
+            self.current_index, self.current_annotations, self.img_w, self.img_h
+        )
 
     def _revalidate_current(self):
         self._validation_per_image[self.current_index] = [
@@ -992,7 +1025,9 @@ class Labeler(QMainWindow):
         self.btn_tool_obb.setEnabled(has_images)
         self.btn_tool_segment_line.setEnabled(has_images)
         self.delete_button.setEnabled(has_images and len(self.current_annotations) > 0)
-        self.delete_all_button.setEnabled(has_images and len(self.current_annotations) > 0)
+        self.delete_all_button.setEnabled(
+            has_images and len(self.current_annotations) > 0
+        )
         self.nav_widget.set_navigation_enabled(has_images)
 
     # ----------------------------------------------------------------------
@@ -1001,8 +1036,9 @@ class Labeler(QMainWindow):
     def _append_annotation(self, new_ann, log_text):
         self.current_annotations.append(new_ann)
         self._sync_current_annotations_to_storage()
-        self.image_view.set_annotations(self.current_annotations,
-                                        self.img_w, self.img_h)
+        self.image_view.set_annotations(
+            self.current_annotations, self.img_w, self.img_h
+        )
         new_row = len(self.current_annotations) - 1
         self._rebuild_object_list(keep_row=new_row)
         # NEW: синхронизируем выделение во view, иначе объект окажется
@@ -1024,7 +1060,7 @@ class Labeler(QMainWindow):
         cy = (y1 + y2) / 2.0 / self.img_h
         bw = w / self.img_w
         bh = h / self.img_h
-        new_ann = ('detect', 0, cx, cy, bw, bh)
+        new_ann = ("detect", 0, cx, cy, bw, bh)
         self._append_annotation(
             new_ann,
             f"Added rectangle: class=0, center=({cx:.3f},{cy:.3f}), "
@@ -1036,18 +1072,17 @@ class Labeler(QMainWindow):
             return
         norm_pts = [max(0.0, min(1.0, float(p))) for p in norm_pts]
         norm_pts = canonicalize_obb_corners(norm_pts)
-        new_ann = ('obb', 0, norm_pts)
+        new_ann = ("obb", 0, norm_pts)
         self._append_annotation(
             new_ann,
-            f"Added OBB: class=0, "
-            f"corners=[{', '.join(f'{p:.3f}' for p in norm_pts)}]",
+            f"Added OBB: class=0, corners=[{', '.join(f'{p:.3f}' for p in norm_pts)}]",
         )
 
     def on_segment_drawn(self, norm_pts):
         if not norm_pts or len(norm_pts) < 6 or len(norm_pts) % 2 != 0:
             return
         norm_pts = [max(0.0, min(1.0, float(p))) for p in norm_pts]
-        new_ann = ('segment', 0, norm_pts)
+        new_ann = ("segment", 0, norm_pts)
         n_pts = len(norm_pts) // 2
         self._append_annotation(
             new_ann,
@@ -1059,6 +1094,7 @@ class Labeler(QMainWindow):
     # ======================================================================
     def _resolve_auto_device(self):
         import torch
+
         d = self.auto_device_combo.currentText()
         if d == "auto":
             try:
@@ -1077,12 +1113,11 @@ class Labeler(QMainWindow):
 
     def load_auto_model(self):
         from runtime_policy import configure_ultralytics
+
         configure_ultralytics()
         from ultralytics import YOLO
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите модель YOLO", "",
-            "YOLO weights (*.pt *.onnx *.engine);;Все файлы (*)"
-        )
+
+        path, _ = source_dialogs.get_open_file(self, "model_yolo")
         if not path:
             return
         try:
@@ -1104,8 +1139,7 @@ class Labeler(QMainWindow):
             self.auto_model = None
             self.auto_model_edit.clear()
             self.auto_kind_label.setText("Тип вывода: —")
-            QMessageBox.critical(self, "Ошибка",
-                                 f"Не удалось загрузить модель:\n{e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить модель:\n{e}")
             self.log(f"[Auto-label] Ошибка загрузки модели: {e}")
 
     def _auto_infer_one(self, img_bgr):
@@ -1151,16 +1185,18 @@ class Labeler(QMainWindow):
 
         # --- 1. OBB ---
         obb = getattr(r, "obb", None)
-        if (obb is not None
-                and getattr(obb, "xyxyxyxy", None) is not None
-                and len(obb) > 0):
+        if (
+            obb is not None
+            and getattr(obb, "xyxyxyxy", None) is not None
+            and len(obb) > 0
+        ):
             corners_all = obb.xyxyxyxy.cpu().numpy()
             cls_all = obb.cls.cpu().numpy().astype(int)
             unified = []
             for i in range(len(cls_all)):
                 corners = corners_all[i].tolist()
                 norm = []
-                for (x, y) in corners:
+                for x, y in corners:
                     nx = max(0.0, min(1.0, float(x) / W))
                     ny = max(0.0, min(1.0, float(y) / H))
                     norm.append(nx)
@@ -1171,9 +1207,11 @@ class Labeler(QMainWindow):
 
         # --- 2. Segmentation ---
         masks = getattr(r, "masks", None)
-        if (masks is not None
-                and getattr(masks, "xy", None) is not None
-                and len(masks.xy) > 0):
+        if (
+            masks is not None
+            and getattr(masks, "xy", None) is not None
+            and len(masks.xy) > 0
+        ):
             boxes = getattr(r, "boxes", None)
             cls_all = []
             if boxes is not None and len(boxes) > 0:
@@ -1247,9 +1285,7 @@ class Labeler(QMainWindow):
                         for corners in corners_all:
                             xs = corners[:, 0]
                             ys = corners[:, 1]
-                            xyxy_all.append(
-                                [xs.min(), ys.min(), xs.max(), ys.max()]
-                            )
+                            xyxy_all.append([xs.min(), ys.min(), xs.max(), ys.max()])
                         xyxy_all = np.array(xyxy_all, dtype=np.float32)
                     cls_all = obb.cls.cpu().numpy().astype(int)
                 except Exception:
@@ -1259,9 +1295,11 @@ class Labeler(QMainWindow):
         # 3) masks.xy
         if xyxy_all is None:
             masks = getattr(r, "masks", None)
-            if (masks is not None
-                    and getattr(masks, "xy", None) is not None
-                    and len(masks.xy) > 0):
+            if (
+                masks is not None
+                and getattr(masks, "xy", None) is not None
+                and len(masks.xy) > 0
+            ):
                 xyxy_all = []
                 for poly in masks.xy:
                     if poly is None or len(poly) < 3:
@@ -1269,15 +1307,15 @@ class Labeler(QMainWindow):
                         continue
                     xs = poly[:, 0]
                     ys = poly[:, 1]
-                    xyxy_all.append(
-                        [xs.min(), ys.min(), xs.max(), ys.max()]
-                    )
+                    xyxy_all.append([xs.min(), ys.min(), xs.max(), ys.max()])
                 xyxy_all = np.array(xyxy_all, dtype=np.float32)
                 cls_all = np.zeros(len(xyxy_all), dtype=int)
                 boxes = getattr(r, "boxes", None)
-                if (boxes is not None
-                        and getattr(boxes, "cls", None) is not None
-                        and len(boxes) == len(xyxy_all)):
+                if (
+                    boxes is not None
+                    and getattr(boxes, "cls", None) is not None
+                    and len(boxes) == len(xyxy_all)
+                ):
                     try:
                         cls_all = boxes.cls.cpu().numpy().astype(int)
                     except Exception:
@@ -1325,15 +1363,15 @@ class Labeler(QMainWindow):
         except Exception:
             return poly
 
-
     def _apply_auto_annotations(self, unified, replace):
         if replace:
             self.current_annotations = list(unified)
         else:
             self.current_annotations = list(self.current_annotations) + list(unified)
         self._sync_current_annotations_to_storage()
-        self.image_view.set_annotations(self.current_annotations,
-                                        self.img_w, self.img_h)
+        self.image_view.set_annotations(
+            self.current_annotations, self.img_w, self.img_h
+        )
         self._rebuild_object_list(keep_row=None)
         self.update_image_display()
         self._revalidate_current()
@@ -1346,10 +1384,10 @@ class Labeler(QMainWindow):
                 return lp
         if self._label_folder:
             base = os.path.splitext(os.path.basename(img_path))[0]
-            cand = os.path.join(self._label_folder, base + '.txt')
+            cand = os.path.join(self._label_folder, base + ".txt")
             if os.path.exists(cand):
                 return cand
-        cand = os.path.splitext(img_path)[0] + '.txt'
+        cand = os.path.splitext(img_path)[0] + ".txt"
         if os.path.exists(cand):
             return cand
         return None
@@ -1357,15 +1395,13 @@ class Labeler(QMainWindow):
     def run_auto_label(self, all_images=False):
         if self.auto_model is None:
             QMessageBox.warning(
-                self, "Auto-label",
-                "Сначала загрузите модель YOLO (кнопка «Загрузить»)."
+                self,
+                "Auto-label",
+                "Сначала загрузите модель YOLO (кнопка «Загрузить»).",
             )
             return
         if not self.image_paths:
-            QMessageBox.warning(
-                self, "Auto-label",
-                "Сначала загрузите изображения."
-            )
+            QMessageBox.warning(self, "Auto-label", "Сначала загрузите изображения.")
             return
 
         if not all_images:
@@ -1387,10 +1423,7 @@ class Labeler(QMainWindow):
             unified, kind = self._auto_infer_one(img)
         except Exception as e:
             QApplication.restoreOverrideCursor()
-            QMessageBox.critical(
-                self, "Ошибка",
-                f"Не удалось выполнить инференс:\n{e}"
-            )
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить инференс:\n{e}")
             self.log(f"[Auto-label] Ошибка инференса: {e}")
             return
         finally:
@@ -1411,8 +1444,10 @@ class Labeler(QMainWindow):
         self._apply_auto_annotations(unified, replace)
 
         action = "заменено" if replace else "добавлено"
-        self.log(f"[Auto-label] Текущий снимок: {action} {len(unified)} "
-                 f"объектов (тип={kind})")
+        self.log(
+            f"[Auto-label] Текущий снимок: {action} {len(unified)} "
+            f"объектов (тип={kind})"
+        )
 
     def _run_auto_label_all(self):
         total = len(self.image_paths)
@@ -1420,19 +1455,19 @@ class Labeler(QMainWindow):
             return
 
         reply = QMessageBox.question(
-            self, "Auto-label",
+            self,
+            "Auto-label",
             f"Разметить все изображения ({total})?\n\n"
             f"Текущее поведение: "
             f"{'заменить существующие аннотации' if self.chk_auto_replace.isChecked() else 'дополнить существующие'}.\n"
             f"Операция может занять продолжительное время.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
 
-        progress = QProgressDialog(
-            "Авторазметка...", "Отмена", 0, total, self
-        )
+        progress = QProgressDialog("Авторазметка...", "Отмена", 0, total, self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
         progress.setValue(0)
@@ -1468,8 +1503,10 @@ class Labeler(QMainWindow):
                 img = read_image_with_fallback(self.image_paths[idx])
                 if img is None:
                     errors += 1
-                    self.log(f"[Auto-label] Не удалось прочитать "
-                             f"{os.path.basename(self.image_paths[idx])}")
+                    self.log(
+                        f"[Auto-label] Не удалось прочитать "
+                        f"{os.path.basename(self.image_paths[idx])}"
+                    )
                     continue
                 img = normalize_to_uint8(img)
                 if len(img.shape) == 2:
@@ -1480,8 +1517,10 @@ class Labeler(QMainWindow):
                     img = img[:, :, :3]
             except Exception as e:
                 errors += 1
-                self.log(f"[Auto-label] Ошибка чтения "
-                         f"{os.path.basename(self.image_paths[idx])}: {e}")
+                self.log(
+                    f"[Auto-label] Ошибка чтения "
+                    f"{os.path.basename(self.image_paths[idx])}: {e}"
+                )
                 continue
 
             # --- Инференс ---
@@ -1490,8 +1529,10 @@ class Labeler(QMainWindow):
                 kind_seen = kind
             except Exception as e:
                 errors += 1
-                self.log(f"[Auto-label] Ошибка инференса "
-                         f"{os.path.basename(self.image_paths[idx])}: {e}")
+                self.log(
+                    f"[Auto-label] Ошибка инференса "
+                    f"{os.path.basename(self.image_paths[idx])}: {e}"
+                )
                 continue
 
             # --- Применение ---
@@ -1505,10 +1546,13 @@ class Labeler(QMainWindow):
                     existing = self.all_annotations[idx]
                     if existing is None:
                         label_path = self._resolve_label_path_for_img(
-                            self.image_paths[idx])
+                            self.image_paths[idx]
+                        )
                         if label_path:
                             try:
-                                existing = load_annotations_for_image(label_path, self.image_paths[idx])
+                                existing = load_annotations_for_image(
+                                    label_path, self.image_paths[idx]
+                                )
                             except Exception:
                                 existing = []
                         else:
@@ -1516,27 +1560,30 @@ class Labeler(QMainWindow):
                     self.all_annotations[idx] = list(existing) + list(unified)
 
                 self._validation_per_image[idx] = [
-                    _validate_unified_annotation(a)
-                    for a in self.all_annotations[idx]
+                    _validate_unified_annotation(a) for a in self.all_annotations[idx]
                 ]
                 processed += 1
                 added_objects += len(unified)
             except Exception as e:
                 errors += 1
-                self.log(f"[Auto-label] Ошибка применения "
-                         f"{os.path.basename(self.image_paths[idx])}: {e}")
+                self.log(
+                    f"[Auto-label] Ошибка применения "
+                    f"{os.path.basename(self.image_paths[idx])}: {e}"
+                )
                 continue
 
         progress.setValue(total)
         progress.close()
 
         # --- Обновляем текущий снимок, если его разметка изменилась ---
-        if (self.current_index < total
-                and self.all_annotations[self.current_index] is not None):
-            self.current_annotations = list(
-                self.all_annotations[self.current_index])
-            self.image_view.set_annotations(self.current_annotations,
-                                            self.img_w, self.img_h)
+        if (
+            self.current_index < total
+            and self.all_annotations[self.current_index] is not None
+        ):
+            self.current_annotations = list(self.all_annotations[self.current_index])
+            self.image_view.set_annotations(
+                self.current_annotations, self.img_w, self.img_h
+            )
             self._rebuild_object_list(keep_row=None)
             self.update_image_display()
             self._revalidate_current()
@@ -1548,19 +1595,22 @@ class Labeler(QMainWindow):
         if kind_seen:
             self.auto_kind_label.setText(f"Тип вывода: {kind_seen}")
 
-        self.log(f"[Auto-label] Обработано {processed}/{total} "
-                 f"(объектов: {added_objects}, ошибок: {errors}); "
-                 f"тип={kind_seen or '—'}")
+        self.log(
+            f"[Auto-label] Обработано {processed}/{total} "
+            f"(объектов: {added_objects}, ошибок: {errors}); "
+            f"тип={kind_seen or '—'}"
+        )
 
         QMessageBox.information(
-            self, "Auto-label",
+            self,
+            "Auto-label",
             f"Обработано изображений: {processed}/{total}\n"
             f"Опции: {opt_str}\n"
             f"Добавлено/заменено объектов: {added_objects}\n"
             f"Ошибок чтения/инференса: {errors}\n"
             f"Тип вывода модели: {kind_seen or '—'}\n\n"
             f"⚠️ Изменения пока только в памяти.\n"
-            f"Не забудьте сохранить разметку (Save Labels / Save All)."
+            f"Не забудьте сохранить разметку (Save Labels / Save All).",
         )
 
     # ----------------------------------------------------------------------
@@ -1656,8 +1706,9 @@ class Labeler(QMainWindow):
             return
         del self.current_annotations[idx]
         self._sync_current_annotations_to_storage()
-        self.image_view.set_annotations(self.current_annotations,
-                                        self.img_w, self.img_h)
+        self.image_view.set_annotations(
+            self.current_annotations, self.img_w, self.img_h
+        )
 
         # Соседний объект вместо пустоты.
         new_idx = -1
@@ -1689,10 +1740,12 @@ class Labeler(QMainWindow):
 
         n = len(self.current_annotations)
         reply = QMessageBox.question(
-            self, "Delete All",
+            self,
+            "Delete All",
             f"Удалить все аннотации ({n}) на текущем снимке?\n"
             f"Другие изображения не затрагиваются.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
@@ -1734,10 +1787,10 @@ class Labeler(QMainWindow):
             return
 
         typ = ann[0]
-        if typ == 'detect':
+        if typ == "detect":
             _, _, cx, cy, w, h = ann
-            new_ann = ('detect', new_class, cx, cy, w, h)
-        elif typ in ('obb', 'segment'):
+            new_ann = ("detect", new_class, cx, cy, w, h)
+        elif typ in ("obb", "segment"):
             _, _, points = ann
             new_ann = (typ, new_class, points)
         else:
@@ -1747,8 +1800,9 @@ class Labeler(QMainWindow):
         self.current_annotations[idx] = new_ann
         self._sync_current_annotations_to_storage()
 
-        self.image_view.set_annotations(self.current_annotations,
-                                        self.img_w, self.img_h)
+        self.image_view.set_annotations(
+            self.current_annotations, self.img_w, self.img_h
+        )
         self._rebuild_object_list(keep_row=idx)
         self.image_view.set_selected_index(idx)
         self.update_image_display()
@@ -1764,7 +1818,7 @@ class Labeler(QMainWindow):
         if not (0 <= idx < len(self.current_annotations)):
             return
         ann = self.current_annotations[idx]
-        if not ann or ann[0] != 'detect':
+        if not ann or ann[0] != "detect":
             self.log(f"Объект #{idx + 1} не detect — конвертация не требуется.")
             return
 
@@ -1772,8 +1826,9 @@ class Labeler(QMainWindow):
         self.current_annotations[idx] = new_ann
         self._sync_current_annotations_to_storage()
 
-        self.image_view.set_annotations(self.current_annotations,
-                                        self.img_w, self.img_h)
+        self.image_view.set_annotations(
+            self.current_annotations, self.img_w, self.img_h
+        )
         self._rebuild_object_list(keep_row=idx)
         self.image_view.set_selected_index(idx)
         self.update_image_display()
@@ -1784,8 +1839,9 @@ class Labeler(QMainWindow):
         """Переводит все detect-аннотации во всех уже загруженных
         снимках (self.all_annotations[i] is not None) в OBB."""
         if not self.image_paths:
-            QMessageBox.warning(self, "Нет изображений",
-                                "Сначала загрузите изображения.")
+            QMessageBox.warning(
+                self, "Нет изображений", "Сначала загрузите изображения."
+            )
             return
 
         total_detect = 0
@@ -1797,31 +1853,36 @@ class Labeler(QMainWindow):
                 continue
             loaded_imgs += 1
             for a in self.all_annotations[i]:
-                if a and a[0] == 'detect':
+                if a and a[0] == "detect":
                     total_detect += 1
 
         if total_detect == 0:
             QMessageBox.information(
-                self, "Box → OBB",
+                self,
+                "Box → OBB",
                 "Обычных bounding box (detect) не найдено "
-                "среди загруженных в память снимков."
+                "среди загруженных в память снимков.",
             )
             return
 
         extra = ""
         if skipped_imgs:
-            extra = (f"\n\n⚠️ Пропущено снимков (аннотации не загружены): "
-                     f"{skipped_imgs}.\n"
-                     f"Откройте их, чтобы включить в конвертацию.")
+            extra = (
+                f"\n\n⚠️ Пропущено снимков (аннотации не загружены): "
+                f"{skipped_imgs}.\n"
+                f"Откройте их, чтобы включить в конвертацию."
+            )
 
         reply = QMessageBox.question(
-            self, "Box → OBB",
+            self,
+            "Box → OBB",
             f"Перевести {total_detect} detect-аннотаций "
             f"в {loaded_imgs} снимках в OBB?\n\n"
             f"Действие необратимо (только в памяти — файлы .txt\n"
             f"перезапишутся при следующем Save Labels / Save All)."
             f"{extra}",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
         )
         if reply != QMessageBox.Yes:
             return
@@ -1834,7 +1895,7 @@ class Labeler(QMainWindow):
             new = []
             changed = False
             for a in old:
-                if a and a[0] == 'detect':
+                if a and a[0] == "detect":
                     new.append(_detect_annotation_to_obb(a))
                     converted += 1
                     changed = True
@@ -1844,22 +1905,28 @@ class Labeler(QMainWindow):
                 self.all_annotations[i] = new
 
         # Обновляем текущий снимок
-        if (0 <= self.current_index < len(self.all_annotations)
-                and self.all_annotations[self.current_index] is not None):
+        if (
+            0 <= self.current_index < len(self.all_annotations)
+            and self.all_annotations[self.current_index] is not None
+        ):
             self.current_annotations = list(self.all_annotations[self.current_index])
-            self.image_view.set_annotations(self.current_annotations,
-                                            self.img_w, self.img_h)
+            self.image_view.set_annotations(
+                self.current_annotations, self.img_w, self.img_h
+            )
             self._rebuild_object_list(keep_row=None)
             self.update_image_display()
             self._revalidate_current()
             self.update_navigation_state()
 
-        self.log(f"[Box → OBB] Переведено detect-аннотаций: {converted} "
-                 f"в {loaded_imgs} снимках.")
+        self.log(
+            f"[Box → OBB] Переведено detect-аннотаций: {converted} "
+            f"в {loaded_imgs} снимках."
+        )
         QMessageBox.information(
-            self, "Box → OBB",
+            self,
+            "Box → OBB",
             f"Переведено detect-аннотаций: {converted}.\n"
-            f"Не забудьте сохранить (Save All)."
+            f"Не забудьте сохранить (Save All).",
         )
 
     # ----------------------------------------------------------------------
@@ -1871,18 +1938,19 @@ class Labeler(QMainWindow):
         ann = self.current_annotations[idx]
         typ = ann[0]
 
-        if typ == 'detect':
+        if typ == "detect":
             type_desc = "Bounding Box (detect) — 4 числа: cx cy w h"
-        elif typ == 'obb':
+        elif typ == "obb":
             type_desc = "OBB (4 точки) — 8 чисел: x1 y1 x2 y2 x3 y3 x4 y4"
-        elif typ == 'segment':
+        elif typ == "segment":
             type_desc = "Segment (полигон) — чётное число ≥ 6: x1 y1 x2 y2 ..."
         else:
-            QMessageBox.warning(self, "Ошибка",
-                                f"Тип '{typ}' не поддерживает редактирование.")
+            QMessageBox.warning(
+                self, "Ошибка", f"Тип '{typ}' не поддерживает редактирование."
+            )
             return
 
-        if typ == 'detect':
+        if typ == "detect":
             _, cls_orig, cx, cy, w, h = ann
             coords = [cx, cy, w, h]
         else:
@@ -1932,38 +2000,39 @@ class Labeler(QMainWindow):
         try:
             new_coords = [float(t) for t in raw]
         except ValueError as e:
-            QMessageBox.warning(self, "Ошибка",
-                                f"Не удалось разобрать координаты: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось разобрать координаты: {e}")
             return
 
-        if typ == 'detect' and len(new_coords) != 4:
+        if typ == "detect" and len(new_coords) != 4:
             QMessageBox.warning(self, "Ошибка", "Для detect нужно ровно 4 числа.")
             return
-        if typ == 'obb' and len(new_coords) != 8:
+        if typ == "obb" and len(new_coords) != 8:
             QMessageBox.warning(self, "Ошибка", "Для OBB нужно ровно 8 чисел.")
             return
-        if typ == 'segment' and (len(new_coords) % 2 != 0 or len(new_coords) < 6):
-            QMessageBox.warning(self, "Ошибка",
-                                "Для segment нужно чётное число ≥ 6.")
+        if typ == "segment" and (len(new_coords) % 2 != 0 or len(new_coords) < 6):
+            QMessageBox.warning(self, "Ошибка", "Для segment нужно чётное число ≥ 6.")
             return
 
-        if typ == 'detect':
-            new_ann = ('detect', new_cls, *new_coords)
-        elif typ == 'obb':
+        if typ == "detect":
+            new_ann = ("detect", new_cls, *new_coords)
+        elif typ == "obb":
             norm_canon = canonicalize_obb_corners(new_coords)
-            new_ann = ('obb', new_cls, norm_canon)
+            new_ann = ("obb", new_cls, norm_canon)
         else:
             new_ann = (typ, new_cls, new_coords)
 
         self.current_annotations[idx] = new_ann
         self._sync_current_annotations_to_storage()
-        self.image_view.set_annotations(self.current_annotations,
-                                        self.img_w, self.img_h)
+        self.image_view.set_annotations(
+            self.current_annotations, self.img_w, self.img_h
+        )
         self._rebuild_object_list(keep_row=idx)
         self.image_view.set_selected_index(idx)
         self.update_image_display()
-        self.log(f"Изменена аннотация #{idx + 1}: type={typ}, class={new_cls}, "
-                 f"координат={len(new_coords)}")
+        self.log(
+            f"Изменена аннотация #{idx + 1}: type={typ}, class={new_cls}, "
+            f"координат={len(new_coords)}"
+        )
         self._revalidate_current()
 
     def on_object_double_clicked(self, item):
@@ -2020,18 +2089,16 @@ class Labeler(QMainWindow):
         menu = QMenu(self)
 
         edit_action = QAction("Edit…", self)
-        edit_action.triggered.connect(
-            lambda: self._open_annotation_edit_dialog(idx))
+        edit_action.triggered.connect(lambda: self._open_annotation_edit_dialog(idx))
         menu.addAction(edit_action)
 
         # Конвертация detect → OBB (только для обычных боксов)
-        if ann and ann[0] == 'detect':
+        if ann and ann[0] == "detect":
             to_obb_action = QAction("Convert to OBB", self)
             to_obb_action.setToolTip(
                 "Заменить этот прямоугольник (detect) на OBB с теми же углами."
             )
-            to_obb_action.triggered.connect(
-                lambda: self._convert_object_to_obb(idx))
+            to_obb_action.triggered.connect(lambda: self._convert_object_to_obb(idx))
             menu.addAction(to_obb_action)
 
         menu.addSeparator()
@@ -2051,13 +2118,13 @@ class Labeler(QMainWindow):
         img_path = self.image_paths[self.current_index]
         as_xywhr = self.chk_obb_xywhr.isChecked()
         try:
-            plan = self._confirm_label_save([img_path], 'Save', as_xywhr)
+            plan = self._confirm_label_save([img_path], "Save", as_xywhr)
             if plan is None:
                 return
             txt_path = plan.entries[0][1]
             success = save_annotations_for_image(
-                self.current_annotations, txt_path, img_path,
-                obb_as_xywhr=as_xywhr)
+                self.current_annotations, txt_path, img_path, obb_as_xywhr=as_xywhr
+            )
             if success:
                 self._sync_current_annotations_to_storage()
                 self._after_label_saved(img_path, txt_path)
@@ -2065,7 +2132,9 @@ class Labeler(QMainWindow):
                 QMessageBox.information(self, "Save", f"Labels saved to {txt_path}")
             else:
                 self.log(f"Error saving labels to {txt_path}")
-                QMessageBox.critical(self, "Error", f"Failed to save labels to {txt_path}")
+                QMessageBox.critical(
+                    self, "Error", f"Failed to save labels to {txt_path}"
+                )
         except Exception as exc:
             self.log(f"[Save] ошибка: {exc}")
             QMessageBox.critical(self, "Save", str(exc))
@@ -2079,29 +2148,35 @@ class Labeler(QMainWindow):
             return self._save_label_map[img_path]
         if self._label_folder:
             base = os.path.splitext(os.path.basename(img_path))[0]
-            return os.path.join(self._label_folder, base + '.txt')
-        if self._save_source_kind in ('yolo', 'unet', 'coco'):
-            raise ValueError(f'Missing save destination for {img_path}')
-        return os.path.splitext(img_path)[0] + '.txt'
+            return os.path.join(self._label_folder, base + ".txt")
+        if self._save_source_kind in ("yolo", "unet", "coco"):
+            raise ValueError(f"Missing save destination for {img_path}")
+        return os.path.splitext(img_path)[0] + ".txt"
 
     def _confirm_label_save(self, items, operation, obb_as_xywhr):
         """One shared plan/summary for Save and Save All, both tabs."""
         plan = build_label_save_plan(
-            (img, self._resolve_save_path_for_img(img)) for img in items)
+            (img, self._resolve_save_path_for_img(img)) for img in items
+        )
         summary = format_label_save_confirmation(
-            plan, operation=operation,
-            obb_format='xywhr' if obb_as_xywhr else 'corners',
+            plan,
+            operation=operation,
+            obb_format="xywhr" if obb_as_xywhr else "corners",
             source_kind=self._save_source_kind,
-            unloaded_count=(max(0, len(self.image_paths)-len(items))
-                            if operation == 'Save All' else 0))
+            unloaded_count=(
+                max(0, len(self.image_paths) - len(items))
+                if operation == "Save All"
+                else 0
+            ),
+        )
         answer = QMessageBox.question(
-            self, operation, summary, QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No)
+            self, operation, summary, QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
         return plan if answer == QMessageBox.Yes else None
 
     def _after_label_saved(self, image_path, target_path):
         """Reopen future lazy reads from the newly saved canonical YOLO path."""
-        if self._save_source_kind == 'yolo':
+        if self._save_source_kind == "yolo":
             self._yaml_label_map[image_path] = target_path
 
     def save_all_annotations(self):
@@ -2121,9 +2196,10 @@ class Labeler(QMainWindow):
 
         if not loaded:
             QMessageBox.information(
-                self, "Save All",
+                self,
+                "Save All",
                 "Нет загруженных аннотаций для сохранения.\n"
-                "Откройте хотя бы один снимок или запустите авторазметку."
+                "Откройте хотя бы один снимок или запустите авторазметку.",
             )
             return
 
@@ -2132,7 +2208,8 @@ class Labeler(QMainWindow):
 
         try:
             plan = self._confirm_label_save(
-                [self.image_paths[i] for i, _ in loaded], 'Save All', obb_as_xywhr)
+                [self.image_paths[i] for i, _ in loaded], "Save All", obb_as_xywhr
+            )
         except Exception as exc:
             self.log(f"[Save All] ошибка подготовки: {exc}")
             QMessageBox.critical(self, "Save All", str(exc))
@@ -2147,7 +2224,9 @@ class Labeler(QMainWindow):
             txt_path = self._resolve_save_path_for_img(img_path)
             try:
                 success = save_annotations_for_image(
-                    anns, txt_path, img_path,
+                    anns,
+                    txt_path,
+                    img_path,
                     obb_as_xywhr=obb_as_xywhr,
                 )
                 if success:
@@ -2162,9 +2241,7 @@ class Labeler(QMainWindow):
 
         self.log(f"[Save All] сохранено: {ok}, ошибок: {err} (формат OBB: {fmt})")
         QMessageBox.information(
-            self, "Save All",
-            f"Сохранено изображений: {ok}\n"
-            f"Ошибок: {err}"
+            self, "Save All", f"Сохранено изображений: {ok}\nОшибок: {err}"
         )
 
     # ----------------------------------------------------------------------
@@ -2210,15 +2287,18 @@ class Labeler(QMainWindow):
 
     def toggle_histogram(self, checked):
         self.hist_container.setVisible(checked)
-        self.toggle_hist_btn.setText("Скрыть гистограмму" if checked else "Показать гистограмму")
+        self.toggle_hist_btn.setText(
+            "Скрыть гистограмму" if checked else "Показать гистограмму"
+        )
 
     def on_global_settings_changed(self, new_settings=None):
         if self.image_paths:
             self.update_image_display()
             # Сохраняем текущее выделение при пересборке списка.
             current_row = self.object_list.currentRow()
-            self._rebuild_object_list(keep_row=current_row
-                                      if current_row >= 0 else None)
+            self._rebuild_object_list(
+                keep_row=current_row if current_row >= 0 else None
+            )
             self._apply_validation_colors_to_list()
 
     def showEvent(self, event):
@@ -2231,4 +2311,5 @@ if __name__ == "__main__":
     window = Labeler()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

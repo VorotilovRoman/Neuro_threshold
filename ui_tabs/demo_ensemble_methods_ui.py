@@ -280,9 +280,10 @@ def setup_demo_ensemble_methods_ui(parent):
     right_layout.addWidget(ensemble_group)
 
     # SOURCE (ImageNavigationWidget)
-    source_group = QGroupBox("Источник данных")
+    source_group = QWidget()
     source_layout = QVBoxLayout(source_group)
-    parent.nav_widget = ImageNavigationWidget()
+    source_layout.setContentsMargins(0, 0, 0, 0)
+    parent.nav_widget = ImageNavigationWidget(profile="yolo_demo")
     source_layout.addWidget(parent.nav_widget)
     parent.current_file_label = QLabel("")
     source_layout.addWidget(parent.current_file_label)
