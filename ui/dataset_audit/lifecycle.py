@@ -1,18 +1,22 @@
 """Guard re-entry during legacy synchronous scans and reject stale ML results."""
 
 from functools import wraps
+from inspect import signature
+
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import (
-    QAbstractItemView,
     QAbstractButton,
+    QAbstractItemView,
+    QAbstractSpinBox,
     QComboBox,
     QLineEdit,
-    QAbstractSpinBox,
     QSlider,
 )
 
 
 def serialized_scan(function):
+    no_arguments = len(signature(function).parameters) == 1
+
     @wraps(function)
     def run(owner, *args, **kwargs):
         if owner._scan_busy or owner._closing:
@@ -39,7 +43,13 @@ def serialized_scan(function):
         for widget, _ in previous:
             widget.setEnabled(False)
         try:
+            # A variadic wrapper exposes clicked(bool) to methods that accept no args.
+            if no_arguments and len(args) == 1 and type(args[0]) is bool:
+                args = ()
             return function(owner, *args, **kwargs)
+        except Exception as exc:
+            owner._audit_exception("Ошибка операции анализа", exc)
+            return None
         finally:
             for widget, enabled in previous:
                 widget.setEnabled(enabled)

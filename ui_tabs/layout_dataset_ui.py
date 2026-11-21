@@ -310,7 +310,11 @@ def setup_layout_dataset_ui(parent):
     objects_layout = QVBoxLayout()
     parent.object_list = QListWidget()
     parent.object_list.setSelectionMode(QAbstractItemView.SingleSelection)
-    objects_layout.addWidget(parent.object_list)
+    from ui.annotation_review import AnnotationReviewWidget
+    parent.overlap_review = AnnotationReviewWidget(parent.object_list, parent=parent)
+    parent.overlap_review.image_selected.connect(lambda index: parent.goto_image(index + 1))
+    parent.overlap_review.changed.connect(parent._apply_validation_colors_to_list)
+    objects_layout.addWidget(parent.overlap_review)
 
     parent.delete_button = QPushButton("Delete Selected")
     parent.delete_all_button = QPushButton("Delete All on Image")

@@ -364,29 +364,46 @@ def overlap_ratio_of_smaller(annotation_a, annotation_b,
 
 
 def find_strong_overlaps(annotations, width: int, height: int,
-                         threshold: float = 0.70) -> Dict[int, List[Tuple[int, float]]]:
+                         threshold: float = 0.70, *, metric="smaller", same_class=False) -> Dict[int, List[Tuple[int, float]]]:
     """Сопоставляет индексы аннотаций с перекрывающими их соседями.
 
-    Красным подсвечиваются ОБА объекта пары, класс не влияет на проверку.
+    Возвращает оба индекса пары. Метрика: пересечение/меньшая площадь либо IoU.
+    same_class ограничивает пары одинаковыми ID класса; порог включительный.
     """
     result = {}
-    threshold = max(0.0, min(1.0, float(threshold)))
+    threshold = float(threshold)
+    if not math.isfinite(threshold) or not 0 < threshold <= 1:
+        raise ValueError("Порог пересечения должен быть в диапазоне (0, 1].")
+    if metric not in ("smaller", "iou"):
+        raise ValueError("Метрика пересечения: smaller или iou.")
     # Sweep по горизонтальным габаритам исключает почти все удалённые пары,
     # особенно при большом числе небольших объектов на крупном снимке.
     rectangles = []
     for idx, ann in enumerate(annotations):
         p = polygon_for_annotation(ann, width, height)
-        if len(p) >= 3:
+        if len(p) >= 3 and np.isfinite(p).all():
             rectangles.append((float(p[:, 0].min()), float(p[:, 1].min()),
                                float(p[:, 0].max()), float(p[:, 1].max()), idx))
     rectangles.sort(key=lambda e: e[0])
     for n, (x1, y1, x2, y2, i) in enumerate(rectangles):
-        for ax1, ay1, ax2, ay2, j in rectangles[n + 1:]:
+        for next_index in range(n + 1, len(rectangles)):
+            ax1, ay1, ax2, ay2, j = rectangles[next_index]
             if ax1 >= x2:
                 break
             if ay1 >= y2 or ay2 <= y1:
                 continue
+            if same_class and class_id_for_annotation(annotations[i]) != class_id_for_annotation(annotations[j]):
+                continue
             score = overlap_ratio_of_smaller(annotations[i], annotations[j], width, height)
+            if metric == "iou":
+                polygons = [polygon_for_annotation(annotations[k], width, height) for k in (i, j)]
+                areas = []
+                for points in polygons:
+                    shape = _shapely_polygon(points)
+                    areas.append(float(shape.area) if shape is not None else abs(cv2.contourArea(points.astype(np.float32))))
+                intersection = score * min(areas)
+                union = sum(areas) - intersection
+                score = intersection / union if union else 0.
             if score + 1e-8 >= threshold:
                 result.setdefault(i, []).append((j, score))
                 result.setdefault(j, []).append((i, score))

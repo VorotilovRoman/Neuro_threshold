@@ -12,6 +12,7 @@ from runtime_torch import prepare_windows_torch
 prepare_windows_torch()
 
 import os
+from pathlib import Path
 import sys
 import traceback
 
@@ -535,6 +536,7 @@ class Labeler(QMainWindow):
                 self.log("Resize mode changed, images cleared. Please load images again.")
 
     def clear_images(self):
+        self.overlap_review.set_dataset([])
         if self._lazy_cache is not None:
             self._lazy_cache.shutdown()
             self._lazy_cache = None
@@ -558,6 +560,7 @@ class Labeler(QMainWindow):
         self.update_navigation_state()
 
     def closeEvent(self, event):
+        self.overlap_review.close_review()
         if self._lazy_cache is not None:
             try:
                 self._lazy_cache.shutdown()
@@ -859,6 +862,14 @@ class Labeler(QMainWindow):
     #  Валидация
     # ----------------------------------------------------------------------
     def _start_annotation_validation(self):
+        pairs = []
+        for path in self.image_paths:
+            label = self._yaml_label_map.get(path)
+            if not label:
+                label = str(Path(self._label_folder) / (Path(path).stem + '.txt')) if self._label_folder else str(Path(path).with_suffix('.txt'))
+            pairs.append((path, label))
+        self.overlap_review.set_dataset(pairs)
+        self._apply_validation_colors_to_list()
         if self._validation_thread is not None and self._validation_thread.isRunning():
             try:
                 self._validation_thread.cancel()
@@ -935,6 +946,8 @@ class Labeler(QMainWindow):
                     item.setForeground(QColor(220, 0, 0))
                     item.setText(base_text + f"  [INVALID: {err}]")
                     item.setToolTip(f"❌ {err}")
+
+        self._overlap_warnings = self.overlap_review.set_current(self.current_index, self.current_annotations, self.img_w, self.img_h)
 
     def _revalidate_current(self):
         self._validation_per_image[self.current_index] = [

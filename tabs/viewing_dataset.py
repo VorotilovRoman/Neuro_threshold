@@ -12,6 +12,7 @@ from runtime_torch import prepare_windows_torch
 prepare_windows_torch()
 
 import os
+from pathlib import Path
 import sys
 import traceback
 from collections import OrderedDict
@@ -45,7 +46,6 @@ from utils_new.annotation_processing import (
     annotation_in_crop,
     class_id_for_annotation,
     crop_for_annotation,
-    find_strong_overlaps,
     mask_roi_at_image_scale,
     normalized_annotation,
     prepare_annotation_preview,
@@ -496,6 +496,7 @@ class ViewingDataset(QMainWindow):
         self.btn_convert_all_to_obb.setEnabled(has_images)
 
     def closeEvent(self, event):
+        self.overlap_review.close_review()
         if self._lazy_cache is not None:
             try:
                 self._lazy_cache.shutdown()
@@ -599,6 +600,7 @@ class ViewingDataset(QMainWindow):
         self._start_annotation_validation()
 
     def _clear_view(self):
+        self.overlap_review.set_dataset([])
         self._source_image_index = None
         self._source_image_for_crop = None
         self._overlap_warnings = {}
@@ -829,9 +831,6 @@ class ViewingDataset(QMainWindow):
         image = item['image']
         self.current_img_h, self.current_img_w = image.shape[:2]
         self.current_annotations = list(self._get_annotations(idx))
-        self._overlap_warnings = find_strong_overlaps(
-            self.current_annotations, self.current_img_w, self.current_img_h,
-            threshold=0.70)
         self.viewer.set_annotations(self.current_annotations,
                                     self.current_img_w, self.current_img_h)
         self._refresh_main_pixmap()
@@ -853,6 +852,14 @@ class ViewingDataset(QMainWindow):
     # Валидация аннотаций (фоновый поток)
     # ------------------------------------------------------------------
     def _start_annotation_validation(self):
+        pairs = []
+        for path in self.image_paths:
+            label = self._yaml_label_map.get(path)
+            if not label:
+                label = str(Path(self._label_folder) / (Path(path).stem + '.txt')) if self._label_folder else str(Path(path).with_suffix('.txt'))
+            pairs.append((path, label))
+        self.overlap_review.set_dataset(pairs)
+        self._apply_validation_colors_to_list()
         if self._validation_thread is not None and self._validation_thread.isRunning():
             try:
                 self._validation_thread.cancel()
@@ -927,16 +934,11 @@ class ViewingDataset(QMainWindow):
                 if not valid:
                     notes.append(f"Ошибка разметки: {error}")
                     text += f"  [INVALID: {error}]"
-            overlaps = self._overlap_warnings.get(row, [])
-            if overlaps:
-                neighbors = ", ".join(
-                    f"#{other + 1} ({score * 100:.1f}%)"
-                    for other, score in overlaps)
-                notes.append("Сильное пересечение с " + neighbors)
-                text += "  [OVERLAP: ≥70%]"
             item.setText("⚠ " + text if notes else text)
             item.setForeground(red if notes else normal)
             item.setToolTip("\n".join(notes))
+
+        self._overlap_warnings = self.overlap_review.set_current(self.current_idx, self.current_annotations, self.current_img_w, self.current_img_h)
 
     def _revalidate_current(self):
         self._validation_per_image[self.current_idx] = [

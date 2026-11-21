@@ -221,7 +221,20 @@ class PairValidationDialog(QDialog):
         self.view.selection_enabled = bool(annotations)
         self.view.set_pixmap(_to_qpixmap(display))
         self.view.set_annotations(annotations, w, h)
-        root.addWidget(self.view, 1)
+        from PyQt5.QtWidgets import QSplitter, QListWidget
+        from ui.annotation_review import AnnotationReviewWidget
+        objects = QListWidget()
+        for index, annotation in enumerate(annotations):
+            objects.addItem(f"#{index + 1} · {annotation[0]} · класс {annotation[1]}")
+        self.overlap_review = AnnotationReviewWidget(objects, parent=self)
+        self.overlap_review.setMinimumWidth(280)
+        self.overlap_review.setMaximumWidth(460)
+        self.overlap_review.set_dataset([(image_path, aux_path)], dataset_type)
+        self.overlap_review.set_current(0, annotations, w, h)
+        objects.currentRowChanged.connect(self.view.set_selected_index)
+        splitter = QSplitter();splitter.addWidget(self.view);splitter.addWidget(self.overlap_review);splitter.setSizes([900,350])
+        root.addWidget(splitter, 1)
+        self.finished.connect(lambda *_: self.overlap_review.close_review())
 
         bottom = QHBoxLayout()
         self.details_btn = QPushButton('Подробности ▾')

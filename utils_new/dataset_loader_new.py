@@ -640,6 +640,7 @@ class DatasetLoaderMixin:
             pairs = self.pairs
 
         if not pairs:
+            self.shutdown_annotation_review()
             self.file_list.clear()
             self.validation_warning_label.setVisible(False)
             self.validation_progress_label.setVisible(False)
@@ -710,6 +711,21 @@ class DatasetLoaderMixin:
             self.validation_warning_label.setVisible(False)
 
         self._update_color_stats_label()
+        if not hasattr(self, '_overlap_review_panel'):
+            from ui.annotation_review import AnnotationReviewWidget
+            self._overlap_review_panel = AnnotationReviewWidget(external_images=self.file_list, parent=self)
+            layout = self.file_list.parentWidget().layout()
+            if layout is not None:
+                layout.insertWidget(0, self._overlap_review_panel)
+        self._overlap_review_panel.set_dataset(self.pairs, self.dataset_type, self.input_format)
+
+    def closeEvent(self, event):
+        self.shutdown_annotation_review()
+        super().closeEvent(event)
+
+    def shutdown_annotation_review(self):
+        if hasattr(self, '_overlap_review_panel'):
+            self._overlap_review_panel.close_review()
 
     def _is_include_empty(self):
         return bool(self.include_empty_annotations.isChecked())

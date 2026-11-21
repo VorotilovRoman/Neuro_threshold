@@ -1,4 +1,5 @@
 """Numerical audit/embedding/report/validation jobs. No Qt; callbacks and dict results."""
+from pathlib import Path
 
 import os
 import traceback
@@ -485,16 +486,21 @@ class ReportJob:
                 if not q:
                     L.append("_Не выполнялось._\n")
                 else:
-                    L.append(
-                        f"- **Median resolution:** {q['median_w']:.0f}×{q['median_h']:.0f}"
-                    )
-                    L.append(f"- **Recommended imgsz:** {q['recommended_imgsz']}")
+                    if q['median_w']>0 and q['median_h']>0:
+                        L.append(f"- **Median resolution:** {q['median_w']:.0f}×{q['median_h']:.0f}")
+                        L.append(f"- **Ориентир масштаба (не оценка VRAM):** {q['recommended_imgsz']}")
+                    else:
+                        L.append("- Нет читаемых снимков: размеры и рекомендуемый масштаб не определены.")
                     br = q.get("brightness")
                     if br:
                         L.append(f"- **Mean brightness:** {br['mean_brightness']:.1f}")
-                        L.append(f"- **Dark images (<40):** {br['dark_count']}")
-                        L.append(f"- **Bright images (>215):** {br['bright_count']}")
+                        L.append(f"- **Тёмные (порог {q.get('thresholds',{}).get('dark',40)}):** {br['dark_count']}")
+                        L.append(f"- **Светлые (порог {q.get('thresholds',{}).get('bright',215)}):** {br['bright_count']}")
                     L.append("")
+                    L.append(f"- **Кандидатов / не читается:** {q.get('candidates',0)} / {q.get('unreadable',0)}")
+                    L.append(f"- **Пороги:** {q.get('thresholds',{})}")
+                    for row in q.get('review_rows',[])[:100]:
+                        L.append(f"- `{Path(row['path']).name}`: {', '.join(row['issues'])}")
                     if imgs.get("quality"):
                         L.append(f"![Качество]({imgs['quality']})\n")
             if s.get("dup"):

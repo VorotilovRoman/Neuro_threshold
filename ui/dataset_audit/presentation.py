@@ -3,6 +3,8 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTableWidgetItem
 
+from utils_new.dataset_audit.analysis import histogram_edges
+
 
 def get_included_class_ids(class_table):
     included = set()
@@ -83,7 +85,13 @@ def render_metrics(
         class_stats_table.setItem(row, 2, item2)
     ax_all.clear()
     if object_areas:
-        ax_all.hist(object_areas, bins=50, color="skyblue", edgecolor="black", log=True)
+        ax_all.hist(
+            object_areas,
+            bins=histogram_edges(object_areas),
+            color="skyblue",
+            edgecolor="black",
+            log=True,
+        )
         ax_all.set_title("Площади: все объекты (px²)")
         ax_all.set_xlabel("Площадь (px²)")
         ax_all.set_ylabel("Кол-во (Log)")
@@ -95,7 +103,7 @@ def render_metrics(
         if object_areas_pct:
             ax_area_pct.hist(
                 object_areas_pct,
-                bins=50,
+                bins=histogram_edges(object_areas_pct),
                 color="lightcoral",
                 edgecolor="black",
                 log=True,
@@ -114,7 +122,7 @@ def render_metrics(
             name = name_by_orig.get(cls_id, str(cls_id))
             ax_classes.hist(
                 areas,
-                bins=40,
+                bins=histogram_edges(areas, 40),
                 alpha=0.55,
                 color=colors[i % len(colors)],
                 edgecolor="black",

@@ -33,7 +33,7 @@ def load_pair_annotations(image_path, label_path, format_hint="auto"):
     annotations = read_yolo_labels(
         label_path, size, format_hint=format_hint, log=messages.append
     )
-    if messages:
+    if any("запись пропущена" in message for message in messages):
         raise ValueError(f"Некорректная разметка {label_path}: {'; '.join(messages)}")
     return [to_legacy(ann, size) for ann in annotations]
 

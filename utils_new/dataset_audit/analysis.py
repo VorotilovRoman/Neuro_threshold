@@ -28,6 +28,19 @@ from utils_new.dataset_files_new import read_image_with_fallback
 from utils_new.dataset_image_stats_new import ImageStats
 
 
+def histogram_edges(values, max_bins=50):
+    """Finite, distinct edges even for areas differing only by rounding noise."""
+    data = np.asarray(values, dtype=float)
+    data = data[np.isfinite(data)]
+    if not data.size:
+        return np.array([-0.5, 0.5])
+    low, high = float(data.min()), float(data.max())
+    if np.isclose(low, high, rtol=1e-12, atol=1e-12):
+        radius = max(0.5, abs(low) * 1e-6)
+        return np.array([low - radius, high + radius])
+    return np.unique(np.linspace(low, high, min(max_bins, data.size) + 1))
+
+
 def get_image_brightness(path):
     try:
         path = os.path.realpath(path)

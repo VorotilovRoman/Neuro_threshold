@@ -479,7 +479,13 @@ import tempfile,cv2,numpy as np,yaml
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication,QMessageBox
 from tabs.dataset_analysis import DatasetAnalysisWindow
+from PyQt5.QtTest import QTest
+from PyQt5.QtCore import QElapsedTimer
 app=QApplication([]);w=DatasetAnalysisWindow();w.show()
+def settled():
+ timer=QElapsedTimer();timer.start()
+ while w.scans.worker is not None and timer.elapsed()<5000:QTest.qWait(10)
+ assert w.scans.worker is None,w.analysis_status.text()
 with tempfile.TemporaryDirectory() as directory:
  root=Path(directory)
  for split,name in [('alpha','a'),('beta','b')]:
@@ -487,7 +493,7 @@ with tempfile.TemporaryDirectory() as directory:
  cfg=root/'data.yaml';cfg.write_text(yaml.safe_dump({'path':str(root),'train':'alpha','val':'beta','names':{0:'Object'}}))
  w._load_yolo_yaml_from_path(str(cfg));assert len(w.filtered_pairs)==2 and w._last_filter_stats['total_objects']==2
  assert set().union(*w._analysis_splits.values())=={'train','val'}
- w.run_heatmap_analysis();assert w._last_heatmap['total_objects']==2
+ w.run_heatmap_analysis();settled();assert w._last_heatmap['total_objects']==2
  w.filter_min_area.setValue(100000);w.apply_filters_and_update_metrics();assert not w.filtered_pairs and not w._get_analysis_pairs()
  assert w._last_heatmap is None and w.audit_table.rowCount()==0
  with patch.object(QMessageBox,'warning') as warning:w.run_quality_analysis();warning.assert_called_once()
@@ -495,12 +501,12 @@ with tempfile.TemporaryDirectory() as directory:
  mask=root/'alpha'/'a_mask.png';array=np.zeros((40,80),np.uint8);array[3:6,3:6]=7;array[10:12,10:12]=7;cv2.imwrite(str(mask),array)
  w._apply_loaded_pairs(pairs=[(str(root/'alpha'/'a.png'),str(mask))],input_type=1,input_format='auto',class_names_override={7:'Mask'},source_label='Test mask')
  assert w._last_filter_stats['total_objects']==2 and w.filtered_pairs
- w.run_heatmap_analysis();assert w._last_heatmap['total_objects']==2
+ w.run_heatmap_analysis();settled();assert w._last_heatmap['total_objects']==2
  # Cancellation must not become a successful empty/full-dataset diagnosis.
  with patch('utils_new.dataset_audit.checks.DuplicateDetector.find_duplicates',return_value={'cancelled':True}):
-  w.run_duplicate_analysis();assert 'отменён' in w.dup_summary_label.text()
+  w.run_duplicate_analysis();settled();assert 'отмен' in w.dup_summary_label.text()
  with patch('utils_new.dataset_audit.checks.ObjectDistributionHeatmap.compute',return_value={'cancelled':True}):
-  w.run_heatmap_analysis();assert 'отменено' in w.heatmap_summary_label.text()
+  w.run_heatmap_analysis();settled();assert 'отмен' in w.heatmap_summary_label.text()
  w._on_audit_finished({'cancelled':True});assert 'отменён' in w.audit_summary_label.text()
 w.close();app.processEvents()
 """)

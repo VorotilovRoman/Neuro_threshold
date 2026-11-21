@@ -124,7 +124,7 @@ class DuplicateDetector:
             for group in groups.values()
             if len(group) > 1 and len({file_hash.get(path, path) for path in group}) > 1
         ]
-        return dict(exact=exact, near=near, cancelled=cancelled, errors=errors)
+        return dict(exact=exact, near=near, cancelled=cancelled, errors=errors, phash_available=IMAGEHASH_AVAILABLE, phash_checked=len(hashes))
 
 
 class LeakageChecker:

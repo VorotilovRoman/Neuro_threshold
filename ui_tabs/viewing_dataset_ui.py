@@ -202,7 +202,11 @@ def setup_viewing_dataset_ui(parent):
     objects_layout.addSpacing(8)
     parent.coord_list = QListWidget()
     parent.coord_list.setSelectionMode(QAbstractItemView.SingleSelection)
-    objects_layout.addWidget(parent.coord_list)
+    from ui.annotation_review import AnnotationReviewWidget
+    parent.overlap_review = AnnotationReviewWidget(parent.coord_list, parent=parent)
+    parent.overlap_review.image_selected.connect(lambda index: parent.goto_image(index + 1))
+    parent.overlap_review.changed.connect(parent._apply_validation_colors_to_list)
+    objects_layout.addWidget(parent.overlap_review)
     hint = QLabel("Ctrl+0…9 — присвоить класс выбранному объекту.  "
                   "Красный объект в списке — некорректная разметка "
                   "или пересечение ≥70% площади меньшего объекта.")
