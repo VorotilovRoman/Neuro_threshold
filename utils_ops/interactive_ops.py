@@ -1,7 +1,7 @@
 """Interactive binary segmentation, without implicit morphology or fallback masks.
 
 SuperCut/OneCut/Lazy Snapping are project variants on a SLIC graph, not
-reproductions of the similarly named publications. See Docs/Segmentation_Methods_Audit.md.
+reproductions of the similarly named publications. See docs/interactive.md.
 """
 
 import cv2

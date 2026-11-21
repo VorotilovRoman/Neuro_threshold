@@ -154,7 +154,7 @@ class EnsembleAndSearchTests(unittest.TestCase):
         for name in removed:
             self.assertFalse((ROOT / (name.replace(".", "/") + ".py")).exists())
         for path in ROOT.rglob("*.py"):
-            if path.relative_to(ROOT).parts[0] in ("tests", "Docs", ".git"):
+            if path.relative_to(ROOT).parts[0] in ("tests", "docs", ".git"):
                 continue
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
                 targets = []

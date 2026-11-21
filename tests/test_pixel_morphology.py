@@ -100,7 +100,7 @@ class PixelPresetTests(unittest.TestCase):
         for module in REMOVED:
             self.assertFalse((ROOT / (module.replace(".", "/") + ".py")).exists())
         for path in ROOT.rglob("*.py"):
-            if path.relative_to(ROOT).parts[0] in ("tests", "Docs", ".git"):
+            if path.relative_to(ROOT).parts[0] in ("tests", "docs", ".git"):
                 continue
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
                 if isinstance(node, ast.Import):

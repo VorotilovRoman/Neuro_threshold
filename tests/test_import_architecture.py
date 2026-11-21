@@ -16,7 +16,7 @@ def python_sources():
     # Only project sources, never virtual environments or generated output.
     import subprocess
     paths = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '*.py'], cwd=ROOT, text=True)
-    return [ROOT / p for p in sorted(set(paths.rstrip('\0').split('\0'))) if not p.startswith('Docs/')]
+    return [ROOT / p for p in sorted(set(paths.rstrip('\0').split('\0'))) if not p.startswith('docs/')]
 
 
 def eager_imports(nodes):
