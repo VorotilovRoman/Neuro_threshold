@@ -53,49 +53,49 @@
 
 ## 10. _validate_unified_annotation
 
-- [tabs/layout_dataset.py:83](../tabs/layout_dataset.py#L83) — `_validate_unified_annotation`, 40 строк
-- [tabs/viewing_dataset.py:94](../tabs/viewing_dataset.py#L94) — `_validate_unified_annotation`, 40 строк
+- [tabs/layout_dataset.py:76](../tabs/layout_dataset.py#L76) — `_validate_unified_annotation`, 40 строк
+- [tabs/viewing_dataset.py:86](../tabs/viewing_dataset.py#L86) — `_validate_unified_annotation`, 40 строк
 
 ## 11. evaluate
 
 - [utils_aeb/auto-aeb_def.py:330](../utils_aeb/auto-aeb_def.py#L330) — `evaluate`, 38 строк
 - [utils_aeb/auto-aeb_old.py:332](../utils_aeb/auto-aeb_old.py#L332) — `evaluate`, 38 строк
 
-## 12. __init__
+## 12. _load_coco_into_labeler
+
+- [tabs/layout_dataset.py:662](../tabs/layout_dataset.py#L662) — `_load_coco_into_labeler`, 37 строк
+- [tabs/viewing_dataset.py:1649](../tabs/viewing_dataset.py#L1649) — `_load_coco_into_viewer`, 36 строк
+
+## 13. __init__
 
 - [utils_aeb/auto-aeb_unet.py:208](../utils_aeb/auto-aeb_unet.py#L208) — `__init__`, 28 строк
 - [utils_new/segmentation/autoencoder.py:248](../utils_new/segmentation/autoencoder.py#L248) — `__init__`, 36 строк
 
-## 13. get_loss_function
+## 14. get_loss_function
 
 - [utils_training/train_unet_worker.py:332](../utils_training/train_unet_worker.py#L332) — `get_loss_function`, 35 строк
 - [utils_training/train_unet_worker_рабочий.py:337](../utils_training/train_unet_worker_рабочий.py#L337) — `get_loss_function`, 35 строк
 
-## 14. save_training_plots
+## 15. _start_annotation_validation
+
+- [tabs/layout_dataset.py:889](../tabs/layout_dataset.py#L889) — `_start_annotation_validation`, 32 строк
+- [tabs/viewing_dataset.py:875](../tabs/viewing_dataset.py#L875) — `_start_annotation_validation`, 32 строк
+
+## 16. save_training_plots
 
 - [utils_training/train_unet_worker.py:467](../utils_training/train_unet_worker.py#L467) — `save_training_plots`, 32 строк
 - [utils_training/train_unet_worker_рабочий.py:452](../utils_training/train_unet_worker_рабочий.py#L452) — `save_training_plots`, 26 строк
 
-## 15. _start_annotation_validation
-
-- [tabs/layout_dataset.py:864](../tabs/layout_dataset.py#L864) — `_start_annotation_validation`, 28 строк
-- [tabs/viewing_dataset.py:854](../tabs/viewing_dataset.py#L854) — `_start_annotation_validation`, 28 строк
-
-## 16. format_annotation_display
+## 17. format_annotation_display
 
 - [utils_new/annotation_processing.py:1204](../utils_new/annotation_processing.py#L1204) — `format_annotation_display`, 28 строк
 - [utils_ops/segmentation_ops.py:340](../utils_ops/segmentation_ops.py#L340) — `format_annotation_display`, 28 строк
 
-## 17. read_image_bgr
+## 18. read_image_bgr
 
 - [cluster/canonicalize_crops.py:74](../cluster/canonicalize_crops.py#L74) — `read_image_bgr`, 21 строк
 - [cluster/canonicalize_crops_method2.py:91](../cluster/canonicalize_crops_method2.py#L91) — `read_image_bgr`, 21 строк
 - [cluster/save_yolo_object_to_path.py:58](../cluster/save_yolo_object_to_path.py#L58) — `read_image`, 27 строк
-
-## 18. _load_coco_into_labeler
-
-- [tabs/layout_dataset.py:671](../tabs/layout_dataset.py#L671) — `_load_coco_into_labeler`, 26 строк
-- [tabs/viewing_dataset.py:1562](../tabs/viewing_dataset.py#L1562) — `_load_coco_into_viewer`, 25 строк
 
 ## 19. read_image_rgb
 
@@ -110,55 +110,55 @@
 
 ## 21. _detect_annotation_to_obb
 
-- [tabs/layout_dataset.py:128](../tabs/layout_dataset.py#L128) — `_detect_annotation_to_obb`, 22 строк
-- [tabs/viewing_dataset.py:139](../tabs/viewing_dataset.py#L139) — `_detect_annotation_to_obb`, 22 строк
+- [tabs/layout_dataset.py:121](../tabs/layout_dataset.py#L121) — `_detect_annotation_to_obb`, 22 строк
+- [tabs/viewing_dataset.py:131](../tabs/viewing_dataset.py#L131) — `_detect_annotation_to_obb`, 22 строк
 
-## 22. __init__
+## 22. _confirm_label_save
+
+- [tabs/layout_dataset.py:2156](../tabs/layout_dataset.py#L2156) — `_confirm_label_save`, 20 строк
+- [tabs/viewing_dataset.py:1026](../tabs/viewing_dataset.py#L1026) — `_confirm_label_save`, 20 строк
+
+## 23. __init__
 
 - [utils_aeb/auto-aeb_def.py:175](../utils_aeb/auto-aeb_def.py#L175) — `__init__`, 12 строк
 - [utils_aeb/auto-aeb_old.py:177](../utils_aeb/auto-aeb_old.py#L177) — `__init__`, 12 строк
 - [utils_new/segmentation/autoencoder.py:40](../utils_new/segmentation/autoencoder.py#L40) — `__init__`, 20 строк
 
-## 23. __init__
+## 24. __init__
 
 - [utils_aeb/auto-aeb_def_new.py:198](../utils_aeb/auto-aeb_def_new.py#L198) — `__init__`, 12 строк
 - [utils_new/segmentation/autoencoder.py:148](../utils_new/segmentation/autoencoder.py#L148) — `__init__`, 20 строк
 
-## 24. run
+## 25. run
 
-- [tabs/layout_dataset.py:182](../tabs/layout_dataset.py#L182) — `run`, 18 строк
-- [tabs/viewing_dataset.py:193](../tabs/viewing_dataset.py#L193) — `run`, 18 строк
+- [tabs/layout_dataset.py:176](../tabs/layout_dataset.py#L176) — `run`, 18 строк
+- [tabs/viewing_dataset.py:186](../tabs/viewing_dataset.py#L186) — `run`, 18 строк
 
-## 25. format_object_for_list
+## 26. format_object_for_list
 
 - [utils_new/annotation_processing.py:1233](../utils_new/annotation_processing.py#L1233) — `format_object_for_list`, 18 строк
 - [utils_ops/segmentation_ops.py:442](../utils_ops/segmentation_ops.py#L442) — `format_object_for_list`, 18 строк
 
-## 26. __init__
+## 27. __init__
 
 - [utils_aeb/auto-aeb_def.py:193](../utils_aeb/auto-aeb_def.py#L193) — `__init__`, 12 строк
 - [utils_aeb/auto-aeb_old.py:195](../utils_aeb/auto-aeb_old.py#L195) — `__init__`, 12 строк
 - [utils_new/segmentation/autoencoder.py:66](../utils_new/segmentation/autoencoder.py#L66) — `__init__`, 15 строк
 
-## 27. __init__
+## 28. __init__
 
 - [utils_aeb/auto-aeb_def_new.py:216](../utils_aeb/auto-aeb_def_new.py#L216) — `__init__`, 12 строк
 - [utils_new/segmentation/autoencoder.py:174](../utils_new/segmentation/autoencoder.py#L174) — `__init__`, 15 строк
 
-## 28. signal_handler
+## 29. signal_handler
 
 - [utils_training/train_unet_worker.py:139](../utils_training/train_unet_worker.py#L139) — `signal_handler`, 15 строк
 - [utils_training/train_unet_worker_рабочий.py:133](../utils_training/train_unet_worker_рабочий.py#L133) — `signal_handler`, 15 строк
 
-## 29. _confirm_label_save
-
-- [tabs/layout_dataset.py:2087](../tabs/layout_dataset.py#L2087) — `_confirm_label_save`, 14 строк
-- [tabs/viewing_dataset.py:990](../tabs/viewing_dataset.py#L990) — `_confirm_label_save`, 14 строк
-
 ## 30. _resolve_label_path
 
-- [tabs/layout_dataset.py:167](../tabs/layout_dataset.py#L167) — `_resolve_label_path`, 14 строк
-- [tabs/viewing_dataset.py:178](../tabs/viewing_dataset.py#L178) — `_resolve_label_path`, 14 строк
+- [tabs/layout_dataset.py:161](../tabs/layout_dataset.py#L161) — `_resolve_label_path`, 14 строк
+- [tabs/viewing_dataset.py:171](../tabs/viewing_dataset.py#L171) — `_resolve_label_path`, 14 строк
 
 ## 31. forward
 
@@ -175,8 +175,8 @@
 
 ## 33. _log_exception
 
-- [tabs/layout_dataset.py:644](../tabs/layout_dataset.py#L644) — `_log_exception`, 13 строк
-- [tabs/viewing_dataset.py:319](../tabs/viewing_dataset.py#L319) — `_log_exception`, 13 строк
+- [tabs/layout_dataset.py:638](../tabs/layout_dataset.py#L638) — `_log_exception`, 13 строк
+- [tabs/viewing_dataset.py:315](../tabs/viewing_dataset.py#L315) — `_log_exception`, 13 строк
 
 ## 34. __getattr__
 
@@ -226,8 +226,8 @@
 
 ## 42. _resolve_save_path_for_img
 
-- [tabs/layout_dataset.py:2076](../tabs/layout_dataset.py#L2076) — `_resolve_save_path_for_img`, 10 строк
-- [tabs/viewing_dataset.py:979](../tabs/viewing_dataset.py#L979) — `_resolve_save_path_for_img`, 10 строк
+- [tabs/layout_dataset.py:2145](../tabs/layout_dataset.py#L2145) — `_resolve_save_path_for_img`, 10 строк
+- [tabs/viewing_dataset.py:1015](../tabs/viewing_dataset.py#L1015) — `_resolve_save_path_for_img`, 10 строк
 
 ## 43. get_scheduler
 

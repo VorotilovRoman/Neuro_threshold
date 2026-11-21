@@ -4,7 +4,7 @@
 
 Сгенерировано `python Docs/generate_reference.py` из текущих исходников. Каталог исключает саму документацию и скрытые каталоги.
 
-Проанализировано Python-модулей: **220**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
+Проанализировано Python-модулей: **222**. Импорты учитываются на всех уровнях AST, включая функции и try/except; наличие записи не означает, что ветка выполняется при запуске. Звёздочные импорты не разворачиваются в список фактических вызовов. QProcess, строковые динамические импорты и файловые зависимости описаны отдельно в карте.
 
 Для всех модулей перечислены верхнеуровневые функции и классы. Для всех каталогов утилит дополнительно перечислены сигнатуры методов классов. Вложенные локальные функции не являются отдельным API и в список не включены. Приватные имена сохранены для поиска реализации.
 
@@ -62,6 +62,7 @@
 - [tests.test_segmentation_shared](#tests-test-segmentation-shared)
 - [tests.test_segmentation_tasks](#tests-test-segmentation-tasks)
 - [tests.test_segmentation_unification](#tests-test-segmentation-unification)
+- [tests.test_source_unification](#tests-test-source-unification)
 - [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch)
 - [tests.test_torch_runtime](#tests-test-torch-runtime)
 - [tests.test_yolo_worker](#tests-test-yolo-worker)
@@ -106,6 +107,7 @@
 - [ui.dataset_audit.training_results](#ui-dataset-audit-training-results)
 - [ui.dataset_audit.workers](#ui-dataset-audit-workers)
 - [ui.dataset_audit.workspace](#ui-dataset-audit-workspace)
+- [ui.dataset_source](#ui-dataset-source)
 - [ui.image_conversion](#ui-image-conversion)
 - [ui.image_navigation](#ui-image-navigation)
 - [ui.image_view](#ui-image-view)
@@ -238,7 +240,7 @@
 | Import | Файлы-потребители (включая условные импорты) |
 | --- | --- |
 | `PIL` | [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.test_new_image](#cluster-test-new-image), [generate](#generate), [tests.test_model_contracts](#tests-test-model-contracts), [utils_aeb.auto-aeb_def](#utils-aeb-auto-aeb-def), [utils_aeb.auto-aeb_def_new](#utils-aeb-auto-aeb-def-new), [utils_aeb.auto-aeb_old](#utils-aeb-auto-aeb-old), [utils_aeb.auto-aeb_unet](#utils-aeb-auto-aeb-unet), [utils_aeb.auto-aeb_unet_with_grad](#utils-aeb-auto-aeb-unet-with-grad), [utils_new.autoreseach_utils.ground_truth](#utils-new-autoreseach-utils-ground-truth), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.segmentation.training_contracts](#utils-new-segmentation-training-contracts), [utils_new.segmentation.training_labels](#utils-new-segmentation-training-labels), [utils_training.train_DeepLabV3_worker](#utils-training-train-DeepLabV3-worker), [utils_training.train_unet_worker](#utils-training-train-unet-worker), [utils_training.train_unet_worker_рабочий](#utils-training-train-unet-worker-рабочий), [utils_training.yolo2voc](#utils-training-yolo2voc) |
-| `PyQt5` | [generate](#generate), [main](#main), [main_ui](#main-ui), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [ui.DL_predict_settings](#ui-DL-predict-settings), [ui.DL_train_settings_base](#ui-DL-train-settings-base), [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model), [ui.annotation_objects](#ui-annotation-objects), [ui.annotation_review](#ui-annotation-review), [ui.annotation_review_view](#ui-annotation-review-view), [ui.application](#ui-application), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.evaluation_controller](#ui-autoreseach-ui-evaluation-controller), [ui.autoreseach_ui.evaluation_controls](#ui-autoreseach-ui-evaluation-controls), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [ui.autoreseach_ui.result_models](#ui-autoreseach-ui-result-models), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [ui.control_buttons](#ui-control-buttons), [ui.dataset_audit.duplicates](#ui-dataset-audit-duplicates), [ui.dataset_audit.embeddings](#ui-dataset-audit-embeddings), [ui.dataset_audit.lifecycle](#ui-dataset-audit-lifecycle), [ui.dataset_audit.models](#ui-dataset-audit-models), [ui.dataset_audit.page_duplicates](#ui-dataset-audit-page-duplicates), [ui.dataset_audit.page_embeddings](#ui-dataset-audit-page-embeddings), [ui.dataset_audit.page_helpers](#ui-dataset-audit-page-helpers), [ui.dataset_audit.page_models](#ui-dataset-audit-page-models), [ui.dataset_audit.page_quality](#ui-dataset-audit-page-quality), [ui.dataset_audit.page_report](#ui-dataset-audit-page-report), [ui.dataset_audit.page_spatial](#ui-dataset-audit-page-spatial), [ui.dataset_audit.page_statistics](#ui-dataset-audit-page-statistics), [ui.dataset_audit.page_training](#ui-dataset-audit-page-training), [ui.dataset_audit.presentation](#ui-dataset-audit-presentation), [ui.dataset_audit.quality_controller](#ui-dataset-audit-quality-controller), [ui.dataset_audit.reporting](#ui-dataset-audit-reporting), [ui.dataset_audit.selection](#ui-dataset-audit-selection), [ui.dataset_audit.session](#ui-dataset-audit-session), [ui.dataset_audit.source_page](#ui-dataset-audit-source-page), [ui.dataset_audit.tasks](#ui-dataset-audit-tasks), [ui.dataset_audit.training_results](#ui-dataset-audit-training-results), [ui.dataset_audit.workers](#ui-dataset-audit-workers), [ui.dataset_audit.workspace](#ui-dataset-audit-workspace), [ui.image_conversion](#ui-image-conversion), [ui.image_navigation](#ui-image-navigation), [ui.image_view](#ui-image-view), [ui.interactive_params_ui](#ui-interactive-params-ui), [ui.log_widget](#ui-log-widget), [ui.morphology_ui](#ui-morphology-ui), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.actions](#ui-segmentation-actions), [ui.segmentation.computation](#ui-segmentation-computation), [ui.segmentation.controller](#ui-segmentation-controller), [ui.segmentation.errors](#ui-segmentation-errors), [ui.segmentation.export](#ui-segmentation-export), [ui.segmentation.image_input](#ui-segmentation-image-input), [ui.segmentation.interactive_view](#ui-segmentation-interactive-view), [ui.segmentation.jobs](#ui-segmentation-jobs), [ui.segmentation.panels](#ui-segmentation-panels), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [ui.segmentation.results](#ui-segmentation-results), [ui.settings_service](#ui-settings-service), [ui.settings_ui](#ui-settings-ui), [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui), [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.slice_dataset_sahi_ui](#ui-tabs-slice-dataset-sahi-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops) |
+| `PyQt5` | [generate](#generate), [main](#main), [main_ui](#main-ui), [tabs.dataset_analysis](#tabs-dataset-analysis), [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.deep_learning_training](#tabs-deep-learning-training), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [ui.DL_predict_settings](#ui-DL-predict-settings), [ui.DL_train_settings_base](#ui-DL-train-settings-base), [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model), [ui.annotation_objects](#ui-annotation-objects), [ui.annotation_review](#ui-annotation-review), [ui.annotation_review_view](#ui-annotation-review-view), [ui.application](#ui-application), [ui.autoreseach_ui.controls](#ui-autoreseach-ui-controls), [ui.autoreseach_ui.evaluation_controller](#ui-autoreseach-ui-evaluation-controller), [ui.autoreseach_ui.evaluation_controls](#ui-autoreseach-ui-evaluation-controls), [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui), [ui.autoreseach_ui.result_models](#ui-autoreseach-ui-result-models), [ui.autoreseach_ui.settings_dialog](#ui-autoreseach-ui-settings-dialog), [ui.control_buttons](#ui-control-buttons), [ui.dataset_audit.duplicates](#ui-dataset-audit-duplicates), [ui.dataset_audit.embeddings](#ui-dataset-audit-embeddings), [ui.dataset_audit.lifecycle](#ui-dataset-audit-lifecycle), [ui.dataset_audit.models](#ui-dataset-audit-models), [ui.dataset_audit.page_duplicates](#ui-dataset-audit-page-duplicates), [ui.dataset_audit.page_embeddings](#ui-dataset-audit-page-embeddings), [ui.dataset_audit.page_helpers](#ui-dataset-audit-page-helpers), [ui.dataset_audit.page_models](#ui-dataset-audit-page-models), [ui.dataset_audit.page_quality](#ui-dataset-audit-page-quality), [ui.dataset_audit.page_report](#ui-dataset-audit-page-report), [ui.dataset_audit.page_spatial](#ui-dataset-audit-page-spatial), [ui.dataset_audit.page_statistics](#ui-dataset-audit-page-statistics), [ui.dataset_audit.page_training](#ui-dataset-audit-page-training), [ui.dataset_audit.presentation](#ui-dataset-audit-presentation), [ui.dataset_audit.quality_controller](#ui-dataset-audit-quality-controller), [ui.dataset_audit.reporting](#ui-dataset-audit-reporting), [ui.dataset_audit.selection](#ui-dataset-audit-selection), [ui.dataset_audit.session](#ui-dataset-audit-session), [ui.dataset_audit.source_page](#ui-dataset-audit-source-page), [ui.dataset_audit.tasks](#ui-dataset-audit-tasks), [ui.dataset_audit.training_results](#ui-dataset-audit-training-results), [ui.dataset_audit.workers](#ui-dataset-audit-workers), [ui.dataset_audit.workspace](#ui-dataset-audit-workspace), [ui.dataset_source](#ui-dataset-source), [ui.image_conversion](#ui-image-conversion), [ui.image_navigation](#ui-image-navigation), [ui.image_view](#ui-image-view), [ui.interactive_params_ui](#ui-interactive-params-ui), [ui.log_widget](#ui-log-widget), [ui.morphology_ui](#ui-morphology-ui), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.actions](#ui-segmentation-actions), [ui.segmentation.computation](#ui-segmentation-computation), [ui.segmentation.controller](#ui-segmentation-controller), [ui.segmentation.errors](#ui-segmentation-errors), [ui.segmentation.export](#ui-segmentation-export), [ui.segmentation.image_input](#ui-segmentation-image-input), [ui.segmentation.interactive_view](#ui-segmentation-interactive-view), [ui.segmentation.jobs](#ui-segmentation-jobs), [ui.segmentation.panels](#ui-segmentation-panels), [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings), [ui.segmentation.results](#ui-segmentation-results), [ui.settings_service](#ui-settings-service), [ui.settings_ui](#ui-settings-ui), [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui), [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.slice_dataset_sahi_ui](#ui-tabs-slice-dataset-sahi-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops) |
 | `cv2` | [cluster.canonicalize_crops](#cluster-canonicalize-crops), [cluster.canonicalize_crops_method2](#cluster-canonicalize-crops-method2), [cluster.cluster_embeddings](#cluster-cluster-embeddings), [cluster.extract_embeddings](#cluster-extract-embeddings), [cluster.save_yolo_object_to_path](#cluster-save-yolo-object-to-path), [cluster.test_new_image](#cluster-test-new-image), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_dataset_audit](#tests-test-dataset-audit), [tests.test_dataset_workspace](#tests-test-dataset-workspace), [tests.test_gradient_autoresearch](#tests-test-gradient-autoresearch), [tests.test_legacy_tabs_migration](#tests-test-legacy-tabs-migration), [tests.test_method_algorithms](#tests-test-method-algorithms), [tests.test_pixel_morphology](#tests-test-pixel-morphology), [tests.test_processing_smoke](#tests-test-processing-smoke), [tests.test_report_evaluation](#tests-test-report-evaluation), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_threshold_autoresearch](#tests-test-threshold-autoresearch), [ui.dataset_audit.duplicates](#ui-dataset-audit-duplicates), [ui.dataset_audit.models](#ui-dataset-audit-models), [ui.image_conversion](#ui-image-conversion), [ui.image_view](#ui-image-view), [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new), [ui.segmentation.presentation](#ui-segmentation-presentation), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.annotation_processing](#utils-new-annotation-processing), [utils_new.annotations.adapters](#utils-new-annotations-adapters), [utils_new.annotations.geometry](#utils-new-annotations-geometry), [utils_new.annotations.masks](#utils-new-annotations-masks), [utils_new.annotations.rendering](#utils-new-annotations-rendering), [utils_new.annotations.transforms](#utils-new-annotations-transforms), [utils_new.autoreseach_utils.gradient_processing](#utils-new-autoreseach-utils-gradient-processing), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_audit.quality](#utils-new-dataset-audit-quality), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.morphology](#utils-new-morphology), [utils_new.segmentation.autoencoder](#utils-new-segmentation-autoencoder), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session), [utils_new.segmentation.model_output](#utils-new-segmentation-model-output), [utils_new.segmentation.operations](#utils-new-segmentation-operations), [utils_new.segmentation.result](#utils-new-segmentation-result), [utils_new.threshold_processing](#utils-new-threshold-processing), [utils_ops.deep_learning_ops](#utils-ops-deep-learning-ops), [utils_ops.gradient_ops](#utils-ops-gradient-ops), [utils_ops.interactive_ops](#utils-ops-interactive-ops), [utils_ops.segmentation_ops](#utils-ops-segmentation-ops), [utils_ops.traditional_ml_ops](#utils-ops-traditional-ml-ops) |
 | `hdbscan` | [cluster.cluster_embeddings](#cluster-cluster-embeddings), [utils_new.dataset_audit.jobs](#utils-new-dataset-audit-jobs) |
 | `imagehash` | [utils_new.dataset_audit.checks](#utils-new-dataset-audit-checks) |
@@ -581,6 +583,7 @@
 - [tabs.yolo_find_img](#tabs-yolo-find-img): `FindImagesWindow`
 - [tabs.yolo_test_aeb](#tabs-yolo-test-aeb): `YoloInspectWindow`
 - [ui.application](#ui-application): `exec_window`
+- [ui.dataset_source](#ui-dataset-source): `TAB_DESCRIPTIONS`
 - [ui.image_navigation](#ui-image-navigation): `NavigationShortcutInstaller`
 - [ui.settings_service](#ui-settings-service): `apply_theme`, `settings`
 - [ui.settings_ui](#ui-settings-ui): `SettingsWidget`
@@ -589,8 +592,8 @@
 
 **Объявления:**
 
-- Класс [`ImagePlayer`](../main.py#L29) (`QMainWindow`)
-- [`main()`](../main.py#L298)
+- Класс [`ImagePlayer`](../main.py#L30) (`QMainWindow`)
+- [`main()`](../main.py#L341)
 
 <a id="main-ui"></a>
 
@@ -601,13 +604,13 @@
 **Прямые потребители:** [main](#main).
 
 **Прямые локальные импорты:**
-- нет
+- [ui.dataset_source](#ui-dataset-source): `TAB_DESCRIPTIONS`
 
 **Внешние/stdlib импорты:** `PyQt5.QtCore.QSettings`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`.
 
 **Объявления:**
 
-- Класс [`StartupDialog`](../main_ui.py#L32) (`QDialog`)
+- Класс [`StartupDialog`](../main_ui.py#L34) (`QDialog`)
 
 <a id="path-setup"></a>
 
@@ -786,6 +789,7 @@
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.image_conversion](#ui-image-conversion): `numpy_to_qpixmap`
 - [ui.segmentation.image_input](#ui-segmentation-image-input): `load_images_universal`
 - [ui.segmentation.jobs](#ui-segmentation-jobs): `BackgroundTask`
@@ -795,7 +799,7 @@
 - [utils_new.annotations.boxes](#utils-new-annotations-boxes): `ensemble_detections`
 - [utils_new.threshold_processing](#utils-new-threshold-processing): `apply_threshold_preset`, `get_detections_from_preset`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QTimer`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QWidget`, `concurrent.futures.ThreadPoolExecutor`, `copy.deepcopy`, `cv2`, `importlib.util.find_spec`, `os`, `pathlib.Path`, `sys`, `torch`, `traceback`, `ultralytics.YOLO`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QTimer`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QWidget`, `concurrent.futures.ThreadPoolExecutor`, `copy.deepcopy`, `cv2`, `importlib.util.find_spec`, `os`, `pathlib.Path`, `sys`, `torch`, `traceback`, `ultralytics.YOLO`.
 
 **Объявления:**
 
@@ -883,25 +887,26 @@
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.image_view](#ui-image-view): `numpy_to_qpixmap`, `set_fill_color_button_preview`
 - [ui.settings_service](#ui-settings-service): `settings`
 - [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui): `setup_layout_dataset_ui`
 - [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new): `import_coco_catalog`
 - [utils_new.dataset_coco_new](#utils-new-dataset-coco-new): `write_yolo_txt_for_coco_items`
-- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `LazyImageCache`, `convert_to_grayscale`, `image_size_from_file`, `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`, `read_mask_with_fallback`, `resize_to_max_side`
+- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `LazyImageCache`, `collect_image_paths`, `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`
 - [utils_new.dataset_unet_new](#utils-new-dataset-unet-new): `load_unet_yaml_pairs`, `write_yolo_txt_for_unet_pairs`
-- [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `build_yolo_save_target_map`, `find_mask_for_image`, `load_yolo_yaml`
-- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `build_label_save_plan`, `canonicalize_obb_corners`, `format_label_save_confirmation`, `load_annotations`, `load_annotations_for_image`, `save_annotations`, `save_annotations_for_image`
+- [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `build_yolo_save_target_map`, `load_yolo_yaml`
+- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `build_label_save_plan`, `canonicalize_obb_corners`, `format_label_save_confirmation`, `load_annotations_for_image`, `save_annotations_for_image`
 - [utils_ops.segmentation_ops](#utils-ops-segmentation-ops): `update_annotation_list`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QThread`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QColor`, `PyQt5.QtWidgets.QAction`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QColorDialog`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QDialogButtonBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `cv2`, `numpy`, `os`, `pathlib.Path`, `sys`, `torch`, `traceback`, `ultralytics.YOLO`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QThread`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QColor`, `PyQt5.QtWidgets.QAction`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QColorDialog`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QDialogButtonBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressDialog`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `cv2`, `numpy`, `os`, `pathlib.Path`, `sys`, `torch`, `traceback`, `ultralytics.YOLO`.
 
 **Объявления:**
 
-- [`_validate_unified_annotation(ann)`](../tabs/layout_dataset.py#L83) — Возвращает (is_valid, err_msg).
-- [`_detect_annotation_to_obb(ann)`](../tabs/layout_dataset.py#L128) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
-- Класс [`LabelValidationThread`](../tabs/layout_dataset.py#L152) (`QThread`)
-- Класс [`Labeler`](../tabs/layout_dataset.py#L202) (`QMainWindow`)
+- [`_validate_unified_annotation(ann)`](../tabs/layout_dataset.py#L76) — Возвращает (is_valid, err_msg).
+- [`_detect_annotation_to_obb(ann)`](../tabs/layout_dataset.py#L121) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+- Класс [`LabelValidationThread`](../tabs/layout_dataset.py#L145) (`QThread`)
+- Класс [`Labeler`](../tabs/layout_dataset.py#L196) (`QMainWindow`)
 
 <a id="tabs-model-research"></a>
 
@@ -916,6 +921,7 @@
 - [ui.application](#ui-application): `exec_window`
 - [ui.autoreseach_ui.evaluation_controller](#ui-autoreseach-ui-evaluation-controller): `EvaluationController`
 - [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui): `setup_model_research_ui`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings): `GradientPresetManager`, `ThresholdPresetManager`
 - [utils_new.autoreseach_utils.evaluation_export](#utils-new-autoreseach-utils-evaluation-export): `export_evaluation`
 - [utils_new.autoreseach_utils.workflow](#utils-new-autoreseach-utils-workflow): `input_guidance`, `selected_presets`
@@ -924,7 +930,7 @@
 
 **Объявления:**
 
-- Класс [`ModelResearchApp`](../tabs/model_research.py#L26) (`QMainWindow`)
+- Класс [`ModelResearchApp`](../tabs/model_research.py#L29) (`QMainWindow`)
 
 <a id="tabs-preparing-dataset-yaml"></a>
 
@@ -1057,26 +1063,27 @@
 **Прямые локальные импорты:**
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.image_view](#ui-image-view): `numpy_to_qpixmap`, `set_fill_color_button_preview`
 - [ui.settings_service](#ui-settings-service): `settings`
 - [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui): `setup_viewing_dataset_ui`
-- [utils_new.annotation_processing](#utils-new-annotation-processing): `annotation_in_crop`, `class_id_for_annotation`, `crop_for_annotation`, `mask_roi_at_image_scale`, `normalized_annotation`, `prepare_annotation_preview`
+- [utils_new.annotation_processing](#utils-new-annotation-processing): `class_id_for_annotation`, `mask_roi_at_image_scale`, `normalized_annotation`, `prepare_annotation_preview`
 - [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new): `import_coco_catalog`
 - [utils_new.dataset_coco_new](#utils-new-dataset-coco-new): `write_yolo_txt_for_coco_items`
-- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `LazyImageCache`, `convert_to_grayscale`, `image_size_from_file`, `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`, `read_index_mask`, `read_mask_with_fallback`, `resize_to_max_side`
+- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `LazyImageCache`, `collect_image_paths`, `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`, `read_index_mask`
 - [utils_new.dataset_mask_preview_new](#utils-new-dataset-mask-preview-new): `blend_index_mask`
 - [utils_new.dataset_unet_new](#utils-new-dataset-unet-new): `load_unet_yaml_pairs`, `write_yolo_txt_for_unet_pairs`
 - [utils_new.dataset_yaml_new](#utils-new-dataset-yaml-new): `build_yolo_save_target_map`, `find_mask_for_image`, `load_yolo_yaml`
-- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `build_label_save_plan`, `canonicalize_obb_corners`, `format_label_save_confirmation`, `load_annotations`, `load_annotations_for_image`, `save_annotations`, `save_annotations_for_image`
+- [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `build_label_save_plan`, `canonicalize_obb_corners`, `format_label_save_confirmation`, `load_annotations_for_image`, `save_annotations_for_image`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QThread`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QColor`, `PyQt5.QtGui.QKeySequence`, `PyQt5.QtGui.QPalette`, `PyQt5.QtWidgets.QAction`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QColorDialog`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QDialogButtonBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidgetItem`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QShortcut`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `collections.OrderedDict`, `cv2`, `numpy`, `os`, `pathlib.Path`, `sys`, `traceback`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QThread`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QColor`, `PyQt5.QtGui.QKeySequence`, `PyQt5.QtGui.QPalette`, `PyQt5.QtWidgets.QAction`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QColorDialog`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QDialogButtonBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidgetItem`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QShortcut`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `collections.OrderedDict`, `cv2`, `numpy`, `os`, `pathlib.Path`, `sys`, `traceback`.
 
 **Объявления:**
 
-- [`_validate_unified_annotation(ann)`](../tabs/viewing_dataset.py#L94) — Возвращает (is_valid, err_msg).
-- [`_detect_annotation_to_obb(ann)`](../tabs/viewing_dataset.py#L139) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
-- Класс [`LabelValidationThread`](../tabs/viewing_dataset.py#L163) (`QThread`)
-- Класс [`ViewingDataset`](../tabs/viewing_dataset.py#L213) (`QMainWindow`)
+- [`_validate_unified_annotation(ann)`](../tabs/viewing_dataset.py#L86) — Возвращает (is_valid, err_msg).
+- [`_detect_annotation_to_obb(ann)`](../tabs/viewing_dataset.py#L131) — ('detect', cls, cx, cy, w, h) → ('obb', cls, [x1,y1,x2,y2,x3,y3,x4,y4])
+- Класс [`LabelValidationThread`](../tabs/viewing_dataset.py#L155) (`QThread`)
+- Класс [`ViewingDataset`](../tabs/viewing_dataset.py#L206) (`QMainWindow`)
 
 <a id="tabs-yolo-find-img"></a>
 
@@ -1090,19 +1097,20 @@
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.image_conversion](#ui-image-conversion): `numpy_to_qpixmap`
 - [ui.segmentation.jobs](#ui-segmentation-jobs): `BackgroundTask`
 - [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui): `setup_yolo_find_img_ui`
 - [utils_new.annotation_processing](#utils-new-annotation-processing): `yolo_result_to_detections`
-- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`, `resize_to_max_side`
+- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `collect_image_paths`, `load_one_image_item`, `normalize_to_uint8`, `read_image_with_fallback`, `resize_to_max_side`
 
 **Внешние/stdlib импорты:** `PyQt5.QtCore.QDir`, `PyQt5.QtCore.QTimer`, `PyQt5.QtCore.QUrl`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtGui.QCursor`, `PyQt5.QtGui.QDesktopServices`, `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFileSystemModel`, `PyQt5.QtWidgets.QFrame`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QListWidgetItem`, `PyQt5.QtWidgets.QMainWindow`, `PyQt5.QtWidgets.QMenu`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `concurrent.futures.ThreadPoolExecutor`, `os`, `pathlib.Path`, `shutil`, `sys`, `torch`, `ultralytics.YOLO`.
 
 **Объявления:**
 
-- Класс [`ClickableLabel`](../tabs/yolo_find_img.py#L52) (`QLabel`)
-- Класс [`ScanThread`](../tabs/yolo_find_img.py#L117) (`BackgroundTask`)
-- Класс [`FindImagesWindow`](../tabs/yolo_find_img.py#L294) (`QMainWindow, setup_yolo_find_img_ui`)
+- Класс [`ClickableLabel`](../tabs/yolo_find_img.py#L54) (`QLabel`)
+- Класс [`ScanThread`](../tabs/yolo_find_img.py#L119) (`BackgroundTask`)
+- Класс [`FindImagesWindow`](../tabs/yolo_find_img.py#L290) (`QMainWindow, setup_yolo_find_img_ui`)
 
 <a id="tabs-yolo-test-aeb"></a>
 
@@ -1116,6 +1124,7 @@
 - [runtime_policy](#runtime-policy): `configure_ultralytics`
 - [runtime_torch](#runtime-torch): `prepare_windows_torch`
 - [ui.application](#ui-application): `exec_window`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.image_conversion](#ui-image-conversion): `numpy_to_qpixmap`
 - [ui.segmentation.jobs](#ui-segmentation-jobs): `BackgroundTask`
 - [ui.segmentation.preset_bindings](#ui-segmentation-preset-bindings): `PresetManager`
@@ -1130,8 +1139,8 @@
 
 **Объявления:**
 
-- Класс [`YoloAEBPresetManager`](../tabs/yolo_test_aeb.py#L78) (`PresetManager`)
-- Класс [`YoloInspectWindow`](../tabs/yolo_test_aeb.py#L176) (`QMainWindow`)
+- Класс [`YoloAEBPresetManager`](../tabs/yolo_test_aeb.py#L79) (`PresetManager`)
+- Класс [`YoloInspectWindow`](../tabs/yolo_test_aeb.py#L177) (`QMainWindow`)
 
 <a id="tests-test-annotation-objects"></a>
 
@@ -1551,6 +1560,25 @@
 - Класс [`UnifiedCoreTests`](../tests/test_segmentation_unification.py#L19) (`unittest.TestCase`)
 - Класс [`UnifiedGuiTests`](../tests/test_segmentation_unification.py#L47) (`unittest.TestCase`)
 
+<a id="tests-test-source-unification"></a>
+
+## tests.test_source_unification
+
+Исходник: [tests/test_source_unification.py](../tests/test_source_unification.py#L1).
+
+**Прямые потребители:** не найдены в import-графе; это не доказательство неиспользования.
+
+**Прямые локальные импорты:**
+- [ui.dataset_source](#ui-dataset-source): `TAB_DESCRIPTIONS`
+- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `collect_image_paths`
+
+**Внешние/stdlib импорты:** `ast`, `os`, `pathlib.Path`, `subprocess`, `sys`, `tempfile`, `textwrap`, `unittest`.
+
+**Объявления:**
+
+- Класс [`SourceContracts`](../tests/test_source_unification.py#L17) (`unittest.TestCase`)
+- Класс [`SourceGuiTests`](../tests/test_source_unification.py#L64) (`unittest.TestCase`)
+
 <a id="tests-test-threshold-autoresearch"></a>
 
 ## tests.test_threshold_autoresearch
@@ -1619,19 +1647,19 @@
 **Прямые потребители:** [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui), [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui).
 
 **Прямые локальные импорты:**
-- нет
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
 - Класс [`BaseInferenceSettings`](../ui/DL_predict_settings.py#L19) (`QGroupBox`)
 - Класс [`YOLOInferenceSettings`](../ui/DL_predict_settings.py#L43) (`BaseInferenceSettings`)
-- Класс [`UNetInferenceSettings`](../ui/DL_predict_settings.py#L126) (`BaseInferenceSettings`)
-- Класс [`DeepLabV3InferenceSettings`](../ui/DL_predict_settings.py#L469) (`BaseInferenceSettings`)
-- Класс [`SegFormerInferenceSettings`](../ui/DL_predict_settings.py#L845) (`BaseInferenceSettings`)
-- Класс [`SAMInferenceSettings`](../ui/DL_predict_settings.py#L882) (`BaseInferenceSettings`)
-- Класс [`CustomONNXInferenceSettings`](../ui/DL_predict_settings.py#L925) (`BaseInferenceSettings`)
+- Класс [`UNetInferenceSettings`](../ui/DL_predict_settings.py#L130) (`BaseInferenceSettings`)
+- Класс [`DeepLabV3InferenceSettings`](../ui/DL_predict_settings.py#L475) (`BaseInferenceSettings`)
+- Класс [`SegFormerInferenceSettings`](../ui/DL_predict_settings.py#L862) (`BaseInferenceSettings`)
+- Класс [`SAMInferenceSettings`](../ui/DL_predict_settings.py#L899) (`BaseInferenceSettings`)
+- Класс [`CustomONNXInferenceSettings`](../ui/DL_predict_settings.py#L940) (`BaseInferenceSettings`)
 
 <a id="ui-DL-train-settings-base"></a>
 
@@ -1642,15 +1670,15 @@
 **Прямые потребители:** [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model), [ui_tabs.deep_learning_training_ui](#ui-tabs-deep-learning-training-ui).
 
 **Прямые локальные импорты:**
-- нет
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 
 **Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QRadioButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `os`, `sys`, `yaml`.
 
 **Объявления:**
 
-- Класс [`BaseTrainWidget`](../ui/DL_train_settings_base.py#L26) (`QWidget`)
-- Класс [`YOLOTrainWidget`](../ui/DL_train_settings_base.py#L167) (`BaseTrainWidget`)
-- Класс [`UNetTrainWidget`](../ui/DL_train_settings_base.py#L404) (`BaseTrainWidget`)
+- Класс [`BaseTrainWidget`](../ui/DL_train_settings_base.py#L28) (`QWidget`)
+- Класс [`YOLOTrainWidget`](../ui/DL_train_settings_base.py#L173) (`BaseTrainWidget`)
+- Класс [`UNetTrainWidget`](../ui/DL_train_settings_base.py#L420) (`BaseTrainWidget`)
 
 <a id="ui-DL-train-settings-new-model"></a>
 
@@ -1662,14 +1690,15 @@
 
 **Прямые локальные импорты:**
 - [ui.DL_train_settings_base](#ui-DL-train-settings-base): `BaseTrainWidget`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QRadioButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `ast`, `os`, `sys`.
+**Внешние/stdlib импорты:** `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QRadioButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `ast`, `os`.
 
 **Объявления:**
 
-- Класс [`DeepLabV3TrainWidget`](../ui/DL_train_settings_new_model.py#L31) (`BaseTrainWidget`)
-- Класс [`SegFormerTrainWidget`](../ui/DL_train_settings_new_model.py#L983) (`BaseTrainWidget`)
-- Класс [`SAMTrainWidget`](../ui/DL_train_settings_new_model.py#L1118) (`BaseTrainWidget`)
+- Класс [`DeepLabV3TrainWidget`](../ui/DL_train_settings_new_model.py#L30) (`BaseTrainWidget`)
+- Класс [`SegFormerTrainWidget`](../ui/DL_train_settings_new_model.py#L1027) (`BaseTrainWidget`)
+- Класс [`SAMTrainWidget`](../ui/DL_train_settings_new_model.py#L1166) (`BaseTrainWidget`)
 
 <a id="ui-annotation-objects"></a>
 
@@ -1812,15 +1841,15 @@
 **Прямые потребители:** [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui).
 
 **Прямые локальные импорты:**
-- нет
+- [ui.dataset_source](#ui-dataset-source): `DatasetSourceWidget`, `annotation_format_combo`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- [`hint(text)`](../ui/autoreseach_ui/evaluation_controls.py#L20)
+- [`hint(text)`](../ui/autoreseach_ui/evaluation_controls.py#L21)
   Явно импортируют: [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui).
-- [`setup_evaluation_controls(owner, layout)`](../ui/autoreseach_ui/evaluation_controls.py#L27)
+- [`setup_evaluation_controls(owner, layout)`](../ui/autoreseach_ui/evaluation_controls.py#L28)
   Явно импортируют: [ui.autoreseach_ui.model_research_ui](#ui-autoreseach-ui-model-research-ui).
 
 <a id="ui-autoreseach-ui-model-research-ui"></a>
@@ -1990,10 +2019,11 @@
 - [runtime_torch](#runtime-torch): `require_torch`
 - [ui.dataset_audit.lifecycle](#ui-dataset-audit-lifecycle): `stale`
 - [ui.dataset_audit.workers](#ui-dataset-audit-workers): `LossInspectionWorker`, `YoloValidationWorker`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects): `load_pair_annotations`
 - [utils_new.dataset_files_new](#utils-new-dataset-files-new): `read_image`, `read_index_mask`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtGui.QColor`, `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QTableWidgetItem`, `PyQt5.QtWidgets.QVBoxLayout`, `cv2`, `numpy`, `os`, `subprocess`, `sys`, `ultralytics.YOLO`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtGui.QColor`, `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QDialog`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QTableWidgetItem`, `PyQt5.QtWidgets.QVBoxLayout`, `cv2`, `numpy`, `os`, `subprocess`, `sys`, `ultralytics.YOLO`.
 
 **Объявления:**
 
@@ -2072,12 +2102,13 @@
 
 **Прямые локальные импорты:**
 - [ui.dataset_audit.page_helpers](#ui-dataset-audit-page-helpers): `_make_page`
+- [ui.dataset_source](#ui-dataset-source): `DatasetSourceWidget`, `make_source_button`
 
 **Внешние/stdlib импорты:** `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QHeaderView`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QTableWidget`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- [`build_models(parent)`](../ui/dataset_audit/page_models.py#L21)
+- [`build_models(parent)`](../ui/dataset_audit/page_models.py#L23)
   Явно импортируют: [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui).
 
 <a id="ui-dataset-audit-page-quality"></a>
@@ -2162,12 +2193,13 @@
 
 **Прямые локальные импорты:**
 - [ui.dataset_audit.page_helpers](#ui-dataset-audit-page-helpers): `TrainingImageLabel`, `_make_page`
+- [ui.dataset_source](#ui-dataset-source): `make_source_button`
 
 **Внешние/stdlib импорты:** `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- [`build_training(parent)`](../ui/dataset_audit/page_training.py#L15)
+- [`build_training(parent)`](../ui/dataset_audit/page_training.py#L17)
   Явно импортируют: [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui).
 
 <a id="ui-dataset-audit-page-wiring"></a>
@@ -2296,12 +2328,13 @@
 **Прямые локальные импорты:**
 - [ui.dataset_audit.page_helpers](#ui-dataset-audit-page-helpers): `_mk_max_dspin`, `_mk_max_spin`, `_mk_min_dspin`, `_mk_min_spin`
 - [ui.dataset_audit.workspace](#ui-dataset-audit-workspace): `AnalysisPages`, `build_overview`
+- [ui.dataset_source](#ui-dataset-source): `DatasetSourceWidget`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QFrame`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHeaderView`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QTableWidget`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QFrame`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QHeaderView`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QTableWidget`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- [`build_source(parent)`](../ui/dataset_audit/source_page.py#L31)
+- [`build_source(parent)`](../ui/dataset_audit/source_page.py#L32)
   Явно импортируют: [ui_tabs.dataset_analysis_ui](#ui-tabs-dataset-analysis-ui).
 
 <a id="ui-dataset-audit-spatial"></a>
@@ -2349,13 +2382,14 @@
 **Прямые потребители:** [tabs.dataset_analysis](#tabs-dataset-analysis).
 
 **Прямые локальные импорты:**
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis): `TrainingResultsLoader`
 
-**Внешние/stdlib импорты:** `PyQt5.QtGui.QPixmap`, `PyQt5.QtWidgets.QFileDialog`, `os`.
+**Внешние/stdlib импорты:** `PyQt5.QtGui.QPixmap`, `os`.
 
 **Объявления:**
 
-- Класс [`DatasetTrainingResultsController`](../ui/dataset_audit/training_results.py#L11)
+- Класс [`DatasetTrainingResultsController`](../ui/dataset_audit/training_results.py#L12)
 
 <a id="ui-dataset-audit-workers"></a>
 
@@ -2397,6 +2431,30 @@
 - [`build_overview(owner)`](../ui/dataset_audit/workspace.py#L58)
   Явно импортируют: [ui.dataset_audit.source_page](#ui-dataset-audit-source-page).
 
+<a id="ui-dataset-source"></a>
+
+## ui.dataset_source
+
+Исходник: [ui/dataset_source.py](../ui/dataset_source.py#L1).
+
+**Прямые потребители:** [main](#main), [main_ui](#main-ui), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.layout_dataset](#tabs-layout-dataset), [tabs.model_research](#tabs-model-research), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_source_unification](#tests-test-source-unification), [ui.DL_predict_settings](#ui-DL-predict-settings), [ui.DL_train_settings_base](#ui-DL-train-settings-base), [ui.DL_train_settings_new_model](#ui-DL-train-settings-new-model), [ui.autoreseach_ui.evaluation_controls](#ui-autoreseach-ui-evaluation-controls), [ui.dataset_audit.models](#ui-dataset-audit-models), [ui.dataset_audit.page_models](#ui-dataset-audit-page-models), [ui.dataset_audit.page_training](#ui-dataset-audit-page-training), [ui.dataset_audit.source_page](#ui-dataset-audit-source-page), [ui.dataset_audit.training_results](#ui-dataset-audit-training-results), [ui.image_navigation](#ui-image-navigation), [ui.segmentation.computation](#ui-segmentation-computation), [ui.segmentation.image_input](#ui-segmentation-image-input), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.preparing_dataset_yaml_ui](#ui-tabs-preparing-dataset-yaml-ui), [ui_tabs.slice_dataset_sahi_ui](#ui-tabs-slice-dataset-sahi-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui), [ui_tabs.yolo_find_img_ui](#ui-tabs-yolo-find-img-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new).
+
+**Прямые локальные импорты:**
+- [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new): `discover_coco_json`
+
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QSettings`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QVBoxLayout`, `pathlib.Path`.
+
+**Объявления:**
+
+- [`make_source_button(key, parent=None)`](../ui/dataset_source.py#L215)
+  Явно импортируют: [ui.dataset_audit.page_models](#ui-dataset-audit-page-models), [ui.dataset_audit.page_training](#ui-dataset-audit-page-training), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui).
+- [`annotation_format_combo(parent=None, *, mixed=True)`](../ui/dataset_source.py#L223)
+  Явно импортируют: [ui.autoreseach_ui.evaluation_controls](#ui-autoreseach-ui-evaluation-controls).
+- [`get_open_file(owner, key, *, multiple=False, directory='')`](../ui/dataset_source.py#L234)
+- [`get_directory(owner, key, *, directory='')`](../ui/dataset_source.py#L250)
+- Класс [`DatasetSourceWidget`](../ui/dataset_source.py#L262) (`QGroupBox`)
+- [`choose_coco_sources(owner)`](../ui/dataset_source.py#L343) — One COCO file/folder chooser used by editors, preparation, audit and SAHI.
+
 <a id="ui-image-conversion"></a>
 
 ## ui.image_conversion
@@ -2424,15 +2482,16 @@
 **Прямые потребители:** [main](#main), [ui.segmentation.panels](#ui-segmentation-panels), [ui_tabs.demo_ensemble_methods_ui](#ui-tabs-demo-ensemble-methods-ui), [ui_tabs.layout_dataset_ui](#ui-tabs-layout-dataset-ui), [ui_tabs.viewing_dataset_ui](#ui-tabs-viewing-dataset-ui), [ui_tabs.yolo_test_aeb_ui](#ui-tabs-yolo-test-aeb-ui).
 
 **Прямые локальные импорты:**
+- [ui.dataset_source](#ui-dataset-source): `DatasetSourceWidget`
 - [ui.settings_service](#ui-settings-service): `settings`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.QEvent`, `PyQt5.QtCore.QObject`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QAbstractSpinBox`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QTabWidget`, `PyQt5.QtWidgets.QTextEdit`, `PyQt5.QtWidgets.QWidget`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.QEvent`, `PyQt5.QtCore.QObject`, `PyQt5.QtCore.Qt`, `PyQt5.QtCore.pyqtSignal`, `PyQt5.QtWidgets.QAbstractSpinBox`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QTabWidget`, `PyQt5.QtWidgets.QTextEdit`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- Класс [`ImageNavigationWidget`](../ui/image_navigation.py#L18) (`QWidget`)
-- [`parse_key_spec(spec)`](../ui/image_navigation.py#L107) — Парсит строку вида:
-- Класс [`NavigationShortcutInstaller`](../ui/image_navigation.py#L145) (`QObject`)
+- Класс [`ImageNavigationWidget`](../ui/image_navigation.py#L20) (`QWidget`)
+- [`parse_key_spec(spec)`](../ui/image_navigation.py#L131) — Парсит строку вида:
+- Класс [`NavigationShortcutInstaller`](../ui/image_navigation.py#L169) (`QObject`)
 
 <a id="ui-image-view"></a>
 
@@ -2563,27 +2622,28 @@
 **Прямые потребители:** [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods).
 
 **Прямые локальные импорты:**
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.segmentation.errors](#ui-segmentation-errors): `errors`
 - [ui.segmentation.presentation](#ui-segmentation-presentation): `presentation`
 - [ui.segmentation.session](#ui-segmentation-session): `session`
 - [utils_new.segmentation.operations](#utils-new-segmentation-operations): `operations`
 - [utils_new.segmentation.result](#utils-new-segmentation-result): `ResultStatus`, `SegmentationResult`, `binary_mask`
 
-**Внешние/stdlib импорты:** `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QMessageBox`, `functools.wraps`, `numpy`, `pathlib.Path`.
+**Внешние/stdlib импорты:** `PyQt5.QtWidgets.QMessageBox`, `functools.wraps`, `numpy`, `pathlib.Path`.
 
 **Объявления:**
 
-- [`gui_action(function)`](../ui/segmentation/computation.py#L14)
-- [`frame_for(owner)`](../ui/segmentation/computation.py#L25)
-- [`accept_mask(owner, attribute, mask, shape)`](../ui/segmentation/computation.py#L36)
-- [`run_interactive(owner)`](../ui/segmentation/computation.py#L43)
-- [`run_dl(owner)`](../ui/segmentation/computation.py#L90)
-- [`cluster_result(owner, result)`](../ui/segmentation/computation.py#L134)
-- [`predict_ml(owner, cluster=False)`](../ui/segmentation/computation.py#L165)
-- [`train_ml(owner)`](../ui/segmentation/computation.py#L195)
-- [`find_k(owner)`](../ui/segmentation/computation.py#L256)
-- [`load_dl(owner, name)`](../ui/segmentation/computation.py#L282)
-- [`load_ml(owner, path=None)`](../ui/segmentation/computation.py#L337)
+- [`gui_action(function)`](../ui/segmentation/computation.py#L15)
+- [`frame_for(owner)`](../ui/segmentation/computation.py#L26)
+- [`accept_mask(owner, attribute, mask, shape)`](../ui/segmentation/computation.py#L37)
+- [`run_interactive(owner)`](../ui/segmentation/computation.py#L44)
+- [`run_dl(owner)`](../ui/segmentation/computation.py#L94)
+- [`cluster_result(owner, result)`](../ui/segmentation/computation.py#L138)
+- [`predict_ml(owner, cluster=False)`](../ui/segmentation/computation.py#L169)
+- [`train_ml(owner)`](../ui/segmentation/computation.py#L199)
+- [`find_k(owner)`](../ui/segmentation/computation.py#L264)
+- [`load_dl(owner, name)`](../ui/segmentation/computation.py#L290)
+- [`load_ml(owner, path=None)`](../ui/segmentation/computation.py#L347)
 
 <a id="ui-segmentation-controller"></a>
 
@@ -2680,23 +2740,24 @@
 **Прямые потребители:** [tabs.deep_learning_methods](#tabs-deep-learning-methods), [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods), [tabs.gradient_methods](#tabs-gradient-methods), [tabs.interactive_methods](#tabs-interactive-methods), [tabs.threshold_methods](#tabs-threshold-methods), [tabs.traditional_ml_methods](#tabs-traditional-ml-methods).
 
 **Прямые локальные импорты:**
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.image_conversion](#ui-image-conversion): `numpy_to_qpixmap`
 - [ui.segmentation.presentation](#ui-segmentation-presentation): `no_frame`
 - [ui.segmentation.results](#ui-segmentation-results): `clear_views`
 - [utils_new.segmentation.image_session](#utils-new-segmentation-image-session): `create_cache`, `image_paths`, `load_one_image_item`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QProgressDialog`, `pathlib.Path`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QProgressDialog`, `pathlib.Path`.
 
 **Объявления:**
 
-- [`choose_images(owner, load)`](../ui/segmentation/image_input.py#L16)
-- [`choose_folder(owner, load)`](../ui/segmentation/image_input.py#L28)
-- [`load_cached(owner, source, view_names, *, max_side=1024, reset=None)`](../ui/segmentation/image_input.py#L35)
-- [`load_images_universal(source, require_annotations=False, resize_enabled=True, max_side=1024, progress_callback=None, parent=None, format_hint='auto', record_callback=None, keep_invalid=False)`](../ui/segmentation/image_input.py#L70) — Temporary eager adapter for ML training; no Qt in the actual reader.
+- [`choose_images(owner, load)`](../ui/segmentation/image_input.py#L17)
+- [`choose_folder(owner, load)`](../ui/segmentation/image_input.py#L24)
+- [`load_cached(owner, source, view_names, *, max_side=1024, reset=None)`](../ui/segmentation/image_input.py#L31)
+- [`load_images_universal(source, require_annotations=False, resize_enabled=True, max_side=1024, progress_callback=None, parent=None, format_hint='auto', record_callback=None, keep_invalid=False)`](../ui/segmentation/image_input.py#L66) — Temporary eager adapter for ML training; no Qt in the actual reader.
   Явно импортируют: [tabs.demo_ensemble_methods](#tabs-demo-ensemble-methods).
-- [`load_eager(owner, source, *, max_side=640)`](../ui/segmentation/image_input.py#L124)
-- [`reload_images(owner, load)`](../ui/segmentation/image_input.py#L145)
-- [`clear_session(owner, *, reset=None, empty_fields=(), none_fields=())`](../ui/segmentation/image_input.py#L153)
+- [`load_eager(owner, source, *, max_side=640)`](../ui/segmentation/image_input.py#L120)
+- [`reload_images(owner, load)`](../ui/segmentation/image_input.py#L141)
+- [`clear_session(owner, *, reset=None, empty_fields=(), none_fields=())`](../ui/segmentation/image_input.py#L149)
 
 <a id="ui-segmentation-interactive-view"></a>
 
@@ -2782,7 +2843,7 @@
 - Класс [`ResultPanel`](../ui/segmentation/panels.py#L82) (`QWidget`)
 - [`begin_layout(owner, kind)`](../ui/segmentation/panels.py#L103)
   Явно импортируют: [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui).
-- [`finish_layout(owner)`](../ui/segmentation/panels.py#L164)
+- [`finish_layout(owner)`](../ui/segmentation/panels.py#L163)
   Явно импортируют: [ui_tabs.deep_learning_methods_ui](#ui-tabs-deep-learning-methods-ui), [ui_tabs.gradient_methods_ui](#ui-tabs-gradient-methods-ui), [ui_tabs.interactive_methods_ui](#ui-tabs-interactive-methods-ui), [ui_tabs.threshold_methods_ui](#ui-tabs-threshold-methods-ui), [ui_tabs.traditional_ml_methods_ui](#ui-tabs-traditional-ml-methods-ui).
 
 <a id="ui-segmentation-presentation"></a>
@@ -3071,16 +3132,17 @@
 
 **Прямые локальные импорты:**
 - [ui.annotation_review](#ui-annotation-review): `AnnotationReviewWidget`
+- [ui.dataset_source](#ui-dataset-source): `make_source_button`
 - [ui.image_navigation](#ui-image-navigation): `ImageNavigationWidget`
 - [ui.image_view](#ui-image-view): `SmartGraphicsViewNew`
 - [ui.log_widget](#ui-log-widget): `LogWidget`
 - [utils_ops.segmentation_ops](#utils-ops-segmentation-ops): `get_class_color`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QButtonGroup`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QSizePolicy`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `matplotlib.backends.backend_qt5agg.FigureCanvasQTAgg`, `matplotlib.figure.Figure`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QButtonGroup`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QSizePolicy`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `matplotlib.backends.backend_qt5agg.FigureCanvasQTAgg`, `matplotlib.figure.Figure`.
 
 **Объявления:**
 
-- [`setup_layout_dataset_ui(parent)`](../ui_tabs/layout_dataset_ui.py#L31)
+- [`setup_layout_dataset_ui(parent)`](../ui_tabs/layout_dataset_ui.py#L33)
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset).
 
 <a id="ui-tabs-preparing-dataset-yaml-ui"></a>
@@ -3093,16 +3155,17 @@
 
 **Прямые локальные импорты:**
 - [ui.control_buttons](#ui-control-buttons): `ControlButtons`
+- [ui.dataset_source](#ui-dataset-source): `DatasetSourceWidget`
 - [ui.log_widget](#ui-log-widget): `LogWidget`
 
 **Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QFrame`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QHeaderView`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QRadioButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QSlider`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QTabWidget`, `PyQt5.QtWidgets.QTableWidget`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`, `matplotlib.backends.backend_qt5agg.FigureCanvasQTAgg`, `matplotlib.figure.Figure`.
 
 **Объявления:**
 
-- [`_section(title, description=None)`](../ui_tabs/preparing_dataset_yaml_ui.py#L34)
-- [`_page()`](../ui_tabs/preparing_dataset_yaml_ui.py#L48)
-- [`_wrap_row(*widgets)`](../ui_tabs/preparing_dataset_yaml_ui.py#L61)
-- [`setup_preparing_dataset_yaml_ui(parent)`](../ui_tabs/preparing_dataset_yaml_ui.py#L70)
+- [`_section(title, description=None)`](../ui_tabs/preparing_dataset_yaml_ui.py#L37)
+- [`_page()`](../ui_tabs/preparing_dataset_yaml_ui.py#L51)
+- [`_wrap_row(*widgets)`](../ui_tabs/preparing_dataset_yaml_ui.py#L64)
+- [`setup_preparing_dataset_yaml_ui(parent)`](../ui_tabs/preparing_dataset_yaml_ui.py#L73)
   Явно импортируют: [tabs.preparing_dataset_yaml](#tabs-preparing-dataset-yaml).
 
 <a id="ui-tabs-slice-dataset-sahi-ui"></a>
@@ -3114,13 +3177,13 @@
 **Прямые потребители:** [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi).
 
 **Прямые локальные импорты:**
-- нет
+- [ui.dataset_source](#ui-dataset-source): `DatasetSourceWidget`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QHeaderView`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QTableWidget`, `PyQt5.QtWidgets.QTextEdit`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QAbstractItemView`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QFormLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QHeaderView`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QTableWidget`, `PyQt5.QtWidgets.QTextEdit`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- [`setup_sahi_slicer_ui(parent)`](../ui_tabs/slice_dataset_sahi_ui.py#L26) — SAHI slicer UI: слева — пары/валидация, справа — SAHI.
+- [`setup_sahi_slicer_ui(parent)`](../ui_tabs/slice_dataset_sahi_ui.py#L29) — SAHI slicer UI: слева — пары/валидация, справа — SAHI.
   Явно импортируют: [tabs.slice_dataset_sahi](#tabs-slice-dataset-sahi).
 
 <a id="ui-tabs-threshold-methods-ui"></a>
@@ -3152,6 +3215,7 @@
 **Прямые потребители:** [tabs.traditional_ml_methods](#tabs-traditional-ml-methods).
 
 **Прямые локальные импорты:**
+- [ui.dataset_source](#ui-dataset-source): `make_source_button`
 - [ui.morphology_ui](#ui-morphology-ui): `MorphologyWidget`
 - [ui.segmentation.panels](#ui-segmentation-panels): `ResultPanel`, `begin_layout`, `finish_layout`
 
@@ -3159,7 +3223,7 @@
 
 **Объявления:**
 
-- [`setup_traditional_ml_ui(parent)`](../ui_tabs/traditional_ml_methods_ui.py#L19)
+- [`setup_traditional_ml_ui(parent)`](../ui_tabs/traditional_ml_methods_ui.py#L20)
   Явно импортируют: [tabs.traditional_ml_methods](#tabs-traditional-ml-methods).
 
 <a id="ui-tabs-viewing-dataset-ui"></a>
@@ -3193,13 +3257,14 @@
 
 **Прямые локальные импорты:**
 - [ui.DL_predict_settings](#ui-DL-predict-settings): `YOLOInferenceSettings`
+- [ui.dataset_source](#ui-dataset-source): `DatasetSourceWidget`
 - [ui.log_widget](#ui-log-widget): `LogWidget`
 
 **Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QComboBox`, `PyQt5.QtWidgets.QDoubleSpinBox`, `PyQt5.QtWidgets.QGridLayout`, `PyQt5.QtWidgets.QGroupBox`, `PyQt5.QtWidgets.QHBoxLayout`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QLineEdit`, `PyQt5.QtWidgets.QListWidget`, `PyQt5.QtWidgets.QProgressBar`, `PyQt5.QtWidgets.QPushButton`, `PyQt5.QtWidgets.QScrollArea`, `PyQt5.QtWidgets.QSizePolicy`, `PyQt5.QtWidgets.QSpinBox`, `PyQt5.QtWidgets.QSplitter`, `PyQt5.QtWidgets.QStackedWidget`, `PyQt5.QtWidgets.QTreeView`, `PyQt5.QtWidgets.QVBoxLayout`, `PyQt5.QtWidgets.QWidget`.
 
 **Объявления:**
 
-- Класс [`setup_yolo_find_img_ui`](../ui_tabs/yolo_find_img_ui.py#L28) (`object`)
+- Класс [`setup_yolo_find_img_ui`](../ui_tabs/yolo_find_img_ui.py#L29) (`object`)
 
 <a id="ui-tabs-yolo-test-aeb-ui"></a>
 
@@ -3211,6 +3276,7 @@
 
 **Прямые локальные импорты:**
 - [ui.annotation_review_view](#ui-annotation-review-view): `DatasetReviewGraphicsView`
+- [ui.dataset_source](#ui-dataset-source): `make_source_button`
 - [ui.image_navigation](#ui-image-navigation): `ImageNavigationWidget`
 - [ui.log_widget](#ui-log-widget): `LogWidget`
 - [ui.morphology_ui](#ui-morphology-ui): `MorphologyWidget`
@@ -3219,7 +3285,7 @@
 
 **Объявления:**
 
-- [`setup_yolo_ae_vae_ui(parent)`](../ui_tabs/yolo_test_aeb_ui.py#L43)
+- [`setup_yolo_ae_vae_ui(parent)`](../ui_tabs/yolo_test_aeb_ui.py#L45)
   Явно импортируют: [tabs.yolo_test_aeb](#tabs-yolo-test-aeb).
 
 <a id="utils-aeb-auto-aeb-def"></a>
@@ -3565,9 +3631,7 @@
 - [`polygon_for_annotation(annotation, width: int, height: int)`](../utils_new/annotation_processing.py#L77) — N×2 float64 вершины в пикселях исходного изображения, без округления.
 - [`crop_bounds_for_annotation(annotation, image_w: int, image_h: int, padding: int=10)`](../utils_new/annotation_processing.py#L111) — Pixel-exclusive (x1,y1,x2,y2), обрезанные по границам снимка.
 - [`crop_for_annotation(image: np.ndarray, annotation, padding: int=10)`](../utils_new/annotation_processing.py#L127) — Возвращает (copy ROI без ресайза, bounds); не меняет входной массив.
-  Явно импортируют: [tabs.viewing_dataset](#tabs-viewing-dataset).
 - [`annotation_in_crop(annotation, original_w: int, original_h: int, bounds: Tuple[int, int, int, int])`](../utils_new/annotation_processing.py#L139) — Пересчитывает аннотацию в координаты кропа для векторного Qt-слоя.
-  Явно импортируют: [tabs.viewing_dataset](#tabs-viewing-dataset).
 - [`mask_roi_at_image_scale(mask: np.ndarray, image_w: int, image_h: int, bounds: Tuple[int, int, int, int])`](../utils_new/annotation_processing.py#L169) — Извлекает маску точно для ROI без ресайза всей маски к размеру снимка.
   Явно импортируют: [tabs.viewing_dataset](#tabs-viewing-dataset).
 - [`apply_class_mask_overlay(image: np.ndarray, mask: Optional[np.ndarray], opacity: float, color_for_class, *, pixel_offset: int=1, background_value: int=0, annotations=None, restrict_to_annotations=False)`](../utils_new/annotation_processing.py#L189) — Показывает индексную маску цветами палитры классов (BGR).
@@ -4496,7 +4560,7 @@
 
 Исходник: [utils_new/dataset_catalog_new.py](../utils_new/dataset_catalog_new.py#L1).
 
-**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_dataset_audit](#tests-test-dataset-audit), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new).
+**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_dataset_audit](#tests-test-dataset-audit), [ui.dataset_source](#ui-dataset-source), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.__init__](#utils-new-annotations---init--): `ImageSize`
@@ -4519,7 +4583,7 @@
 - [`load_unet_catalog(path, log_cb=None)`](../utils_new/dataset_catalog_new.py#L66) — Source mask pixel values map to names; preserve actual input offset.
   Явно импортируют: [tests.test_dataset_audit](#tests-test-dataset-audit), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new).
 - [`discover_coco_json(folder)`](../utils_new/dataset_catalog_new.py#L76) — Find only JSON files containing COCO images and annotations fields.
-  Явно импортируют: [utils_new.dataset_loader_new](#utils-new-dataset-loader-new).
+  Явно импортируют: [ui.dataset_source](#ui-dataset-source).
 - [`import_coco_catalog(json_paths, existing_name_to_id=None, *, log_cb=None)`](../utils_new/dataset_catalog_new.py#L94) — Merge COCO sources by category NAME and remap objects to global IDs.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [utils_new.dataset_loader_new](#utils-new-dataset-loader-new).
 - [`collect_label_classes(pairs, format_hint='auto', log_cb=None)`](../utils_new/dataset_catalog_new.py#L142) — Read class IDs from YOLO labels without a QApplication or label rendering.
@@ -4562,51 +4626,51 @@
 
 Исходник: [utils_new/dataset_files_new.py](../utils_new/dataset_files_new.py#L1).
 
-**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui.dataset_audit.duplicates](#ui-dataset-audit-duplicates), [ui.dataset_audit.models](#ui-dataset-audit-models), [ui.segmentation.export](#ui-segmentation-export), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_audit.quality](#utils-new-dataset-audit-quality), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session).
+**Прямые потребители:** [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [tests.test_source_unification](#tests-test-source-unification), [ui.dataset_audit.duplicates](#ui-dataset-audit-duplicates), [ui.dataset_audit.models](#ui-dataset-audit-models), [ui.segmentation.export](#ui-segmentation-export), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_audit.quality](#utils-new-dataset-audit-quality), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session).
 
 **Прямые локальные импорты:**
 - [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new): `ImageStats`
 - [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `load_annotations`
 
-**Внешние/stdlib импорты:** `PIL.Image`, `collections.OrderedDict`, `concurrent.futures.ThreadPoolExecutor`, `cv2`, `numpy`, `pathlib.Path`, `threading`.
+**Внешние/stdlib импорты:** `PIL.Image`, `collections.OrderedDict`, `concurrent.futures.ThreadPoolExecutor`, `cv2`, `numpy`, `os`, `pathlib.Path`, `threading`.
 
 **Объявления:**
 
-- [`_read_with_fallback(path, flags)`](../utils_new/dataset_files_new.py#L9) — Read image/mask with Unicode-path fallback (notably Windows Cyrillic).
+- [`_read_with_fallback(path, flags)`](../utils_new/dataset_files_new.py#L10) — Read image/mask with Unicode-path fallback (notably Windows Cyrillic).
   Явно импортируют: [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
 - [`read_image(path)`](../utils_new/dataset_files_new.py#L23) — Read BGR image, keeping existing generator's 3-channel convention.
   Явно импортируют: [ui.dataset_audit.duplicates](#ui-dataset-audit-duplicates), [ui.dataset_audit.models](#ui-dataset-audit-models), [utils_new.dataset_io_new](#utils-new-dataset-io-new).
-- [`normalize_index_mask_shape(mask, *, path=None)`](../utils_new/dataset_files_new.py#L32) — Normalize equivalent OpenCV single-channel shapes to (H, W).
-- [`read_index_mask(path)`](../utils_new/dataset_files_new.py#L52) — Read indexed PNG as 2D integer array; accept decoder's (H,W,1).
+- [`normalize_index_mask_shape(mask, *, path=None)`](../utils_new/dataset_files_new.py#L31) — Normalize equivalent OpenCV single-channel shapes to (H, W).
+- [`read_index_mask(path)`](../utils_new/dataset_files_new.py#L51) — Read indexed PNG as 2D integer array; accept decoder's (H,W,1).
   Явно импортируют: [tabs.viewing_dataset](#tabs-viewing-dataset), [ui.dataset_audit.duplicates](#ui-dataset-audit-duplicates), [ui.dataset_audit.models](#ui-dataset-audit-models), [utils_new.DatasetGenerator_new](#utils-new-DatasetGenerator-new), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_audit.objects](#utils-new-dataset-audit-objects), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new), [utils_new.dataset_unet_new](#utils-new-dataset-unet-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`write_image(path, image)`](../utils_new/dataset_files_new.py#L61) — Write image safely also when cv2.imwrite cannot handle the path.
+- [`write_image(path, image)`](../utils_new/dataset_files_new.py#L59) — Write image safely also when cv2.imwrite cannot handle the path.
   Явно импортируют: [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [utils_new.dataset_audit.export](#utils-new-dataset-audit-export), [utils_new.dataset_io_new](#utils-new-dataset-io-new), [utils_new.dataset_mask_diagnostics_new](#utils-new-dataset-mask-diagnostics-new), [utils_new.dataset_output_new](#utils-new-dataset-output-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`read_image_with_fallback(path)`](../utils_new/dataset_files_new.py#L82) — Read image with original depth, TIFF and Unicode-path support.
+- [`read_image_with_fallback(path)`](../utils_new/dataset_files_new.py#L80) — Read image with original depth, TIFF and Unicode-path support.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [utils_new.dataset_audit.analysis](#utils-new-dataset-audit-analysis), [utils_new.dataset_audit.quality](#utils-new-dataset-audit-quality), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session).
 - [`read_mask_with_fallback(path)`](../utils_new/dataset_files_new.py#L119) — Nullable indexed-mask reader; never squeeze a real RGB mask.
-  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset).
 - [`image_size_from_file(path)`](../utils_new/dataset_files_new.py#L127) — Full-resolution (width,height), without decoding image pixels if possible.
-  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [ui.segmentation.export](#ui-segmentation-export), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new).
-- [`resize_to_max_side(img, max_side=1024)`](../utils_new/dataset_files_new.py#L140)
+  Явно импортируют: [ui.segmentation.export](#ui-segmentation-export), [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new).
+- [`resize_to_max_side(img, max_side=1024)`](../utils_new/dataset_files_new.py#L141)
+  Явно импортируют: [tabs.yolo_find_img](#tabs-yolo-find-img).
+- [`normalize_to_uint8(img)`](../utils_new/dataset_files_new.py#L153) — Use the already-shared ImageStats conversion, not a second algorithm.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img).
-- [`normalize_to_uint8(img)`](../utils_new/dataset_files_new.py#L149) — Use the already-shared ImageStats conversion, not a second algorithm.
-  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img).
-- [`convert_to_grayscale(img)`](../utils_new/dataset_files_new.py#L155)
-  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset).
-- [`load_one_image_item(image_path, resize_enabled=True, max_side=1024, safe_max_side=None, load_annotations_flag=True, format_hint='auto', hard_max_side=HARD_MAX_SIDE)`](../utils_new/dataset_files_new.py#L160) — Qt-free lazy cache record used by both dataset tabs.
+- [`convert_to_grayscale(img)`](../utils_new/dataset_files_new.py#L160)
+- [`load_one_image_item(image_path, resize_enabled=True, max_side=1024, safe_max_side=None, load_annotations_flag=True, format_hint='auto', hard_max_side=HARD_MAX_SIDE)`](../utils_new/dataset_files_new.py#L166) — Qt-free lazy cache record used by both dataset tabs.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tabs.yolo_test_aeb](#tabs-yolo-test-aeb).
-- Класс [`LazyImageCache`](../utils_new/dataset_files_new.py#L199)
-  - [`LazyImageCache.__init__(self, paths, loader, window=8, prefetch_ahead=4, max_resident=16, max_workers=2)`](../utils_new/dataset_files_new.py#L200)
-  - [`LazyImageCache.__len__(self)`](../utils_new/dataset_files_new.py#L216)
-  - [`LazyImageCache._trim_locked(self)`](../utils_new/dataset_files_new.py#L219)
-  - [`LazyImageCache._load_sync(self, idx)`](../utils_new/dataset_files_new.py#L223)
-  - [`LazyImageCache.is_loaded(self, idx)`](../utils_new/dataset_files_new.py#L240)
-  - [`LazyImageCache.get_error(self, idx)`](../utils_new/dataset_files_new.py#L244)
-  - [`LazyImageCache.get(self, idx)`](../utils_new/dataset_files_new.py#L248)
-  - [`LazyImageCache._load_bg(self, idx)`](../utils_new/dataset_files_new.py#L266)
-  - [`LazyImageCache.prefetch(self, indices)`](../utils_new/dataset_files_new.py#L293)
-  - [`LazyImageCache.trim_around(self, center, keep_behind=3, keep_ahead=None)`](../utils_new/dataset_files_new.py#L308)
-  - [`LazyImageCache.shutdown(self)`](../utils_new/dataset_files_new.py#L321)
+- Класс [`LazyImageCache`](../utils_new/dataset_files_new.py#L217)
+  - [`LazyImageCache.__init__(self, paths, loader, window=8, prefetch_ahead=4, max_resident=16, max_workers=2)`](../utils_new/dataset_files_new.py#L218)
+  - [`LazyImageCache.__len__(self)`](../utils_new/dataset_files_new.py#L236)
+  - [`LazyImageCache._trim_locked(self)`](../utils_new/dataset_files_new.py#L239)
+  - [`LazyImageCache._load_sync(self, idx)`](../utils_new/dataset_files_new.py#L243)
+  - [`LazyImageCache.is_loaded(self, idx)`](../utils_new/dataset_files_new.py#L260)
+  - [`LazyImageCache.get_error(self, idx)`](../utils_new/dataset_files_new.py#L264)
+  - [`LazyImageCache.get(self, idx)`](../utils_new/dataset_files_new.py#L268)
+  - [`LazyImageCache._load_bg(self, idx)`](../utils_new/dataset_files_new.py#L286)
+  - [`LazyImageCache.prefetch(self, indices)`](../utils_new/dataset_files_new.py#L313)
+  - [`LazyImageCache.trim_around(self, center, keep_behind=3, keep_ahead=None)`](../utils_new/dataset_files_new.py#L328)
+  - [`LazyImageCache.shutdown(self)`](../utils_new/dataset_files_new.py#L341)
+- [`collect_image_paths(source, *, recursive=False)`](../utils_new/dataset_files_new.py#L361) — Ordered, deduplicated image inputs; recursion is explicit, never implicit.
+  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tabs.yolo_find_img](#tabs-yolo-find-img), [tests.test_source_unification](#tests-test-source-unification), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session).
 
 <a id="utils-new-dataset-image-stats-new"></a>
 
@@ -4664,61 +4728,59 @@
 
 **Прямые локальные импорты:**
 - [ui.annotation_review](#ui-annotation-review): `AnnotationReviewWidget`
+- [ui.dataset_source](#ui-dataset-source): `dataset_source as source_dialogs`
 - [ui.pair_validation_dialog_new](#ui-pair-validation-dialog-new): `PairValidationDialog`
-- [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new): `CatalogSourceError`, `collect_label_classes`, `collect_mask_classes`, `dense_class_remap`, `discover_coco_json`, `import_coco_catalog`, `load_unet_catalog`, `load_yolo_catalog`, `resolve_class_name`
+- [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new): `CatalogSourceError`, `collect_label_classes`, `collect_mask_classes`, `dense_class_remap`, `import_coco_catalog`, `load_unet_catalog`, `load_yolo_catalog`, `resolve_class_name`
 - [utils_new.dataset_coco_new](#utils-new-dataset-coco-new): `write_yolo_txt_for_coco_items`
 - [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new): `ImageStats`
 - [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new): `build_pair_display`, `scan_detection_pairs`, `scan_image_only_pairs`, `scan_segmentation_pairs`
-- [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new): `PairValidator`
 - [utils_new.dataset_unet_new](#utils-new-dataset-unet-new): `is_unet_yaml`
 
-**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtGui.QColor`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QFileDialog`, `PyQt5.QtWidgets.QLabel`, `PyQt5.QtWidgets.QListWidgetItem`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QTableWidgetItem`, `os`, `tempfile`, `traceback`.
+**Внешние/stdlib импорты:** `PyQt5.QtCore.Qt`, `PyQt5.QtGui.QColor`, `PyQt5.QtWidgets.QApplication`, `PyQt5.QtWidgets.QCheckBox`, `PyQt5.QtWidgets.QListWidgetItem`, `PyQt5.QtWidgets.QMessageBox`, `PyQt5.QtWidgets.QTableWidgetItem`, `os`, `tempfile`, `traceback`.
 
 **Объявления:**
 
-- Класс [`DatasetLoaderMixin`](../utils_new/dataset_loader_new.py#L47)
-  - [`DatasetLoaderMixin._after_load_hook(self)`](../utils_new/dataset_loader_new.py#L69)
-  - [`DatasetLoaderMixin._after_type_change_hook(self, new_type)`](../utils_new/dataset_loader_new.py#L76)
-  - [`DatasetLoaderMixin._sync_all_states(self, *_)`](../utils_new/dataset_loader_new.py#L81)
-  - [`DatasetLoaderMixin._refresh_mask_pixel_column(self)`](../utils_new/dataset_loader_new.py#L97)
-  - [`DatasetLoaderMixin.log(self, message)`](../utils_new/dataset_loader_new.py#L107)
-  - [`DatasetLoaderMixin._log_debug(self, msg)`](../utils_new/dataset_loader_new.py#L116)
-  - [`DatasetLoaderMixin._log_exception(self, context, exc=None)`](../utils_new/dataset_loader_new.py#L123)
-  - [`DatasetLoaderMixin._copy_selected_rows_to_clipboard(self)`](../utils_new/dataset_loader_new.py#L135)
-  - [`DatasetLoaderMixin._on_file_list_double_clicked(self, item)`](../utils_new/dataset_loader_new.py#L143)
-  - [`DatasetLoaderMixin.select_images_folder(self)`](../utils_new/dataset_loader_new.py#L155)
-  - [`DatasetLoaderMixin.select_labels_folder(self)`](../utils_new/dataset_loader_new.py#L165)
-  - [`DatasetLoaderMixin.load_from_yaml(self)`](../utils_new/dataset_loader_new.py#L187)
-  - [`DatasetLoaderMixin._load_yolo_yaml_from_path(self, file_path)`](../utils_new/dataset_loader_new.py#L204)
+- Класс [`DatasetLoaderMixin`](../utils_new/dataset_loader_new.py#L45)
+  - [`DatasetLoaderMixin._after_load_hook(self)`](../utils_new/dataset_loader_new.py#L67)
+  - [`DatasetLoaderMixin._after_type_change_hook(self, new_type)`](../utils_new/dataset_loader_new.py#L74)
+  - [`DatasetLoaderMixin._sync_all_states(self, *_)`](../utils_new/dataset_loader_new.py#L79)
+  - [`DatasetLoaderMixin._refresh_mask_pixel_column(self)`](../utils_new/dataset_loader_new.py#L88)
+  - [`DatasetLoaderMixin.log(self, message)`](../utils_new/dataset_loader_new.py#L98)
+  - [`DatasetLoaderMixin._log_debug(self, msg)`](../utils_new/dataset_loader_new.py#L107)
+  - [`DatasetLoaderMixin._log_exception(self, context, exc=None)`](../utils_new/dataset_loader_new.py#L114)
+  - [`DatasetLoaderMixin._copy_selected_rows_to_clipboard(self)`](../utils_new/dataset_loader_new.py#L126)
+  - [`DatasetLoaderMixin._on_file_list_double_clicked(self, item)`](../utils_new/dataset_loader_new.py#L134)
+  - [`DatasetLoaderMixin.select_images_folder(self)`](../utils_new/dataset_loader_new.py#L146)
+  - [`DatasetLoaderMixin.select_labels_folder(self)`](../utils_new/dataset_loader_new.py#L156)
+  - [`DatasetLoaderMixin.load_from_yaml(self)`](../utils_new/dataset_loader_new.py#L176)
+  - [`DatasetLoaderMixin._load_yolo_yaml_from_path(self, file_path)`](../utils_new/dataset_loader_new.py#L201)
   - [`DatasetLoaderMixin.load_from_coco(self)`](../utils_new/dataset_loader_new.py#L254)
   - [`DatasetLoaderMixin.add_from_coco(self)`](../utils_new/dataset_loader_new.py#L257)
   - [`DatasetLoaderMixin._handle_load_coco(self, replace)`](../utils_new/dataset_loader_new.py#L260)
-  - [`DatasetLoaderMixin._ask_coco_source(self)`](../utils_new/dataset_loader_new.py#L280)
-  - [`DatasetLoaderMixin._find_coco_json_in_folder(self, folder)`](../utils_new/dataset_loader_new.py#L296)
-  - [`DatasetLoaderMixin._get_coco_tmp_labels_dir(self, first_json_path=None)`](../utils_new/dataset_loader_new.py#L300)
-  - [`DatasetLoaderMixin._load_coco_from_paths(self, json_paths, replace=True)`](../utils_new/dataset_loader_new.py#L308)
-  - [`DatasetLoaderMixin.load_from_unet_yaml(self)`](../utils_new/dataset_loader_new.py#L386)
-  - [`DatasetLoaderMixin._load_unet_from_path(self, yaml_path)`](../utils_new/dataset_loader_new.py#L393)
-  - [`DatasetLoaderMixin._apply_loaded_pairs(self, pairs, input_type, input_format, class_names_from_yaml=None, class_names_override=None, source_label='', source_yaml=None)`](../utils_new/dataset_loader_new.py#L431)
-  - [`DatasetLoaderMixin.scan_pairs(self)`](../utils_new/dataset_loader_new.py#L486)
-  - [`DatasetLoaderMixin._validate_all_pairs(self)`](../utils_new/dataset_loader_new.py#L551)
-  - [`DatasetLoaderMixin._recompute_color_stats(self)`](../utils_new/dataset_loader_new.py#L572)
+  - [`DatasetLoaderMixin._get_coco_tmp_labels_dir(self, first_json_path=None)`](../utils_new/dataset_loader_new.py#L265)
+  - [`DatasetLoaderMixin._load_coco_from_paths(self, json_paths, replace=True)`](../utils_new/dataset_loader_new.py#L273)
+  - [`DatasetLoaderMixin.load_from_unet_yaml(self)`](../utils_new/dataset_loader_new.py#L356)
+  - [`DatasetLoaderMixin._load_unet_from_path(self, yaml_path)`](../utils_new/dataset_loader_new.py#L362)
+  - [`DatasetLoaderMixin._apply_loaded_pairs(self, pairs, input_type, input_format, class_names_from_yaml=None, class_names_override=None, source_label='', source_yaml=None)`](../utils_new/dataset_loader_new.py#L410)
+  - [`DatasetLoaderMixin.scan_pairs(self)`](../utils_new/dataset_loader_new.py#L473)
+  - [`DatasetLoaderMixin._validate_all_pairs(self)`](../utils_new/dataset_loader_new.py#L546)
+  - [`DatasetLoaderMixin._recompute_color_stats(self)`](../utils_new/dataset_loader_new.py#L570)
   - [`DatasetLoaderMixin._update_color_stats_label(self)`](../utils_new/dataset_loader_new.py#L578)
-  - [`DatasetLoaderMixin._open_pair_validation(self, pair)`](../utils_new/dataset_loader_new.py#L588)
-  - [`DatasetLoaderMixin._make_list_item(self, text, tag=None, error_msg='')`](../utils_new/dataset_loader_new.py#L614)
-  - [`DatasetLoaderMixin._rebuild_file_list_display(self, pairs=None)`](../utils_new/dataset_loader_new.py#L638)
-  - [`DatasetLoaderMixin.closeEvent(self, event)`](../utils_new/dataset_loader_new.py#L722)
-  - [`DatasetLoaderMixin.shutdown_annotation_review(self)`](../utils_new/dataset_loader_new.py#L726)
-  - [`DatasetLoaderMixin._is_include_empty(self)`](../utils_new/dataset_loader_new.py#L730)
-  - [`DatasetLoaderMixin._on_include_empty_toggled(self, *_)`](../utils_new/dataset_loader_new.py#L733)
-  - [`DatasetLoaderMixin._on_dataset_type_changed(self, idx)`](../utils_new/dataset_loader_new.py#L739)
-  - [`DatasetLoaderMixin._on_input_format_changed(self, idx)`](../utils_new/dataset_loader_new.py#L764)
-  - [`DatasetLoaderMixin._fill_class_table_from_dict(self, class_names_dict, preserve_include=True)`](../utils_new/dataset_loader_new.py#L776)
-  - [`DatasetLoaderMixin._get_yaml_name_for_id(self, cid)`](../utils_new/dataset_loader_new.py#L820)
-  - [`DatasetLoaderMixin.collect_classes(self)`](../utils_new/dataset_loader_new.py#L824)
-  - [`DatasetLoaderMixin.update_included_classes(self)`](../utils_new/dataset_loader_new.py#L913)
-  - [`DatasetLoaderMixin.on_class_table_item_changed(self, item)`](../utils_new/dataset_loader_new.py#L993)
-  - [`DatasetLoaderMixin._update_pair_count_label(self, extra_text, error=False)`](../utils_new/dataset_loader_new.py#L999)
+  - [`DatasetLoaderMixin._open_pair_validation(self, pair)`](../utils_new/dataset_loader_new.py#L589)
+  - [`DatasetLoaderMixin._make_list_item(self, text, tag=None, error_msg='')`](../utils_new/dataset_loader_new.py#L620)
+  - [`DatasetLoaderMixin._rebuild_file_list_display(self, pairs=None)`](../utils_new/dataset_loader_new.py#L644)
+  - [`DatasetLoaderMixin.closeEvent(self, event)`](../utils_new/dataset_loader_new.py#L744)
+  - [`DatasetLoaderMixin.shutdown_annotation_review(self)`](../utils_new/dataset_loader_new.py#L748)
+  - [`DatasetLoaderMixin._is_include_empty(self)`](../utils_new/dataset_loader_new.py#L752)
+  - [`DatasetLoaderMixin._on_include_empty_toggled(self, *_)`](../utils_new/dataset_loader_new.py#L755)
+  - [`DatasetLoaderMixin._on_dataset_type_changed(self, idx)`](../utils_new/dataset_loader_new.py#L761)
+  - [`DatasetLoaderMixin._on_input_format_changed(self, idx)`](../utils_new/dataset_loader_new.py#L786)
+  - [`DatasetLoaderMixin._fill_class_table_from_dict(self, class_names_dict, preserve_include=True)`](../utils_new/dataset_loader_new.py#L798)
+  - [`DatasetLoaderMixin._get_yaml_name_for_id(self, cid)`](../utils_new/dataset_loader_new.py#L842)
+  - [`DatasetLoaderMixin.collect_classes(self)`](../utils_new/dataset_loader_new.py#L845)
+  - [`DatasetLoaderMixin.update_included_classes(self)`](../utils_new/dataset_loader_new.py#L935)
+  - [`DatasetLoaderMixin.on_class_table_item_changed(self, item)`](../utils_new/dataset_loader_new.py#L1020)
+  - [`DatasetLoaderMixin._update_pair_count_label(self, extra_text, error=False)`](../utils_new/dataset_loader_new.py#L1026)
 
 <a id="utils-new-dataset-mask-diagnostics-new"></a>
 
@@ -4808,7 +4870,7 @@
 **Прямые потребители:** [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
 
 **Прямые локальные импорты:**
-- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `_read_with_fallback`, `write_image`
+- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `_read_with_fallback`, `collect_image_paths`, `write_image`
 - [utils_new.dataset_image_stats_new](#utils-new-dataset-image-stats-new): `ImageStats`
 - [utils_new.dataset_pair_validator_new](#utils-new-dataset-pair-validator-new): `IMG_EXTENSIONS`, `INPUT_FORMAT_AUTO`, `PairValidator`, `read_mask_with_fallback`
 
@@ -4818,21 +4880,21 @@
 
 - [`_list_images(folder)`](../utils_new/dataset_pair_tools_new.py#L18)
   Явно импортируют: [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`scan_detection_pairs(images_folder, labels_folder, log_cb=None, format_hint=INPUT_FORMAT_AUTO)`](../utils_new/dataset_pair_tools_new.py#L28)
+- [`scan_detection_pairs(images_folder, labels_folder, log_cb=None, format_hint=INPUT_FORMAT_AUTO)`](../utils_new/dataset_pair_tools_new.py#L23)
   Явно импортируют: [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`scan_segmentation_pairs(images_folder, masks_folder, log_cb=None)`](../utils_new/dataset_pair_tools_new.py#L48)
+- [`scan_segmentation_pairs(images_folder, masks_folder, log_cb=None)`](../utils_new/dataset_pair_tools_new.py#L43)
   Явно импортируют: [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`scan_image_only_pairs(images_folder)`](../utils_new/dataset_pair_tools_new.py#L83)
+- [`scan_image_only_pairs(images_folder)`](../utils_new/dataset_pair_tools_new.py#L78)
   Явно импортируют: [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`select_pairs_for_conversion(pairs, validator, target)`](../utils_new/dataset_pair_tools_new.py#L88)
+- [`select_pairs_for_conversion(pairs, validator, target)`](../utils_new/dataset_pair_tools_new.py#L83)
   Явно импортируют: [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`convert_pairs_color(pairs, target, progress_cb=None, log_cb=None)`](../utils_new/dataset_pair_tools_new.py#L103)
+- [`convert_pairs_color(pairs, target, progress_cb=None, log_cb=None)`](../utils_new/dataset_pair_tools_new.py#L98)
   Явно импортируют: [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`select_pairs_for_8bit_png(pairs, validator)`](../utils_new/dataset_pair_tools_new.py#L131) — Возвращает (all_pairs, need_convert).
+- [`select_pairs_for_8bit_png(pairs, validator)`](../utils_new/dataset_pair_tools_new.py#L126) — Возвращает (all_pairs, need_convert).
   Явно импортируют: [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`convert_pairs_to_8bit_png(pairs, progress_cb=None, log_cb=None, skip_masks=False)`](../utils_new/dataset_pair_tools_new.py#L146) — skip_masks: если True — pairs трактуются как pairs из (img, mask),
+- [`convert_pairs_to_8bit_png(pairs, progress_cb=None, log_cb=None, skip_masks=False)`](../utils_new/dataset_pair_tools_new.py#L141) — skip_masks: если True — pairs трактуются как pairs из (img, mask),
   Явно импортируют: [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
-- [`build_pair_display(pair, validator, dataset_type, include_empty)`](../utils_new/dataset_pair_tools_new.py#L189)
+- [`build_pair_display(pair, validator, dataset_type, include_empty)`](../utils_new/dataset_pair_tools_new.py#L184)
   Явно импортируют: [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
 
 <a id="utils-new-dataset-pair-validator-new"></a>
@@ -4841,7 +4903,7 @@
 
 Исходник: [utils_new/dataset_pair_validator_new.py](../utils_new/dataset_pair_validator_new.py#L1).
 
-**Прямые потребители:** [utils_new.dataset_loader_new](#utils-new-dataset-loader-new), [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
+**Прямые потребители:** [utils_new.dataset_pair_tools_new](#utils-new-dataset-pair-tools-new), [utils_new.dataset_validation_new](#utils-new-dataset-validation-new).
 
 **Прямые локальные импорты:**
 - [utils_new.annotations.__init__](#utils-new-annotations---init--): `ImageSize`, `to_legacy`
@@ -4974,7 +5036,7 @@
 - [`_resolve_split_dirs(split_val, base_path)`](../utils_new/dataset_yaml_new.py#L21) — split_val может быть:
 - [`_find_label_for_image(img_path, base_path, split, rel_dir)`](../utils_new/dataset_yaml_new.py#L70) — Ищет .txt для изображения в стандартных местах YOLO-структуры.
 - [`find_mask_for_image(img_path, base_path=None)`](../utils_new/dataset_yaml_new.py#L110) — Ищет маску для изображения в стандартных местах YAML-структуры.
-  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset).
+  Явно импортируют: [tabs.viewing_dataset](#tabs-viewing-dataset).
 - [`load_yolo_yaml(yaml_path, log_cb=None)`](../utils_new/dataset_yaml_new.py#L151) — Парсит YOLO data.yaml.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [utils_new.dataset_catalog_new](#utils-new-dataset-catalog-new).
 - [`build_yolo_save_target_map(yaml_path, image_paths, *, root=None)`](../utils_new/dataset_yaml_new.py#L233) — Resolve canonical labels/<split>/<image>.txt destinations for YOLO YAML.
@@ -5015,9 +5077,9 @@
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset).
 - [`_tolerant_editor_rows(path, size, format_hint='auto')`](../utils_new/dataset_yolo_labels_new.py#L224) — Recover syntactically valid, geometrically invalid rows for manual repair.
 - [`load_annotations(txt_path, img_w, img_h, format_hint='auto', log=None)`](../utils_new/dataset_yolo_labels_new.py#L266)
-  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session).
+  Явно импортируют: [tests.test_segmentation_shared](#tests-test-segmentation-shared), [utils_new.dataset_files_new](#utils-new-dataset-files-new), [utils_new.segmentation.image_session](#utils-new-segmentation-image-session).
 - [`save_annotations(annotations, txt_path, img_w, img_h, obb_as_xywhr=False)`](../utils_new/dataset_yolo_labels_new.py#L286)
-  Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [utils_new.segmentation.export](#utils-new-segmentation-export).
+  Явно импортируют: [utils_new.segmentation.export](#utils-new-segmentation-export).
 - Класс [`LabelSavePlan`](../utils_new/dataset_yolo_labels_new.py#L333)
 - [`build_label_save_plan(entries)`](../utils_new/dataset_yolo_labels_new.py#L341) — Refuse collisions; count only existing *destination* .txt files.
   Явно импортируют: [tabs.layout_dataset](#tabs-layout-dataset), [tabs.viewing_dataset](#tabs-viewing-dataset), [tests.test_label_save_merge](#tests-test-label-save-merge), [ui.segmentation.export](#ui-segmentation-export).
@@ -5206,7 +5268,7 @@
 **Прямые потребители:** [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [tests.test_segmentation_shared](#tests-test-segmentation-shared), [ui.segmentation.image_input](#ui-segmentation-image-input), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
 
 **Прямые локальные импорты:**
-- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `HARD_MAX_SIDE`, `LazyImageCache`, `read_image_with_fallback`
+- [utils_new.dataset_files_new](#utils-new-dataset-files-new): `HARD_MAX_SIDE`, `LazyImageCache`, `collect_image_paths`, `read_image_with_fallback`
 - [utils_new.dataset_yolo_labels_new](#utils-new-dataset-yolo-labels-new): `load_annotations`
 
 **Внешние/stdlib импорты:** `cv2`, `numpy`, `pathlib.Path`.
@@ -5215,11 +5277,11 @@
 
 - [`image_paths(source)`](../utils_new/segmentation/image_session.py#L21)
   Явно импортируют: [tabs.yolo_test_aeb](#tabs-yolo-test-aeb), [ui.segmentation.image_input](#ui-segmentation-image-input).
-- [`legacy_uint8(image)`](../utils_new/segmentation/image_session.py#L29)
-- [`resize_legacy(image, max_side)`](../utils_new/segmentation/image_session.py#L39)
-- [`load_one_image_item(image_path, resize_enabled=True, max_side=1024, safe_max_side=None, load_annotations_flag=True, format_hint='auto')`](../utils_new/segmentation/image_session.py#L48)
+- [`legacy_uint8(image)`](../utils_new/segmentation/image_session.py#L25)
+- [`resize_legacy(image, max_side)`](../utils_new/segmentation/image_session.py#L35)
+- [`load_one_image_item(image_path, resize_enabled=True, max_side=1024, safe_max_side=None, load_annotations_flag=True, format_hint='auto')`](../utils_new/segmentation/image_session.py#L47)
   Явно импортируют: [ui.segmentation.image_input](#ui-segmentation-image-input), [utils_new.autoreseach_utils.search](#utils-new-autoreseach-utils-search).
-- [`create_cache(source, **loader_options)`](../utils_new/segmentation/image_session.py#L79)
+- [`create_cache(source, **loader_options)`](../utils_new/segmentation/image_session.py#L92)
   Явно импортируют: [ui.segmentation.image_input](#ui-segmentation-image-input).
 
 <a id="utils-new-segmentation-model-export"></a>
