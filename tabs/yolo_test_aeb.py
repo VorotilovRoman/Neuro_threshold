@@ -471,7 +471,9 @@ class YoloInspectWindow(QMainWindow):
         self._manual_ops = []
         self._clear_ae_view()
         for view in (self.yolo_view, self.transformed_view, self.error_view):
+            view.set_annotations([], 0, 0)
             view.set_pixmap(numpy_to_qpixmap(None))
+        self._sync_processing_state()
         self.info_label.setText("No images")
         self.objects_list.clear()
         self.update_navigation_state()

@@ -351,6 +351,9 @@ with tempfile.TemporaryDirectory() as directory:
  w.goto_image(2)
  assert w.original_image is None and w.displayed_image is None and w._error_bgr is None
  assert w.yolo_view.pixmap_item.pixmap().isNull() and not w.current_detections
+ w.yolo_view.set_annotations([('detect',0,.5,.5,.2,.2)],80,30)
+ w.clear_images();assert not w.yolo_view.annotations and w.yolo_view.img_width==0
+ assert not w.btn_stop_processing.isEnabled()
 w.close();app.processEvents()
 """)
 
