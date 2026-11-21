@@ -219,11 +219,9 @@ def setup_demo_ensemble_methods_ui(parent):
     header_layout.addStretch()
     parent.weights_container.addLayout(header_layout)
 
-    weights_hint = QLabel(
+    ensemble_group.setToolTip(
         "Строка пресета: вес · назначенная оценка · ID класса. Оценка классического метода не является вероятностью модели. ID должны совпадать по смыслу с классами YOLO. Нулевой вес исключает источник. Все пресеты работают на текущем размере снимка; морфология — в px."
     )
-    weights_hint.setWordWrap(True)
-    ensemble_layout.addWidget(weights_hint)
     parent.preset_weights_container = QVBoxLayout()
     parent.weights_container.addLayout(parent.preset_weights_container)
 

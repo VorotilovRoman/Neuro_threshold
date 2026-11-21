@@ -98,10 +98,11 @@ from main import ImagePlayer
 from main_ui import ALL_TABS,StartupDialog
 from ui.dataset_source import DatasetSourceWidget,ACTIONS,TAB_DESCRIPTIONS
 app=QApplication([]);window=ImagePlayer(ALL_TABS);window.show();app.processEvents()
-window.resize(1600,1000);app.processEvents()
-assert window.height()<=1000,window.height()
+window.resize(1280,900);app.processEvents()
+assert window.width()<=1280 and window.height()<=900,(window.width(),window.height())
 chooser=StartupDialog()
 for index,(key,title) in enumerate(ALL_TABS):
+ window.tab_widget.setCurrentIndex(index);app.processEvents()
  owner=window._tab_widgets[index]
  assert window.tab_widget.tabToolTip(index)==TAB_DESCRIPTIONS[key]
  assert chooser.checkboxes[key].toolTip()==TAB_DESCRIPTIONS[key]
@@ -112,6 +113,10 @@ for index,(key,title) in enumerate(ALL_TABS):
   for action,button in widget.buttons.items():
    assert button.text()==ACTIONS[action][0],(key,action,button.text())
    assert button.toolTip(),(key,action)
+ if hasattr(owner,'nav_widget'):
+  assert owner.nav_widget.height()<=40,(key,owner.nav_widget.height())
+ for widget in widgets:
+  if widget.isVisible():assert widget._bar.height()<=36,(key,widget._bar.height())
  if key=='sahi':
   assert owner.dataset_source.type_combo.count()==1
   assert 'unet_yaml' not in owner.dataset_source.buttons and 'masks' not in owner.dataset_source.buttons
@@ -123,7 +128,7 @@ for index,(key,title) in enumerate(ALL_TABS):
   with patch.object(QFileDialog,'getOpenFileName',return_value=('masked.yaml','')),patch('utils_new.dataset_loader_new.is_unet_yaml',return_value=True),patch.object(QMessageBox,'warning') as warning,patch.object(QMessageBox,'question') as question:
    owner.btn_load_yaml.click();assert warning.called;question.assert_not_called()
  if key in ('dataset','dataset_analysis'):
-  panel=owner.dataset_source;assert panel is owner.btn_load_yaml.parentWidget()
+  panel=owner.dataset_source;assert panel.isAncestorOf(owner.btn_load_yaml)
   panel.type_combo.setCurrentIndex(panel.type_combo.findData(1))
   assert panel.button('labels').text()==ACTIONS['masks'][0]
   assert not panel.format_combo.isEnabled()
@@ -225,6 +230,37 @@ with tempfile.TemporaryDirectory() as directory:
  choose('Отмена')
  with patch.object(QFileDialog,'getOpenFileNames') as picker:
   assert choose_coco_sources(None)==[];picker.assert_not_called()
+""")
+
+    def test_compact_sources_keep_hidden_actions_available_with_correct_state(self):
+        self.gui("""
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QApplication
+from ui.dataset_source import DatasetSourceWidget,ACTIONS
+app=QApplication([])
+panel=DatasetSourceWidget(('images','folder','labels','masks','yolo_yaml','coco','unet_yaml'),types=(0,1,2),formats=True,profile='test')
+panel.resize(500,32);panel.show();app.processEvents()
+assert panel.height()<=36,panel.height()
+assert panel.overflow.isVisible()
+visible=[button for button in panel.buttons.values() if button.isVisible()]
+assert len(visible)<len(panel.buttons)
+assert len({button.geometry().center().y() for button in visible})<=1
+seen=[];panel.requested.connect(seen.append)
+def choose_hidden():
+ menu=panel.overflow.menu()
+ next(action for action in menu.actions() if action.text()==ACTIONS['unet_yaml'][0]).trigger()
+ menu.close()
+QTimer.singleShot(0,choose_hidden);panel.overflow.click()
+assert seen==['unet_yaml'],seen
+panel.type_combo.setCurrentIndex(panel.type_combo.findData(1));panel._refresh_menu()
+assert panel.button('labels').text()==ACTIONS['masks'][0]
+panel.type_combo.setCurrentIndex(panel.type_combo.findData(2));panel._refresh_menu()
+assert not panel.button('labels').isEnabled() and not panel.format_combo.isEnabled()
+assert any(action.text()==ACTIONS['labels'][0] and not action.isEnabled() for action in panel.overflow.menu().actions())
+panel.resize(1600,32);app.processEvents()
+assert not panel.overflow.isVisible() and all(button.isVisible() for button in panel.buttons.values())
+assert panel.help_button.toolTip() and panel.help_button.isVisible()
+panel.close()
 """)
 
     def test_training_sources_use_correct_dialogs_and_keep_state_on_cancel(self):

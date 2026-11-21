@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import textwrap
 import sys
 import tempfile
 import unittest
@@ -62,6 +63,23 @@ class ObjectInfoTests(unittest.TestCase):
 )
 class ObjectInspectorGuiTests(unittest.TestCase):
     def run_gui(self, code):
+        # Match exec_window: destroy widgets while QApplication still exists.
+        cleanup = """
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QCoreApplication, QEvent
+app = QApplication.instance()
+if app:
+    for widget in app.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+"""
+        code = (
+            "try:\n"
+            + textwrap.indent(code, " ")
+            + "\nfinally:\n"
+            + textwrap.indent(cleanup, " ")
+        )
         with tempfile.TemporaryDirectory() as config:
             env = dict(
                 os.environ,

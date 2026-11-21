@@ -625,8 +625,7 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SAHI Dataset Slicer")
-        self.setMinimumWidth(1400)
-        self.setMinimumHeight(900)
+        self.setMinimumSize(900, 600)
 
         setup_sahi_slicer_ui(self)
 

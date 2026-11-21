@@ -2,16 +2,20 @@
 
 from pathlib import Path
 
-from PyQt5.QtCore import QSettings, pyqtSignal
+from PyQt5.QtCore import QEvent, QSettings, QSize, pyqtSignal
 from PyQt5.QtWidgets import (
     QComboBox,
     QFileDialog,
-    QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLayout,
+    QMenu,
     QPushButton,
+    QSizePolicy,
+    QToolButton,
+    QToolTip,
     QVBoxLayout,
+    QWidget,
 )
 
 # Stable action keys; one caption/filter/meaning across every consumer.
@@ -31,21 +35,21 @@ ACTIONS = {
         "Выбрать один или несколько снимков. Текущий набор заменяется.",
     ),
     "folder": (
-        "Папка снимков…",
+        "Папка…",
         "Выберите папку со снимками",
         "",
         True,
         "Загрузить снимки из выбранной папки. Вложенные папки не включаются, если вкладка явно не указывает рекурсивный поиск.",
     ),
     "labels": (
-        "Папка разметки TXT…",
+        "TXT…",
         "Выберите папку разметки TXT",
         "",
         True,
         "Одноимённые TXT: BBox, OBB или Segment. Это папка меток, а не снимков.",
     ),
     "masks": (
-        "Папка масок…",
+        "Маски…",
         "Выберите папку индексных масок",
         "",
         True,
@@ -59,21 +63,21 @@ ACTIONS = {
         "Загрузить снимки, TXT, классы и split из YOLO data.yaml. Текущий набор заменяется.",
     ),
     "coco": (
-        "COCO JSON…",
+        "COCO…",
         "Выберите COCO JSON",
         "COCO JSON (*.json)",
         False,
         "Импортировать COCO JSON с категориями и аннотациями; текущий набор заменяется.",
     ),
     "add_coco": (
-        "Добавить COCO…",
+        "+ COCO…",
         "Выберите COCO JSON для добавления",
         "COCO JSON (*.json)",
         False,
         "Добавить COCO к текущему набору; классы объединяются по имени.",
     ),
     "unet_yaml": (
-        "YAML с масками…",
+        "Маски YAML…",
         "Выберите YAML датасета с масками",
         "YAML (*.yaml *.yml)",
         False,
@@ -180,17 +184,17 @@ ORDER = (
     "training_run",
 )
 FORMATS = (
-    ("Автоматически", "auto"),
-    ("BBox — осевые рамки", "detect"),
-    ("OBB — четыре угла", "obb_corners"),
-    ("OBB — XYWHR", "obb_xywhr"),
-    ("Segment — полигоны", "segment"),
-    ("Смешанный формат", "mixed"),
+    ("Auto", "auto"),
+    ("BBox", "detect"),
+    ("OBB: углы", "obb_corners"),
+    ("OBB: XYWHR", "obb_xywhr"),
+    ("Segment", "segment"),
+    ("Mixed", "mixed"),
 )
 DATA_TYPES = (
-    ("Разметка TXT: BBox / OBB / Segment", 0),
-    ("Индексные маски", 1),
-    ("Только снимки", 2),
+    ("TXT", 0),
+    ("Маски", 1),
+    ("Без разметки", 2),
 )
 TAB_DESCRIPTIONS = {
     "threshold": "Пороговая сегментация снимков и папок, пиксельная морфология, BBox/OBB/Segment и автоподбор по эталону.",
@@ -217,6 +221,8 @@ def make_source_button(key, parent=None):
     button = QPushButton(caption, parent)
     button.setObjectName("source_" + key)
     button.setToolTip(hint)
+    button.setAccessibleName(ACTIONS[key][1])
+    button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
     return button
 
 
@@ -259,7 +265,7 @@ def get_directory(owner, key, *, directory=""):
     return selected
 
 
-class DatasetSourceWidget(QGroupBox):
+class DatasetSourceWidget(QWidget):
     requested = pyqtSignal(str)
 
     def __init__(
@@ -272,47 +278,81 @@ class DatasetSourceWidget(QGroupBox):
         title="Источник данных",
         parent=None,
     ):
-        super().__init__(title, parent)
+        super().__init__(parent)
         self.profile = profile
+        self.setAccessibleName(title)
         self.buttons = {}
         self.actions = tuple(key for key in ORDER if key in actions)
         if set(actions) - set(ACTIONS):
             raise ValueError("Неизвестное действие источника.")
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(8, 5, 8, 5)
-        grid = QGridLayout()
-        self._layout.addLayout(grid)
-        for index, key in enumerate(self.actions):
-            button = make_source_button(key, self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(2)
+        self._layout.setSizeConstraint(QLayout.SetNoConstraint)
+        self._bar = QWidget(self)
+        self._row = QHBoxLayout(self._bar)
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(4)
+        self._row.setSizeConstraint(QLayout.SetNoConstraint)
+        self._layout.addWidget(self._bar)
+        for key in self.actions:
+            button = make_source_button(key, self._bar)
             self.buttons[key] = button
-            grid.addWidget(button, index // 4, index % 4)
+            self._row.addWidget(button)
             button.clicked.connect(
                 lambda checked=False, key=key: self.requested.emit(key)
             )
+        self.overflow = QToolButton(self._bar)
+        self.overflow.setText("Ещё…")
+        self.overflow.setToolTip(
+            "Остальные источники: кнопки, не поместившиеся в строке."
+        )
+        self.overflow.setPopupMode(QToolButton.InstantPopup)
+        self.overflow.setMenu(QMenu(self.overflow))
+        self.overflow.menu().aboutToShow.connect(self._refresh_menu)
+        self.overflow.hide()
+        self._row.addWidget(self.overflow)
+        self._controls = []
         self.type_combo = None
         self.format_combo = None
         if types is not None:
-            row = QHBoxLayout()
-            row.addWidget(QLabel("Тип данных:"))
+            label = QLabel("Тип:")
             self.type_combo = QComboBox()
             for caption, value in DATA_TYPES:
                 if value in types:
                     self.type_combo.addItem(caption, value)
-            row.addWidget(self.type_combo, 1)
-            self._layout.addLayout(row)
+            self.type_combo.setFixedWidth(124)
+            self.type_combo.setToolTip(
+                "Тип входа: разметка TXT, индексные маски классов или снимки без разметки."
+            )
+            self._controls.extend((label, self.type_combo))
             self.type_combo.currentIndexChanged.connect(
                 lambda: self.set_dataset_type(self.type_combo.currentData())
             )
         if formats:
-            row = QHBoxLayout()
-            row.addWidget(QLabel("Формат TXT:"))
+            label = QLabel("TXT:")
             self.format_combo = annotation_format_combo()
-            row.addWidget(self.format_combo, 1)
-            self._layout.addLayout(row)
-        self.hint = QLabel(TAB_DESCRIPTIONS.get(profile, ""))
-        self.hint.setWordWrap(True)
-        self.hint.setVisible(bool(self.hint.text()))
-        self._layout.addWidget(self.hint)
+            self.format_combo.setFixedWidth(112)
+            self._controls.extend((label, self.format_combo))
+        self.help_button = QToolButton(self._bar)
+        self.help_button.setText("?")
+        self.help_button.setAutoRaise(True)
+        self.help_button.setAccessibleName("Назначение вкладки и источники данных")
+        self.help_button.clicked.connect(
+            lambda: QToolTip.showText(
+                self.help_button.mapToGlobal(self.help_button.rect().bottomLeft()),
+                self.help_button.toolTip(),
+                self.help_button,
+            )
+        )
+        self.set_description(TAB_DESCRIPTIONS.get(profile, ""))
+        self._controls.append(self.help_button)
+        for control in self._controls:
+            self._row.addWidget(control)
+        self._row.addStretch()
+        self._paths = None
+        self._bar.installEventFilter(self)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         if types is not None:
             self.set_dataset_type(self.type_combo.currentData())
 
@@ -328,16 +368,70 @@ class DatasetSourceWidget(QGroupBox):
             button.setEnabled(value != 2)
         if self.format_combo is not None:
             self.format_combo.setEnabled(value == 0)
+        self._fit_buttons(self._bar.width())
 
     def add_path_field(self, caption, field):
-        row = QHBoxLayout()
-        row.addWidget(QLabel(caption))
-        row.addWidget(field, 1)
-        self._layout.addLayout(row)
+        if self._paths is None:
+            self._paths = QHBoxLayout()
+            self._paths.setSpacing(4)
+            self._layout.addLayout(self._paths)
+        self._paths.addWidget(QLabel(caption))
+        self._paths.addWidget(field, 1)
 
     def set_description(self, text):
-        self.hint.setText(text)
-        self.hint.setVisible(bool(text))
+        self.setToolTip(text)
+        self.help_button.setToolTip(text)
+        self.help_button.setVisible(bool(text))
+
+    def minimumSizeHint(self):
+        controls = [c for c in self._controls if not c.isHidden()]
+        width = sum(
+            c.width() if c.minimumWidth() == c.maximumWidth() else c.sizeHint().width()
+            for c in controls
+        )
+        width += self.overflow.sizeHint().width() + self._row.spacing() * len(controls)
+        if self._paths is not None:
+            width = max(width, self._paths.minimumSize().width())
+        return QSize(width, self.sizeHint().height())
+
+    def eventFilter(self, watched, event):
+        if watched is self._bar and event.type() == QEvent.Resize:
+            self._fit_buttons(event.size().width())
+        return super().eventFilter(watched, event)
+
+    def _fit_buttons(self, width):
+        """Keep a single row; hidden buttons retain their real signals/state."""
+        buttons = list(self.buttons.values())
+        controls = [c for c in self._controls if not c.isHidden()]
+        reserved = sum(
+            c.width() if c.minimumWidth() == c.maximumWidth() else c.sizeHint().width()
+            for c in controls
+        )
+        count = len(buttons)
+        while count >= 0:
+            overflow = count < len(buttons)
+            total = reserved + sum(b.sizeHint().width() for b in buttons[:count])
+            total += self._row.spacing() * max(
+                0, count + len(controls) + int(overflow) - 1
+            )
+            if overflow:
+                total += self.overflow.sizeHint().width()
+            if total <= width or count == 0:
+                break
+            count -= 1
+        for index, button in enumerate(buttons):
+            button.setVisible(index < count)
+        self.overflow.setVisible(count < len(buttons))
+
+    def _refresh_menu(self):
+        menu = self.overflow.menu()
+        menu.clear()
+        for button in self.buttons.values():
+            if button.isHidden():
+                action = menu.addAction(button.text())
+                action.setToolTip(button.toolTip())
+                action.setEnabled(button.isEnabled())
+                action.triggered.connect(button.click)
 
 
 def choose_coco_sources(owner):

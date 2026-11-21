@@ -63,8 +63,10 @@ def setup_evaluation_controls(owner, layout):
     owner.btn_report_files = owner.report_source.button("reports")
     owner.btn_select = owner.report_source.button("report_folder")
     owner.btn_clear_reports = QPushButton("Очистить отчёты")
-    box.addWidget(owner.report_source)
-    box.addWidget(owner.btn_clear_reports)
+    report_buttons = QHBoxLayout()
+    report_buttons.addWidget(owner.report_source, 1)
+    report_buttons.addWidget(owner.btn_clear_reports)
+    box.addLayout(report_buttons)
 
     owner.lbl_reports = hint("Отчёты ещё не загружены.")
     box.addWidget(owner.lbl_reports)

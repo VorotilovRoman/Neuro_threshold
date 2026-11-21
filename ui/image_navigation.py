@@ -9,7 +9,6 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QTabWidget,
     QTextEdit,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -36,30 +35,34 @@ class ImageNavigationWidget(QWidget):
         resize_limit=None,
     ):
         super().__init__(parent)
-        root = QVBoxLayout(self)
+        root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(4)
         self.source_widget = DatasetSourceWidget(
             source_actions, profile=profile, parent=self
         )
-        root.addWidget(self.source_widget)
+        root.addWidget(self.source_widget, 1)
         self._load_images_btn = self.source_widget.button("images")
         self._load_folder_btn = self.source_widget.button("folder")
         self._load_images_btn.clicked.connect(self.load_images.emit)
         self._load_folder_btn.clicked.connect(self.load_folder.emit)
         layout = self.navigation_layout = QHBoxLayout()
         root.addLayout(layout)
-        self._prev_btn = QPushButton("◀ Предыдущий")
-        self._next_btn = QPushButton("Следующий ▶")
+        self._prev_btn = QPushButton("◀")
+        self._prev_btn.setToolTip("Предыдущий снимок")
+        self._next_btn = QPushButton("▶")
+        self._next_btn.setToolTip("Следующий снимок")
+        self._prev_btn.setFixedWidth(28)
+        self._next_btn.setFixedWidth(28)
         self._page_spin = QSpinBox()
         self._page_spin.setRange(1, 1)
-        self._page_spin.setFixedWidth(120)
+        self._page_spin.setFixedWidth(86)
         self._page_spin.setAlignment(Qt.AlignCenter)
         self._page_spin.setSuffix(" / 0")
         self.resize_limit = resize_limit or (
             640 if profile == "traditional_ml" else 1024
         )
-        self._resize_cb = QCheckBox(f"Рабочий размер до {self.resize_limit} px")
+        self._resize_cb = QCheckBox(f"До {self.resize_limit} px")
         self._resize_cb.setChecked(True)
         self._resize_cb.setToolTip(
             "Меняет рабочее разрешение обработки и просмотра. Пиксельные параметры применяются на рабочей сетке; исходный файл не перезаписывается."
