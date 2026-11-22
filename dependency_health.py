@@ -16,6 +16,21 @@ OPENCV_PROVIDERS = (
 TORCH_PROFILES = ('cpu', 'cu126', 'cu130')
 
 
+def installed_torch_profile():
+    """Read wheel metadata without initializing Torch or guessing a CUDA build."""
+    try:
+        version = metadata.version('torch')
+    except metadata.PackageNotFoundError:
+        return None
+    profile = version.partition('+')[2]
+    if profile in TORCH_PROFILES:
+        return profile
+    raise ValueError(
+        f'Installed Torch {version} has no supported explicit build tag. '
+        'Select --torch cpu, --torch cu126 or --torch cu130 to change it.'
+    )
+
+
 def installed_opencv():
     versions = {}
     for name in OPENCV_PROVIDERS:

@@ -36,6 +36,8 @@ python dependency_health.py --torch-profile cu126 --cuda-test
 
 Дополнительные функции: `--extra training`, `--extra audit`, `--extra sahi`,
 `--extra export` — флаги можно сочетать. Версии находятся в `requirements/` и `requirements.txt`.
+Без `--torch` установщик сохраняет установленный CPU/CUDA-профиль; в новом окружении
+выбирает CPU. Для смены профиля задайте `--torch` явно.
 Файлы `requirements/torch-*.txt` включают общие зависимости и точную сборку:
 при ручной установке используйте `python -m pip install -r requirements/torch-cu126.txt`,
 затем восстановление OpenCV ниже. Один `requirements.txt` не выбирает CUDA-профиль.

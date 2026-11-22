@@ -97,6 +97,50 @@ class InstallationTests(unittest.TestCase):
             'install', '-r', str(install.ROOT / 'requirements/torch-cu126.txt'),
             '-r', str(install.ROOT / 'requirements/optional-training.txt'), dry_run=True)
 
+    def test_installed_profile_uses_metadata_without_guessing_unknown_builds(self):
+        for profile in install.TORCH_PROFILES:
+            with self.subTest(profile=profile), patch.object(
+                    dependency_health.metadata, 'version', return_value='2.11.0+' + profile):
+                self.assertEqual(dependency_health.installed_torch_profile(), profile)
+        with patch.object(dependency_health.metadata, 'version',
+                          side_effect=dependency_health.metadata.PackageNotFoundError('torch')):
+            self.assertIsNone(dependency_health.installed_torch_profile())
+        for version in ('2.11.0', '2.11.0+cu128'):
+            with self.subTest(version=version), patch.object(
+                    dependency_health.metadata, 'version', return_value=version):
+                with self.assertRaisesRegex(ValueError, 'Select --torch'):
+                    dependency_health.installed_torch_profile()
+
+    def test_adding_extras_preserves_existing_cuda_profile(self):
+        with patch.object(install, 'installed_torch_profile', return_value='cu126'), \
+                patch.object(install, 'run_pip') as pip, \
+                patch.object(install, 'normalize_opencv'):
+            self.assertEqual(install.main(['--extra', 'training', '--dry-run']), 0)
+        self.assertIn(str(install.ROOT / 'requirements/torch-cu126.txt'), pip.call_args.args)
+
+    def test_fresh_environment_defaults_to_cpu(self):
+        with patch.object(install, 'installed_torch_profile', return_value=None), \
+                patch.object(install, 'run_pip') as pip, \
+                patch.object(install, 'normalize_opencv'):
+            self.assertEqual(install.main(['--dry-run']), 0)
+        self.assertIn(str(install.ROOT / 'requirements/torch-cpu.txt'), pip.call_args.args)
+
+    def test_ambiguous_installed_build_stops_before_changing_packages(self):
+        with patch.object(install, 'installed_torch_profile', side_effect=ValueError('Select --torch')), \
+                patch.object(install, 'run_pip') as pip, \
+                patch.object(install, 'normalize_opencv') as normalize:
+            self.assertEqual(install.main(['--extra', 'training', '--dry-run']), 1)
+        pip.assert_not_called()
+        normalize.assert_not_called()
+
+    def test_explicit_profile_overrides_existing_build_without_detection(self):
+        with patch.object(install, 'installed_torch_profile') as detect, \
+                patch.object(install, 'run_pip') as pip, \
+                patch.object(install, 'normalize_opencv'):
+            self.assertEqual(install.main(['--torch', 'cpu', '--dry-run']), 0)
+        detect.assert_not_called()
+        self.assertIn(str(install.ROOT / 'requirements/torch-cpu.txt'), pip.call_args.args)
+
     def test_gpu_installation_requires_successful_real_cuda_verification(self):
         with patch.object(install, 'run_pip'), \
                 patch.object(install, 'normalize_opencv'), \

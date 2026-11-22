@@ -5,7 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from dependency_health import OPENCV_PROVIDERS, SELECTED_OPENCV, TORCH_PROFILES, installed_opencv
+from dependency_health import (
+    OPENCV_PROVIDERS, SELECTED_OPENCV, TORCH_PROFILES,
+    installed_opencv, installed_torch_profile,
+)
 
 ROOT = Path(__file__).resolve().parent
 EXTRAS = ('training', 'audit', 'sahi', 'export')
@@ -37,8 +40,8 @@ def normalize_opencv(dry_run=False, force=False):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--torch', choices=TORCH_PROFILES, default='cpu',
-                        help='Explicit Torch/torchvision wheel profile (default: cpu)')
+    parser.add_argument('--torch', choices=TORCH_PROFILES,
+                        help='Torch/torchvision profile (default: keep installed build; cpu for a new environment)')
     parser.add_argument('--extra', action='append', choices=EXTRAS, default=[],
                         help='Optional feature dependencies; may be repeated')
     parser.add_argument('--dry-run', action='store_true', help='Print commands without installing')
@@ -49,9 +52,10 @@ def main(argv=None):
         parser.error('Activate a virtual environment first: python -m venv .venv')
     try:
         if not args.repair_opencv:
+            selected_profile = args.torch or installed_torch_profile() or 'cpu'
             # One resolution includes the exact local Torch build and all extras.
             # A conflicting extra must fail rather than replace CUDA with CPU.
-            requirements = ['-r', str(ROOT / 'requirements' / f'torch-{args.torch}.txt')]
+            requirements = ['-r', str(ROOT / 'requirements' / f'torch-{selected_profile}.txt')]
             for extra in sorted(set(args.extra)):
                 requirements.extend(['-r', str(ROOT / 'requirements' / f'optional-{extra}.txt')])
             run_pip('install', *requirements, dry_run=args.dry_run)
@@ -61,14 +65,14 @@ def main(argv=None):
             # a new process after all wheel files have reached their final state.
             verification = [sys.executable, str(ROOT / 'dependency_health.py'), '--load']
             if not args.repair_opencv:
-                verification += ['--torch-profile', args.torch]
-                if args.torch != 'cpu':
+                verification += ['--torch-profile', selected_profile]
+                if selected_profile != 'cpu':
                     verification.append('--cuda-test')
             subprocess.run(verification,
                            cwd=ROOT, check=True)
             print('Installation verified. See any explicit OpenCV metadata exceptions above.')
         return 0
-    except (subprocess.CalledProcessError, OSError) as exc:
+    except (subprocess.CalledProcessError, OSError, ValueError) as exc:
         print(f'Installation failed: {exc}', file=sys.stderr)
         return 1
 
