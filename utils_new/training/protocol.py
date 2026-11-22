@@ -4,6 +4,7 @@ import codecs
 from contextlib import contextmanager
 from pathlib import Path
 import signal
+import sys
 from threading import Event
 
 WORKERS = {
@@ -11,6 +12,13 @@ WORKERS = {
     for kind in ("yolo", "unet", "deeplab", "autoencoder")
 }
 CANCELLED = 130
+
+
+def configure_worker_streams():
+    """Use the GUI's wire encoding, even with redirected Windows console output."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 
 def worker_arguments(kind, *, params_file=None, stop_file=None):

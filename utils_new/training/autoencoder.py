@@ -103,4 +103,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    from utils_new.training.protocol import configure_worker_streams
+
+    configure_worker_streams()
     raise SystemExit(main())

@@ -11,7 +11,6 @@ import argparse
 import json
 import shutil
 import signal
-import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -260,8 +259,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    # QProcess decodes UTF-8, including Windows paths and fragmented output.
-    for _stream in (sys.stdout, sys.stderr):
-        if hasattr(_stream, "reconfigure"):
-            _stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    from utils_new.training.protocol import configure_worker_streams
+
+    configure_worker_streams()
     raise SystemExit(main())

@@ -510,6 +510,23 @@ assert 'torch' not in sys.modules and 'PyQt5' not in sys.modules
         self.assertEqual(lines, ["PROGRESS:50:1:2", "RESULT_DIR:снимки", "готово"])
         self.assertFalse((ROOT / "utils_training").exists())
 
+    def test_cli_output_is_utf8_even_when_parent_forces_ascii(self):
+        modules = [
+            "utils_new.training." + kind
+            for kind in ("unet", "deeplab", "yolo", "autoencoder", "experiments")
+        ] + ["utils_new.import_export.voc"]
+        for module in modules:
+            with self.subTest(module=module):
+                result = subprocess.run(
+                    [sys.executable, "-m", module, "--help"],
+                    cwd=ROOT,
+                    env=dict(os.environ, PYTHONIOENCODING="ascii"),
+                    capture_output=True,
+                    timeout=15,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+                self.assertIn("--help", result.stdout.decode("utf-8"))
+
 
 @unittest.skipUnless(os.environ.get("NEURO_RUN_GUI_TESTS") == "1", "opt-in GUI checks")
 class TrainingGui(unittest.TestCase):
