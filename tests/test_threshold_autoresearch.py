@@ -5,17 +5,9 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import patch
 import cv2, numpy as np
-from utils_new.autoreseach_utils.search_space import (
-    default_settings,
-    combination_count,
-    iter_presets,
-)
+from utils_new.autoreseach_utils.search_space import default_settings, combination_count, iter_presets
 from utils_new.autoreseach_utils.search import evaluate, run_search
-from utils_new.autoreseach_utils.reports import (
-    read_report,
-    parse_reports,
-    preset_from_row,
-)
+from utils_new.import_export.research_reports import read_report, parse_reports, preset_from_row
 from utils_new.autoreseach_utils.evaluation import evaluate_dataset
 
 
@@ -46,8 +38,8 @@ class SearchTests(unittest.TestCase):
             combination_count(state)
 
     def test_numerical_order_and_all_modes_match_existing_pipeline(self):
-        from utils_new.threshold_processing import apply_threshold_method
-        from utils_new.morphology import apply_morphology
+        from utils_new.segmentation.threshold import apply_threshold_method
+        from utils_new.images.morphology import apply_morphology
         from utils_new.segmentation.postprocessing import extract_objects
 
         gray = np.full((64, 128), 230, np.uint8)

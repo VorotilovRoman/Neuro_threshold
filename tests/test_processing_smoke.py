@@ -16,7 +16,7 @@ class ProcessingSmokeTests(unittest.TestCase):
         import numpy as np
 
         from utils_new.segmentation.backends.gradient import apply_gradient_method
-        from utils_new.threshold_processing import apply_threshold_method
+        from utils_new.segmentation.threshold import apply_threshold_method
         image = np.zeros((64, 64), dtype=np.uint8)
         image[16:48, 16:48] = 220
         with tempfile.TemporaryDirectory() as directory:
@@ -41,16 +41,8 @@ class ProcessingSmokeTests(unittest.TestCase):
         import numpy as np
         import yaml
 
-        from utils_new.annotations import (
-            AnnotationSample,
-            ImageSize,
-            Resize,
-            from_legacy,
-            rasterize_annotations,
-            to_legacy,
-            transform_sample,
-        )
-        from utils_new.DatasetGenerator_new import INPUT_LABELS, DatasetGeneratorCoreNew
+        from utils_new.annotations import AnnotationSample, ImageSize, Resize, from_legacy, rasterize_annotations, to_legacy, transform_sample
+        from utils_new.import_export.dataset_generator import INPUT_LABELS, DatasetGeneratorCoreNew
         size = ImageSize(32, 24)
         legacy = ('detect', 0, .5, .5, .5, .5)
         annotation = from_legacy(legacy, size)

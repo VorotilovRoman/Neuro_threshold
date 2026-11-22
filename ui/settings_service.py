@@ -7,7 +7,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtGui import QColor, QPalette
 
 from path_setup import get_project_root
-from utils_new.settings_store import load_settings, save_settings
+from utils_new.configuration.settings_store import load_settings, save_settings
 
 # Общая начальная BGR-палитра классов для всех графических компонентов.
 DEFAULT_DATASET_CLASS_PALETTE_BGR = [

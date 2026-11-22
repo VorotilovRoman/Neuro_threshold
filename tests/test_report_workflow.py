@@ -10,16 +10,10 @@ from threading import Event
 import unittest
 import numpy as np
 import test_report_evaluation as fixtures
-from utils_new.autoreseach_utils.workflow import (
-    discover_reports,
-    load_collection,
-    input_guidance,
-    result_guidance,
-    selected_presets,
-)
-from utils_new.autoreseach_utils.reports import read_report
+from utils_new.autoreseach_utils.workflow import discover_reports, load_collection, input_guidance, result_guidance, selected_presets
+from utils_new.import_export.research_reports import read_report
 from utils_new.autoreseach_utils.evaluation import evaluate_dataset
-from utils_new.autoreseach_utils.ground_truth import load_ground_truth
+from utils_new.import_export.ground_truth import load_ground_truth
 from utils_new.annotations.boxes import yolo_to_xyxy, xyxy_to_yolo, iou_xyxy
 from utils_new.annotations.boxes import non_max_suppression
 

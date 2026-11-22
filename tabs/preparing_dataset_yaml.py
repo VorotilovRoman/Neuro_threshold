@@ -18,31 +18,15 @@ import sys
 import yaml
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QKeySequence
-from PyQt5.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QListWidgetItem,
-    QMainWindow,
-    QMessageBox,
-    QShortcut,
-    QTableWidgetItem,
-)
+from PyQt5.QtWidgets import QApplication, QFileDialog, QListWidgetItem, QMainWindow, QMessageBox, QShortcut, QTableWidgetItem
 
 from ui_tabs.preparing_dataset_yaml_ui import setup_preparing_dataset_yaml_ui
-from utils_new.dataset_loader_new import DatasetLoaderMixin
-from utils_new.dataset_preparation_bridge import (
-    mask_classes_from_rows,
-    normalize_generation_pairs,
-)
-from utils_new.dataset_validation_new import (
-    ImageStats,
-    PairValidator,
-    convert_pairs_color,
-    convert_pairs_to_8bit_png,
-    select_pairs_for_8bit_png,
-    select_pairs_for_conversion,
-)
-from utils_new.DatasetGenerator_new import DatasetGeneratorThread
+from ui.dataset_loader import DatasetLoaderMixin
+from utils_new.dataset.preparation import mask_classes_from_rows, normalize_generation_pairs
+from utils_new.images.processing import ImageStats
+from utils_new.dataset.validation import PairValidator
+from utils_new.import_export.image_conversion import convert_pairs_color, convert_pairs_to_8bit_png, select_pairs_for_8bit_png, select_pairs_for_conversion
+from ui.dataset_generation import DatasetGeneratorThread
 
 
 class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):

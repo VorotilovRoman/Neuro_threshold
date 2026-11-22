@@ -5,18 +5,9 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import patch
 import cv2, numpy as np
-from utils_new.autoreseach_utils.search_space import (
-    default_settings,
-    combination_count,
-    iter_presets,
-    method_params,
-)
+from utils_new.autoreseach_utils.search_space import default_settings, combination_count, iter_presets, method_params
 from utils_new.autoreseach_utils.search import evaluate, run_search
-from utils_new.autoreseach_utils.reports import (
-    parse_reports,
-    preset_from_row,
-    read_report,
-)
+from utils_new.import_export.research_reports import parse_reports, preset_from_row, read_report
 from utils_new.autoreseach_utils.evaluation import evaluate_dataset
 
 
@@ -56,7 +47,7 @@ class GradientSearchTests(unittest.TestCase):
 
     def test_seven_methods_match_manual_live_pipeline_with_fill_filter_invert(self):
         from utils_new.segmentation.backends.gradient import apply_gradient_method
-        from utils_new.morphology import apply_morphology
+        from utils_new.images.morphology import apply_morphology
 
         gray = np.full((64, 96), 220, np.uint8)
         gray[8:50, 20:80] = 20
@@ -110,7 +101,7 @@ class GradientSearchTests(unittest.TestCase):
 
     def test_postprocessing_variants_reuse_the_numerical_base(self):
         from utils_new.autoreseach_utils.search import RawMaskCache
-        from utils_new.autoreseach_utils import gradient_processing
+        from utils_new.segmentation import gradient_processing
 
         gray = np.full((32, 48), 210, np.uint8)
         gray[8:24, 12:36] = 20
@@ -128,7 +119,7 @@ class GradientSearchTests(unittest.TestCase):
             target = (
                 "utils_new.autoreseach_utils.search.apply_threshold_method"
                 if kind == "threshold"
-                else "utils_new.autoreseach_utils.gradient_processing.apply_gradient_method"
+                else "utils_new.segmentation.gradient_processing.apply_gradient_method"
             )
             from utils_new.autoreseach_utils import search
 

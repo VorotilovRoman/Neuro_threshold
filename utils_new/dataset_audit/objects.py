@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 import cv2
 import numpy as np
-from PIL import Image
+from utils_new.import_export.images import image_size_from_file
 from utils_new.annotations import ImageSize, to_legacy
 from utils_new.annotations.geometry import polygon_area
-from utils_new.dataset_files_new import read_index_mask
-from utils_new.dataset_yolo_labels_new import read_yolo_labels
+from utils_new.import_export.images import read_index_mask
+from utils_new.import_export.yolo_labels import read_yolo_labels
 
 
 @dataclass(frozen=True)
@@ -21,8 +21,7 @@ class DatasetObject:
 
 
 def image_size(path):
-    with Image.open(path) as image:
-        return tuple(image.size)
+    return image_size_from_file(path)
 
 
 def load_pair_annotations(image_path, label_path, format_hint="auto"):
@@ -31,10 +30,8 @@ def load_pair_annotations(image_path, label_path, format_hint="auto"):
     size = ImageSize(*image_size(image_path))
     messages = []
     annotations = read_yolo_labels(
-        label_path, size, format_hint=format_hint, log=messages.append
+        label_path, size, format_hint=format_hint, log=messages.append, strict=True
     )
-    if any("запись пропущена" in message for message in messages):
-        raise ValueError(f"Некорректная разметка {label_path}: {'; '.join(messages)}")
     return [to_legacy(ann, size) for ann in annotations]
 
 
@@ -49,10 +46,8 @@ def read_objects(pair, dataset_type=0, input_format="auto"):
         size = ImageSize(w, h)
         messages = []
         annotations = read_yolo_labels(
-            aux, size, format_hint=input_format, log=messages.append
+            aux, size, format_hint=input_format, log=messages.append, strict=True
         )
-        if messages:
-            raise ValueError(f"Некорректная разметка {aux}: {'; '.join(messages)}")
         result = []
         for ann in annotations:
             pts = ann.points_px

@@ -4,26 +4,10 @@ from pathlib import Path
 
 from PyQt5.QtCore import QSettings, QSignalBlocker, Qt, pyqtSignal
 from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QStyle,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QStyle, QTabWidget, QVBoxLayout, QWidget
 
 from ui.dataset_audit.workers import AuditWorker
-from utils_new.annotation_processing import (
-    find_strong_overlaps,
-    format_annotation_display,
-    normalized_annotation,
-)
+from utils_new.annotations.processing import find_strong_overlaps, format_annotation_display, normalized_annotation
 from utils_new.dataset_audit.annotation_review import AnnotationReviewJob
 
 

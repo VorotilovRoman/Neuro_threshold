@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from utils_new.dataset_files_new import read_image_with_fallback
-from utils_new.dataset_image_stats_new import ImageStats
+from utils_new.import_export.images import read_image_with_fallback
+from utils_new.images.processing import ImageStats
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import yaml
+from utils_new.import_export.yolo_yaml import resolve_split_sources
 
 
 def split_memberships(yaml_path, pairs):
@@ -22,25 +23,13 @@ def split_memberships(yaml_path, pairs):
     result = {}
 
     def entries(value):
-        for item in value if isinstance(value, (list, tuple)) else [value]:
-            if isinstance(item, dict):
-                item = item.get("images")
-            if not item:
-                continue
-            if not isinstance(item, str):
-                raise ValueError("Путь split должен быть строкой.")
-            path = Path(item)
-            path = path if path.is_absolute() else root / path
-            if path.is_file() and path.suffix.lower() == ".txt":
-                for line in path.read_text(encoding="utf-8-sig").splitlines():
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        listed = Path(line)
-                        yield (
-                            listed if listed.is_absolute() else root / listed
-                        ).resolve()
-            else:
-                yield path.resolve()
+        values = value if isinstance(value, (list, tuple)) else [value]
+        values = [
+            item.get("images") if isinstance(item, dict) else item for item in values
+        ]
+        return [
+            Path(path) for path in resolve_split_sources([v for v in values if v], root)
+        ]
 
     for key, split in [
         ("train", "train"),

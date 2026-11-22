@@ -6,9 +6,9 @@ import json
 import hashlib
 import math
 import pandas as pd
-from .geometry_metrics import normalize_annotations, evaluate_image, count_metrics
-from .ground_truth import load_ground_truth, match_sample, digest_file
-from .reports import preset_from_row, describe_preset
+from utils_new.annotations.metrics import normalize_annotations, evaluate_image, count_metrics
+from utils_new.import_export.ground_truth import load_ground_truth, match_sample, digest_file
+from utils_new.import_export.research_reports import preset_from_row, describe_preset
 
 
 @dataclass

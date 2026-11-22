@@ -17,35 +17,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PyQt5.QtCore import QDir, Qt, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QCursor, QDesktopServices, QPixmap
-from PyQt5.QtWidgets import (
-    QApplication,
-    QCheckBox,
-    QComboBox,
-    QFileDialog,
-    QFileSystemModel,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QListWidgetItem,
-    QMainWindow,
-    QMenu,
-    QMessageBox,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QApplication, QCheckBox, QComboBox, QFileDialog, QFileSystemModel, QFrame, QHBoxLayout, QLabel, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QVBoxLayout, QWidget
 
 from ui import dataset_source as source_dialogs
 from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation.jobs import BackgroundTask
 from ui_tabs.yolo_find_img_ui import setup_yolo_find_img_ui
-from utils_new.annotation_processing import yolo_result_to_detections
-from utils_new.dataset_files_new import (
-    collect_image_paths,
-    load_one_image_item,
-    normalize_to_uint8,
-    read_image_with_fallback,
-    resize_to_max_side,
-)
+from utils_new.annotations.processing import yolo_result_to_detections
+from utils_new.import_export.images import collect_image_paths, read_image_with_fallback
+from utils_new.images.session import load_one_image_item
+from utils_new.images.processing import normalize_to_uint8, resize_to_max_side
 
 
 # ------------------------------------------------------------

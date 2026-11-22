@@ -1,7 +1,7 @@
 """Cancellable base checks over a snapshot of selected pairs, without Qt."""
 
-from .checks import DuplicateDetector, LeakageChecker, ObjectDistributionHeatmap
-from .quality import QualityJob
+from utils_new.dataset_audit.checks import DuplicateDetector, LeakageChecker, ObjectDistributionHeatmap
+from utils_new.dataset_audit.quality import QualityJob
 
 
 class ScanJob:

@@ -7,8 +7,8 @@ from importlib.util import find_spec
 import cv2
 import numpy as np
 from PIL import Image
-from .objects import read_objects
-from .export import infer_split
+from utils_new.dataset_audit.objects import read_objects
+from utils_new.import_export.dataset_export import infer_split
 
 IMAGEHASH_AVAILABLE = find_spec("imagehash") is not None
 CLIP_AVAILABLE = find_spec("torch") is not None and (

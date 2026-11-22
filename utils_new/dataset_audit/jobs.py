@@ -5,17 +5,10 @@ import os
 import traceback
 import numpy as np
 from PIL import Image
-from .objects import read_objects
-from .matching import match_detections, project_embeddings
-from .atomic import write_text_atomic
-from .checks import (
-    detect_device,
-    _safe_progress,
-    CLIP_AVAILABLE,
-    _CLIP_BACKEND,
-    UMAP_AVAILABLE,
-    HDBSCAN_AVAILABLE,
-)
+from utils_new.dataset_audit.objects import read_objects
+from utils_new.dataset_audit.matching import match_detections, project_embeddings
+from utils_new.import_export.atomic import write_text_atomic
+from utils_new.dataset_audit.checks import detect_device, _safe_progress, CLIP_AVAILABLE, _CLIP_BACKEND, UMAP_AVAILABLE, HDBSCAN_AVAILABLE
 
 
 class LossInspectionJob:

@@ -19,7 +19,7 @@
 индекса, остальное подгружается/выгружается через LazyImageCache.
 
 Геометрия, морфология, смещения, кроп и повороты объектов вынесены в
-utils_new/annotation_processing.py. Только модели AE/VAE и их препроцессинг
+utils_new/annotations/processing.py. Только модели AE/VAE и их препроцессинг
 импортируются по запросу из utils_new/segmentation/autoencoder.py.
 """
 
@@ -52,22 +52,24 @@ from PyQt5.QtWidgets import (
 )
 
 from ui import dataset_source as source_dialogs
+from utils_new.images.error_map import render_ae_error_map
 from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation.jobs import BackgroundTask
 from ui.segmentation.preset_bindings import PresetManager
 from ui.settings_service import settings
 from ui_tabs.yolo_test_aeb_ui import setup_yolo_ae_vae_ui
-from utils_new.annotation_processing import (
+from utils_new.annotations.processing import (
     aeb_transform_image,
     cls_suffix_from_detection,
     detections_to_unified,
     longest_edge_angle_deg,
-    render_ae_error_map,
     render_unified_annotations,
     yolo_result_to_detections,
 )
-from utils_new.dataset_files_new import LazyImageCache, load_one_image_item, write_image
-from utils_new.segmentation.image_session import image_paths
+from utils_new.images.cache import LazyImageCache
+from utils_new.images.session import load_one_image_item
+from utils_new.import_export.images import write_image
+from utils_new.import_export.images import collect_image_paths as image_paths
 
 # Защитный лимит для QPixmap/QImage и GDI на Windows.
 MAX_SAFE_SIDE = 8192

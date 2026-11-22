@@ -1,4 +1,5 @@
 """Common-service migration contracts; unique auto research is explicitly frozen."""
+
 import os
 import subprocess
 import sys
@@ -10,109 +11,190 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from utils_new.dataset_yolo_labels_new import load_annotations
-from utils_new.presets_store import read_presets, write_presets
-from utils_new.segmentation import image_session, postprocessing
-from utils_new.segmentation.export import write_annotations_atomic
+from utils_new.import_export.yolo_labels import load_annotations
+from utils_new.configuration.presets_store import read_presets, write_presets
+from utils_new.images import session as image_session, processing as image_processing
+from utils_new.segmentation import postprocessing
+from utils_new.import_export.annotation_export import write_annotations_atomic
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class SegmentationCommonTests(unittest.TestCase):
     def test_autoresearch_uses_new_owners_without_legacy_sources(self):
-        self.assertFalse((ROOT/'utils_auto_research/gradient_auto_research.py').exists())
-        self.assertFalse((ROOT/'utils_auto_research/gradient_auto_settings_dialog.py').exists())
-        for name in ('threshold','gradient'):
-            source=(ROOT/f'tabs/{name}_methods.py').read_text()
-            self.assertNotIn('utils_auto_research',source)
-            self.assertIn('SearchController(self)',source)
+        self.assertFalse(
+            (ROOT / "utils_auto_research/gradient_auto_research.py").exists()
+        )
+        self.assertFalse(
+            (ROOT / "utils_auto_research/gradient_auto_settings_dialog.py").exists()
+        )
+        for name in ("threshold", "gradient"):
+            source = (ROOT / f"tabs/{name}_methods.py").read_text()
+            self.assertNotIn("utils_auto_research", source)
+            self.assertIn("SearchController(self)", source)
 
     def test_legacy_normalization_and_nonzero_floor_resize(self):
-        np.testing.assert_array_equal(image_session.legacy_uint8(np.array([[0.,2.,5.,10.]],np.float32)),
-                                      [[0,2,5,10]])
-        np.testing.assert_array_equal(image_session.legacy_uint8(np.array([[0,256,65535]],np.uint16)),
-                                      [[0,1,255]])
-        self.assertEqual(image_session.resize_legacy(np.zeros((301,1000,3),np.uint8),640).shape,(192,640,3))
-        self.assertEqual(image_session.resize_legacy(np.zeros((1,10000,3),np.uint8),640).shape,(1,640,3))
+        np.testing.assert_array_equal(
+            image_processing.segmentation_uint8(
+                np.array([[0.0, 2.0, 5.0, 10.0]], np.float32)
+            ),
+            [[0, 2, 5, 10]],
+        )
+        np.testing.assert_array_equal(
+            image_processing.segmentation_uint8(np.array([[0, 256, 65535]], np.uint16)),
+            [[0, 1, 255]],
+        )
+        self.assertEqual(
+            image_processing.resize_for_segmentation(
+                np.zeros((301, 1000, 3), np.uint8), 640
+            ).shape,
+            (192, 640, 3),
+        )
+        self.assertEqual(
+            image_processing.resize_for_segmentation(
+                np.zeros((1, 10000, 3), np.uint8), 640
+            ).shape,
+            (1, 640, 3),
+        )
 
     def test_image_records_keep_source_geometry_and_unicode_paths(self):
         with tempfile.TemporaryDirectory() as directory:
-            image = Path(directory)/'снимок.png'
-            cv2.imwrite(str(image), np.zeros((301,1000,3),np.uint8))
-            record = image_session.load_one_image_item(str(image),max_side=640)
-            self.assertEqual(record['source_size'],(1000,301))
-            self.assertEqual(record['working_size'],(640,192))
-            self.assertEqual(record['gray'].shape,(192,640))
-            self.assertEqual(record['annotations'],[])
-            with patch.object(image_session,'read_image_with_fallback',return_value=np.zeros((10,20,1),np.uint16)):
-                self.assertEqual(image_session.load_one_image_item('missing-source.png')['image'].shape,(10,20,3))
-            with patch.object(image_session,'read_image_with_fallback',return_value=np.zeros((10,20,2),np.uint8)):
-                self.assertIsNone(image_session.load_one_image_item('missing-source.png'))
-            cache = image_session.create_cache([str(image)],max_side=640)
+            image = Path(directory) / "снимок.png"
+            cv2.imwrite(str(image), np.zeros((301, 1000, 3), np.uint8))
+            record = image_session.load_segmentation_image(str(image), max_side=640)
+            self.assertEqual(record["source_size"], (1000, 301))
+            self.assertEqual(record["working_size"], (640, 192))
+            self.assertEqual(record["gray"].shape, (192, 640))
+            self.assertEqual(record["annotations"], [])
+            with patch.object(
+                image_session.image_io,
+                "read_image_with_fallback",
+                return_value=np.zeros((10, 20, 1), np.uint16),
+            ):
+                self.assertEqual(
+                    image_session.load_segmentation_image("missing-source.png")[
+                        "image"
+                    ].shape,
+                    (10, 20, 3),
+                )
+            with patch.object(
+                image_session.image_io,
+                "read_image_with_fallback",
+                return_value=np.zeros((10, 20, 2), np.uint8),
+            ):
+                self.assertIsNone(
+                    image_session.load_segmentation_image("missing-source.png")
+                )
+            cache = image_session.create_segmentation_cache([str(image)], max_side=640)
             try:
-                self.assertEqual(cache.get(0)['working_size'],(640,192))
+                self.assertEqual(cache.get(0)["working_size"], (640, 192))
             finally:
                 cache.shutdown()
 
     def test_atomic_export_preserves_segment_type_and_old_file_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory)/'labels.txt'
-            polygon = ('segment',2,[.1,.2,.8,.2,.8,.7,.1,.7])
-            write_annotations_atomic([polygon],path,1000,200)
-            self.assertEqual(load_annotations(path,1000,200)[0][0],'segment')
-            self.assertEqual(len(path.read_text().split()),11)
+            path = Path(directory) / "labels.txt"
+            polygon = ("segment", 2, [0.1, 0.2, 0.8, 0.2, 0.8, 0.7, 0.1, 0.7])
+            write_annotations_atomic([polygon], path, 1000, 200)
+            self.assertEqual(load_annotations(path, 1000, 200)[0][0], "segment")
+            self.assertEqual(len(path.read_text().split()), 11)
             before = path.read_bytes()
-            def fail(annotations,temporary,*args):
-                Path(temporary).write_text('partial')
+
+            def fail(annotations, temporary, *args):
+                Path(temporary).write_text("partial")
                 return False
-            with patch('utils_new.segmentation.export.save_annotations',side_effect=fail):
-                with self.assertRaises(ValueError):write_annotations_atomic([polygon],path,1000,200)
-            self.assertEqual(path.read_bytes(),before)
-            self.assertEqual(list(Path(directory).glob('*.tmp')),[])
-            self.assertEqual(list(Path(directory).glob('*.txt')),[path])
-            write_annotations_atomic([],path,1000,200)
-            self.assertEqual(path.read_text(),'')
+
+            with patch(
+                "utils_new.import_export.annotation_export.save_annotations",
+                side_effect=fail,
+            ):
+                with self.assertRaises(ValueError):
+                    write_annotations_atomic([polygon], path, 1000, 200)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+            self.assertEqual(list(Path(directory).glob("*.txt")), [path])
+            write_annotations_atomic([], path, 1000, 200)
+            self.assertEqual(path.read_text(), "")
 
     def test_extraction_preserves_reference_rectangle_geometry(self):
-        mask = np.zeros((80,120),np.uint8)
-        mask[10:40,20:70]=255
-        mask[23:25,35:38]=0  # Interior hole does not change the outer contour.
-        image = np.zeros((80,120,3),np.uint8)
+        mask = np.zeros((80, 120), np.uint8)
+        mask[10:40, 20:70] = 255
+        mask[23:25, 35:38] = 0  # Interior hole does not change the outer contour.
+        image = np.zeros((80, 120, 3), np.uint8)
         expected = {
-            'detect': ('detect', 0, .375, .3125, 50/120, .375),
-            'segment': ('segment', 0, [20/120,10/80,20/120,39/80,69/120,39/80,69/120,10/80]),
-            'obb': ('obb', 0, [69/120,39/80,20/120,39/80,20/120,10/80,69/120,10/80]),
+            "detect": ("detect", 0, 0.375, 0.3125, 50 / 120, 0.375),
+            "segment": (
+                "segment",
+                0,
+                [
+                    20 / 120,
+                    10 / 80,
+                    20 / 120,
+                    39 / 80,
+                    69 / 120,
+                    39 / 80,
+                    69 / 120,
+                    10 / 80,
+                ],
+            ),
+            "obb": (
+                "obb",
+                0,
+                [
+                    69 / 120,
+                    39 / 80,
+                    20 / 120,
+                    39 / 80,
+                    20 / 120,
+                    10 / 80,
+                    69 / 120,
+                    10 / 80,
+                ],
+            ),
         }
         for mode, reference in expected.items():
             with self.subTest(mode=mode):
-                objects = postprocessing.extract_objects(image,mask,mode)[1]
-                self.assertEqual(len(objects),1)
-                self.assertEqual(objects[0][:2],reference[:2])
-                np.testing.assert_allclose(objects[0][2:],reference[2:])
-
+                objects = postprocessing.extract_objects(image, mask, mode)[1]
+                self.assertEqual(len(objects), 1)
+                self.assertEqual(objects[0][:2], reference[:2])
+                np.testing.assert_allclose(objects[0][2:], reference[2:])
 
     def test_preset_store_writes_atomically_without_widget_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory)/'presets.json'
-            presets = {'default':{'morphology':{'units':'px','shape':'Ellipse','operations':[]}}}
-            write_presets(path,presets)
-            self.assertEqual(read_presets(path),presets)
+            path = Path(directory) / "presets.json"
+            presets = {
+                "default": {
+                    "morphology": {"units": "px", "shape": "Ellipse", "operations": []}
+                }
+            }
+            write_presets(path, presets)
+            self.assertEqual(read_presets(path), presets)
             before = path.read_bytes()
-            with self.assertRaises(TypeError):write_presets(path,{'bad':object()})
-            self.assertEqual(path.read_bytes(),before)
-            self.assertEqual(list(Path(directory).glob('*.tmp')),[])
+            with self.assertRaises(TypeError):
+                write_presets(path, {"bad": object()})
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
 
     def test_current_views_and_settings_have_single_canonical_owners(self):
         import ui.annotation_review_view
         import ui.image_view
         import ui.settings_service
         from tabs.yolo_test_aeb import LazyImageCache
-        from utils_new.dataset_files_new import LazyImageCache as canonical
+        from utils_new.images.cache import LazyImageCache as canonical
+
         self.assertIs(LazyImageCache, canonical)
-        self.assertEqual(ui.image_view.SmartGraphicsViewNew.__module__, 'ui.image_view')
-        self.assertEqual(ui.annotation_review_view.DatasetReviewGraphicsView.__module__, 'ui.annotation_review_view')
-        for module in ('utils/settings.py','utils/presets.py','utils_new/smart_view_new.py','utils_new/dataset_review_view.py'):
-            self.assertFalse((ROOT/module).exists(), module)
+        self.assertEqual(ui.image_view.SmartGraphicsViewNew.__module__, "ui.image_view")
+        self.assertEqual(
+            ui.annotation_review_view.DatasetReviewGraphicsView.__module__,
+            "ui.annotation_review_view",
+        )
+        for module in (
+            "utils/settings.py",
+            "utils/presets.py",
+            "utils_new/smart_view_new.py",
+            "utils_new/dataset_review_view.py",
+        ):
+            self.assertFalse((ROOT / module).exists(), module)
 
     def test_five_tabs_and_their_ui_no_longer_import_legacy_utils(self):
         code = """import importlib,sys
@@ -122,42 +204,66 @@ for name in ('threshold','gradient','interactive','traditional_ml','deep_learnin
 legacy = [name for name in sys.modules if name.startswith('utils.')]
 assert not legacy, legacy
 """
-        result = subprocess.run([sys.executable,'-c',code],cwd=ROOT,capture_output=True,text=True,timeout=60,
-                                env=dict(os.environ,NO_ALBUMENTATIONS_UPDATE='1'))
-        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=dict(os.environ, NO_ALBUMENTATIONS_UPDATE="1"),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_new_computational_services_do_not_import_qt_or_ml(self):
-        code = '''import sys
-import utils_new.segmentation.image_session
+        code = """import sys
+import utils_new.images.session
 import utils_new.segmentation.postprocessing
-import utils_new.segmentation.export
-import utils_new.presets_store
+import utils_new.import_export.annotation_export
+import utils_new.configuration.presets_store
 import utils_new.segmentation.presets
 import utils_new.segmentation.result
 import utils_new.segmentation.operations
 import utils_new.annotations.modes
-import utils_new.settings_store
+import utils_new.configuration.settings_store
 assert not any(n.startswith(('PyQt5','torch','ultralytics','matplotlib')) for n in sys.modules)
-'''
-        result = subprocess.run([sys.executable,'-c',code],cwd=ROOT,capture_output=True,text=True,timeout=30)
-        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
-
-
-@unittest.skipUnless(os.environ.get('NEURO_RUN_GUI_TESTS') == '1', 'opt-in GUI/runtime suite')
+@unittest.skipUnless(
+    os.environ.get("NEURO_RUN_GUI_TESTS") == "1", "opt-in GUI/runtime suite"
+)
 class SegmentationSharedGuiTests(unittest.TestCase):
     def run_gui(self, code):
         with tempfile.TemporaryDirectory() as directory:
-            env = dict(os.environ, QT_QPA_PLATFORM='offscreen', NO_ALBUMENTATIONS_UPDATE='1',
-                       XDG_CONFIG_HOME=directory, XDG_CACHE_HOME=directory,
-                       MPLCONFIGDIR=directory, YOLO_CONFIG_DIR=directory)
-            result = subprocess.run([sys.executable,'-c',code],cwd=ROOT,env=env,
-                                    capture_output=True,text=True,timeout=90)
-            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            env = dict(
+                os.environ,
+                QT_QPA_PLATFORM="offscreen",
+                NO_ALBUMENTATIONS_UPDATE="1",
+                XDG_CONFIG_HOME=directory,
+                XDG_CACHE_HOME=directory,
+                MPLCONFIGDIR=directory,
+                YOLO_CONFIG_DIR=directory,
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_panels_presets_and_vector_selection_in_all_five_tabs(self):
-        self.run_gui('''
+        self.run_gui("""
 from pathlib import Path
 import tempfile,json
 from unittest.mock import patch
@@ -200,13 +306,12 @@ with tempfile.TemporaryDirectory() as directory:
         assert stored['shared_refactor']['morphology']['units']=='px'
         assert 'close_factor' not in stored['shared_refactor']
         owner.preset_manager.apply_preset('shared_refactor')
-        cache=getattr(owner,'_lazy_cache',None)
-        if cache is not None:cache.shutdown()
+    # Keep caches alive while pending Qt updates run; window.close owns cleanup.
     QTimer.singleShot(10,window.close);exec_window(window,app)
-''')
+""")
 
     def test_common_export_cancels_without_write_and_roundtrips_in_all_tabs(self):
-        self.run_gui('''
+        self.run_gui("""
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
@@ -215,7 +320,7 @@ from PyQt5.QtWidgets import QApplication,QFileDialog,QMessageBox
 from PyQt5.QtCore import QTimer
 from main import ImagePlayer
 from ui.application import exec_window
-from utils_new.dataset_yolo_labels_new import load_annotations
+from utils_new.import_export.yolo_labels import load_annotations
 app=QApplication([])
 keys=['threshold','gradient','interactive','traditional_ml','deep_learning']
 window=ImagePlayer([(key,key) for key in keys]);window.show()
@@ -243,10 +348,10 @@ with tempfile.TemporaryDirectory() as directory:
         cache=getattr(owner,'_lazy_cache',None)
         if cache is not None:cache.shutdown()
     QTimer.singleShot(10,window.close);exec_window(window,app)
-''')
+""")
 
     def test_new_interactive_view_keeps_roi_and_fg_bg_after_zoom(self):
-        self.run_gui('''
+        self.run_gui("""
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
@@ -286,9 +391,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert owner.mask is not None and owner.mask.shape==(64,128) and owner.mask.max()>0
     owner._lazy_cache.shutdown()
     QTimer.singleShot(10,host.close);exec_window(host,app)
-''')
+""")
+
     def test_navigation_resets_unique_result_state_and_updates_view_geometry(self):
-        self.run_gui('''
+        self.run_gui("""
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
@@ -330,8 +436,8 @@ with tempfile.TemporaryDirectory() as directory:
             view=getattr(owner,name)
             assert not view.annotations and (view.img_width,view.img_height)==(0,0)
     QTimer.singleShot(10,host.close);exec_window(host,app)
-''')
+""")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

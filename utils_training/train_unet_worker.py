@@ -1509,7 +1509,7 @@ def main():
 
         log(f"Запуск torch.onnx.export (opset=18, dynamic_axes=True)...")
         try:
-            from utils_new.segmentation.model_export import stride_padded_model
+            from utils_new.import_export.model_export import stride_padded_model
             torch.onnx.export(
                 stride_padded_model(model),
                 dummy_input,

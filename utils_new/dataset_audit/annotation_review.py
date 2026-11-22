@@ -1,8 +1,8 @@
 """Shared annotation-overlap review for editors, preparation and analysis. No Qt."""
 
-from utils_new.annotation_processing import find_strong_overlaps
+from utils_new.annotations.processing import find_strong_overlaps
 
-from .objects import image_size, load_pair_annotations, read_objects
+from utils_new.dataset_audit.objects import image_size, load_pair_annotations, read_objects
 
 
 class AnnotationReviewJob:

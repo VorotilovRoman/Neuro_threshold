@@ -23,17 +23,12 @@ from contextlib import redirect_stdout
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QKeySequence
-from PyQt5.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QMainWindow,
-    QMessageBox,
-    QShortcut,
-)
+from PyQt5.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox, QShortcut
 
 from ui_tabs.slice_dataset_sahi_ui import setup_sahi_slicer_ui
-from utils_new.dataset_loader_new import DatasetLoaderMixin
-from utils_new.dataset_validation_new import ImageStats, PairValidator
+from ui.dataset_loader import DatasetLoaderMixin
+from utils_new.images.processing import ImageStats
+from utils_new.dataset.validation import PairValidator
 
 try:
     from sahi.slicing import slice_coco

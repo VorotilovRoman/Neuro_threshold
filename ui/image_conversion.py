@@ -16,7 +16,7 @@ def numpy_to_qpixmap(img_bgr, max_side=8192):
         img = cv2.resize(img, (max(1, round(w*scale)), max(1, round(h*scale))),
                          interpolation=cv2.INTER_AREA)
     if img.dtype != np.uint8:
-        from utils_new.dataset_image_stats_new import ImageStats
+        from utils_new.images.processing import ImageStats
         img = ImageStats.to_uint8(img)
     img = np.ascontiguousarray(img)
     h, w = img.shape[:2]

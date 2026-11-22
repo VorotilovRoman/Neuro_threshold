@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from utils_new.annotation_processing import find_strong_overlaps
+from utils_new.annotations.processing import find_strong_overlaps
 from utils_new.dataset_audit.annotation_review import AnnotationReviewJob
 from utils_new.dataset_audit.quality import QualityJob
 from utils_new.dataset_audit.scans import ScanJob

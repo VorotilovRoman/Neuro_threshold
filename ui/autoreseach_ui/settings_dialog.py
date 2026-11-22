@@ -1,29 +1,9 @@
 """Shared threshold/gradient ranges and pixel morphology configuration."""
 
 from copy import deepcopy
-from PyQt5.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QDoubleSpinBox,
-    QFormLayout,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QSpinBox,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
-)
-from utils_new.autoreseach_utils.search_space import (
-    specs_for,
-    search_kind,
-    POST_SPECS,
-    combination_count,
-    default_settings,
-)
-from utils_new.morphology import SUPPORTED_OPERATIONS
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox, QSpinBox, QTabWidget, QVBoxLayout, QWidget
+from utils_new.autoreseach_utils.search_space import specs_for, search_kind, POST_SPECS, combination_count, default_settings
+from utils_new.images.morphology import SUPPORTED_OPERATIONS
 from ui.morphology_ui import MorphologyWidget
 
 

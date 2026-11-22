@@ -154,7 +154,7 @@ import ui.annotation_review_view
 import utils_new.annotations.augmentation
 import ui.segmentation.preset_bindings
 import ui.settings_service
-import utils_new.DatasetGenerator_new
+import utils_new.import_export.dataset_generator
 import main_ui
 import tabs.threshold_methods
 import tabs.layout_dataset

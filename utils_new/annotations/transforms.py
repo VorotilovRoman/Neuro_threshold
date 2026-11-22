@@ -11,16 +11,8 @@ from typing import Literal
 import cv2
 import numpy as np
 
-from .geometry import (
-    GeometryError,
-    bounds,
-    canonical_obb_points,
-    clip_annotation,
-    is_axis_aligned,
-    is_rectangle,
-    rectangle_points,
-)
-from .model import Annotation, AnnotationSample, ImageSize
+from utils_new.annotations.geometry import GeometryError, bounds, canonical_obb_points, clip_annotation, is_axis_aligned, is_rectangle, rectangle_points
+from utils_new.annotations.model import Annotation, AnnotationSample, ImageSize
 
 
 @dataclass(frozen=True)

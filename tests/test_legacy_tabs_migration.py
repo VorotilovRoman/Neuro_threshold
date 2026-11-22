@@ -15,7 +15,7 @@ import numpy as np
 
 from utils_new.annotations.boxes import ensemble_detections
 from utils_new.segmentation.presets import make_preset
-from utils_new.threshold_processing import get_detections_from_preset
+from utils_new.segmentation.threshold import get_detections_from_preset
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -173,10 +173,7 @@ class EnsembleAndSearchTests(unittest.TestCase):
 class AutoencoderTests(unittest.TestCase):
     def test_actual_architectures_shapes_and_explicit_deterministic_vae(self):
         import torch
-        from utils_new.segmentation.autoencoder import (
-            build_ae_model_from_cfg,
-            infer_autoencoder,
-        )
+        from utils_new.segmentation.autoencoder import build_ae_model_from_cfg, infer_autoencoder
 
         image = np.full((20, 60, 3), 73, np.uint8)
         for arch in ("conv", "conv_gn", "unet", "unet_v2"):

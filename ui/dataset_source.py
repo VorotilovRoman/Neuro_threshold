@@ -3,20 +3,7 @@
 from pathlib import Path
 
 from PyQt5.QtCore import QEvent, QSettings, QSize, pyqtSignal
-from PyQt5.QtWidgets import (
-    QComboBox,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QLayout,
-    QMenu,
-    QPushButton,
-    QSizePolicy,
-    QToolButton,
-    QToolTip,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel, QLayout, QMenu, QPushButton, QSizePolicy, QToolButton, QToolTip, QVBoxLayout, QWidget
 
 # Stable action keys; one caption/filter/meaning across every consumer.
 ACTIONS = {
@@ -438,7 +425,7 @@ def choose_coco_sources(owner):
     """One COCO file/folder chooser used by editors, preparation, audit and SAHI."""
     from PyQt5.QtWidgets import QMessageBox
 
-    from utils_new.dataset_catalog_new import discover_coco_json
+    from utils_new.import_export.catalog import discover_coco_json
 
     box = QMessageBox(owner)
     box.setWindowTitle("Источник COCO")

@@ -12,7 +12,7 @@ import numpy as np
 
 from utils_new.annotations import ImageSize, from_legacy
 from utils_new.annotations.object_info import ObjectInfo
-from utils_new.dataset_yolo_labels_new import serialize_yolo_labels, write_yolo_labels
+from utils_new.import_export.yolo_labels import serialize_yolo_labels, write_yolo_labels
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -141,7 +141,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from ui.segmentation import results
 from utils_new.annotations import ImageSize,from_legacy
-from utils_new.dataset_yolo_labels_new import serialize_yolo_labels
+from utils_new.import_export.yolo_labels import serialize_yolo_labels
 from main import ImagePlayer
 app=QApplication([]);w=ImagePlayer([(k,k) for k in ['threshold','gradient','interactive','traditional_ml','deep_learning']]);w.show()
 with tempfile.TemporaryDirectory() as directory:

@@ -17,7 +17,7 @@ from utils_new.dataset_audit.checks import (
     LeakageChecker,
     ObjectDistributionHeatmap,
 )
-from utils_new.dataset_audit.export import export_subset, infer_split
+from utils_new.import_export.dataset_export import export_subset, infer_split
 from utils_new.dataset_audit.splits import split_memberships
 from utils_new.dataset_audit.matching import match_detections, project_embeddings
 from utils_new.dataset_audit.jobs import (
@@ -66,8 +66,10 @@ class DatasetAuditTests(unittest.TestCase):
     def test_numerical_modules_import_without_qt_torch_or_models(self):
         code = """
 import importlib, sys
-for name in ('analysis', 'objects', 'export', 'checks', 'splits', 'matching', 'atomic', 'jobs'):
+for name in ('analysis', 'objects', 'checks', 'splits', 'matching', 'jobs'):
     importlib.import_module('utils_new.dataset_audit.' + name)
+for name in ('dataset_export','atomic'):
+    importlib.import_module('utils_new.import_export.' + name)
 for prefix in ('PyQt5', 'torch', 'ultralytics', 'open_clip', 'transformers', 'matplotlib.pyplot'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 """
@@ -248,7 +250,7 @@ for prefix in ('PyQt5', 'torch', 'ultralytics', 'open_clip', 'transformers', 'ma
         result = cv2.imread(str(out / "masks/train/image.png"), cv2.IMREAD_UNCHANGED)
         self.assertEqual(set(np.unique(result)), {0, 1, 2})
         self.assertFalse((out / "labels/train/image.txt").exists())
-        from utils_new.dataset_catalog_new import load_unet_catalog
+        from utils_new.import_export.catalog import load_unet_catalog
 
         catalog = load_unet_catalog(out / "data.yaml")
         self.assertEqual(catalog.class_names, {1: "A", 2: "B"})
@@ -284,7 +286,7 @@ for prefix in ('PyQt5', 'torch', 'ultralytics', 'open_clip', 'transformers', 'ma
         path.write_text("previous")
         job = ReportJob({"general": {"Pairs": 1}}, str(path), {})
         with patch(
-            "utils_new.dataset_audit.atomic.os.replace", side_effect=OSError("disk")
+            "utils_new.import_export.atomic.os.replace", side_effect=OSError("disk")
         ):
             self.assertIn("disk", job.run()["error"])
         self.assertEqual(path.read_text(), "previous")

@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .adapters import from_legacy
-from .geometry import bounds, polygon_area
-from .model import Annotation, ImageSize
+from utils_new.annotations.adapters import from_legacy
+from utils_new.annotations.geometry import bounds, polygon_area
+from utils_new.annotations.model import Annotation, ImageSize
 
 
 @dataclass(frozen=True)

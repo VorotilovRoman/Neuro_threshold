@@ -15,20 +15,12 @@ import pandas as pd
 import yaml
 from utils_new.autoreseach_utils.search_space import default_settings, iter_presets
 from utils_new.autoreseach_utils.search import run_search
-from utils_new.autoreseach_utils.reports import read_report, parse_reports
-from utils_new.autoreseach_utils.ground_truth import (
-    load_ground_truth,
-    match_sample,
-    digest_file,
-)
-from utils_new.autoreseach_utils.geometry_metrics import (
-    normalize_annotations,
-    evaluate_image,
-    match_overlaps,
-)
+from utils_new.import_export.research_reports import read_report, parse_reports
+from utils_new.import_export.ground_truth import load_ground_truth, match_sample, digest_file
+from utils_new.annotations.metrics import normalize_annotations, evaluate_image, match_overlaps
 from utils_new.autoreseach_utils.evaluation import evaluate_dataset
-from utils_new.autoreseach_utils.evaluation_export import export_evaluation
-from utils_new.autoreseach_utils.geometry_metrics import parse_sequence
+from utils_new.import_export.evaluation_export import export_evaluation
+from utils_new.annotations.metrics import parse_sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 BOX = ("detect", 0, 0.4, 0.4, 0.4, 0.4)
@@ -312,7 +304,7 @@ class ReportEvaluationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             export_evaluation(result, output)
         with patch(
-            "utils_new.autoreseach_utils.evaluation_export.os.replace",
+            "utils_new.import_export.evaluation_export.os.replace",
             side_effect=OSError("disk"),
         ):
             with self.assertRaises(OSError):
@@ -433,7 +425,7 @@ from PyQt5.QtWidgets import QApplication
 from main import ImagePlayer
 from utils_new.autoreseach_utils.search import run_search,evaluate
 from utils_new.autoreseach_utils.search_space import default_settings
-from utils_new.autoreseach_utils.reports import parse_reports,preset_from_row
+from utils_new.import_export.research_reports import parse_reports,preset_from_row
 app=QApplication([]);w=ImagePlayer([('threshold','Threshold'),('gradient','Gradient')]);w.show()
 with TemporaryDirectory() as directory:
  image=Path(directory)/'large.png';pixels=np.full((700,1400),230,np.uint8);pixels[100:400,200:800]=40;cv2.imwrite(str(image),pixels)

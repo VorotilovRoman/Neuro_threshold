@@ -19,54 +19,25 @@ import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import (
-    QAction,
-    QApplication,
-    QColorDialog,
-    QDialog,
-    QDialogButtonBox,
-    QFormLayout,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QMenu,
-    QMessageBox,
-    QProgressDialog,
-    QSpinBox,
-    QVBoxLayout,
-)
+from PyQt5.QtWidgets import QAction, QApplication, QColorDialog, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QProgressDialog, QSpinBox, QVBoxLayout
 
 from ui import dataset_source as source_dialogs
 from ui.image_view import numpy_to_qpixmap, set_fill_color_button_preview
 from ui.settings_service import settings
 from ui_tabs.layout_dataset_ui import setup_layout_dataset_ui
-from utils_new.dataset_catalog_new import import_coco_catalog
-from utils_new.dataset_coco_new import write_yolo_txt_for_coco_items
+from utils_new.import_export.catalog import import_coco_catalog
+from utils_new.import_export.coco import write_yolo_txt_for_coco_items
 
 # V20: shared dataset services; legacy utility imports are not required.
 # The UI import above is intentionally left unchanged.
-from utils_new.dataset_files_new import (
-    LazyImageCache,
-    collect_image_paths,
-    load_one_image_item,
-    normalize_to_uint8,
-    read_image_with_fallback,
-)
-from utils_new.dataset_unet_new import (
-    load_unet_yaml_pairs,
-    write_yolo_txt_for_unet_pairs,
-)
-from utils_new.dataset_yaml_new import (
-    build_yolo_save_target_map,
-    load_yolo_yaml,
-)
-from utils_new.dataset_yolo_labels_new import (
-    build_label_save_plan,
-    canonicalize_obb_corners,
-    format_label_save_confirmation,
-    load_annotations_for_image,
-    save_annotations_for_image,
-)
+from utils_new.images.cache import LazyImageCache
+from utils_new.import_export.images import collect_image_paths, read_image_with_fallback
+from utils_new.images.session import load_one_image_item
+from utils_new.images.processing import normalize_to_uint8
+from utils_new.import_export.mask_yaml import load_unet_yaml_pairs, write_yolo_txt_for_unet_pairs
+from utils_new.import_export.yolo_yaml import build_yolo_save_target_map, load_yolo_yaml
+from utils_new.import_export.yolo_labels import build_label_save_plan, format_label_save_confirmation, load_annotations_for_image, save_annotations_for_image
+from utils_new.annotations.geometry import order_normalized_obb_corners as canonicalize_obb_corners
 from ui.annotation_review import update_annotation_list
 
 

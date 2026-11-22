@@ -7,17 +7,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .model import AnnotationSample, ImageSize
-from .transforms import (
-    Crop,
-    Flip,
-    Resize,
-    Rotate,
-    Rotate90,
-    Shear,
-    TransformPlan,
-    transform_sample,
-)
+from utils_new.annotations.model import AnnotationSample, ImageSize
+from utils_new.annotations.transforms import Crop, Flip, Resize, Rotate, Rotate90, Shear, TransformPlan, transform_sample
 
 
 @dataclass(frozen=True)

@@ -2,26 +2,11 @@
 import ast
 import os
 
-from PyQt5.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
-    QFormLayout,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QRadioButton,
-    QSpinBox,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget
 
 from ui import dataset_source as source_dialogs
 
-from .DL_train_settings_base import BaseTrainWidget
+from ui.DL_train_settings_base import BaseTrainWidget
 
 
 # =============================================================================

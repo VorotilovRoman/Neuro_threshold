@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from .reports import parse_reports
+from utils_new.import_export.research_reports import parse_reports
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,7 @@ def load_folder_collection(
 
 
 def selected_presets(frame):
-    from .reports import preset_from_row
+    from utils_new.import_export.research_reports import preset_from_row
 
     if frame is None or frame.empty:
         raise ValueError("Выберите хотя бы одну настройку в таблице результата.")

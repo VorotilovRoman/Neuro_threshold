@@ -136,7 +136,7 @@ class ThresholdAndGradientAlgorithms(unittest.TestCase):
     def test_threshold_local_formulas_match_reference_interior(self):
         from skimage.filters import threshold_niblack, threshold_sauvola
 
-        from utils_new.threshold_processing import niblack_threshold, sauvola_threshold
+        from utils_new.segmentation.threshold import niblack_threshold, sauvola_threshold
 
         image = np.random.default_rng(4).integers(0, 256, (37, 61), dtype=np.uint8)
         # The classic mean+k*std convention is the NEGATIVE of skimage's k.
@@ -153,10 +153,7 @@ class ThresholdAndGradientAlgorithms(unittest.TestCase):
             )
 
     def test_all_thresholds_share_polarity_and_report_actual_threshold(self):
-        from utils_new.threshold_processing import (
-            apply_threshold_method,
-            row_adaptive_threshold,
-        )
+        from utils_new.segmentation.threshold import apply_threshold_method, row_adaptive_threshold
 
         image = np.tile(np.array([20] * 10 + [220] * 10, np.uint8), (20, 1))
         mask, _ = row_adaptive_threshold(image, window_size=20)
@@ -209,7 +206,7 @@ class ThresholdAndGradientAlgorithms(unittest.TestCase):
             self.assertEqual(actual[y, x], np.clip(max(responses), 0, 255))
 
     def test_shared_threshold_backend_is_used_by_ensemble(self):
-        from utils_new import threshold_processing
+        from utils_new.segmentation import threshold as threshold_processing
         from tabs import threshold_methods, demo_ensemble_methods
 
         self.assertIs(threshold_methods.apply_threshold_method, threshold_processing.apply_threshold_method)
@@ -268,11 +265,7 @@ class TraditionalLearningContracts(unittest.TestCase):
                 manual_target(path, gray.shape)
 
     def test_tiny_superpixels_and_constant_k_search(self):
-        from utils_new.segmentation.backends.traditional_ml import (
-            compute_elbow_kmeans,
-            create_superpixels,
-            find_optimal_k_elbow,
-        )
+        from utils_new.segmentation.backends.traditional_ml import compute_elbow_kmeans, create_superpixels, find_optimal_k_elbow
 
         segments = create_superpixels(np.zeros((3, 5, 3), np.uint8), 100)
         self.assertEqual(segments.shape, (3, 5))

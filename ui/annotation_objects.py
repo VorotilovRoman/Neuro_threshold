@@ -1,32 +1,13 @@
 """Read-only object inspector: stable IDs, inclusion checks and one focused object."""
 
 import numpy as np
-from PyQt5.QtCore import (
-    QAbstractTableModel,
-    QModelIndex,
-    QSortFilterProxyModel,
-    Qt,
-    pyqtSignal,
-)
-from PyQt5.QtWidgets import (
-    QAbstractItemView,
-    QApplication,
-    QComboBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QTableView,
-    QToolButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, pyqtSignal
+from PyQt5.QtWidgets import QAbstractItemView, QApplication, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableView, QToolButton, QVBoxLayout, QWidget
 
 from utils_new.annotations.model import ImageSize
 from utils_new.annotations.modes import MODE_LABELS
 from utils_new.annotations.object_info import ObjectInfo
-from utils_new.dataset_yolo_labels_new import serialize_yolo_labels
+from utils_new.import_export.yolo_labels import serialize_yolo_labels
 
 SORT_ROLE = Qt.UserRole + 1
 SEARCH_ROLE = Qt.UserRole + 2

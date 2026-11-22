@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 from utils_new.segmentation.presets import make_preset, validate_preset
-from utils_new.settings_store import load_settings, normalize_settings, save_settings
+from utils_new.configuration.settings_store import load_settings, normalize_settings, save_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 REMOVED = {
@@ -116,7 +116,7 @@ class PixelPresetTests(unittest.TestCase):
                 self.assertFalse(REMOVED.intersection(names), f"{path}:{node.lineno}")
 
     def test_ensemble_executes_pixel_erosion_from_shared_threshold_presets(self):
-        from utils_new.threshold_processing import get_detections_from_preset
+        from utils_new.segmentation.threshold import get_detections_from_preset
 
         gray = np.full((80, 120), 255, np.uint8)
         gray[20:60, 30:90] = 0
@@ -173,7 +173,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QImage
 from main import ImagePlayer
 from ui.morphology_ui import MorphologyWidget
-from utils_new.morphology import apply_morphology
+from utils_new.images.morphology import apply_morphology
 app=QApplication([])
 keys=['threshold','gradient','interactive','traditional_ml','deep_learning']
 w=ImagePlayer([(key,key) for key in keys])
@@ -232,7 +232,7 @@ from PyQt5.QtCore import QTimer
 from main import ImagePlayer
 from ui.application import exec_window
 from utils_new.segmentation.presets import make_preset
-import utils_new.morphology as morphology_module
+import utils_new.images.morphology as morphology_module
 app=QApplication([])
 w=ImagePlayer([('yolo_demo','Ensemble')]);owner=w._tab_widgets[0]
 gray=np.full((80,120),255,np.uint8);gray[20:60,30:90]=0

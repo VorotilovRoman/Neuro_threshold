@@ -22,10 +22,10 @@ import numpy as np
 from PIL import Image
 
 _brightness_cache = {}
-from .objects import read_objects
-from .export import export_subset
-from utils_new.dataset_files_new import read_image_with_fallback
-from utils_new.dataset_image_stats_new import ImageStats
+from utils_new.dataset_audit.objects import read_objects
+from utils_new.import_export.dataset_export import export_subset
+from utils_new.import_export.images import read_image_with_fallback
+from utils_new.images.processing import ImageStats
 
 
 def histogram_edges(values, max_bins=50):

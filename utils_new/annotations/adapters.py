@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .model import Annotation, ImageSize
+from utils_new.annotations.model import Annotation, ImageSize
 
 
 def from_legacy(value, size: ImageSize, *, allow_classless=False) -> Annotation:
@@ -105,7 +105,7 @@ def legacy_convert_annotations(values, size: ImageSize, target: str, *,
     Does not silently return Detect for an OBB conversion failure. Callers must
     explicitly allow lossy conversions and provide source image dimensions.
     """
-    from .geometry import convert_annotation
+    from utils_new.annotations.geometry import convert_annotation
     return [to_legacy(convert_annotation(from_legacy(v, size), target,
                                           allow_lossy=allow_lossy, obb_policy=obb_policy), size)
             for v in values]
@@ -115,7 +115,7 @@ def to_detection_dict(ann: Annotation, *, class_name=None, confidence=None):
     """Canonical annotation -> YOLO+AE/VAE detection dictionary in pixels."""
     import cv2
 
-    from .geometry import bounds
+    from utils_new.annotations.geometry import bounds
     x0, y0, x1, y1 = bounds(ann.points_px)
     if ann.kind == 'segment':
         rect = cv2.minAreaRect(np.asarray(ann.points_px, dtype=np.float32))

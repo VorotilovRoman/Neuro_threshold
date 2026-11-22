@@ -7,11 +7,8 @@ from PyQt5.QtWidgets import QProgressDialog
 
 from ui import dataset_source as source_dialogs
 from ui.image_conversion import numpy_to_qpixmap
-from utils_new.segmentation.image_session import (
-    create_cache,
-    image_paths,
-    load_one_image_item,
-)
+from utils_new.images.session import create_segmentation_cache as create_cache, load_segmentation_image as load_one_image_item
+from utils_new.import_export.images import collect_image_paths as image_paths
 
 
 def choose_images(owner, load):

@@ -8,21 +8,13 @@ import cv2
 import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QPixmap
-from PyQt5.QtWidgets import (
-    QDialog,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QTableWidgetItem,
-    QVBoxLayout,
-)
+from PyQt5.QtWidgets import QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTableWidgetItem, QVBoxLayout
 
 from ui import dataset_source as source_dialogs
 from ui.dataset_audit.lifecycle import stale
 from ui.dataset_audit.workers import YoloValidationWorker
 from utils_new.dataset_audit.objects import load_pair_annotations
-from utils_new.dataset_files_new import read_image, read_index_mask
+from utils_new.import_export.images import read_image, read_index_mask
 
 
 class DatasetModelController:

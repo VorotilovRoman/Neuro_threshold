@@ -6,24 +6,11 @@ import cv2
 import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QPixmap
-from PyQt5.QtWidgets import (
-    QAbstractItemView,
-    QApplication,
-    QDialog,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QProgressDialog,
-    QPushButton,
-    QScrollArea,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QAbstractItemView, QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressDialog, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from ui.dataset_audit.page_helpers import TrainingImageLabel
 from utils_new.dataset_audit.objects import load_pair_annotations
-from utils_new.dataset_files_new import read_image, read_index_mask
+from utils_new.import_export.images import read_image, read_index_mask
 
 
 class DatasetDuplicatesController:

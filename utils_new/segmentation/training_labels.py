@@ -3,11 +3,11 @@
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from utils_new.import_export.images import image_size_from_file
 
 from utils_new.annotations import ImageSize
 from utils_new.annotations.masks import annotation_binary_mask
-from utils_new.dataset_yolo_labels_new import read_yolo_labels
+from utils_new.import_export.yolo_labels import read_yolo_labels
 
 
 def manual_target(image_path, shape):
@@ -30,12 +30,11 @@ def manual_target(image_path, shape):
         raise ValueError(
             f"Для {path.name} нужен один YOLO TXT: найдено {len(found)}. Пустой TXT допустим; отсутствующий — нет."
         )
-    with Image.open(path) as image:
-        source = ImageSize(*image.size)
-    messages = []
-    annotations = read_yolo_labels(found.pop(), source, log=messages.append)
-    if any("запись пропущена" in message for message in messages):
-        raise ValueError(f"Некорректная ручная разметка {path.name}: {messages}")
+    source = ImageSize(*image_size_from_file(path))
+    try:
+        annotations = read_yolo_labels(found.pop(), source, strict=True)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Некорректная ручная разметка {path.name}: {exc}") from exc
     target = ImageSize(shape[1], shape[0])
     scale = np.array([target.width / source.width, target.height / source.height])
     result = np.zeros(shape, np.uint8)

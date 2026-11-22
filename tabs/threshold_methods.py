@@ -20,10 +20,7 @@ import os
 import sys
 
 import cv2
-from PyQt5.QtWidgets import (
-    QApplication,
-    QMainWindow,
-)
+from PyQt5.QtWidgets import QApplication, QMainWindow
 
 from path_setup import get_project_root
 from ui.segmentation import actions as segmentation_actions
@@ -37,15 +34,24 @@ from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import ThresholdPresetManager
 from ui_tabs.threshold_methods_ui import setup_threshold_ui
 from ui.autoreseach_ui.controls import SearchController
-from utils_new.autoreseach_utils.search_space import default_settings, combination_count, search_kind
-from utils_new.json_store import read_json_object, write_json_atomic
+from utils_new.autoreseach_utils.search_space import (
+    default_settings,
+    combination_count,
+    search_kind,
+)
+from utils_new.import_export.json_objects import read_json_object, write_json_atomic
 from ui.autoreseach_ui.settings_dialog import AutoSettingsDialog
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_new.threshold_processing import apply_threshold_method
+from utils_new.segmentation.threshold import apply_threshold_method
 
 
 class ThresholdWindow(QMainWindow):
-    segmentation_view_names = ('original_view', 'binary_view', 'morph_view', 'annotated_view')
+    segmentation_view_names = (
+        "original_view",
+        "binary_view",
+        "morph_view",
+        "annotated_view",
+    )
 
     def __init__(self):
         super().__init__()
@@ -65,7 +71,7 @@ class ThresholdWindow(QMainWindow):
         self.current_gray = None
 
         self.current_threshold = None
-        self.current_objects_full = []   # список объектов в унифицированном формате
+        self.current_objects_full = []  # список объектов в унифицированном формате
         self.current_selected_indices = []
         self.current_base_image = None
 
@@ -80,7 +86,6 @@ class ThresholdWindow(QMainWindow):
         self.auto_search = SearchController(self)
         self.configure_auto_button.clicked.connect(self.open_auto_settings)
         self.auto_button.clicked.connect(self.run_auto_optimization)
-
 
         # Пресеты
         self.preset_manager = ThresholdPresetManager(self)
@@ -109,7 +114,6 @@ class ThresholdWindow(QMainWindow):
         self.on_method_changed(self.method_combo.currentIndex())
         self.update_navigation_state()
 
-
         # Применить пресет по умолчанию (если есть)
         preset_names = self.preset_manager.get_preset_names()
         if preset_names:
@@ -128,7 +132,8 @@ class ThresholdWindow(QMainWindow):
     def load_auto_settings(self):
         try:
             value = read_json_object(self.settings_file)
-            if search_kind(value)!="threshold":raise ValueError("Нужны настройки порогового поиска.")
+            if search_kind(value) != "threshold":
+                raise ValueError("Нужны настройки порогового поиска.")
             combination_count(value)
             self.auto_settings = value
         except FileNotFoundError:
@@ -198,12 +203,20 @@ class ThresholdWindow(QMainWindow):
     # ---------- Отображение текущего изображения ----------
 
     def _mask_signature(self, frame):
-        return frame.key, self.method_combo.currentText(), repr(self.get_current_threshold_params())
+        return (
+            frame.key,
+            self.method_combo.currentText(),
+            repr(self.get_current_threshold_params()),
+        )
 
     def _compute_mask(self, frame):
-        binary, self.current_threshold = apply_threshold_method(frame.gray, self.method_combo.currentText(), self.get_current_threshold_params())
+        binary, self.current_threshold = apply_threshold_method(
+            frame.gray,
+            self.method_combo.currentText(),
+            self.get_current_threshold_params(),
+        )
         binary = cv2.bitwise_not(binary)
-        return binary, {'binary_view': binary}
+        return binary, {"binary_view": binary}
 
     def display_current_image(self):
         segmentation_presentation.display(self)
@@ -226,7 +239,7 @@ class ThresholdWindow(QMainWindow):
         segmentation_navigation.step(self, 1)
 
     def goto_image(self, page_num):
-        segmentation_navigation.navigate(self, page_num-1)
+        segmentation_navigation.navigate(self, page_num - 1)
 
     # ---------- Загрузка изображений ----------
     def load_images_from_dialog(self):
@@ -240,13 +253,20 @@ class ThresholdWindow(QMainWindow):
 
     # ------- Ленивая загрузка (единая точка входа) -------
     def _load_images(self, source):
-        segmentation_input.load_cached(self, source, self.segmentation_view_names, max_side=1024, reset=lambda: setattr(self, 'current_threshold', None))
+        segmentation_input.load_cached(
+            self,
+            source,
+            self.segmentation_view_names,
+            max_side=1024,
+            reset=lambda: setattr(self, "current_threshold", None),
+        )
 
     # ---------- Сохранение аннотаций (универсальное) ----------
     # ---------- Сохранение аннотаций (только выбранные объекты) ----------
     # ---------- Сохранение аннотаций (включая пустой файл) ----------
     def save_current_annotations(self):
         segmentation_export.save_selected(self)
+
     # ---------- События UI ----------
     def reset_all_zooms(self):
         segmentation_navigation.reset_zooms(self)
@@ -255,7 +275,7 @@ class ThresholdWindow(QMainWindow):
         segmentation_controller.resize_changed(self, enabled)
 
     def clear_images(self):
-        segmentation_input.clear_session(self, none_fields=('current_threshold',))
+        segmentation_input.clear_session(self, none_fields=("current_threshold",))
 
     def reset_params_for_method(self, method):
         if method == "Simple Threshold":
@@ -316,8 +336,6 @@ class ThresholdWindow(QMainWindow):
     def schedule_update(self):
         segmentation_controller.schedule(self)
 
-
-
     def on_morphology_changed(self):
         # При ручной настройке отменяем отложенную конвертацию старого пресета.
         self.on_param_changed()
@@ -328,15 +346,18 @@ class ThresholdWindow(QMainWindow):
 
     def on_simple_threshold_changed(self, value):
         self.threshold_value_label.setText(str(value))
-        if self.original_image is not None and self.method_combo.currentText() == "Simple Threshold":
+        if (
+            self.original_image is not None
+            and self.method_combo.currentText() == "Simple Threshold"
+        ):
             self.schedule_update()
 
     def on_niblack_k_changed(self, value):
-        self.niblack_k_label.setText(f"{value/100:.2f}")
+        self.niblack_k_label.setText(f"{value / 100:.2f}")
         self.schedule_update()
 
     def on_sauvola_k_changed(self, value):
-        self.sauvola_k_label.setText(f"{value/100:.2f}")
+        self.sauvola_k_label.setText(f"{value / 100:.2f}")
         self.schedule_update()
 
     def on_sauvola_r_changed(self, value):
@@ -344,11 +365,11 @@ class ThresholdWindow(QMainWindow):
         self.schedule_update()
 
     def on_row_k_changed(self, value):
-        self.row_k_label.setText(f"{value/100:.2f}")
+        self.row_k_label.setText(f"{value / 100:.2f}")
         self.schedule_update()
 
     def on_bg_excess_changed(self, value):
-        self.bg_excess_label.setText(f"{value/100:.2f}")
+        self.bg_excess_label.setText(f"{value / 100:.2f}")
         self.schedule_update()
 
     def on_invert_changed(self, state):
@@ -363,7 +384,9 @@ class ThresholdWindow(QMainWindow):
 
     # ---------- Извлечение аннотаций из бинарной маски ----------
     def draw_objects_on_image(self, img, binary, draw=True):
-        return extract_objects(img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked())
+        return extract_objects(
+            img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked()
+        )
 
     # ---------- Пресеты ----------
     def update_preset_combo(self):
@@ -393,4 +416,5 @@ if __name__ == "__main__":
     window = ThresholdWindow()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

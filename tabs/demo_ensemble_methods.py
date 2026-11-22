@@ -18,16 +18,7 @@ from copy import deepcopy
 import cv2
 from PyQt5.QtCore import QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtWidgets import (
-    QApplication,
-    QDoubleSpinBox,
-    QHBoxLayout,
-    QLabel,
-    QMainWindow,
-    QMessageBox,
-    QSpinBox,
-    QWidget,
-)
+from PyQt5.QtWidgets import QApplication, QDoubleSpinBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QSpinBox, QWidget
 
 from ui import dataset_source as source_dialogs
 from ui.image_conversion import numpy_to_qpixmap
@@ -36,10 +27,7 @@ from ui.segmentation.jobs import BackgroundTask
 from ui.segmentation.preset_bindings import ThresholdPresetManager
 from ui_tabs.demo_ensemble_methods_ui import setup_demo_ensemble_methods_ui
 from utils_new.annotations.boxes import ensemble_detections
-from utils_new.threshold_processing import (
-    apply_threshold_preset,
-    get_detections_from_preset,
-)
+from utils_new.segmentation.threshold import apply_threshold_preset, get_detections_from_preset
 
 
 def print_flush(*args, **kwargs):
@@ -107,7 +95,7 @@ class YoloInferThread(BackgroundTask):
             if not results:
                 raise ValueError("Модель не вернула результата.")
             result = results[0]
-            from utils_new.annotation_processing import yolo_result_to_detections
+            from utils_new.annotations.processing import yolo_result_to_detections
 
             detections = yolo_result_to_detections(
                 result, getattr(result, "names", {}) or {}

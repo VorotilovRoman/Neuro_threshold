@@ -2,24 +2,11 @@
 
 import pandas as pd
 from PyQt5.QtCore import Qt, QSignalBlocker
-from PyQt5.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QScrollArea,
-    QSplitter,
-    QTabWidget,
-    QTextBrowser,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
 from ui.log_widget import LogWidget
-from .evaluation_controls import hint, setup_evaluation_controls
-from .result_models import ComparisonTable, IMAGE_COLUMNS
-from utils_new.autoreseach_utils.evaluation_export import preset_settings_text
+from ui.autoreseach_ui.evaluation_controls import hint, setup_evaluation_controls
+from ui.autoreseach_ui.result_models import ComparisonTable, IMAGE_COLUMNS
+from utils_new.import_export.evaluation_export import preset_settings_text
 from utils_new.autoreseach_utils.workflow import result_guidance
 
 

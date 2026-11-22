@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Универсальная панель для utils_new.morphology.
+"""Универсальная панель для utils_new.images.morphology.
 
 Пример подключения:
     from ui.morphology_ui import MorphologyWidget
@@ -16,19 +16,9 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QSpinBox,
-    QToolButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QLabel, QSpinBox, QToolButton, QVBoxLayout, QWidget
 
-from utils_new.morphology import SUPPORTED_OPERATIONS, SUPPORTED_SHAPES, MorphologyStep
+from utils_new.images.morphology import SUPPORTED_OPERATIONS, SUPPORTED_SHAPES, MorphologyStep
 
 _LABELS = {
     "close": "Закрытие",

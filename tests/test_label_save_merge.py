@@ -6,11 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from utils_new.dataset_yaml_new import build_yolo_save_target_map
-from utils_new.dataset_yolo_labels_new import (
-    build_label_save_plan,
-    format_label_save_confirmation,
-)
+from utils_new.import_export.yolo_yaml import build_yolo_save_target_map
+from utils_new.import_export.yolo_labels import build_label_save_plan, format_label_save_confirmation
 
 ROOT = Path(__file__).resolve().parents[1]
 

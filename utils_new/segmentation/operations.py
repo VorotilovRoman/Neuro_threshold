@@ -81,7 +81,7 @@ def prepare_training(images, grays, spec, cancel, paths=None):
         elif spec.get("training_source") == "Otsu (псевдометки)":
             _, pseudo = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         elif spec.get("training_source") == "Ручная разметка YOLO":
-            from .training_labels import manual_target
+            from utils_new.segmentation.training_labels import manual_target
             if paths is None or len(paths) != len(images):
                 raise ValueError("Для ручного обучения нужны пути всех изображений.")
             pseudo = manual_target(paths[index], gray.shape) * 255

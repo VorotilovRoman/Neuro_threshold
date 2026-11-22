@@ -18,11 +18,8 @@ from PyQt5.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox
 from ui import dataset_source as source_dialogs
 from ui.autoreseach_ui.evaluation_controller import EvaluationController
 from ui.autoreseach_ui.model_research_ui import setup_model_research_ui
-from ui.segmentation.preset_bindings import (
-    GradientPresetManager,
-    ThresholdPresetManager,
-)
-from utils_new.autoreseach_utils.evaluation_export import export_evaluation
+from ui.segmentation.preset_bindings import GradientPresetManager, ThresholdPresetManager
+from utils_new.import_export.evaluation_export import export_evaluation
 from utils_new.autoreseach_utils.workflow import input_guidance, selected_presets
 
 

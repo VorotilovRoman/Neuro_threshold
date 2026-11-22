@@ -140,7 +140,10 @@ class RealTorchContracts(unittest.TestCase):
         import segmentation_models_pytorch as smp
         import torch
 
-        from utils_new.segmentation.backends.deep_learning import DeepLabV3Segmentor, UNetSegmentor
+        from utils_new.segmentation.backends.deep_learning import (
+            DeepLabV3Segmentor,
+            UNetSegmentor,
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             for name, network, adapter, metadata in (
@@ -257,6 +260,26 @@ class SemanticMetrics(unittest.TestCase):
             0.01,
         )
 
+    def test_confusion_and_metrics_share_invalid_target_checks(self):
+        import torch
+        from utils_new.segmentation.model_metrics import (
+            confusion_matrix,
+            segmentation_metrics,
+        )
+
+        logits = torch.zeros(1, 2, 2, 2)
+        for evaluate in (confusion_matrix, segmentation_metrics):
+            for target in (
+                torch.full((1, 2, 2), 2),
+                torch.full((1, 2, 2), 0.5),
+                torch.zeros(1, 3, 2),
+            ):
+                with self.subTest(evaluate=evaluate.__name__, shape=target.shape):
+                    with self.assertRaises(ValueError):
+                        evaluate(logits, target, 2)
+            with self.assertRaises(ValueError):
+                evaluate(logits, torch.zeros(1, 2, 2), 2, threshold=float("nan"))
+
 
 @unittest.skipUnless(
     find_spec("onnx") and find_spec("onnxruntime"), "optional ONNX backend"
@@ -366,7 +389,7 @@ class ExportGeometryContracts(unittest.TestCase):
     def test_stride_padding_is_dynamic_and_output_is_cropped_before_decoding(self):
         import torch
 
-        from utils_new.segmentation.model_export import stride_padded_model
+        from utils_new.import_export.model_export import stride_padded_model
         from utils_new.segmentation.backends.deep_learning import ONNXSegmentor
 
         class Network(torch.nn.Module):

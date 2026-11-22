@@ -7,13 +7,13 @@ from pathlib import Path
 
 import cv2
 
-from utils_new.morphology import apply_morphology
-from utils_new.segmentation.image_session import load_one_image_item
+from utils_new.images.morphology import apply_morphology
+from utils_new.images.session import load_segmentation_image as load_one_image_item
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_new.threshold_processing import apply_threshold_method, apply_threshold_preset
-from .search_space import combination_count, iter_presets, search_kind, method_params
-from .gradient_processing import gradient_binary, finalize_gradient_mask
-from .ground_truth import digest_file
+from utils_new.segmentation.threshold import apply_threshold_method, apply_threshold_preset
+from utils_new.autoreseach_utils.search_space import combination_count, iter_presets, search_kind, method_params
+from utils_new.segmentation.gradient_processing import gradient_binary, finalize_gradient_mask
+from utils_new.import_export.ground_truth import digest_file
 
 
 def evaluate(gray, image, preset, *, raw_mask=None):

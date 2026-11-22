@@ -3,12 +3,9 @@ from pathlib import Path
 
 from PyQt5.QtWidgets import QMessageBox
 
-from utils_new.dataset_files_new import image_size_from_file
-from utils_new.dataset_yolo_labels_new import (
-    build_label_save_plan,
-    format_label_save_confirmation,
-)
-from utils_new.segmentation.export import write_annotations_atomic
+from utils_new.import_export.images import image_size_from_file
+from utils_new.import_export.yolo_labels import build_label_save_plan, format_label_save_confirmation
+from utils_new.import_export.annotation_export import write_annotations_atomic
 
 
 def save_selected(owner):

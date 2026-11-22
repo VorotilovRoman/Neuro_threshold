@@ -15,10 +15,11 @@ from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
 from utils_new.dataset_audit.analysis import DatasetAnalyzer
 from ui.dataset_audit.lifecycle import close_workers
-from utils_new.dataset_validation_new import ImageStats, PairValidator
+from utils_new.images.processing import ImageStats
+from utils_new.dataset.validation import PairValidator
 
 from ui_tabs.dataset_analysis_ui import setup_dataset_analysis_ui
-from utils_new.dataset_loader_new import DatasetLoaderMixin
+from ui.dataset_loader import DatasetLoaderMixin
 from ui.dataset_audit.tasks import ScanController
 from ui.dataset_audit.quality_controller import DatasetQualityController
 from ui.dataset_audit.session import DatasetSessionController

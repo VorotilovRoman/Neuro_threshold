@@ -8,14 +8,9 @@ from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import histogram, results, session
 from ui.segmentation.panels import STAGES
 from utils_new.annotations.modes import supports_hull
-from utils_new.morphology import apply_morphology
+from utils_new.images.morphology import apply_morphology
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_new.segmentation.result import (
-    ResultStatus,
-    SegmentationResult,
-    binary_mask,
-    masked_preview,
-)
+from utils_new.segmentation.result import ResultStatus, SegmentationResult, binary_mask, masked_preview
 
 STATUS_TEXT = {
     ResultStatus.NO_IMAGE: "Нет изображения",

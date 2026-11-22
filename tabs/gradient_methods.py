@@ -1,4 +1,3 @@
-
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
 if __name__ == "__main__" and not __package__:
     import sys as _bootstrap_sys
@@ -15,10 +14,7 @@ import os
 import sys
 
 import cv2
-from PyQt5.QtWidgets import (
-    QApplication,
-    QMainWindow,
-)
+from PyQt5.QtWidgets import QApplication, QMainWindow
 
 from path_setup import get_project_root
 from ui.segmentation import actions as segmentation_actions
@@ -33,15 +29,26 @@ from ui.segmentation.preset_bindings import GradientPresetManager
 from ui_tabs.gradient_methods_ui import setup_gradient_ui
 from ui.autoreseach_ui.settings_dialog import AutoSettingsDialog
 from ui.autoreseach_ui.controls import SearchController
-from utils_new.autoreseach_utils.search_space import default_settings, combination_count, search_kind
-from utils_new.autoreseach_utils.gradient_processing import finalize_gradient_mask
-from utils_new.json_store import read_json_object, write_json_atomic
+from utils_new.autoreseach_utils.search_space import (
+    default_settings,
+    combination_count,
+    search_kind,
+)
+from utils_new.segmentation.gradient_processing import finalize_gradient_mask
+from utils_new.import_export.json_objects import read_json_object, write_json_atomic
 from utils_new.segmentation.postprocessing import extract_objects
 from utils_new.segmentation.backends.gradient import apply_gradient_method
 
 
 class GradientMethodsWindow(QMainWindow):
-    segmentation_view_names = ('original_view', 'gradient_view', 'binary_view', 'morph_view', 'filled_view', 'annotated_view')
+    segmentation_view_names = (
+        "original_view",
+        "gradient_view",
+        "binary_view",
+        "morph_view",
+        "filled_view",
+        "annotated_view",
+    )
 
     def __init__(self):
         super().__init__()
@@ -67,15 +74,18 @@ class GradientMethodsWindow(QMainWindow):
         _root = get_project_root()
         auto_settings_dir = os.path.join(_root, "settings", "auto_settings")
         os.makedirs(auto_settings_dir, exist_ok=True)
-        self.settings_file = os.path.join(auto_settings_dir, "auto_settings_gradient.json")
+        self.settings_file = os.path.join(
+            auto_settings_dir, "auto_settings_gradient.json"
+        )
 
         self.auto_settings = default_settings("gradient")
         self.load_auto_settings()
         self.auto_search = SearchController(self)
         # Пресеты
-        self.preset_manager = GradientPresetManager(self, preset_file="presets_gradient.json")
+        self.preset_manager = GradientPresetManager(
+            self, preset_file="presets_gradient.json"
+        )
         self.update_preset_combo()
-
 
         # Сигналы
 
@@ -95,7 +105,6 @@ class GradientMethodsWindow(QMainWindow):
 
         self.configure_auto_button.clicked.connect(self.open_auto_settings)
         self.auto_button.clicked.connect(self.run_auto_optimization)
-
 
         self.on_method_changed(self.method_combo.currentIndex())
         self.update_navigation_state()
@@ -121,32 +130,33 @@ class GradientMethodsWindow(QMainWindow):
 
     def load_auto_settings(self):
         try:
-            value=read_json_object(self.settings_file)
-            if search_kind(value)!='gradient':raise ValueError('Нужны настройки градиентного поиска.')
+            value = read_json_object(self.settings_file)
+            if search_kind(value) != "gradient":
+                raise ValueError("Нужны настройки градиентного поиска.")
             combination_count(value)
-            self.auto_settings=value
+            self.auto_settings = value
         except FileNotFoundError:
             pass
         except Exception as exc:
-            self.log(f'Настройки автоподбора отклонены: {exc}')
+            self.log(f"Настройки автоподбора отклонены: {exc}")
 
     def save_auto_settings(self):
         try:
             combination_count(self.auto_settings)
-            write_json_atomic(self.settings_file,self.auto_settings)
+            write_json_atomic(self.settings_file, self.auto_settings)
         except Exception as exc:
-            self.log(f'Не удалось сохранить настройки автоподбора: {exc}')
+            self.log(f"Не удалось сохранить настройки автоподбора: {exc}")
 
-    def closeEvent(self,event):
+    def closeEvent(self, event):
         self.auto_search.close()
         segmentation_controller.close(self)
         self.save_auto_settings()
         event.accept()
 
     def open_auto_settings(self):
-        dialog=AutoSettingsDialog(self,self.auto_settings)
+        dialog = AutoSettingsDialog(self, self.auto_settings)
         if dialog.exec_():
-            self.auto_settings=dialog.get_settings()
+            self.auto_settings = dialog.get_settings()
             self.save_auto_settings()
 
     def run_auto_optimization(self):
@@ -184,21 +194,34 @@ class GradientMethodsWindow(QMainWindow):
     def on_min_area_changed(self, value):
         self.schedule_update()
 
-
-
     # ---------- Основная логика ----------
 
     def _mask_signature(self, frame):
-        return frame.key, self.method_combo.currentText(), repr(self.get_current_gradient_params()), self.threshold_slider.value()
+        return (
+            frame.key,
+            self.method_combo.currentText(),
+            repr(self.get_current_gradient_params()),
+            self.threshold_slider.value(),
+        )
 
     def _compute_mask(self, frame):
-        gradient = apply_gradient_method(cv2.bitwise_not(frame.gray), self.method_combo.currentText(), self.get_current_gradient_params())
+        gradient = apply_gradient_method(
+            cv2.bitwise_not(frame.gray),
+            self.method_combo.currentText(),
+            self.get_current_gradient_params(),
+        )
         self.current_gradient_mask = gradient
-        _, binary = cv2.threshold(gradient, self.threshold_slider.value(), 255, cv2.THRESH_BINARY)
-        return binary, {'gradient_view': gradient, 'binary_view': binary}
+        _, binary = cv2.threshold(
+            gradient, self.threshold_slider.value(), 255, cv2.THRESH_BINARY
+        )
+        return binary, {"gradient_view": gradient, "binary_view": binary}
 
     def _finalize_mask(self, processed, frame):
-        return finalize_gradient_mask(processed,self.min_area_spinbox.value(),self.fill_contours_checkbox.isChecked())
+        return finalize_gradient_mask(
+            processed,
+            self.min_area_spinbox.value(),
+            self.fill_contours_checkbox.isChecked(),
+        )
 
     def display_current_image(self):
         segmentation_presentation.display(self)
@@ -221,7 +244,7 @@ class GradientMethodsWindow(QMainWindow):
         segmentation_navigation.step(self, 1)
 
     def goto_image(self, page_num):
-        segmentation_navigation.navigate(self, page_num-1, only_if_changed=True)
+        segmentation_navigation.navigate(self, page_num - 1, only_if_changed=True)
 
     def load_images_from_dialog(self):
         segmentation_input.choose_images(self, self._load_images)
@@ -234,7 +257,9 @@ class GradientMethodsWindow(QMainWindow):
 
     # ------- Ленивая загрузка (единая точка входа) -------
     def _load_images(self, source):
-        segmentation_input.load_cached(self, source, self.segmentation_view_names, max_side=1024, reset=None)
+        segmentation_input.load_cached(
+            self, source, self.segmentation_view_names, max_side=1024, reset=None
+        )
 
     def reset_all_zooms(self):
         segmentation_navigation.reset_zooms(self)
@@ -293,11 +318,14 @@ class GradientMethodsWindow(QMainWindow):
 
     # ---------- Отрисовка объектов (унифицированная) ----------
     def draw_objects_on_image(self, img, binary, draw=True):
-        return extract_objects(img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked())
+        return extract_objects(
+            img, binary, self.draw_combo.currentData(), self.hull_checkbox.isChecked()
+        )
 
     # ---------- Сохранение аннотаций ----------
     def save_current_annotations(self):
         segmentation_export.save_selected(self)
+
     def toggle_log(self, checked):
         segmentation_actions.toggle_log(self, checked)
 
@@ -310,4 +338,5 @@ if __name__ == "__main__":
     window = GradientMethodsWindow()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))

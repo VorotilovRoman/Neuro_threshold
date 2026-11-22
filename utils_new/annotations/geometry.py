@@ -8,7 +8,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .model import Annotation, ImageSize
+from utils_new.annotations.model import Annotation, ImageSize
 
 try:
     from shapely.geometry import Polygon as _Polygon
@@ -292,3 +292,30 @@ def sanitize_annotation_topology(ann: Annotation, *, hole_policy='error'):
         raise GeometryError('Invalid Segment could not be represented in YOLO')
     return output, [f'Self-intersecting Segment repaired into {len(output)} valid polygon(s)'
                     + ('; holes dropped' if any(p.interiors for p in polygons) else '')]
+
+
+def order_normalized_obb_corners(norm_points, width=1, height=1):
+    """Order the original four vertices, without altering their coordinates.
+
+    Full-size width/height are optional so hand-edited normalized coordinates
+    can be ordered too; unlike minAreaRect this does not refit the polygon.
+    """
+    vals = np.asarray(norm_points, dtype=np.float64).reshape(-1)
+    if len(vals) != 8 or not np.isfinite(vals).all():
+        return list(norm_points)
+    points = vals.reshape(4, 2).copy()
+    pixels = points * np.array([width, height], dtype=np.float64)
+    hull_idx = cv2.convexHull(pixels.astype(np.float32), returnPoints=False)
+    if hull_idx is None or len(hull_idx) != 4:
+        return list(norm_points)
+    points = points[hull_idx.reshape(-1)]
+    pixel_ordered = pixels[hull_idx.reshape(-1)]
+    first = min(range(4), key=lambda i: (pixel_ordered[i, 1], pixel_ordered[i, 0]))
+    return np.roll(points, -first, axis=0).reshape(-1).tolist()
+
+
+def fit_normalized_obb_corners(norm_points, width, height):
+    """Explicitly refit an OBB in pixel space; unlike ordering this changes vertices."""
+    size=ImageSize(int(width),int(height))
+    value=Annotation('obb',0,np.asarray(norm_points).reshape(4,2)*[size.width,size.height])
+    return (canonical_obb_points(value.points_px)/[size.width,size.height]).flatten().tolist()

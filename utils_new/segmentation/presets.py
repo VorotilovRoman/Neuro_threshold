@@ -3,7 +3,7 @@
 from copy import deepcopy
 from utils_new.annotations.modes import validate_mode
 
-from utils_new.morphology import SUPPORTED_OPERATIONS, SUPPORTED_SHAPES
+from utils_new.images.morphology import SUPPORTED_OPERATIONS, SUPPORTED_SHAPES
 
 SCHEMA_VERSION = 3
 KINDS = ("threshold", "gradient", "interactive", "traditional_ml", "deep_learning")

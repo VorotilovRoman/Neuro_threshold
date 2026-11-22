@@ -4,17 +4,10 @@ from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 
-from PyQt5.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
-    QLineEdit,
-    QSlider,
-    QSpinBox,
-)
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QLineEdit, QSlider, QSpinBox
 
 from path_setup import get_project_root
-from utils_new.presets_store import read_presets, write_presets
+from utils_new.configuration.presets_store import read_presets, write_presets
 from utils_new.segmentation.presets import make_preset, validate_preset
 
 

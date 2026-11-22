@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 
-from utils_new.dataset_files_new import collect_image_paths
+from utils_new.import_export.images import collect_image_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -125,7 +125,7 @@ for index,(key,title) in enumerate(ALL_TABS):
   with patch.object(QMessageBox,'warning') as warning:
    owner._load_unet_from_path('not-loaded.yaml');assert warning.called and owner.dataset_type==0
   from PyQt5.QtWidgets import QFileDialog
-  with patch.object(QFileDialog,'getOpenFileName',return_value=('masked.yaml','')),patch('utils_new.dataset_loader_new.is_unet_yaml',return_value=True),patch.object(QMessageBox,'warning') as warning,patch.object(QMessageBox,'question') as question:
+  with patch.object(QFileDialog,'getOpenFileName',return_value=('masked.yaml','')),patch('ui.dataset_loader.is_unet_yaml',return_value=True),patch.object(QMessageBox,'warning') as warning,patch.object(QMessageBox,'question') as question:
    owner.btn_load_yaml.click();assert warning.called;question.assert_not_called()
  if key in ('dataset','dataset_analysis'):
   panel=owner.dataset_source;assert panel.isAncestorOf(owner.btn_load_yaml)
@@ -174,7 +174,7 @@ from unittest.mock import patch
 import cv2,numpy as np,yaml
 from PyQt5.QtWidgets import QApplication,QFileDialog
 from tabs.dataset_analysis import DatasetAnalysisWindow
-from utils_new.dataset_files_new import read_index_mask
+from utils_new.import_export.images import read_index_mask
 app=QApplication([]);owner=DatasetAnalysisWindow();owner.show()
 with tempfile.TemporaryDirectory() as directory:
  root=Path(directory);(root/'images').mkdir();(root/'labels').mkdir()
