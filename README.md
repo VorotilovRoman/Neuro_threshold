@@ -69,8 +69,10 @@ TXT-разметка: BBox, OBB или Segment. У четырёхточечно�
 ## Разработка
 
 Одна вкладка отдельно: `python -m tabs.threshold_methods` из корня проекта.
-Общие виджеты — `ui/`, вычисления и I/O — `utils_new/` и `utils_ops/`,
-обучение — отдельные процессы `utils_training/`. Старые утилиты `utils` удалены.
+Общие виджеты — `ui/`, вычисления и I/O — `utils_new/`, алгоритмы —
+`utils_new/segmentation/backends/`, обучение — процессы `utils_training/`.
+Старые исходники из `utils` и `utils_ops` удалены. Редактор и просмотрщик используют общий
+список объектов в `ui/annotation_review.py` и палитру из настроек.
 
 ```bash
 python -m unittest discover -s tests -v

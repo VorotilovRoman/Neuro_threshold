@@ -13,3 +13,4 @@ YOLO принимает PT/ONNX/engine при наличии backend; U-Net/Deep
 один RGB float32 NCHW-вход и один выход семантической сегментации; нужны метаданные.
 Detect/OBB + Otsu — явно включаемый гибрид, не полноценный YOLO-seg.
 Общий результат вкладки — бинарная маска. SAM и SegFormer пока не реализованы.
+Адаптеры моделей: `utils_new/segmentation/backends/deep_learning.py`.
