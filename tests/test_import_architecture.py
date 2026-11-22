@@ -111,7 +111,7 @@ assert not ({'torch','torchvision','ultralytics','onnxruntime','PyQt5'} & sys.mo
             visit(name, [])
 
     def test_legacy_scripts_defer_mutation_until_main(self):
-        paths = [ROOT / 'rename_data.py', *(ROOT / 'utils_aeb').glob('auto-*.py')]
+        paths = [ROOT / 'rename_data.py', ROOT / 'utils_training/train_autoencoder_worker.py']
         forbidden = ('os.makedirs', 'random.seed', 'np.random.seed', 'torch.manual_seed',
                      'torch.cuda.manual_seed_all')
         def calls(nodes):

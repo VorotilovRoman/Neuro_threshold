@@ -1,41 +1,10 @@
-"""AE/VAE architectures and preprocessing. Torch is loaded only by model operations."""
+"""Four checkpoint-compatible AE/VAE architectures; model parameters have one owner."""
 
-"""
-Утилиты для вкладки YOLO + AE/VAE.
-
-Содержит:
-  • модели AE / VAE в четырёх архитектурах:
-        - conv        : старая conv-сеть, BatchNorm, enc_c=128, шаг 16;
-        - conv_gn     : новая conv-сеть, GroupNorm, enc_c=64, шаг 16;
-        - unet        : U-Net со skip-связями, BatchNorm, шаг 8;
-        - unet_v2     : U-Net V2 (GroupNorm, stride-conv downsampling,
-                        dilated bottleneck, edge-канал на входе) —
-                        соответствует auto-aeb_unet_with_grad.py;
-  • фабрику моделей по config чекпойнта (detect_arch / build_ae_model_from_cfg),
-    понимающую явное поле "arch" и умеющую угадывать архитектуру по
-    структуре state_dict (если поля нет — старые чекпойнты);
-  • препроцессинг изображения под вход AE/VAE, включая автоматическое
-    добавление edge-канала для unet_v2;
-  • вспомогательные функции для работы с детекциями:
-      - маска объекта,
-      - морфология внутри маски,
-      - кроп / доворот по объекту,
-      - заливка фона за пределами объекта,
-      - безопасный суффикс имени файла по классу,
-      - ограничение размера изображения.
-
-Ничего из этого модуля не зависит от QWidget-ов и не трогает UI.
-"""
-import cv2
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
+from torch.nn import functional as F
 
 
-# ============================================================
-# AE / VAE — старая архитектура (Conv + BatchNorm, шаг 16)
-# ============================================================
 class ConvEncoder(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -116,7 +85,11 @@ class ConvVAE(nn.Module):
         self.decoder = ConvDecoder(in_channels)
 
     def reparameterize(self, mu, logvar):
-        logvar = torch.clamp(logvar, -10.0, 10.0)
+        logvar = torch.clamp(
+            logvar,
+            getattr(self, "logvar_min", -10.0),
+            getattr(self, "logvar_max", 10.0),
+        )
         if not self.training and getattr(self, "deterministic_eval", False):
             return mu, logvar
         std = torch.exp(0.5 * logvar)
@@ -133,9 +106,6 @@ class ConvVAE(nn.Module):
         return self.decoder(h_dec), (mu, logvar_c)
 
 
-# ============================================================
-# AE / VAE — новая conv-архитектура (GroupNorm, bottleneck enc_c=64)
-# ============================================================
 def _gn(channels, max_groups=8):
     """GroupNorm с автоматическим подбором числа групп — как в обучении."""
     g = max_groups
@@ -224,7 +194,11 @@ class ConvVAEGN(nn.Module):
         self.decoder = ConvDecoderGN(in_channels)
 
     def reparameterize(self, mu, logvar):
-        logvar = torch.clamp(logvar, -10.0, 10.0)
+        logvar = torch.clamp(
+            logvar,
+            getattr(self, "logvar_min", -10.0),
+            getattr(self, "logvar_max", 10.0),
+        )
         if not self.training and getattr(self, "deterministic_eval", False):
             return mu, logvar
         std = torch.exp(0.5 * logvar)
@@ -241,9 +215,6 @@ class ConvVAEGN(nn.Module):
         return self.decoder(h_dec), (mu, logvar_c)
 
 
-# ============================================================
-# AE / VAE — U-Net (шаг 8, skip-связи, BatchNorm) — старая версия
-# ============================================================
 class UNetEncoder(nn.Module):
     def __init__(self, in_channels, base=32):
         super().__init__()
@@ -382,7 +353,11 @@ class UNetVAE(nn.Module):
         self.decoder = UNetDecoder(in_channels, base)
 
     def reparameterize(self, mu, logvar):
-        logvar = torch.clamp(logvar, -10.0, 10.0)
+        logvar = torch.clamp(
+            logvar,
+            getattr(self, "logvar_min", -10.0),
+            getattr(self, "logvar_max", 10.0),
+        )
         if not self.training and getattr(self, "deterministic_eval", False):
             return mu, logvar
         std = torch.exp(0.5 * logvar)
@@ -399,11 +374,6 @@ class UNetVAE(nn.Module):
         return recon, (mu, logvar_c)
 
 
-# ============================================================
-# AE / VAE — U-Net V2
-# GroupNorm, stride-conv downsampling, dilated bottleneck,
-# edge-канал на входе. Полностью соответствует auto-aeb_unet_with_grad.py.
-# ============================================================
 def _norm_v2(c, kind="gn"):
     """GroupNorm с тем же подбором групп, что и в тренировочном скрипте."""
     if kind == "gn":
@@ -600,72 +570,6 @@ class UNetVAEV2(nn.Module):
         return recon, (mu, logvar_c)
 
 
-# ============================================================
-# Edge-map для инференса (численно совпадает с auto-aeb_unet_with_grad)
-# ============================================================
-_EDGE_SCHARR = torch.tensor(
-    [[3.0, 0.0, -3.0], [10.0, 0.0, -10.0], [3.0, 0.0, -3.0]], dtype=torch.float32
-)
-_EDGE_SOBEL = torch.tensor(
-    [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]], dtype=torch.float32
-)
-
-
-def _median_blur_torch(x, k=3):
-    """x: [B,C,H,W]. Медианный фильтр через unfold (совместим с обучением)."""
-    if k <= 1:
-        return x
-    p = k // 2
-    xp = F.pad(x, (p, p, p, p), mode="reflect")
-    patches = xp.unfold(2, k, 1).unfold(3, k, 1)
-    patches = patches.contiguous().view(*x.shape, k * k)
-    return patches.median(dim=-1).values
-
-
-def compute_edge_map_torch(
-    img_tensor, edge_kernel="scharr", median_kernel=3, edge_lo=0.10, edge_hi=0.35
-):
-    """
-    img_tensor: [C,H,W] или [B,C,H,W], float32 в [0,1].
-    Возвращает [1,H,W] или [B,1,H,W] — сохраняет batch-мерность.
-    """
-    squeeze = False
-    if img_tensor.dim() == 3:
-        img_tensor = img_tensor.unsqueeze(0)
-        squeeze = True
-
-    if img_tensor.size(1) == 3:
-        g = (
-            0.299 * img_tensor[:, 0:1]
-            + 0.587 * img_tensor[:, 1:2]
-            + 0.114 * img_tensor[:, 2:3]
-        )
-    else:
-        g = img_tensor
-
-    if median_kernel > 1:
-        g = _median_blur_torch(g, int(median_kernel))
-
-    kx = _EDGE_SCHARR if edge_kernel == "scharr" else _EDGE_SOBEL
-    kx = kx.view(1, 1, 3, 3)
-    ky = kx.transpose(2, 3).contiguous()
-    scale = 16.0 if edge_kernel == "scharr" else 4.0
-    kx = (kx / scale).to(img_tensor.device, img_tensor.dtype)
-    ky = (ky / scale).to(img_tensor.device, img_tensor.dtype)
-
-    gx = F.conv2d(g, kx, padding=1)
-    gy = F.conv2d(g, ky, padding=1)
-    mag = torch.sqrt(gx * gx + gy * gy + 1e-8)
-    mid = 0.5 * (float(edge_lo) + float(edge_hi))
-    s = 6.0 / max(float(edge_hi) - float(edge_lo), 1e-6)
-    edge = torch.sigmoid(s * (mag - mid))
-
-    return edge[0] if squeeze else edge
-
-
-# ============================================================
-# Фабрика моделей по config чекпойнта
-# ============================================================
 def detect_arch_from_state_dict(state_dict):
     """
     Определяет архитектуру по ключам state_dict.
@@ -730,39 +634,12 @@ def detect_arch(cfg, state_dict=None):
     return "conv"
 
 
-def build_ae_model_from_cfg(cfg, arch=None):
-    """
-    Собирает модель AE/VAE по config чекпойнта.
-    Поддерживает 4 архитектуры: unet_v2, unet, conv, conv_gn.
-    """
-    if arch is None:
-        arch = detect_arch(cfg)
-
-    if arch not in ("conv", "conv_gn", "unet", "unet_v2"):
-        raise ValueError(f"Неизвестная архитектура AE/VAE: {arch}")
-    if cfg.get("model_type") not in ("ae", "vae"):
-        raise ValueError("model_type должен быть ae или vae.")
-    stride = 16 if arch in ("conv", "conv_gn") else 8
-    for key in ("img_h", "img_w"):
-        value = cfg.get(key)
-        if (
-            not isinstance(value, (int, float))
-            or not np.isfinite(value)
-            or int(value) != value
-            or value < stride
-            or value % stride
-        ):
-            raise ValueError(
-                f"{key} должен быть положительным целым, кратным {stride}."
-            )
-    if cfg.get("in_channels") not in (1, 3):
-        raise ValueError(
-            "in_channels должен быть 1 или 3 (без дополнительного edge-канала)."
-        )
+def _build_model(cfg):
+    """Construct an already validated configuration, without changing parameter names."""
+    arch = cfg["arch"]
     model_type = cfg["model_type"]
-    in_channels = int(cfg["in_channels"])
-    img_h = int(cfg["img_h"])
-    img_w = int(cfg["img_w"])
+    in_channels = cfg["in_channels"]
+    img_h, img_w = cfg["img_h"], cfg["img_w"]
 
     # ---- unet_v2 (новый U-Net с edge-каналом и dilated bottleneck) ----
     if arch == "unet_v2":
@@ -819,170 +696,35 @@ def build_ae_model_from_cfg(cfg, arch=None):
     return ConvAutoencoder(in_channels, latent_dim, img_h, img_w)
 
 
-# ============================================================
-# Препроцессинг изображения под вход AE/VAE
-# ============================================================
-def preprocess_image_for_ae(img_bgr, cfg):
-    """
-    Приводит произвольный BGR-снимок к тензору [C, H, W] float32 [0..1],
-    совместимому с моделью AE/VAE.
+def build_ae_model_from_cfg(cfg, arch=None):
+    from utils_new.configuration.autoencoder import normalize_model_config
 
-    Если cfg.use_edge_channel=True (или model_in_channels > in_channels) —
-    автоматически добавляет второй канал: карту рёбер (Scharr + мягкий порог),
-    посчитанную от того же (ресайзнутого, с паддингом) изображения.
-    Параметры edge-канала берутся из cfg (те же, что сохраняются при обучении).
+    cfg = normalize_model_config(cfg, arch=arch or cfg.get("arch") or detect_arch(cfg))
+    model = _build_model(cfg)
+    model.logvar_min, model.logvar_max = cfg["logvar_min"], cfg["logvar_max"]
+    model.deterministic_eval = cfg["vae_use_mean"]
+    return model
 
-    Возвращает (tensor, valid_region),
-    где valid_region = (x1, y1, x2, y2) — область исходного изображения
-    внутри padded-кадра.
-    """
-    if img_bgr is None or not isinstance(img_bgr, np.ndarray) or img_bgr.size == 0:
-        raise ValueError("Пустое изображение для AE/VAE")
 
-    H = int(cfg["img_h"])
-    W = int(cfg["img_w"])
-    keep_aspect = bool(cfg.get("keep_aspect", True))
-    pad_value = int(cfg.get("pad_value", 0))
-    in_channels = int(cfg.get("in_channels", 3))
+class PatchDiscriminator(nn.Module):
+    """Training-only PatchGAN; shares the V2 normalization implementation."""
 
-    img = img_bgr
-    if img.ndim == 3 and img.shape[2] == 4:
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-    elif img.ndim == 3 and img.shape[2] == 1:
-        img = img[:, :, 0]
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    elif img.ndim != 3 or img.shape[2] != 3:
-        raise ValueError(f"Неподдерживаемая форма изображения: {img.shape}")
+    def __init__(self, in_channels, base=32, norm_type="gn"):
+        super().__init__()
 
-    if img.dtype != np.uint8:
-        if img.dtype == np.uint16:
-            f = img.astype(np.float32)
-            mx = float(f.max()) if f.size else 0.0
-            img = (
-                np.zeros(img.shape, dtype=np.uint8)
-                if mx <= 0
-                else np.clip(f * (255.0 / mx), 0, 255).astype(np.uint8)
-            )
-        else:
-            f = img.astype(np.float32)
-            mn = float(f.min())
-            mx = float(f.max())
-            img = (
-                np.zeros(img.shape, dtype=np.uint8)
-                if mx - mn < 1e-9
-                else np.clip((f - mn) / (mx - mn) * 255.0, 0, 255).astype(np.uint8)
-            )
+        def block(i, o, stride, norm=True):
+            layers = [nn.Conv2d(i, o, 4, stride, 1)]
+            if norm:
+                layers.append(_norm_v2(o, norm_type))
+            return nn.Sequential(*layers, nn.LeakyReLU(0.2, inplace=True))
 
-    if in_channels == 1:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    elif in_channels == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    else:
-        raise ValueError(f"Неподдерживаемое число входных каналов: {in_channels}")
-
-    h, w = img.shape[:2]
-    if keep_aspect:
-        scale = min(W / w, H / h)
-        nw = max(1, int(round(w * scale)))
-        nh = max(1, int(round(h * scale)))
-        resized = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
-        if in_channels == 1:
-            canvas = np.full((H, W), pad_value, dtype=np.uint8)
-        else:
-            canvas = np.full((H, W, 3), pad_value, dtype=np.uint8)
-        ox = (W - nw) // 2
-        oy = (H - nh) // 2
-        canvas[oy : oy + nh, ox : ox + nw] = resized
-        padded = canvas
-        valid_region = (ox, oy, ox + nw, oy + nh)
-    else:
-        padded = cv2.resize(img, (W, H), interpolation=cv2.INTER_LINEAR)
-        valid_region = (0, 0, W, H)
-
-    x = padded.astype(np.float32) / 255.0
-    if in_channels == 1:
-        x = x[None, :, :]
-    else:
-        x = x.transpose(2, 0, 1)
-    x = np.ascontiguousarray(x)
-    x_t = torch.from_numpy(x)
-
-    # ---- edge-канал (только для unet_v2 с USE_EDGE_CHANNEL=True) ----
-    use_edge = bool(cfg.get("use_edge_channel", False))
-    model_in_channels = int(cfg.get("model_in_channels", in_channels))
-    need_edge = use_edge or (model_in_channels > in_channels)
-
-    if need_edge:
-        edge_t = compute_edge_map_torch(
-            x_t,
-            edge_kernel=str(cfg.get("edge_kernel", "scharr")),
-            median_kernel=int(cfg.get("median_kernel", 3)),
-            edge_lo=float(cfg.get("edge_lo", 0.10)),
-            edge_hi=float(cfg.get("edge_hi", 0.35)),
+        self.net = nn.Sequential(
+            block(in_channels, base, 2, False),
+            block(base, base * 2, 2),
+            block(base * 2, base * 4, 2),
+            block(base * 4, base * 4, 1),
+            nn.Conv2d(base * 4, 1, 4, 1, 1),
         )
-        x_t = torch.cat([x_t, edge_t], dim=0)
 
-    return x_t, valid_region
-
-
-# ============================================================================
-# Backwards-compatible re-exports of geometry and annotation processing.
-# New applications should import directly from utils_new.annotation_processing.
-# All neural model code above remains unchanged.
-# ============================================================================
-
-
-def infer_autoencoder(image, model, cfg, device, cancel=None):
-    """Validated reconstruction/error on the model grid; no widgets or Qt."""
-    from concurrent.futures import CancelledError
-
-    def checkpoint():
-        if cancel is not None and cancel.is_set():
-            raise CancelledError()
-
-    checkpoint()
-    model.to(device)
-    model.eval()
-    model.deterministic_eval = bool(cfg.get("vae_use_mean", False))
-    x, valid_region = preprocess_image_for_ae(image, cfg)
-    with torch.inference_mode():
-        output = model(x.unsqueeze(0).to(device))
-        reconstruction = output[0] if isinstance(output, (tuple, list)) else output
-        if (
-            not isinstance(reconstruction, torch.Tensor)
-            or reconstruction.ndim != 4
-            or reconstruction.shape[0] != 1
-        ):
-            raise ValueError(
-                "AE/VAE должен вернуть Tensor [1,C,H,W] либо tuple с таким первым элементом."
-            )
-        in_channels = int(cfg.get("in_channels", 3))
-        expected = int(cfg.get("out_channels", in_channels))
-        if (
-            reconstruction.shape[1] != expected
-            or expected > in_channels
-            or reconstruction.shape[2:] != x.shape[1:]
-        ):
-            raise ValueError(
-                f"Выход AE/VAE {tuple(reconstruction.shape)} не соответствует image-каналам входа {tuple(x.shape)} и out_channels={expected}."
-            )
-        reconstruction = reconstruction.float().cpu()
-        if not torch.isfinite(reconstruction).all():
-            raise ValueError("Реконструкция содержит NaN/Inf.")
-        error = (
-            (x[:expected].unsqueeze(0).cpu() - reconstruction)
-            .abs()
-            .mean(dim=1)[0]
-            .numpy()
-        )
-    checkpoint()
-    if not np.isfinite(error).all():
-        raise ValueError("Карта ошибки содержит NaN/Inf.")
-    return {
-        "error": error,
-        "valid_region": valid_region,
-        "input_shape": tuple(x.shape),
-        "output_shape": tuple(reconstruction.shape),
-        "device": str(device),
-    }
+    def forward(self, image):
+        return self.net(image)

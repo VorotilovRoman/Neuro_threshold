@@ -245,6 +245,12 @@ def setup_yolo_ae_vae_ui(parent):
     )
     ae_hint.setWordWrap(True)
     controls_layout.addWidget(ae_hint)
+    parent.ae_score_label = QLabel("Ошибка снимка: —")
+    parent.ae_score_label.setWordWrap(True)
+    parent.ae_score_label.setToolTip(
+        "Оценка снимка использует среднюю MAE без полей padding. Порог снимка и порог отдельных пикселей калибруются отдельно на нормальных снимках."
+    )
+    controls_layout.addWidget(parent.ae_score_label)
     # --- Параметры AE/VAE ---
     ae_row1 = QGridLayout()
     ae_row1.addWidget(QLabel("Порог, перцентиль:"), 0, 0)
@@ -255,11 +261,12 @@ def setup_yolo_ae_vae_ui(parent):
     parent.ae_perc_spin.setValue(99.0)
     ae_row1.addWidget(parent.ae_perc_spin, 0, 1)
 
-    parent.chk_ae_use_ckpt_thr = QCheckBox("Порог из чекпойнта")
-    parent.chk_ae_use_ckpt_thr.setChecked(True)
+    parent.chk_ae_use_ckpt_thr = QCheckBox("Порог пикселей из checkpoint")
+    parent.chk_ae_use_ckpt_thr.setChecked(False)
+    parent.chk_ae_use_ckpt_thr.setEnabled(False)
     parent.chk_ae_use_ckpt_thr.setToolTip(
-        "Если в чекпойнте есть готовый порог (threshold_value),\n"
-        "использовать его. Иначе — перцентиль слева."
+        "Используется только пиксельный порог новой калибровки с той же предобработкой. "
+        "Старый threshold_value относится к средней ошибке снимка и для маски не подходит."
     )
     ae_row1.addWidget(parent.chk_ae_use_ckpt_thr, 1, 0, 1, 2)
 

@@ -173,7 +173,8 @@ class EnsembleAndSearchTests(unittest.TestCase):
 class AutoencoderTests(unittest.TestCase):
     def test_actual_architectures_shapes_and_explicit_deterministic_vae(self):
         import torch
-        from utils_new.segmentation.autoencoder import build_ae_model_from_cfg, infer_autoencoder
+        from utils_new.autoencoders.models import build_ae_model_from_cfg
+        from utils_new.autoencoders.inference import infer_autoencoder
 
         image = np.full((20, 60, 3), 73, np.uint8)
         for arch in ("conv", "conv_gn", "unet", "unet_v2"):
@@ -202,7 +203,7 @@ class AutoencoderTests(unittest.TestCase):
 
     def test_invalid_output_and_edge_channels_are_not_silently_compared(self):
         import torch
-        from utils_new.segmentation.autoencoder import infer_autoencoder
+        from utils_new.autoencoders.inference import infer_autoencoder
 
         cfg = dict(in_channels=1, img_h=32, img_w=32, keep_aspect=True)
 

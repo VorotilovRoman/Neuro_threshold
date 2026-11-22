@@ -1,0 +1,206 @@
+[
+  {
+    "config": {
+      "arch": "conv",
+      "model_type": "ae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "6a4f16e60233e01eeb7e7752b56a4960b54fbb2919730572d7bcca39acf614b9"
+  },
+  {
+    "config": {
+      "arch": "conv",
+      "model_type": "vae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "05775a78061e657e150f87765ba35d749efd0d543b4b0e2d5e465ddd758a1800"
+  },
+  {
+    "config": {
+      "arch": "conv",
+      "model_type": "ae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "e68fb935bc900c93a7ae8cb6dd74a45ba9a4f1bd09047fb077b88eb2acfc9129"
+  },
+  {
+    "config": {
+      "arch": "conv",
+      "model_type": "vae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "3cbf9b4bb7634f7b0a7a4635d42b4dc59605a4c5be1f71afa37ac7f810c5a28c"
+  },
+  {
+    "config": {
+      "arch": "conv_gn",
+      "model_type": "ae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "ddff6f15ebe0449f83d8a67096ea5ff347c20ee5be3f89d6cfee190b8bf350ce"
+  },
+  {
+    "config": {
+      "arch": "conv_gn",
+      "model_type": "vae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "c9ea914b09522f202c5b63f02cdf79ab92f38cbbe4bff379b32ca0046e735484"
+  },
+  {
+    "config": {
+      "arch": "conv_gn",
+      "model_type": "ae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "8568b05ed1553339baa473f673d45e0949858771dbfd1724ea417d8cdf0f7a21"
+  },
+  {
+    "config": {
+      "arch": "conv_gn",
+      "model_type": "vae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "dafa5344708d3f34142cc045f6758d033df778ad439b35fe3a5de2393e117c45"
+  },
+  {
+    "config": {
+      "arch": "unet",
+      "model_type": "ae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "f649e70d506568147ce2967b568d026a7fd4ed78f5b8b8405b22d75760831789"
+  },
+  {
+    "config": {
+      "arch": "unet",
+      "model_type": "vae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "387a8324ed7732bdec742fdb2f6d7d0e9cf52a878caa2beb0fa0d18b61bdd407"
+  },
+  {
+    "config": {
+      "arch": "unet",
+      "model_type": "ae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "81ffce5f80452731bb6859a075130ad2f33b9b7daa0886a530342e632bf4a06f"
+  },
+  {
+    "config": {
+      "arch": "unet",
+      "model_type": "vae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4
+    },
+    "state_signature": "2dc40e6d9f63a30d48bbbf0d7546d9444ffe3c8e4b6cfb7785f29588679ba6b2"
+  },
+  {
+    "config": {
+      "arch": "unet_v2",
+      "model_type": "ae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4,
+      "model_in_channels": 2,
+      "out_channels": 1,
+      "use_edge_channel": true
+    },
+    "state_signature": "0c4f7fb51ce7fe2ffe646715d236b2dadad74a6f1c348ca883338685ba50ced7"
+  },
+  {
+    "config": {
+      "arch": "unet_v2",
+      "model_type": "vae",
+      "in_channels": 1,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4,
+      "model_in_channels": 2,
+      "out_channels": 1,
+      "use_edge_channel": true
+    },
+    "state_signature": "231f5fb11134f13c8139de4a72bb10caefdbfdb4f2891f39b5c65f41d6c76b69"
+  },
+  {
+    "config": {
+      "arch": "unet_v2",
+      "model_type": "ae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4,
+      "model_in_channels": 4,
+      "out_channels": 3,
+      "use_edge_channel": true
+    },
+    "state_signature": "316eb7592b8cef1af078cbe0e031f00e5dbea9129d376452239594a506442fe8"
+  },
+  {
+    "config": {
+      "arch": "unet_v2",
+      "model_type": "vae",
+      "in_channels": 3,
+      "img_h": 32,
+      "img_w": 48,
+      "latent_dim": 8,
+      "latent_channels": 4,
+      "model_in_channels": 4,
+      "out_channels": 3,
+      "use_edge_channel": true
+    },
+    "state_signature": "74d80be8ab8391524d1781b70068e1802ba5134479ff6e9ab31f20bfa9221122"
+  }
+]

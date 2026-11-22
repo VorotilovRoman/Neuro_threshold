@@ -20,7 +20,7 @@
 
 Геометрия, морфология, смещения, кроп и повороты объектов вынесены в
 utils_new/annotations/processing.py. Только модели AE/VAE и их препроцессинг
-импортируются по запросу из utils_new/segmentation/autoencoder.py.
+импортируются по запросу из utils_new/autoencoders/.
 """
 
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
@@ -198,6 +198,7 @@ class YoloInspectWindow(QMainWindow):
         self.ae_cfg = None
         self.ae_device = None
         self.ae_arch = "conv"
+        self._ae_calibration = None
         self._ae_ckpt_threshold = None
         self._ae_ckpt_percentile = None
         self._ae_err_hw = None
@@ -1067,61 +1068,14 @@ class YoloInspectWindow(QMainWindow):
         try:
             import torch
 
-            from utils_new.segmentation.autoencoder import (
-                build_ae_model_from_cfg,
-                detect_arch,
-            )
+            from utils_new.import_export.autoencoder import load_autoencoder
 
-            try:
-                ckpt = torch.load(path, map_location="cpu", weights_only=False)
-            except TypeError:
-                ckpt = torch.load(path, map_location="cpu")
-
-            if (
-                not isinstance(ckpt, dict)
-                or "model" not in ckpt
-                or "config" not in ckpt
-            ):
-                raise RuntimeError("В чекпойнте нет полей 'model' и 'config'.")
-
-            threshold_value = ckpt.get("threshold_value")
-            if threshold_value is not None:
-                threshold_value = float(threshold_value)
-                if not np.isfinite(threshold_value) or threshold_value < 0:
-                    raise ValueError(
-                        "Порог чекпойнта должен быть конечным неотрицательным числом."
-                    )
-            cfg = dict(ckpt["config"])
-            state_dict = ckpt["model"]
-
-            # Определяем архитектуру: сначала по cfg["arch"], затем по структуре
-            # state_dict. Это даёт совместимость со всеми тремя семействами:
-            # conv (BatchNorm, enc_c=128), conv_gn (GroupNorm, enc_c=64), unet.
-            arch = detect_arch(cfg, state_dict=state_dict)
-
-            required = ["model_type", "in_channels", "img_h", "img_w"]
-            required.append(
-                "latent_channels" if arch in ("unet", "unet_v2") else "latent_dim"
-            )
-            for k in required:
-                if k not in cfg:
-                    raise RuntimeError(f"В config нет ключа '{k}' (arch={arch}).")
-
+            loaded = load_autoencoder(path, device="cpu")
+            model, cfg, arch = loaded.model, loaded.config, loaded.arch
+            calibration = loaded.calibration
+            threshold_value = calibration["pixel_threshold"] if calibration else None
             device = self._resolve_torch_device()
-            model = build_ae_model_from_cfg(cfg, arch=arch)
 
-            # Строгая загрузка + понятная ошибка, если что-то не совпало.
-            try:
-                model.load_state_dict(state_dict)
-            except RuntimeError as e:
-                raise RuntimeError(
-                    f"state_dict не совпал с моделью arch={arch}.\n"
-                    f"Проверьте, что чекпойнт от того же скрипта обучения "
-                    f"(conv / conv_gn / unet) и той же геометрии входа.\n"
-                    f"Детали: {e}"
-                )
-
-            model.eval()
             try:
                 model.to(device)
             except Exception as e:
@@ -1131,13 +1085,28 @@ class YoloInspectWindow(QMainWindow):
                 device = torch.device("cpu")
                 model.to(device)
 
+            self._cancel_task("_ae_task")
+            self._clear_ae_view()
             self.ae_model = model
             self.ae_cfg = cfg
             self.ae_device = device
             self.ae_arch = arch
             self.ae_model_edit.setText(path)
             self._ae_ckpt_threshold = threshold_value
-            self._ae_ckpt_percentile = ckpt.get("threshold_percentile", None)
+            self._ae_calibration = calibration
+            self._ae_ckpt_percentile = (
+                calibration["pixel_percentile"] if calibration else None
+            )
+            self.chk_ae_use_ckpt_thr.setEnabled(calibration is not None)
+            self.chk_ae_use_ckpt_thr.setChecked(calibration is not None)
+            if loaded.legacy:
+                self.log(
+                    "[AE/VAE] Старый checkpoint: порог средней ошибки снимка не применяется к пикселям. Нужна новая калибровка."
+                )
+            elif calibration is None:
+                self.log(
+                    "[AE/VAE] Нет калибровки: доступен относительный перцентиль карты ошибок."
+                )
 
             # Собираем сводку по модели для лога.
             n_params = sum(p.numel() for p in model.parameters())
@@ -1198,16 +1167,19 @@ class YoloInspectWindow(QMainWindow):
 
     def clear_ae_model(self):
         self._cancel_task("_ae_task")
-        import torch
-
         if self.ae_model is None:
             return
+        import torch
+
         self.ae_model = None
         self.ae_cfg = None
         self.ae_device = torch.device("cpu")
         self.ae_arch = "conv"
+        self._ae_calibration = None
         self._ae_ckpt_threshold = None
         self._ae_ckpt_percentile = None
+        self.chk_ae_use_ckpt_thr.setEnabled(False)
+        self.chk_ae_use_ckpt_thr.setChecked(False)
         self.ae_model_edit.clear()
         self._clear_ae_view()
         self.log("[AE/VAE] Очищено")
@@ -1238,6 +1210,7 @@ class YoloInspectWindow(QMainWindow):
         self._ae_valid_region = None
         self._ae_base_bgr = None
         self._ae_threshold = float("nan")
+        self.ae_score_label.setText("Ошибка снимка: —")
         self.error_view.set_pixmap(numpy_to_qpixmap(None))
 
     def apply_ae(self, silent=False):
@@ -1260,7 +1233,7 @@ class YoloInspectWindow(QMainWindow):
         device = self._resolve_torch_device()
 
         def compute(cancel):
-            from utils_new.segmentation.autoencoder import infer_autoencoder
+            from utils_new.autoencoders.inference import infer_autoencoder
 
             return infer_autoencoder(image, model, cfg, device, cancel)
 
@@ -1270,6 +1243,17 @@ class YoloInspectWindow(QMainWindow):
             self._ae_valid_region = result["valid_region"]
             self._ae_base_bgr = image
             self._ae_threshold = self._compute_threshold()
+            score = result["image_score"]
+            text = f"Средняя ошибка снимка (MAE): {score:.6f}"
+            if self._ae_calibration is not None:
+                limit = self._ae_calibration["image_threshold"]
+                verdict = (
+                    "кандидат на дефект" if score > limit else "в пределах калибровки"
+                )
+                text += f"; порог {limit:.6f} — {verdict}"
+            else:
+                text += "; порог снимка не откалиброван"
+            self.ae_score_label.setText(text)
             self._render_ae_view()
             x1, y1, x2, y2 = self._ae_valid_region
             roi = self._ae_err_hw[y1:y2, x1:x2]
