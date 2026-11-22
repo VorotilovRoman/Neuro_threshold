@@ -7,7 +7,7 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from utils_ops import interactive_ops as ops
+from utils_new.segmentation.backends import interactive as ops
 
 
 class InteractiveAlgorithms(unittest.TestCase):
@@ -191,7 +191,7 @@ class ThresholdAndGradientAlgorithms(unittest.TestCase):
             self.assertNotEqual(mask[0, 0], mask[10, 10])
 
     def test_kirsch_is_signed_maximum_of_eight_compass_directions(self):
-        from utils_ops.gradient_ops import apply_gradient_method
+        from utils_new.segmentation.backends.gradient import apply_gradient_method
 
         # Low amplitude avoids saturation hiding the max(abs) error.
         image = np.random.default_rng(6).integers(0, 12, (17, 23), dtype=np.uint8)
@@ -210,12 +210,10 @@ class ThresholdAndGradientAlgorithms(unittest.TestCase):
 
     def test_shared_threshold_backend_is_used_by_ensemble(self):
         from utils_new import threshold_processing
-        from utils_ops import segmentation_ops
+        from tabs import threshold_methods, demo_ensemble_methods
 
-        self.assertIs(
-            segmentation_ops.apply_threshold_method,
-            threshold_processing.apply_threshold_method,
-        )
+        self.assertIs(threshold_methods.apply_threshold_method, threshold_processing.apply_threshold_method)
+        self.assertIs(demo_ensemble_methods.apply_threshold_preset, threshold_processing.apply_threshold_preset)
 
 
 class TraditionalLearningContracts(unittest.TestCase):
@@ -270,7 +268,7 @@ class TraditionalLearningContracts(unittest.TestCase):
                 manual_target(path, gray.shape)
 
     def test_tiny_superpixels_and_constant_k_search(self):
-        from utils_ops.traditional_ml_ops import (
+        from utils_new.segmentation.backends.traditional_ml import (
             compute_elbow_kmeans,
             create_superpixels,
             find_optimal_k_elbow,

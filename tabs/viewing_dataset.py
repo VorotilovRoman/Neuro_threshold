@@ -29,7 +29,6 @@ from PyQt5.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
-    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -39,6 +38,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ui import dataset_source as source_dialogs
+from ui.annotation_review import update_annotation_list
 from ui.image_view import numpy_to_qpixmap, set_fill_color_button_preview
 from ui.settings_service import settings
 from ui_tabs.viewing_dataset_ui import setup_viewing_dataset_ui
@@ -799,37 +799,6 @@ class ViewingDataset(QMainWindow):
             self.info_label.setText(f"Image {self.current_idx + 1} of {total}")
 
     # ------------------------------------------------------------------
-    # Список аннотаций / отрисовка
-    # ------------------------------------------------------------------
-    def update_annotation_list(self, list_widget, annotations, img_w, img_h):
-        list_widget.blockSignals(True)
-        try:
-            list_widget.clear()
-            for idx, original_ann in enumerate(annotations):
-                ann = normalized_annotation(original_ann)
-                if ann[0] == "detect":
-                    _, cls, cx, cy, w, h = ann
-                    x = int((cx - w / 2) * img_w)
-                    y = int((cy - h / 2) * img_h)
-                    x2 = int((cx + w / 2) * img_w)
-                    y2 = int((cy + h / 2) * img_h)
-                    text = f"{idx}: cls={cls}, rect=({x},{y},{x2},{y2})"
-                elif ann[0] == "obb":
-                    _, cls, points = ann
-                    text = f"{idx}: cls={cls}, OBB (4 points)"
-                elif ann[0] == "segment":
-                    _, cls, points = ann
-                    num_pts = len(points) // 2
-                    text = f"{idx}: cls={cls}, polygon ({num_pts} points)"
-                else:
-                    text = f"{idx}: unknown type"
-                item = QListWidgetItem(text)
-                item.setData(Qt.UserRole, idx)
-                list_widget.addItem(item)
-        finally:
-            list_widget.blockSignals(False)
-
-    # ------------------------------------------------------------------
     # Отображение текущего изображения
     # ------------------------------------------------------------------
     def show_current_image(self):
@@ -849,7 +818,7 @@ class ViewingDataset(QMainWindow):
             self.current_annotations, self.current_img_w, self.current_img_h
         )
         self._refresh_main_pixmap()
-        self.update_annotation_list(
+        update_annotation_list(
             self.coord_list,
             self.current_annotations,
             self.current_img_w,
@@ -1252,7 +1221,7 @@ class ViewingDataset(QMainWindow):
         self._sync_current_annotations()
 
         # Обновляем только список и вид — выделение сохраняем
-        self.update_annotation_list(
+        update_annotation_list(
             self.coord_list,
             self.current_annotations,
             self.current_img_w,
@@ -1342,7 +1311,7 @@ class ViewingDataset(QMainWindow):
             and self.annotations[self.current_idx] is not None
         ):
             self.current_annotations = list(self.annotations[self.current_idx])
-            self.update_annotation_list(
+            update_annotation_list(
                 self.coord_list,
                 self.current_annotations,
                 self.current_img_w,
@@ -1379,7 +1348,7 @@ class ViewingDataset(QMainWindow):
                 )
             )
             self.selected_index = new_sel
-            self.update_annotation_list(
+            update_annotation_list(
                 self.coord_list,
                 self.current_annotations,
                 self.current_img_w,
@@ -1440,7 +1409,7 @@ class ViewingDataset(QMainWindow):
         self._sync_current_annotations()
 
         # Обновляем список и восстанавливаем выделение
-        self.update_annotation_list(
+        update_annotation_list(
             self.coord_list,
             self.current_annotations,
             self.current_img_w,
@@ -1550,7 +1519,7 @@ class ViewingDataset(QMainWindow):
 
         self.current_annotations[idx] = new_ann
         self._sync_current_annotations()
-        self.update_annotation_list(
+        update_annotation_list(
             self.coord_list,
             self.current_annotations,
             self.current_img_w,

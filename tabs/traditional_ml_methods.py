@@ -41,7 +41,7 @@ from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import TraditionalMLPresetManager
 from ui_tabs.traditional_ml_methods_ui import setup_traditional_ml_ui
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_ops.traditional_ml_ops import (
+from utils_new.segmentation.backends.traditional_ml import (
     create_superpixels,
     extract_pixel_features,
     extract_superpixel_features,

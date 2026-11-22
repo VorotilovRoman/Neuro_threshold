@@ -2,7 +2,7 @@
 
 import cv2
 import numpy as np
-from utils_ops.gradient_ops import apply_gradient_method
+from utils_new.segmentation.backends.gradient import apply_gradient_method
 
 
 def gradient_binary(gray, method, params, threshold):

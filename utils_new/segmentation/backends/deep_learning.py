@@ -1,3 +1,4 @@
+"""Lazy model adapters for semantic segmentation and YOLO inference."""
 # deep_learning_ops.py
 import json
 import os

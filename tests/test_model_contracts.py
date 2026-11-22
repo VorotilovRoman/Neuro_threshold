@@ -47,7 +47,7 @@ class OutputContracts(unittest.TestCase):
             validate_mask_files(paths, 1)  # binary union accepts all positive IDs
 
     def test_onnx_dynamic_input_and_centered_padding_roundtrip(self):
-        from utils_ops.deep_learning_ops import ONNXSegmentor
+        from utils_new.segmentation.backends.deep_learning import ONNXSegmentor
 
         model = ONNXSegmentor()
 
@@ -140,7 +140,7 @@ class RealTorchContracts(unittest.TestCase):
         import segmentation_models_pytorch as smp
         import torch
 
-        from utils_ops.deep_learning_ops import DeepLabV3Segmentor, UNetSegmentor
+        from utils_new.segmentation.backends.deep_learning import DeepLabV3Segmentor, UNetSegmentor
 
         with tempfile.TemporaryDirectory() as directory:
             for name, network, adapter, metadata in (
@@ -266,7 +266,7 @@ class RealONNXContracts(unittest.TestCase):
         import onnx
         from onnx import TensorProto, helper
 
-        from utils_ops.deep_learning_ops import ONNXSegmentor
+        from utils_new.segmentation.backends.deep_learning import ONNXSegmentor
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "semantic.onnx"
@@ -302,7 +302,7 @@ class RealONNXContracts(unittest.TestCase):
 
 class YOLOContracts(unittest.TestCase):
     def test_mask_geometry_is_original_size_and_detection_fallback_is_explicit(self):
-        from utils_ops.deep_learning_ops import YOLOSegmentor
+        from utils_new.segmentation.backends.deep_learning import YOLOSegmentor
 
         model = YOLOSegmentor()
         image = np.zeros((10, 30, 3), np.uint8)
@@ -367,7 +367,7 @@ class ExportGeometryContracts(unittest.TestCase):
         import torch
 
         from utils_new.segmentation.model_export import stride_padded_model
-        from utils_ops.deep_learning_ops import ONNXSegmentor
+        from utils_new.segmentation.backends.deep_learning import ONNXSegmentor
 
         class Network(torch.nn.Module):
             encoder = SimpleNamespace(output_stride=32)

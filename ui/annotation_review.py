@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyQt5.QtCore import QSettings, Qt, pyqtSignal
+from PyQt5.QtCore import QSettings, QSignalBlocker, Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -19,8 +19,31 @@ from PyQt5.QtWidgets import (
 )
 
 from ui.dataset_audit.workers import AuditWorker
-from utils_new.annotation_processing import find_strong_overlaps
+from utils_new.annotation_processing import (
+    find_strong_overlaps,
+    format_annotation_display,
+    normalized_annotation,
+)
 from utils_new.dataset_audit.annotation_review import AnnotationReviewJob
+
+
+def update_annotation_list(list_widget, annotations, image_width, image_height):
+    """Shared editor/viewer rows; preserve source indices and signal blocking."""
+    blocker = QSignalBlocker(list_widget)
+    try:
+        list_widget.clear()
+        for index, annotation in enumerate(annotations):
+            try:
+                text = format_annotation_display(
+                    index, normalized_annotation(annotation), image_width, image_height
+                )
+            except (TypeError, ValueError, IndexError, OverflowError):
+                text = f"Obj {index + 1}: некорректная аннотация"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, index)
+            list_widget.addItem(item)
+    finally:
+        blocker.unblock()
 
 
 class ReviewWorker(AuditWorker):

@@ -32,6 +32,37 @@ def eager_imports(nodes):
 
 
 class ArchitectureTests(unittest.TestCase):
+    def test_algorithm_consumers_and_registry_use_only_new_backends(self):
+        import import_libs_internal
+
+        self.assertFalse(list((ROOT / 'utils_ops').rglob('*.py')))
+        removed = {'predict_pixelwise', 'predict_superpixel', 'get_display_params',
+                   'draw_selected_objects', 'get_class_color', 'apply_morphology',
+                   'segment_contours', 'segment_projections', 'segment_min_area_rect'}
+        self.assertFalse(removed & set(import_libs_internal.__all__))
+        for path in python_sources():
+            if path.relative_to(ROOT).parts[0] == 'tests':
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+                targets = []
+                if isinstance(node, ast.Import):
+                    targets = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    targets = [node.module or '']
+                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    targets = [node.value]
+                self.assertFalse(any(t == 'utils_ops' or t.startswith('utils_ops.') for t in targets),
+                                 f'{path}:{getattr(node, "lineno", 0)}')
+
+    def test_backend_package_is_lazy_and_algorithms_do_not_import_qt(self):
+        self.run_python('''import importlib, sys
+import utils_new.segmentation.backends
+assert not ({'cv2','numpy','torch','PyQt5'} & sys.modules.keys())
+for name in ('gradient','interactive','traditional_ml','deep_learning'):
+    importlib.import_module('utils_new.segmentation.backends.' + name)
+assert not ({'torch','torchvision','ultralytics','onnxruntime','PyQt5'} & sys.modules.keys())
+''')
+
     def run_python(self, code):
         with tempfile.TemporaryDirectory() as config:
             env = dict(os.environ, QT_QPA_PLATFORM='offscreen',

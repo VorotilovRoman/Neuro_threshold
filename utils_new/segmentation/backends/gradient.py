@@ -1,3 +1,4 @@
+"""Gradient maps; shared by the gradient tab and automatic search."""
 import cv2
 import numpy as np
 

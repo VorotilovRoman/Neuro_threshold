@@ -12,7 +12,7 @@ def checkpoint(cancel):
 
 
 def interactive(method, image, gray, rect, fg, bg, params, cancel):
-    from utils_ops import interactive_ops as ops
+    from utils_new.segmentation.backends import interactive as ops
 
     checkpoint(cancel)
     if method == "GrabCut":
@@ -60,7 +60,7 @@ def interactive(method, image, gray, rect, fg, bg, params, cancel):
 
 
 def features(image, spec):
-    from utils_ops import traditional_ml_ops as ops
+    from utils_new.segmentation.backends import traditional_ml as ops
 
     flags = (spec["use_intensity"], spec["use_texture"], spec["use_spatial"])
     if spec["use_superpixels"]:
@@ -103,7 +103,7 @@ def prepare_training(images, grays, spec, cancel, paths=None):
 
 
 def train_prepared(x, y, spec, cancel):
-    from utils_ops import traditional_ml_ops as ops
+    from utils_new.segmentation.backends import traditional_ml as ops
 
     checkpoint(cancel)
     metadata = dict(spec)
@@ -162,7 +162,7 @@ def predict_ml(image, gray, model, metadata, spec, cluster, cancel):
 
 
 def optimal_k(images, spec, cancel):
-    from utils_ops import traditional_ml_ops as ops
+    from utils_new.segmentation.backends import traditional_ml as ops
 
     values = []
     for image in images:
@@ -187,7 +187,7 @@ def predict_dl(model, image, parameters, overrides, cancel):
 
 
 def load_dl(name, path, device, cancel):
-    from utils_ops.deep_learning_ops import create_segmentor
+    from utils_new.segmentation.backends.deep_learning import create_segmentor
 
     checkpoint(cancel)
     model = create_segmentor(name, device=device)

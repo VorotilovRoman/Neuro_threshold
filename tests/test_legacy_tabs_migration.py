@@ -307,12 +307,16 @@ from tabs.yolo_find_img import FindImagesWindow
 app=QApplication([]);w=FindImagesWindow();w.show()
 with tempfile.TemporaryDirectory() as directory:
  path=Path(directory)/'image.png';cv2.imwrite(str(path),np.zeros((30,60),np.uint8));weights=Path(directory)/'model.pt';weights.write_text('bad')
- w.current_root_dir=directory;w.yolo_settings._model_path.setText(str(weights))
+ w.current_root_dir=directory
+ # The path starts a class-reading task too: patch before either background import.
  with patch.dict(sys.modules,ultralytics=SimpleNamespace(YOLO=lambda _:(_ for _ in ()).throw(ValueError('bad weights')))),patch('runtime_policy.configure_ultralytics'):
+  w.yolo_settings._model_path.setText(str(weights))
   w.scan_btn.click();timer=QElapsedTimer();timer.start()
   while not w.scan_btn.isEnabled() and timer.elapsed()<8000:QTest.qWait(10)
   assert w.scan_btn.isEnabled() and not w.stop_btn.isEnabled()
-  assert 'bad weights' in w.scan_status.text()
+  assert 'bad weights' in w.scan_status.text(),w.scan_status.text()
+  while w._class_task and w._class_task.isRunning() and timer.elapsed()<8000:QTest.qWait(10)
+  assert not w._class_task or not w._class_task.isRunning()
  item=QListWidgetItem('image');item.setData(Qt.UserRole,str(path));item.setCheckState(Qt.Checked);w.results_list.addItem(item)
  w.target_folder_edit.setText(directory)
  with patch.object(QMessageBox,'information'):w.copy_selected_files()

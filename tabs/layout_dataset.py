@@ -67,7 +67,7 @@ from utils_new.dataset_yolo_labels_new import (
     load_annotations_for_image,
     save_annotations_for_image,
 )
-from utils_ops.segmentation_ops import update_annotation_list
+from ui.annotation_review import update_annotation_list
 
 
 # ============================================================
@@ -318,7 +318,7 @@ class Labeler(QMainWindow):
         выделения во view. Если keep_row задан — восстанавливает
         current row на этой строке.
         keep_row == -1 (или None) — current row снимается."""
-        self.object_list.blockSignals(True)
+        was_blocked = self.object_list.blockSignals(True)
         try:
             update_annotation_list(
                 self.object_list, self.current_annotations, self.img_w, self.img_h
@@ -328,7 +328,7 @@ class Labeler(QMainWindow):
             else:
                 self.object_list.setCurrentRow(-1)
         finally:
-            self.object_list.blockSignals(False)
+            self.object_list.blockSignals(was_blocked)
 
     # ----------------------------------------------------------------------
     #  Инструменты рисования

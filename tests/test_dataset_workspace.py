@@ -107,6 +107,49 @@ class DatasetWorkspaceTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("NEURO_RUN_GUI_TESTS") == "1", "opt-in Qt tests")
 class DatasetWorkspaceGuiTests(unittest.TestCase):
+    def test_editor_and_viewer_share_rows_indices_and_configurable_palette(self):
+        self.gui(r'''
+import tempfile
+from pathlib import Path
+import cv2,numpy as np
+from copy import deepcopy
+from PyQt5.QtWidgets import QApplication,QListWidget
+from PyQt5.QtCore import Qt,QCoreApplication,QEvent
+from PyQt5.QtTest import QSignalSpy
+from main import ImagePlayer
+from ui.annotation_review import update_annotation_list
+from ui.settings_service import settings
+app=QApplication([]);window=ImagePlayer([('labeler','Editor'),('test','Viewer')])
+palette=deepcopy(settings.current['dataset_class_palette'])
+try:
+ window.show();app.processEvents()
+ with tempfile.TemporaryDirectory() as directory:
+  image=Path(directory)/'source.png';cv2.imwrite(str(image),np.zeros((40,80),np.uint8))
+  image.with_suffix('.txt').write_text('1 .5 .5 .4 .4\n2 .1 .1 .3 .1 .3 .3 .1 .3\n3 .5 .1 .8 .1 .7 .3\n')
+  settings.current['dataset_class_palette'][1]=[12,34,56]
+  rows=[]
+  for owner in window._tab_widgets:
+   owner._load_images([str(image)]);objects=owner.overlap_review.objects
+   assert objects.count()==3
+   rows.append([objects.item(i).text().split('  [OVERLAP:')[0].removeprefix('⚠ ') for i in range(3)])
+   assert [objects.item(i).data(Qt.UserRole) for i in range(3)]==[0,1,2]
+   view=getattr(owner,'image_view',None) or owner.viewer
+   assert view._annotation_color(1).getRgb()[:3]==(56,34,12)
+  assert rows[0]==rows[1],rows
+  objects=window._tab_widgets[0].object_list;objects.setCurrentRow(1)
+  changes=QSignalSpy(objects.currentRowChanged)
+  objects.blockSignals(True)
+  update_annotation_list(objects,[('detect',1,.5,.5,.4,.4),('detect',)],80,40)
+  assert objects.signalsBlocked() and len(changes)==0
+  assert objects.count()==2 and 'некорректная' in objects.item(1).text()
+  objects.blockSignals(False)
+  update_annotation_list(objects,[],80,40)
+  assert not objects.signalsBlocked() and not objects.count() and len(changes)==0
+finally:
+ settings.current['dataset_class_palette']=palette
+ window.close();window.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
+''')
+
     def gui(self, code):
         with tempfile.TemporaryDirectory() as directory:
             env = dict(

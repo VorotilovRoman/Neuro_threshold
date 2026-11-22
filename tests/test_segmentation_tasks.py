@@ -239,7 +239,7 @@ class NumericalOperationTests(unittest.TestCase):
         import numpy as np
 
         from utils_new.segmentation import operations
-        from utils_ops import interactive_ops
+        from utils_new.segmentation.backends import interactive as interactive_ops
 
         image = np.zeros((20, 30, 3), np.uint8)
         gray = np.zeros((20, 30), np.uint8)

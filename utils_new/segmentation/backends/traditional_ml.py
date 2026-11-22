@@ -1,7 +1,6 @@
-import warnings
+"""Pixel/superpixel features and classical estimator training."""
 
 import cv2
-import joblib
 import numpy as np
 from skimage import feature, segmentation
 from sklearn.cluster import KMeans, MeanShift
@@ -116,16 +115,7 @@ def train_decision_tree(X, y):
     dt.fit(X, y)
     return dt
 
-def predict_pixelwise(model, X, original_shape):
-    labels = model.predict(X)
-    return labels.reshape(original_shape).astype(np.uint8)
 
-def predict_superpixel(model, segments, X_superpixel):
-    labels = model.predict(X_superpixel)
-    result = np.zeros_like(segments, dtype=np.uint8)
-    for seg_id, label in enumerate(labels):
-        result[segments == seg_id] = 255 if label == 1 else 0
-    return result
 
 def create_superpixels(image, superpixel_size=50):
     h, w = image.shape[:2]

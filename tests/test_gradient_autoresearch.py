@@ -55,7 +55,7 @@ class GradientSearchTests(unittest.TestCase):
             combination_count(state)
 
     def test_seven_methods_match_manual_live_pipeline_with_fill_filter_invert(self):
-        from utils_ops.gradient_ops import apply_gradient_method
+        from utils_new.segmentation.backends.gradient import apply_gradient_method
         from utils_new.morphology import apply_morphology
 
         gray = np.full((64, 96), 220, np.uint8)

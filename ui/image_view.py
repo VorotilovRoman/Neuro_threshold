@@ -182,7 +182,6 @@ class SmartGraphicsViewNew(QGraphicsView):
         self._last_pixmap_size = None
         self._save_basename = "image"
         self.display_style = AnnotationDisplayStyle()
-        self._class_color_provider = None
         self._class_name_provider = None
 
         # ----- Режимы -----
@@ -466,12 +465,6 @@ class SmartGraphicsViewNew(QGraphicsView):
             overrides['fill_color'] = chosen.name().upper()
         if overrides:
             self.set_display_style(**overrides)
-
-    def set_class_color_provider(self, provider):
-        """Совместимость: старый provider сохраняется, но цвета берутся
-        из редактируемой палитры settings.dataset_class_palette."""
-        self._class_color_provider = provider
-        self.viewport().update()
 
     def set_class_name_provider(self, provider):
         """Необязательная функция: provider(class_id) -> текст подписи."""
@@ -2206,8 +2199,8 @@ class SmartGraphicsViewNew(QGraphicsView):
             painter.translate(start_scene)
             painter.scale(spx, spx)
             if style.label_background_alpha > 0:
-                # Плашка датасета окрашивается по классу, как в старом
-                # draw_class_label(); текст — независимый colors.label_text.
+                # Плашка датасета окрашивается по классу;
+                # цвет текста задаётся отдельно через colors.label_text.
                 # Для других вызовов сохраняется контрастный fallback.
                 if background_color is not None:
                     bg = QColor(background_color)

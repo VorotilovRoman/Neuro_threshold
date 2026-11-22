@@ -1090,10 +1090,10 @@ def transform_annotation_image(image, annotation, **kwargs):
 # ---------------------------------------------------------------------------
 
 def _mask_extraction_dimensions(binary: np.ndarray, image_shape=None, min_area=None):
-    """Площадь отсечения — та же, что в старом get_display_params().
+    """Проверяет размеры маски; по умолчанию отсеивает области меньше 0.05% кадра.
 
-    img_shape используется для нормализации/отсечения и обычно совпадает
-    с binary.shape. Для миграции допускается явное значение min_area.
+    Явный min_area задаёт площадь в пикселях. Размеры изображения и маски
+    должны совпадать, чтобы нормализация координат оставалась корректной.
     """
     if binary is None or binary.ndim != 2 or binary.dtype != np.uint8:
         raise ValueError("Требуется одноканальная бинарная маска uint8")
@@ -1202,8 +1202,7 @@ def extract_annotations_from_mask(binary: np.ndarray, mode='detect', *,
 
 
 def format_annotation_display(index, ann, img_w, img_h):
-    """Форматирует аннотацию для отображения в QListWidget.
-       Поддерживает форматы ('detect',...), ('obb',...), ('segment',...)."""
+    """Форматирует Detect/OBB/Segment в строку списка объектов."""
     typ = ann[0]
     if typ == 'detect':
         _, cls, cx, cy, w, h = ann
@@ -1229,22 +1228,3 @@ def format_annotation_display(index, ann, img_w, img_h):
         return f"Obj {index + 1}: polygon {num_pts} pts | YOLO-seg: {cls} {preview}"
     else:
         return f"Obj {index + 1}: unknown type"
-
-def format_object_for_list(index, obj, img_w, img_h):
-    """Универсальное форматирование для старого стиля (используется в threshold_methods.py)."""
-    if isinstance(obj, tuple) and len(obj) > 0 and obj[0] in ('detect', 'obb', 'segment'):
-        return format_annotation_display(index, obj, img_w, img_h)
-    elif len(obj) == 4:
-        x, y, w, h = obj
-        cx_norm = (x + w / 2) / img_w
-        cy_norm = (y + h / 2) / img_h
-        w_norm = w / img_w
-        h_norm = h / img_h
-        markup = f"obj {index + 1}: x={x}, y={y}, w={w}, h={h}"
-        yolo = f"YOLO: 0 {cx_norm:.6f} {cy_norm:.6f} {w_norm:.6f} {h_norm:.6f}"
-        return f"{markup} | {yolo}"
-    elif len(obj) == 5:
-        cx, cy, w, h, angle = obj
-        return f"obj {index + 1}: center=({cx:.1f},{cy:.1f}), size=({w:.1f}x{h:.1f}), angle={angle:.1f}°"
-    else:
-        return f"obj {index + 1}: unknown"

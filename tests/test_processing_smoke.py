@@ -15,8 +15,8 @@ class ProcessingSmokeTests(unittest.TestCase):
         import cv2
         import numpy as np
 
-        from utils_ops.gradient_ops import apply_gradient_method
-        from utils_ops.segmentation_ops import apply_threshold_method
+        from utils_new.segmentation.backends.gradient import apply_gradient_method
+        from utils_new.threshold_processing import apply_threshold_method
         image = np.zeros((64, 64), dtype=np.uint8)
         image[16:48, 16:48] = 220
         with tempfile.TemporaryDirectory() as directory:

@@ -9,8 +9,7 @@ from PyQt5.QtGui import QColor, QPalette
 from path_setup import get_project_root
 from utils_new.settings_store import load_settings, save_settings
 
-# Исходные BGR-цвета классов 0..9 из utils.segmentation_ops.CLASS_COLORS.
-# Этот модуль не импортирует segmentation_ops, чтобы избежать циклического импорта.
+# Общая начальная BGR-палитра классов для всех графических компонентов.
 DEFAULT_DATASET_CLASS_PALETTE_BGR = [
     [0, 0, 200], [0, 130, 220], [0, 150, 150], [0, 140, 0],
     [170, 110, 0], [200, 0, 0], [180, 0, 180], [110, 0, 110],
@@ -54,8 +53,7 @@ class SettingsManager(QObject):
                 "edit_points": [0, 0, 255],
                 "label_text": [255, 0, 0]
             },
-            # Размеры в логических пикселях Qt (для старых OpenCV вкладок
-            # getter-множители вычисляются относительно прежних базовых размеров).
+            # Размеры в логических пикселях Qt.
             "font_size_px": FONT_SIZE_PX_DEFAULT,
             "line_thickness_px": LINE_THICKNESS_PX_DEFAULT,
             # Датасет имеет отдельную палитру: все десять прежних цветов.
@@ -153,15 +151,6 @@ class SettingsManager(QObject):
         cls = max(0, cls)
         palette = self.get_dataset_class_palette()
         return tuple(palette[cls % len(palette)])
-
-    def get_font_scale_factor(self):
-        # Обратная совместимость с OpenCV-утилитами, ожидающими множитель.
-        return self.get_font_size_px() / float(FONT_SIZE_PX_DEFAULT)
-
-    def get_line_thickness_factor(self):
-        # Для старого get_display_params() — множитель от его базовой толщины.
-        # Точная пиксельная толщина гарантируется новым Qt view.
-        return self.get_line_thickness_px() / float(LINE_THICKNESS_PX_DEFAULT)
 
 
 def adjust_color(color, h_shift=0, s_shift=0, l_shift=0):

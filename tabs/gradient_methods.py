@@ -37,7 +37,7 @@ from utils_new.autoreseach_utils.search_space import default_settings, combinati
 from utils_new.autoreseach_utils.gradient_processing import finalize_gradient_mask
 from utils_new.json_store import read_json_object, write_json_atomic
 from utils_new.segmentation.postprocessing import extract_objects
-from utils_ops.gradient_ops import apply_gradient_method
+from utils_new.segmentation.backends.gradient import apply_gradient_method
 
 
 class GradientMethodsWindow(QMainWindow):

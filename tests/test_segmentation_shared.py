@@ -73,21 +73,23 @@ class SegmentationCommonTests(unittest.TestCase):
             write_annotations_atomic([],path,1000,200)
             self.assertEqual(path.read_text(),'')
 
-    def test_extraction_matches_previous_geometry(self):
-        from utils_ops.segmentation_ops import (
-            segment_contours,
-            segment_min_area_rect,
-            segment_projections,
-        )
+    def test_extraction_preserves_reference_rectangle_geometry(self):
         mask = np.zeros((80,120),np.uint8)
         mask[10:40,20:70]=255
-        mask[23:25,35:38]=0
+        mask[23:25,35:38]=0  # Interior hole does not change the outer contour.
         image = np.zeros((80,120,3),np.uint8)
-        for mode,fn in [('segment',segment_contours),('detect',segment_projections),
-                        ('obb',segment_min_area_rect)]:
-            old = fn(image,mask,draw=False,**({'use_hull':False} if fn!=segment_projections else {}))[1]
-            self.assertEqual(postprocessing.extract_objects(image,mask,mode)[1],old)
-        self.assertTrue(postprocessing.extract_objects(image,mask,'segment')[1])
+        expected = {
+            'detect': ('detect', 0, .375, .3125, 50/120, .375),
+            'segment': ('segment', 0, [20/120,10/80,20/120,39/80,69/120,39/80,69/120,10/80]),
+            'obb': ('obb', 0, [69/120,39/80,20/120,39/80,20/120,10/80,69/120,10/80]),
+        }
+        for mode, reference in expected.items():
+            with self.subTest(mode=mode):
+                objects = postprocessing.extract_objects(image,mask,mode)[1]
+                self.assertEqual(len(objects),1)
+                self.assertEqual(objects[0][:2],reference[:2])
+                np.testing.assert_allclose(objects[0][2:],reference[2:])
+
 
     def test_preset_store_writes_atomically_without_widget_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:
