@@ -13,12 +13,18 @@ requests==2.33.1
 PyYAML==6.0.3
 Pillow==12.1.1
 
-# Portable pins: exact build is selected by install.py --torch cpu|cu126|cu130
-# Windows / GTX 1650 working profile: --torch cu126 (torch 2.11.0+cu126, torchvision 0.26.0+cu126)
+# Shared versions. Select an exact CPU/CUDA build for the whole environment:
+#   python install.py --torch cu126 --extra training
+#   python -m pip install -r requirements/torch-cu126.txt
+# After manual pip installation: python install.py --repair-opencv
+# GTX 1650: cu126 (CUDA runtime 12.6). This file alone does not select a GPU build.
+# torch/torchvision are a matched pair; do not upgrade either independently.
 torch==2.11.0
 torchvision==0.26.0
 
 ultralytics==8.4.36
+# ONNX stays on CPU by default; PyTorch/YOLO training uses the CUDA profile above.
+# Do not install onnxruntime and onnxruntime-gpu together.
 onnxruntime==1.25.1
 albumentations==2.0.8
 PyQt5==5.15.11

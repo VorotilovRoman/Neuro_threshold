@@ -14,10 +14,31 @@ python dependency_health.py --load
 python main.py
 ```
 
-Windows: активируйте `.venv\Scripts\activate`. Для CUDA используйте подходящий
-профиль `--torch cu126` или `--torch cu130`; cu126 использовался с GTX 1650.
+Windows: активируйте `.venv\Scripts\activate`. Для NVIDIA GTX 1650 используйте
+CUDA 12.6 вместо CPU-команды выше:
+
+```bash
+python install.py --torch cu126 --extra training
+python dependency_health.py --torch-profile cu126 --cuda-test
+```
+
+| Профиль | PyTorch / torchvision | Назначение |
+| --- | --- | --- |
+| `cu126` | `2.11.0+cu126` / `0.26.0+cu126` | NVIDIA, основной профиль для GTX 1650 |
+| `cu130` | `2.11.0+cu130` / `0.26.0+cu130` | Альтернатива с совместимыми GPU и драйвером CUDA 13 |
+| `cpu` | `2.11.0+cpu` / `0.26.0+cpu` | Работа без NVIDIA GPU |
+
+Нужен совместимый драйвер NVIDIA; отдельный CUDA Toolkit для готовых wheels
+не требуется. [Официальная таблица версий](https://pytorch.org/get-started/previous-versions/).
+Установщик проверяет точный профиль, CUDA forward/backward и GPU-операцию NMS
+из torchvision; недоступная CUDA считается ошибкой, перехода на CPU нет.
+Вспомогательный `onnxruntime` остаётся CPU-сборкой и не влияет на CUDA-обучение.
+
 Дополнительные функции: `--extra training`, `--extra audit`, `--extra sahi`,
 `--extra export` — флаги можно сочетать. Версии находятся в `requirements/` и `requirements.txt`.
+Файлы `requirements/torch-*.txt` включают общие зависимости и точную сборку:
+при ручной установке используйте `python -m pip install -r requirements/torch-cu126.txt`,
+затем восстановление OpenCV ниже. Один `requirements.txt` не выбирает CUDA-профиль.
 
 Установщик оставляет один `opencv-python-headless`: интерфейс создаёт PyQt5.
 Предупреждение pip check о требовании Ultralytics к `opencv-python` — допускаемое

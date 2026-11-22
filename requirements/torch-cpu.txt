@@ -1,3 +1,5 @@
---index-url https://download.pytorch.org/whl/cpu
+# Full CPU-only profile. Exact local pins prevent a CUDA wheel being selected.
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r ../requirements.txt
 torch==2.11.0+cpu
 torchvision==0.26.0+cpu

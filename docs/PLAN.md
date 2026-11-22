@@ -20,7 +20,5 @@
   редактора/просмотрщика поверх общего парсера YOLO и рендера масок;
   сохранить различия сценариев сохранения.
 - [ ] Проверить Windows/CUDA на целевой системе: полный набор вкладок,
+  установку GPU-профиля и `dependency_health.py --torch-profile cu126 --cuda-test`,
   YOLO AutoBatch/остановку обучения, реальные U-Net/DeepLab и AE/VAE checkpoints.
-
-- [ ] Обновить requirements.txt под работу с GPU: согласовать версии PyTorch,
-  torchvision и CUDA, проверить установку и обучение на целевой видеокарте.

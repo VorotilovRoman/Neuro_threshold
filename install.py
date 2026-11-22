@@ -5,10 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from dependency_health import OPENCV_PROVIDERS, SELECTED_OPENCV, installed_opencv
+from dependency_health import OPENCV_PROVIDERS, SELECTED_OPENCV, TORCH_PROFILES, installed_opencv
 
 ROOT = Path(__file__).resolve().parent
-TORCH_PROFILES = ('cpu', 'cu126', 'cu130')
 EXTRAS = ('training', 'audit', 'sahi', 'export')
 
 
@@ -50,10 +49,9 @@ def main(argv=None):
         parser.error('Activate a virtual environment first: python -m venv .venv')
     try:
         if not args.repair_opencv:
-            # Resolve the matching pair together. Never silently switch GPU/CPU profiles.
-            run_pip('install', '-r', str(ROOT / 'requirements' / f'torch-{args.torch}.txt'),
-                    dry_run=args.dry_run)
-            requirements = ['-r', str(ROOT / 'requirements.txt')]
+            # One resolution includes the exact local Torch build and all extras.
+            # A conflicting extra must fail rather than replace CUDA with CPU.
+            requirements = ['-r', str(ROOT / 'requirements' / f'torch-{args.torch}.txt')]
             for extra in sorted(set(args.extra)):
                 requirements.extend(['-r', str(ROOT / 'requirements' / f'optional-{extra}.txt')])
             run_pip('install', *requirements, dry_run=args.dry_run)
@@ -61,7 +59,12 @@ def main(argv=None):
         if not args.dry_run:
             # No native modules have been imported by this installer. Validate in
             # a new process after all wheel files have reached their final state.
-            subprocess.run([sys.executable, str(ROOT / 'dependency_health.py'), '--load'],
+            verification = [sys.executable, str(ROOT / 'dependency_health.py'), '--load']
+            if not args.repair_opencv:
+                verification += ['--torch-profile', args.torch]
+                if args.torch != 'cpu':
+                    verification.append('--cuda-test')
+            subprocess.run(verification,
                            cwd=ROOT, check=True)
             print('Installation verified. See any explicit OpenCV metadata exceptions above.')
         return 0
