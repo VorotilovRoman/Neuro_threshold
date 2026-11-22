@@ -215,6 +215,9 @@ def load_coco(json_path, log_cb=None, *, preserve_category_ids=False):
             f"categories={len(categories)}"
         )
 
+    if payload.get('_dataset_sources') and log_cb:
+        from utils_new.import_export.dataset_sources import log_manifest
+        log_manifest(json_path, log_cb)
     return items, categories, root
 
 

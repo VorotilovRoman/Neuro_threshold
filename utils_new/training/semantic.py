@@ -397,6 +397,11 @@ def run_training(params, kind, *, stop=None, log=print):
     root = root.resolve()
     weights = root / "weights"
     weights.mkdir(parents=True)
+    from utils_new.import_export.dataset_sources import persist_source
+    persistent_source = persist_source(source, root / 'dataset_source')
+    for key in ('dataset_path', 'unet_yaml', 'deeplab_yaml'):
+        if cfg.get(key) == str(source):
+            cfg[key] = persistent_source
     write_json_atomic(root / "args.json", cfg)
     write_json_atomic(root / "split.json", data)
     log(f"RESULT_DIR:{root}")

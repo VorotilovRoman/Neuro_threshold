@@ -173,6 +173,7 @@ class DatasetAnalyzer:
             object_areas=[],
             object_areas_pct=[],
             empty_images=0,
+            unlabelled_images=0,
             error=None,
             errors=[],
             cancelled=False,
@@ -226,6 +227,11 @@ class DatasetAnalyzer:
                         and brightness > params.max_brightness
                     ):
                         continue
+                if self.dataset_type != 2 and (len(pair) < 2 or pair[1] is None):
+                    if params.min_objs == 0:
+                        result['filtered_pairs'].append(pair)
+                        result['unlabelled_images'] += 1
+                    continue
                 selected = [
                     obj
                     for obj in objects

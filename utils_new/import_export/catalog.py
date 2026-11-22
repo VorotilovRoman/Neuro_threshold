@@ -187,6 +187,7 @@ def collect_mask_classes(pairs, log_cb=None):
     for pair in pairs:
         path = pair[1] if len(pair) > 1 else None
         if not path:
+            valid_pairs.append((pair[0], None))
             continue
         try:
             mask = read_index_mask(path)

@@ -42,6 +42,18 @@ def _mask_split_pairs(cfg, root, split, *, strict, log=None):
         _local_image_path,
     )
 
+    if cfg.get('_dataset_sources'):
+        selection = cfg['_dataset_sources']
+        result = []
+        for value in resolve_split_sources(cfg.get(split), root, strict=True):
+            for image in collect_image_paths(value, recursive=Path(value).is_dir()):
+                image = str(Path(image).resolve())
+                mask = selection['annotations'].get(image)
+                if strict and not mask:
+                    continue  # No mask is not a background target for semantic training.
+                result.append((image, mask))
+        return list(dict.fromkeys(result))
+
     aliases = ("val", "valid", "validation") if split == "val" else (split,)
     key = next((key for key in aliases if key in cfg or key + "_images" in cfg), split)
     raw = cfg.get(key + "_images", cfg.get(key))
@@ -132,6 +144,9 @@ def load_unet_yaml(yaml_path, log_cb=None):
         log_cb(
             f"[U-Net] загружено: pairs={len(pairs)}, classes={len(classes)}, offset={offset}, root={root}"
         )
+    if cfg.get('_dataset_sources') and log_cb:
+        from utils_new.import_export.dataset_sources import log_manifest
+        log_manifest(yaml_path, log_cb)
     return dict(
         pairs=pairs,
         class_names=classes,
@@ -210,6 +225,9 @@ def write_yolo_txt_for_unet_pairs(
     used = {p.name.casefold() for p in output.iterdir()}
     allowed = set(map(int, class_names.keys()))
     for image_path, mask_path in pairs:
+        if mask_path is None:
+            result.append((str(image_path), None))
+            continue
         try:
             mask = read_index_mask(mask_path)
             height, width = mask.shape
@@ -251,7 +269,7 @@ def load_training_sources(source, default_num_classes=2):
 
     cfg, root, nc, _offset, _names = _mask_config(source, default_num_classes)
     result = {key: [] for key in ("train", "val", "test")}
-    voc = (
+    voc = not cfg.get('_dataset_sources') and (
         bool(cfg.get("train_txt"))
         or (root / "ImageSets/Segmentation/train.txt").exists()
     )

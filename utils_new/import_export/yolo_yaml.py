@@ -87,54 +87,35 @@ def _local_image_path(image, source, root):
         return Path(image.name)
 
 
-def _find_label_for_image(img_path, base_path, split, rel_dir):
-    """
-    Ищет .txt для изображения в стандартных местах YOLO-структуры.
-    Возвращает путь или None.
-    """
-    img_path_abs = os.path.abspath(img_path)
-    d = os.path.dirname(img_path_abs)
-    base = os.path.splitext(os.path.basename(img_path_abs))[0]
-
-    # 1) рядом с изображением
-    same = os.path.join(d, base + ".txt")
-    if os.path.exists(same):
-        return same
-
-    # 2) подстановка images → labels в пути
-    norm = img_path_abs.replace("\\", "/")
-    parts = norm.split("/")
-    for i, p in enumerate(parts):
-        if p == "images":
-            new_parts = parts[:i] + ["labels"] + parts[i + 1 :]
-            new_parts[-1] = base + ".txt"
-            cand = os.sep.join(new_parts)
-            if os.path.exists(cand):
-                return cand
-
-    local = _local_image_path(img_path, rel_dir, base_path)
+def label_candidates(img_path, base_path, split, rel_dir=None):
+    """List existing candidates by user-visible source, without choosing a winner."""
+    from pathlib import Path
+    image, root = Path(img_path).resolve(), Path(base_path).resolve()
+    result = {"beside": [], "labels": [], "other": []}
+    candidates = [("beside", image.with_suffix(".txt"))]
+    for i, part in enumerate(image.parts):
+        if part == "images":
+            candidates.append(("labels", Path(*image.parts[:i], "labels", *image.parts[i + 1:]).with_suffix(".txt")))
+    local = _local_image_path(image, rel_dir, root).with_suffix(".txt")
     canonical_split = "val" if split in ("valid", "validation") else split
-    canonical = os.path.join(
-        base_path, "labels", canonical_split, str(local.with_suffix(".txt"))
-    )
-    if os.path.isfile(canonical):
-        return canonical
+    candidates.append(("labels", root / "labels" / canonical_split / local))
+    for folder in [root / "labels" / split,
+                   root / "labels" / Path(rel_dir).name if rel_dir else None,
+                   root / "labels", image.parent.parent / "labels"]:
+        if folder:
+            candidates.append(("labels" if folder.is_relative_to(root / "labels") else "other", folder / (image.stem + ".txt")))
+    seen = set()
+    for group, path in candidates:
+        path = path.resolve()
+        if path.is_file() and path not in seen:
+            result[group].append(str(path))
+            seen.add(path)
+    return result
 
-    # 3) стандартные относительные пути от base_path
-    for lbl_dir in [
-        os.path.join(base_path, "labels", split),
-        os.path.join(base_path, "labels", os.path.basename(rel_dir))
-        if rel_dir
-        else None,
-        os.path.join(base_path, "labels"),
-        os.path.join(os.path.dirname(d), "labels"),
-    ]:
-        if not lbl_dir:
-            continue
-        cand = os.path.join(lbl_dir, base + ".txt")
-        if os.path.exists(cand):
-            return cand
-    return None
+
+def _find_label_for_image(img_path, base_path, split, rel_dir):
+    groups = label_candidates(img_path, base_path, split, rel_dir)
+    return next((p for paths in groups.values() for p in paths), None)
 
 
 def find_mask_for_image(img_path, base_path=None):
@@ -232,16 +213,19 @@ def load_yolo_yaml(yaml_path, log_cb=None):
                 if key in seen_paths:
                     continue
                 seen_paths.add(key)
-                lbl = _find_label_for_image(
-                    img_path,
-                    base_path,
-                    split,
-                    source if os.path.isdir(source) else None,
-                )
+                selection = cfg.get("_dataset_sources")
+                if selection:
+                    lbl = selection["annotations"].get(os.path.realpath(img_path))
+                else:
+                    lbl = _find_label_for_image(img_path, base_path, split,
+                                                source if os.path.isdir(source) else None)
                 pairs.append((img_path, lbl))
                 n_in_split += 1
         splits_info[split] = n_in_split
 
+    if cfg.get('_dataset_sources') and log_cb:
+        from utils_new.import_export.dataset_sources import log_manifest
+        log_manifest(yaml_path, log_cb)
     return pairs, names_dict, base_path, splits_info
 
 
@@ -305,6 +289,12 @@ def build_yolo_save_target_map(yaml_path, image_paths, *, root=None):
         raise ValueError(
             "Cannot determine YAML split for saving labels: " + ", ".join(missing[:5])
         )
+    if cfg.get("_dataset_sources"):
+        targets.update({image: label for image, label in cfg['_dataset_sources'].get('targets', {}).items()
+                        if image in targets and label})
+        for image, label in cfg["_dataset_sources"]["annotations"].items():
+            if label and image in targets:
+                targets[image] = label
     reversed_targets = {}
     for image, target in targets.items():
         identity = os.path.normcase(os.path.abspath(target))

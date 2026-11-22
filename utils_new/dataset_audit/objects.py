@@ -40,6 +40,8 @@ def read_objects(pair, dataset_type=0, input_format="auto"):
     aux = pair[1] if len(pair) > 1 else None
     if dataset_type == 2:
         return (w, h), []
+    if aux is None:
+        return (w, h), []
     if not aux or not Path(aux).is_file():
         raise FileNotFoundError(f"Нет разметки: {aux}")
     if dataset_type == 0:

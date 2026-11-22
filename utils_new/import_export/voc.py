@@ -34,7 +34,7 @@ from utils_new.import_export.yolo_yaml import (
 )
 
 
-def read_voc_pairs(txt_path, jpeg_dir, seg_dir):
+def read_voc_images(txt_path, jpeg_dir):
     path = Path(txt_path)
     if not path.is_file():
         raise FileNotFoundError(f"Не найден VOC список: {path}")
@@ -59,13 +59,21 @@ def read_voc_pairs(txt_path, jpeg_dir, seg_dir):
             raise ValueError(
                 f"Для VOC ID {name} нужно ровно одно изображение: {images}"
             )
-        mask = Path(seg_dir) / (name + ".png")
-        if not mask.is_file():
-            raise FileNotFoundError(f"Нет маски: {mask}")
         image = images[0].resolve()
         if image not in seen:
-            pairs.append((str(image), str(mask.resolve())))
+            pairs.append(str(image))
             seen.add(image)
+    return pairs
+
+
+def read_voc_pairs(txt_path, jpeg_dir, seg_dir):
+    pairs = []
+    for image in read_voc_images(txt_path, jpeg_dir):
+        relative = Path(image).relative_to(Path(jpeg_dir).resolve()).with_suffix('.png')
+        mask = Path(seg_dir) / relative
+        if not mask.is_file():
+            raise FileNotFoundError(f"Нет маски: {mask}")
+        pairs.append((image, str(mask.resolve())))
     return pairs
 
 

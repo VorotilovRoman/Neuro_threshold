@@ -120,7 +120,7 @@ class ModelResearchApp(QMainWindow):
 
     def set_ground_truth_source(self, path):
         self.ground_truth_path = str(Path(path).resolve())
-        self.truth_path.setText(self.ground_truth_path)
+        self.truth_path.setText(source_dialogs.display_dataset_source(self.ground_truth_path))
         self.truth_path.setToolTip(self.ground_truth_path)
         self.lbl_truth.setText(
             "Эталон выбран. При сравнении будут проверены TXT и размеры снимков. Пустой TXT допустим; отсутствующий файл — ошибка."

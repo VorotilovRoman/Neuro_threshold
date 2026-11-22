@@ -825,6 +825,9 @@ class YoloValidationJob:
             from runtime_policy import configure_ultralytics
 
             configure_ultralytics()
+            from utils_new.import_export.dataset_sources import enable_ultralytics_sources, metadata
+            if metadata(self.data_path):
+                enable_ultralytics_sources()
             from runtime_torch import require_torch
 
             require_torch()

@@ -179,7 +179,7 @@ class UtilityContracts(unittest.TestCase):
             self.assertFalse(validator.validate(pair)[0])
             with self.assertRaises(ValueError):
                 read_yolo_labels(label, ImageSize(80, 40), strict=True)
-            self.assertFalse(validator.validate((str(image), None))[0])
+            self.assertTrue(validator.validate((str(image), None))[0])
             self.assertTrue(PairValidator(2).validate((str(image), None))[0])
 
     def test_mask_class_collection_does_not_truncate_32bit_ids(self):

@@ -479,12 +479,12 @@ class DatasetModelController:
     def browse_val_data(self):
         path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
         if path:
-            self.val_data_edit.setText(path)
+            source_dialogs.set_dataset_path(self.val_data_edit, path)
 
     def browse_val_folder(self):
         path = source_dialogs.get_directory(self, "dataset_root")
         if path:
-            self.val_data_edit.setText(path)
+            source_dialogs.set_dataset_path(self.val_data_edit, path)
 
     def _resolve_val_data_path(self, path):
         if not path:
@@ -503,7 +503,7 @@ class DatasetModelController:
         if not self._audit_model_path:
             QMessageBox.warning(self, "Модель не выбрана", "Загрузите YOLO-модель.")
             return
-        raw = self.val_data_edit.text().strip()
+        raw = source_dialogs.dataset_path(self.val_data_edit)
         if not raw:
             QMessageBox.warning(
                 self, "Нет данных", "Укажите путь к data.yaml или папке."

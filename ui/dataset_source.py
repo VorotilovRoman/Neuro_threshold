@@ -47,14 +47,14 @@ ACTIONS = {
         "Выберите YOLO YAML",
         "YAML (*.yaml *.yml)",
         False,
-        "Загрузить снимки, TXT, классы и split из YOLO data.yaml. Текущий набор заменяется.",
+        "Проверить path, источник TXT и количество файлов перед загрузкой YOLO data.yaml. Снимки без меток сохраняются.",
     ),
     "coco": (
         "COCO…",
         "Выберите COCO JSON",
         "COCO JSON (*.json)",
         False,
-        "Импортировать COCO JSON с категориями и аннотациями; текущий набор заменяется.",
+        "Проверить пути снимков, используемые COCO JSON и количество файлов перед импортом; текущий набор заменяется.",
     ),
     "add_coco": (
         "+ COCO…",
@@ -68,7 +68,7 @@ ACTIONS = {
         "Выберите YAML датасета с масками",
         "YAML (*.yaml *.yml)",
         False,
-        "Загрузить пары снимок–индексная маска и классы из masks_data.yaml. В редакторе маски преобразуются в полигоны с потерей деталей.",
+        "Проверить пути, источник индексных масок и количество файлов. Снимки без масок сохраняются; в редакторе маски преобразуются в полигоны.",
     ),
     "dataset_root": (
         "Папка датасета…",
@@ -224,7 +224,7 @@ def annotation_format_combo(parent=None, *, mixed=True):
     return combo
 
 
-def get_open_file(owner, key, *, multiple=False, directory=""):
+def get_open_file(owner, key, *, multiple=False, directory="", confirm=True):
     caption, title, filters, is_folder, _ = ACTIONS[key]
     if is_folder:
         raise ValueError("Используйте get_directory для папки.")
@@ -237,7 +237,43 @@ def get_open_file(owner, key, *, multiple=False, directory=""):
     first = selected[0] if multiple and selected else selected if not multiple else ""
     if first:
         settings.setValue(key, str(Path(first).parent))
+        if confirm and key in ('yolo_yaml', 'unet_yaml', 'coco', 'add_coco'):
+            try:
+                approved = confirm_dataset_import(owner, selected if multiple else [selected],
+                    'coco' if key in ('coco', 'add_coco') else ('unet' if key == 'unet_yaml' else 'yolo'))
+            except (OSError, ValueError, TypeError) as exc:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(owner, 'Источник датасета', str(exc))
+                approved = []
+            return (approved if multiple else (approved[0] if approved else ''), result[1])
     return result
+
+
+def confirm_dataset_import(owner, paths, kind):
+    from ui.dataset_import import confirm_dataset_import as confirm
+    return confirm(owner, paths, kind)
+
+
+def set_dataset_path(edit, path):
+    from utils_new.import_export.dataset_sources import original_source
+    display = original_source(path)
+    edit.setProperty('dataset_effective_path', str(path))
+    edit.setProperty('dataset_display_path', display)
+    same = edit.text() == display
+    edit.setText(display)
+    if same:
+        edit.textChanged.emit(display)
+
+
+def dataset_path(edit):
+    if edit.text().strip() == edit.property('dataset_display_path'):
+        return edit.property('dataset_effective_path') or edit.text().strip()
+    return edit.text().strip()
+
+
+def display_dataset_source(path):
+    from utils_new.import_export.dataset_sources import original_source
+    return original_source(path)
 
 
 def get_directory(owner, key, *, directory=""):
@@ -449,7 +485,7 @@ def choose_coco_sources(owner):
             paths = discover_coco_json(directory)
             if not paths:
                 QMessageBox.warning(owner, "COCO", "В папке не найдено COCO JSON.")
-            return paths
+            return confirm_dataset_import(owner, paths, 'coco') if paths else []
         except (OSError, ValueError) as exc:
             QMessageBox.warning(owner, "COCO", str(exc))
     return []

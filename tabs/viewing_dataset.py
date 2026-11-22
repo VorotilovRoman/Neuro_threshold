@@ -173,8 +173,7 @@ class LabelValidationThread(QThread):
     def _resolve_label_path(self, img_path):
         if self.yaml_label_map:
             lp = self.yaml_label_map.get(img_path)
-            if lp and os.path.exists(lp):
-                return lp
+            return lp if lp and os.path.exists(lp) else None
         if self.label_folder:
             base = os.path.splitext(os.path.basename(img_path))[0]
             cand = os.path.join(self.label_folder, base + ".txt")
@@ -552,6 +551,7 @@ class ViewingDataset(QMainWindow):
             resize_enabled=resize_enabled,
             max_side=max_side,
             safe_max_side=None,
+            load_annotations_flag=(label_map is None),
         )
         self._lazy_cache = LazyImageCache(
             paths=all_files,
@@ -847,7 +847,7 @@ class ViewingDataset(QMainWindow):
         pairs = []
         for path in self.image_paths:
             label = self._yaml_label_map.get(path)
-            if not label:
+            if not self._yaml_label_map:
                 label = (
                     str(Path(self._label_folder) / (Path(path).stem + ".txt"))
                     if self._label_folder
@@ -1556,13 +1556,17 @@ class ViewingDataset(QMainWindow):
         if not file_path:
             return
         try:
+            from utils_new.import_export.mask_yaml import is_unet_yaml
+            if is_unet_yaml(file_path):
+                self._load_unet_into_viewer(file_path)
+                return
             pairs, names, root, splits_info = load_yolo_yaml(file_path, log_cb=self.log)
             if not pairs:
                 QMessageBox.warning(self, "Ошибка", "Не найдено изображений в YAML.")
                 return
 
             image_paths = [p for p, _ in pairs]
-            label_map = {p: lp for p, lp in pairs if lp is not None}
+            label_map = dict(pairs)
             save_target_map = build_yolo_save_target_map(
                 file_path, image_paths, root=root
             )
@@ -1584,20 +1588,20 @@ class ViewingDataset(QMainWindow):
             self._save_label_map = save_target_map
             self._save_source_kind = "yolo"
 
-            self.log(f"=== Загрузка YAML: {file_path} ===")
+            self.log(f"=== Загрузка YAML: {source_dialogs.display_dataset_source(file_path)} ===")
             self.log(f"Root: {root}")
             for split, n in splits_info.items():
                 if n:
                     self.log(f"  • {split}: {n} изображений")
             self.log(
                 f"Загружено {len(image_paths)} изображений "
-                f"(метки: {len(label_map)}, маски: {len(mask_map)})."
+                f"(метки: {sum(value is not None for value in label_map.values())}, маски: {len(mask_map)})."
             )
             QMessageBox.information(
                 self,
                 "Успех",
                 f"Загружено {len(image_paths)} изображений.\n"
-                f"Метки: {len(label_map)}\n"
+                f"Метки: {sum(value is not None for value in label_map.values())}\n"
                 f"Маски: {len(mask_map)}",
             )
         except Exception as e:
@@ -1700,7 +1704,7 @@ class ViewingDataset(QMainWindow):
         )
         self._save_label_map = dict(label_map)
         self._save_source_kind = "unet"
-        self.log(f"=== Загрузка U-Net YAML: {yaml_path} ===")
+        self.log(f"=== Загрузка U-Net YAML: {source_dialogs.display_dataset_source(yaml_path)} ===")
         self.log(
             f"Root: {root}, пар: {len(image_paths)}, "
             f"classes: {len(class_names)}, offset={mask_offset}"

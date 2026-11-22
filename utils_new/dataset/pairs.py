@@ -93,7 +93,10 @@ def build_pair_display(pair, validator, dataset_type, include_empty):
         "other": " [??bit]",
     }.get(bit_type, "")
 
-    if not is_valid:
+    if is_valid and dataset_type != 2 and aux_path is None:
+        tag = 'unlabelled'
+        text = f'{name}{color_marker}{bit_marker} [Без разметки]'
+    elif not is_valid:
         tag = "invalid"
         kind = "label" if dataset_type == 0 else ("mask" if dataset_type == 1 else "")
         text = f"{name}{color_marker}{bit_marker} (image + {kind}) [INVALID: {err}]"

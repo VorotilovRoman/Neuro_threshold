@@ -120,10 +120,11 @@ for prefix in ('PyQt5', 'torch', 'ultralytics', 'open_clip', 'transformers', 'ma
             FilterParams(),
             include_empty=True,
         )
-        self.assertEqual(result["filtered_pairs"], [valid, empty])
+        self.assertEqual(result["filtered_pairs"], [valid, empty, missing])
         self.assertEqual(result["empty_images"], 1)
         self.assertEqual(result["total_objects"], 1)
-        self.assertEqual(len(result["errors"]), 2)
+        self.assertEqual(result['unlabelled_images'], 1)
+        self.assertEqual(len(result["errors"]), 1)
         result = DatasetAnalyzer(2).filter_pairs([missing], set(), 0, FilterParams())
         self.assertEqual(result["filtered_pairs"], [missing])
         self.assertTrue(

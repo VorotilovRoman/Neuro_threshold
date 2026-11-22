@@ -131,7 +131,7 @@ class PairValidator:
         if self.dataset_type == 2:
             return True, "", color_type, bit_type
         if aux_path is None:
-            return False, "Annotation file is missing", color_type, bit_type
+            return True, "Без разметки", color_type, bit_type
 
         if self.dataset_type == 1:
             if not os.path.exists(aux_path):

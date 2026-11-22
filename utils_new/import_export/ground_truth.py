@@ -184,9 +184,11 @@ def load_ground_truth(
             if image.is_relative_to(base)
             else image.as_posix()
         )
-        samples.append(
-            _read_sample(key, image, _label_for(image, root), size, format_hint)
-        )
+        selection = config.get('_dataset_sources') if path.is_file() else None
+        label = selection['annotations'].get(str(image)) if selection else None
+        if selection and label is None:
+            continue  # Unlabelled images are not an ideal/manual reference.
+        samples.append(_read_sample(key, image, Path(label) if label else _label_for(image, root), size, format_hint))
     if not samples and path.is_dir():
         samples = _labels_only(root, reports, format_hint, cancel_check)
     if not samples:

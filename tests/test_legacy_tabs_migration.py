@@ -227,6 +227,8 @@ class AutoencoderTests(unittest.TestCase):
 @unittest.skipUnless(os.environ.get("NEURO_RUN_GUI_TESTS") == "1", "opt-in Qt tests")
 class MigratedTabsGuiTests(unittest.TestCase):
     def gui(self, code):
+        code = ("from unittest.mock import patch as _source_patch\n"
+                "_source_patch('ui.dataset_source.confirm_dataset_import', side_effect=lambda owner, paths, kind: paths).start()\n" + code)
         with tempfile.TemporaryDirectory() as directory:
             env = dict(
                 os.environ,

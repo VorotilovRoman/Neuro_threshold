@@ -228,7 +228,7 @@ class YOLOTrainWidget(BaseTrainWidget):
     def _browse_dataset_yaml(self):
         path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
         if path:
-            self.dataset_yaml.setText(path)
+            source_dialogs.set_dataset_path(self.dataset_yaml, path)
             self.dataset_folder.clear()
 
     def _add_model_selection(self):
@@ -376,7 +376,7 @@ class YOLOTrainWidget(BaseTrainWidget):
                 QMessageBox.warning(self, "Ошибка", "Не указан путь к модели YOLO")
                 return None
 
-        data_path = self.dataset_yaml.text().strip()
+        data_path = source_dialogs.dataset_path(self.dataset_yaml)
         if not data_path:
             data_path = self.dataset_folder.text().strip()
             if data_path:
@@ -485,12 +485,12 @@ class UNetTrainWidget(BaseTrainWidget):
     def _browse_unet_yaml(self):
         path, _ = source_dialogs.get_open_file(self, "unet_yaml")
         if path:
-            self.unet_yaml.setText(path)
+            source_dialogs.set_dataset_path(self.unet_yaml, path)
             # Авто-заполнение полей ниже — через сигнал textChanged
 
     def _on_unet_yaml_changed(self, text):
         """Автозаполнение dataset_path и num_classes из YAML."""
-        path = (text or "").strip()
+        path = source_dialogs.dataset_path(self.unet_yaml)
         if not path or not os.path.isfile(path):
             return
         try:
@@ -747,7 +747,7 @@ class UNetTrainWidget(BaseTrainWidget):
                 return None
 
         dataset_path = self.dataset_path.text().strip()
-        unet_yaml = self.unet_yaml.text().strip()
+        unet_yaml = source_dialogs.dataset_path(self.unet_yaml)
 
         # Должен быть указан хотя бы один источник: папка или YAML.
         if not dataset_path and not unet_yaml:

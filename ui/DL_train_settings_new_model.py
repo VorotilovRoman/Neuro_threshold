@@ -188,7 +188,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
     def _browse_deeplab_yaml(self):
         path, _ = source_dialogs.get_open_file(self, "unet_yaml")
         if path:
-            self.deeplab_yaml.setText(path)
+            source_dialogs.set_dataset_path(self.deeplab_yaml, path)
             self.dataset_path.clear()
 
     # ------------------------------------------------------------------
@@ -627,7 +627,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         return {
             # Датасет
             "dataset_path": self.dataset_path.text().strip(),
-            "deeplab_yaml": self.deeplab_yaml.text().strip(),
+            "deeplab_yaml": source_dialogs.dataset_path(self.deeplab_yaml),
             # Архитектура
             "architecture": arch,
             "backbone": self.backbone.currentText(),
@@ -863,7 +863,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
                 return None
 
         dataset_path = self.dataset_path.text().strip()
-        deeplab_yaml = self.deeplab_yaml.text().strip()
+        deeplab_yaml = source_dialogs.dataset_path(self.deeplab_yaml)
 
         if not dataset_path and not deeplab_yaml:
             QMessageBox.warning(

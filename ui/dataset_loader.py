@@ -185,17 +185,8 @@ class DatasetLoaderMixin:
                     "Эта вкладка не принимает индексные маски. Выберите YOLO YAML с TXT или COCO.",
                 )
                 return
-            reply = QMessageBox.question(
-                self,
-                "Похоже на U-Net YAML",
-                f"Файл {os.path.basename(file_path)} похож на U-Net-датасет "
-                f"(есть masks-поля). Загрузить его как U-Net?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if reply == QMessageBox.Yes:
-                self._load_unet_from_path(file_path)
-                return
+            self._load_unet_from_path(file_path)
+            return
         self._load_yolo_yaml_from_path(file_path)
 
     def _load_yolo_yaml_from_path(self, file_path):
@@ -218,12 +209,6 @@ class DatasetLoaderMixin:
             return
 
         missing = sum(1 for _, lbl in pairs if lbl is None)
-        with_labels = [(img, lbl) for img, lbl in pairs if lbl is not None]
-        if not with_labels:
-            QMessageBox.warning(
-                self, "Ошибка", f"Найдено {len(pairs)} изображений, но ни одного .txt."
-            )
-            return
 
         self._yaml_mode = True
         self._yaml_root = root
@@ -235,20 +220,21 @@ class DatasetLoaderMixin:
         self.masks_folder = None
 
         self._apply_loaded_pairs(
-            pairs=with_labels,
+            pairs=pairs,
             input_type=0,
             input_format="auto",
             class_names_from_yaml=names,
-            source_label=f"YAML: {file_path}",
+            source_label=f"YAML: {source_dialogs.display_dataset_source(file_path)}",
             source_yaml=file_path,
         )
+        self.log(f'Загружено снимков: {len(pairs)}, TXT: {len(pairs) - missing}, без меток: {missing}.')
 
         self.log(f"=== Загрузка из YAML: {file_path} ===")
         self.log(f"Root: {root}")
         for split, n in splits_info.items():
             if n:
                 self.log(f"  • {split}: {n} изображений")
-        self.log(f"Пар с метками: {len(with_labels)}, без .txt: {missing}")
+        self.log(f"Пар с метками: {len(pairs) - missing}, без .txt: {missing}")
 
     # ---------------- COCO ----------------
     def load_from_coco(self):
@@ -396,7 +382,7 @@ class DatasetLoaderMixin:
             input_type=1,
             input_format="auto",
             class_names_override=pixel_class_names,
-            source_label=f"U-Net YAML: {yaml_path}",
+            source_label=f"U-Net YAML: {source_dialogs.display_dataset_source(yaml_path)}",
             source_yaml=yaml_path,
         )
         self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")

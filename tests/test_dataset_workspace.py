@@ -151,6 +151,8 @@ finally:
 ''')
 
     def gui(self, code):
+        code = ("from unittest.mock import patch as _source_patch\n"
+                "_source_patch('ui.dataset_source.confirm_dataset_import', side_effect=lambda owner, paths, kind: paths).start()\n" + code)
         with tempfile.TemporaryDirectory() as directory:
             env = dict(
                 os.environ,

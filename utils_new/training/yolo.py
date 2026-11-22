@@ -76,6 +76,7 @@ def main(argv=None):
             else json.loads(args.params)
         )
         train_args = build_train_args(params)
+        params['data'] = train_args['data']
         if train_args["batch"] == -1 or 0 < train_args["batch"] < 1:
             log(
                 "[BATCH] AutoBatch передан Ultralytics без изменения; ошибка отдельной пробы не обязательно означает сбой обучения."
@@ -86,6 +87,10 @@ def main(argv=None):
         configure_ultralytics()
         import ultralytics
         from ultralytics import YOLO
+
+        from utils_new.import_export.dataset_sources import enable_ultralytics_sources, metadata as source_metadata
+        if source_metadata(params['data']):
+            enable_ultralytics_sources()
 
         log(f"Ultralytics YOLO version: {ultralytics.__version__}")
         for signum in (signal.SIGINT, signal.SIGTERM):
@@ -106,6 +111,14 @@ def main(argv=None):
         def on_train_start(trainer):
             nonlocal phase
             capture_trainer(trainer)
+            if source_metadata(params['data']):
+                from utils_new.import_export.dataset_sources import persist_source
+                from ultralytics.utils import YAML
+                approved = persist_source(params['data'], Path(trainer.save_dir) / 'dataset_source')
+                trainer.args.data = approved
+                train_args['data'] = approved
+                params['data'] = approved
+                YAML.save(Path(trainer.save_dir) / 'args.yaml', vars(trainer.args))
             phase = "обучение"
             log(
                 "[TRAIN] Фактические параметры: "
