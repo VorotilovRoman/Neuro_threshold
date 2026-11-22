@@ -180,3 +180,53 @@ def resize_for_segmentation(image, max_side):
 
 normalize_to_uint8 = ImageStats.to_uint8
 convert_to_grayscale = ImageStats.to_gray
+
+
+def resize_segmentation_pair(
+    image, mask, size, mode="hard", *, is_train=False, mask_fill=0
+):
+    """OpenCV linear image resize and exact nearest index sampling, shared with inference."""
+    from utils_new.annotations import ImageSize
+    from utils_new.annotations.masks import mask_roi_at_image_scale
+
+    target_h, target_w = (size, size) if isinstance(size, int) else size
+    height, width = image.shape[:2]
+    if mode not in ("hard", "keep_aspect_pad", "random_crop"):
+        raise ValueError("Неизвестный режим ресайза.")
+    if mode == "hard":
+        nh, nw = target_h, target_w
+    else:
+        scale = (min if mode == "keep_aspect_pad" else max)(
+            target_h / height, target_w / width
+        )
+        nh, nw = max(1, round(height * scale)), max(1, round(width * scale))
+    resized = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    labels = (
+        mask_roi_at_image_scale(mask, ImageSize(nw, nh), (0, 0, nw, nh))
+        if mask is not None
+        else None
+    )
+    if mode == "keep_aspect_pad":
+        top, left = (target_h - nh) // 2, (target_w - nw) // 2
+        result = np.zeros((target_h, target_w, *image.shape[2:]), dtype=image.dtype)
+        result[top : top + nh, left : left + nw] = resized
+        if labels is not None:
+            padded = np.full((target_h, target_w), mask_fill, dtype=labels.dtype)
+            padded[top : top + nh, left : left + nw] = labels
+            labels = padded
+        return result, labels, (left, top, nh, nw)
+    if mode == "random_crop":
+        top = (
+            int(np.random.randint(nh - target_h + 1))
+            if is_train
+            else (nh - target_h) // 2
+        )
+        left = (
+            int(np.random.randint(nw - target_w + 1))
+            if is_train
+            else (nw - target_w) // 2
+        )
+        resized = resized[top : top + target_h, left : left + target_w]
+        if labels is not None:
+            labels = labels[top : top + target_h, left : left + target_w]
+    return resized, labels, (0, 0, target_h, target_w)

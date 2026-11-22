@@ -59,12 +59,6 @@ def split_images(paths, fraction, seed):
     return train, val
 
 
-def seed_worker(worker_id):
-    import random
-
-    seed = torch.initial_seed() % 2**32
-    np.random.seed(seed)
-    random.seed(seed)
 
 
 class AutoencoderDataset(Dataset):

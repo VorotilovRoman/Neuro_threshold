@@ -239,7 +239,11 @@ class ImagePlayer(QMainWindow):
     # ------------------------------------------------------------------
     def closeEvent(self, event):
         scanning = False
+        training = False
         for tab in getattr(self, "_tab_widgets", []):
+            shutdown_training = getattr(tab, "shutdown_training", None)
+            if shutdown_training is not None:
+                training = shutdown_training() or training
             shutdown_processing = getattr(tab, "shutdown_processing", None)
             if shutdown_processing is not None:
                 shutdown_processing()
@@ -256,8 +260,11 @@ class ImagePlayer(QMainWindow):
             if shutdown is not None:
                 shutdown()
                 scanning = scanning or tab._scan_busy
-        if scanning:
+        if scanning or training:
             event.ignore()
+            if training:
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(100,self.close)
             return
         # Проверяем глобальный флаг через переменную окружения
         collect_info = os.environ.get("COLLECT_LIBS_INFO", "0").lower() in (

@@ -28,6 +28,13 @@ def segmentation_metrics(
     matrix = confusion_matrix(
         logits, target, num_classes, threshold=threshold, ignore_index=ignore_index
     ).double()
+    return metrics_from_confusion(matrix, num_classes)
+
+
+def metrics_from_confusion(matrix, num_classes):
+    import torch
+
+    matrix = torch.as_tensor(matrix, dtype=torch.float64)
     keys = ("IoU", "Dice", "Precision", "Recall", "F1", "Accuracy")
     if not matrix.sum():
         return dict.fromkeys(keys, float("nan"))

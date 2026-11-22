@@ -138,27 +138,8 @@ class TorchSegmentor(BaseSegmentor):
         else:
             tgt_h, tgt_w = input_size
 
-        pad_info = (0, 0, tgt_h, tgt_w)
-
-        if resize_mode == 'keep_aspect_pad':
-            scale = min(tgt_h / h, tgt_w / w)
-            new_h = max(1, int(round(h * scale)))
-            new_w = max(1, int(round(w * scale)))
-            resized = cv2.resize(image, (new_w, new_h))
-            pad_h = tgt_h - new_h
-            pad_w = tgt_w - new_w
-            pad_top = pad_h // 2
-            pad_bottom = pad_h - pad_top
-            pad_left = pad_w // 2
-            pad_right = pad_w - pad_left
-            image = cv2.copyMakeBorder(
-                resized, pad_top, pad_bottom, pad_left, pad_right,
-                cv2.BORDER_CONSTANT, value=(0, 0, 0),
-            )
-            pad_info = (pad_left, pad_top, new_h, new_w)
-        else:  # 'hard'
-            image = cv2.resize(image, (tgt_w, tgt_h))
-            pad_info = (0, 0, tgt_h, tgt_w)
+        from utils_new.images.processing import resize_segmentation_pair
+        image, _, pad_info = resize_segmentation_pair(image,None,(tgt_h,tgt_w),resize_mode)
 
         # --- Тензор + нормализация ---
         ops = [T.ToTensor()]

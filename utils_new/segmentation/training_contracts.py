@@ -1,14 +1,13 @@
 """Mask and training-parameter contracts shared by segmentation workers."""
 
 import numpy as np
-from PIL import Image
+from utils_new.import_export.images import read_index_mask
 
 
 def validate_mask_files(paths, num_classes, ignore_index=None):
     """Read EVERY source mask before training; never silently relabel bad IDs."""
     for path in paths:
-        with Image.open(path) as source:
-            mask = np.array(source)
+        mask = read_index_mask(path, ignore_index=ignore_index)
         if mask.ndim != 2 or mask.dtype.kind not in "bui":
             raise ValueError(f"{path}: нужна одноканальная индексная маска, не RGB.")
         if num_classes > 1:

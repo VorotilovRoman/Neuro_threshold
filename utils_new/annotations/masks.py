@@ -17,7 +17,7 @@ from utils_new.annotations.geometry import (
 from utils_new.annotations.model import Annotation, ImageSize, MaskEncoding
 
 
-def normalize_index_mask_shape(mask, *, path=None):
+def normalize_index_mask_shape(mask, *, path=None, ignore_index=None):
     """Normalize equivalent OpenCV single-channel shapes to (H, W).
 
     cv2 normally decodes gray PNG to (H, W), but certain decoders/builds
@@ -34,7 +34,9 @@ def normalize_index_mask_shape(mask, *, path=None):
             f"Expected single-channel integer class mask{suffix} "
             f"(shape={mask.shape}, dtype={mask.dtype})"
         )
-    if mask.size == 0 or np.any(mask < 0):
+    if mask.size == 0 or np.any(
+        (mask < 0) & (mask != ignore_index if ignore_index is not None else True)
+    ):
         raise ValueError("Class masks must be nonempty and contain nonnegative IDs")
     return mask
 

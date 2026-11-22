@@ -13,9 +13,9 @@ from utils_new.autoencoders.dataset import (
     AutoencoderDataset,
     collect_training_images,
     dataset_manifest,
-    seed_worker,
     split_images,
 )
+from utils_new.training.optimization import seed_worker
 from utils_new.autoencoders.losses import (
     ReconstructionLoss,
     beta_at,

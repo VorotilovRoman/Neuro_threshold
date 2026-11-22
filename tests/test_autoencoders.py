@@ -420,7 +420,7 @@ class AutoencoderContracts(unittest.TestCase):
             [
                 sys.executable,
                 "-c",
-                "import sys;import utils_training.train_autoencoder_worker;import utils_new.autoencoders;assert 'torch' not in sys.modules",
+                "import sys;import utils_new.training.autoencoder;import utils_new.autoencoders;assert 'torch' not in sys.modules",
             ],
             cwd=ROOT,
             capture_output=True,
@@ -430,7 +430,7 @@ class AutoencoderContracts(unittest.TestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "utils_training/train_autoencoder_worker.py"),
+                str(ROOT / "utils_new/training/autoencoder.py"),
                 "--help",
             ],
             cwd="/tmp",

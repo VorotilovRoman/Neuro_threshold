@@ -26,7 +26,7 @@
 Обучение AE/VAE запускается отдельно от вкладки обучения YOLO:
 
 ```bash
-python -m utils_training.train_autoencoder_worker --profile unet_v2_edge_gan --data "normal_images" --output "runs/ae_run" --device auto
+python -m utils_new.training.autoencoder --profile unet_v2_edge_gan --data "normal_images" --output "runs/ae_run" --device auto
 ```
 
 Профили: `conv_bn_baseline`, `conv_bn`, `conv_gn`, `unet`, `unet_v2_edge_gan`.
@@ -42,7 +42,7 @@ python -m utils_training.train_autoencoder_worker --profile unet_v2_edge_gan --d
 Возобновление с последней полной эпохи:
 
 ```bash
-python -m utils_training.train_autoencoder_worker --data "normal_images" --output "runs/ae_run" --resume "runs/ae_run/last.pt" --device auto
+python -m utils_new.training.autoencoder --data "normal_images" --output "runs/ae_run" --resume "runs/ae_run/last.pt" --device auto
 ```
 
 При resume проверяются параметры и содержимое датасета, восстанавливаются

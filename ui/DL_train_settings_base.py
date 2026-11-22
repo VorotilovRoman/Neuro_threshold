@@ -1,6 +1,5 @@
 # widgets/DL_train_settings_base.py
 import os
-import sys
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -121,6 +120,7 @@ class BaseTrainWidget(QWidget):
 
     def _update_open_folder_button_state(self):
         """Включает/отключает кнопку открытия папки в зависимости от наличия пути."""
+        self._last_run_dir=None
         if hasattr(self, "open_folder_btn"):
             self.open_folder_btn.setEnabled(bool(self.project_path.text().strip()))
 
@@ -143,18 +143,18 @@ class BaseTrainWidget(QWidget):
         self.stop_training.emit()
 
     def _open_project_folder(self):
-        folder = self.project_path.text().strip()
-        if not folder or not os.path.exists(folder):
-            QMessageBox.warning(
-                self, "Ошибка", "Папка проекта не выбрана или не существует"
-            )
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtGui import QDesktopServices
+        folder = getattr(self,"_last_run_dir",None) or self.project_path.text().strip()
+        if not folder or not os.path.isdir(folder):
+            QMessageBox.warning(self,"Ошибка","Папка результата не существует.")
             return
-        if sys.platform == "win32":
-            os.startfile(folder)
-        elif sys.platform == "darwin":
-            os.system(f'open "{folder}"')
-        else:
-            os.system(f'xdg-open "{folder}"')
+        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(folder)))
+
+    def set_result_directory(self,folder):
+        self._last_run_dir=folder
+        self.open_folder_btn.setEnabled(bool(folder))
+        self.open_folder_btn.setToolTip("Каталог текущего запуска: "+str(folder))
 
     def set_running(self, running):
         self.run_btn.setEnabled(not running)

@@ -92,10 +92,8 @@ class RealTorchContracts(unittest.TestCase):
         import torch
 
         from utils_new.segmentation.training_contracts import apply_decoder_dropout
-        from utils_training.train_DeepLabV3_worker import (
-            get_loss_function as deeplab_loss,
-        )
-        from utils_training.train_unet_worker import get_loss_function
+        from utils_new.training.losses import get_loss_function as deeplab_loss
+        from utils_new.training.losses import get_loss_function
 
         for classes in (1, 3):
             logits = torch.randn(2, classes, 16, 16, requires_grad=True)
@@ -194,8 +192,7 @@ class RealTorchContracts(unittest.TestCase):
                 self.assertTrue(np.isin(result, [0, 1, 2]).all())
 
     def test_binary_dataset_preserves_index_one(self):
-        from utils_training.train_DeepLabV3_worker import VOCSegmentationPairs
-        from utils_training.train_unet_worker import SegmentationDataset
+        from utils_new.dataset.segmentation import ImageMaskDataset
 
         with tempfile.TemporaryDirectory() as directory:
             image_dir, mask_dir = Path(directory) / "images", Path(directory) / "masks"
@@ -206,12 +203,10 @@ class RealTorchContracts(unittest.TestCase):
             pixels = np.zeros((8, 8), np.uint8)
             pixels[2:6, 2:6] = 1
             Image.fromarray(pixels).save(mask)
-            unet = SegmentationDataset(
+            unet = ImageMaskDataset.from_folders(
                 str(image_dir), str(mask_dir), input_size=8, num_classes=1
             )[0][1]
-            deeplab = VOCSegmentationPairs([(str(path), str(mask))], 8, 1, None, {})[0][
-                1
-            ]
+            deeplab = ImageMaskDataset([(str(path), str(mask))], 8, 1, None, {})[0][1]
             self.assertEqual(int(unet.sum()), 16)
             self.assertEqual(int(deeplab.sum()), 16)
 
@@ -452,7 +447,7 @@ class BinaryVoidContracts(unittest.TestCase):
     def test_binary_ignored_pixels_have_zero_loss_gradient(self):
         import torch
 
-        from utils_training.train_DeepLabV3_worker import get_loss_function
+        from utils_new.training.losses import get_loss_function
 
         logits = torch.zeros(1, 1, 1, 3, requires_grad=True)
         labels = torch.tensor([[[[0.0, 1.0, 255.0]]]])

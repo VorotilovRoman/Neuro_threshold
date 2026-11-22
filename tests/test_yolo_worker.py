@@ -13,7 +13,8 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
-from utils_training import train_yolo_worker as worker
+from utils_new.training import yolo as worker
+from utils_new.configuration.training import is_standard_yolo_model, build_train_args
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -257,16 +258,16 @@ class YoloWorkerTests(unittest.TestCase):
         self.assertEqual(status, 1, output)
         self.assertEqual(self.models, [])
         for model in ("yolo11m.pt", "yolov8n-seg.pt", "yolo26s-obb.pt"):
-            self.assertTrue(worker.is_standard_yolo_model(model))
+            self.assertTrue(is_standard_yolo_model(model))
         for model in (
             "yolo11missing.pt",
             "C:\\models\\yolo11n.pt",
             "models/yolo11n.pt",
         ):
-            self.assertFalse(worker.is_standard_yolo_model(model))
+            self.assertFalse(is_standard_yolo_model(model))
 
     def test_disable_augmentation_includes_mosaic_and_cutmix(self):
-        args = worker.build_train_args(
+        args = build_train_args(
             dict(self.params, disable_aug=True, mosaic=1, close_mosaic=10)
         )
         for name in ("mosaic", "cutmix", "mixup", "close_mosaic", "fliplr", "scale"):
@@ -294,7 +295,7 @@ class YOLO:
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "utils_training/train_yolo_worker.py"),
+                str(ROOT / "utils_new/training/yolo.py"),
                 "--params_file",
                 str(path),
             ],

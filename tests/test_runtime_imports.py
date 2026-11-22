@@ -205,13 +205,17 @@ with tempfile.TemporaryDirectory() as directory:
         self.assertEqual(status, 0, output)
 
     def test_worker_help_without_qt_or_training(self):
-        for name in ('train_yolo_worker.py', 'train_unet_worker.py',
-                     'train_unet_worker_рабочий.py', 'train_DeepLabV3_worker.py', 'yolo2voc.py'):
-            with self.subTest(worker=name):
-                path = ROOT / 'utils_training' / name
-                status, output = self.run_python([str(path), '--help'], self.temp.name)
-                self.assertEqual(status, 0, output)
-                self.assertIn('--yaml' if name == 'yolo2voc.py' else '--params', output)
+        for relative,flag in [('utils_new/training/yolo.py','--params'),
+                              ('utils_new/training/unet.py','--params'),
+                              ('utils_new/training/deeplab.py','--params'),
+                              ('utils_new/training/autoencoder.py','--profile'),
+                              ('utils_new/training/experiments.py','--grid'),
+                              ('utils_new/import_export/voc.py','--yaml')]:
+            with self.subTest(worker=relative):
+                status,output=self.run_python([str(ROOT/relative),'--help'],self.temp.name)
+                self.assertEqual(status,0,output)
+                self.assertIn(flag,output)
+
 
 
 if __name__ == '__main__':

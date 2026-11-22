@@ -5,13 +5,12 @@ if __name__ == "__main__" and not __package__:
     import sys as _sys
     from pathlib import Path as _Path
 
-    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 
 import argparse
 import json
 from pathlib import Path
-import signal
-from threading import Event
+from utils_new.training.protocol import StopRequest
 import traceback
 
 
@@ -40,18 +39,15 @@ def main(argv=None):
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--edge-cache", type=Path)
     parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument("--stop_file")
     args = parser.parse_args(argv)
     from concurrent.futures import CancelledError
     from utils_new.configuration.autoencoder import TrainConfig
     from utils_new.import_export.json_objects import read_json_object
 
-    stop = Event()
-
-    def request_stop(signum, frame):
-        stop.set()
-
-    signal.signal(signal.SIGINT, request_stop)
-    signal.signal(signal.SIGTERM, request_stop)
+    stop = StopRequest(args.stop_file)
+    if stop.is_set():
+        return 130
     try:
         from runtime_torch import prepare_windows_torch
 
@@ -64,7 +60,7 @@ def main(argv=None):
                 raise ValueError("В --resume нет конфигурации обучения.")
         else:
             path = args.config or Path(__file__).resolve().parents[
-                1
+                2
             ] / "settings/autoencoders" / (
                 (args.profile or "unet_v2_edge_gan") + ".json"
             )
@@ -84,19 +80,20 @@ def main(argv=None):
         )
         if torch.device(device).type == "cuda" and not torch.cuda.is_available():
             raise ValueError("Запрошена CUDA, но она недоступна.")
-        run_training(
-            config,
-            args.data,
-            args.output,
-            device=device,
-            resume=args.resume,
-            edge_cache=args.edge_cache,
-            cancel=stop,
-            progress=lambda event: print(
-                json.dumps(event, ensure_ascii=False), flush=True
-            ),
-            plots=not args.no_plots,
-        )
+        with stop.signals():
+            run_training(
+                config,
+                args.data,
+                args.output,
+                device=device,
+                resume=args.resume,
+                edge_cache=args.edge_cache,
+                cancel=stop,
+                progress=lambda event: print(
+                    json.dumps(event, ensure_ascii=False), flush=True
+                ),
+                plots=not args.no_plots,
+            )
         return 0
     except CancelledError:
         return 130

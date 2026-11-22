@@ -33,12 +33,26 @@ def read_image(path):
     return image
 
 
-def read_index_mask(path):
+def read_index_mask(path, *, ignore_index=None):
     """Read indexed PNG as 2D integer array; accept decoder's (H,W,1)."""
+    # Palette PNG stores class IDs; decoding its RGB palette would destroy them.
+    try:
+        from PIL import Image
+
+        with Image.open(path) as source:
+            if source.mode in ("P", "I", "I;16", "1"):
+                value = np.array(source)
+                if value.dtype == np.bool_:
+                    value = value.astype(np.uint8)
+                return normalize_index_mask_shape(
+                    value, path=path, ignore_index=ignore_index
+                )
+    except (OSError, ImportError):
+        pass
     mask = _read_with_fallback(path, cv2.IMREAD_UNCHANGED)
     if mask is None:
         raise OSError(f"Cannot read mask: {path}")
-    return normalize_index_mask_shape(mask, path=path)
+    return normalize_index_mask_shape(mask, path=path, ignore_index=ignore_index)
 
 
 def write_image(path, image):
@@ -155,3 +169,18 @@ def collect_image_paths(source, *, recursive=False):
     for path in values:
         unique.setdefault(os.path.normcase(os.path.abspath(path)), path)
     return list(unique.values())
+
+
+def index_mask_files(folder):
+    """Index lossless mask paths by relative stem; reject ambiguous sidecars."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        raise FileNotFoundError(f"Нет папки масок: {folder}")
+    result = {}
+    for path in folder.rglob("*"):
+        if path.is_file() and path.suffix.lower() in (".png", ".tif", ".tiff", ".bmp"):
+            key = path.relative_to(folder).with_suffix("").as_posix().casefold()
+            if key in result:
+                raise ValueError(f"Неоднозначная маска: {path}")
+            result[key] = path
+    return result

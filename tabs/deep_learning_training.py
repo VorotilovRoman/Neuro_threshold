@@ -1,4 +1,3 @@
-
 # Allow both `python -m tabs.<name>` and direct execution from any directory.
 if __name__ == "__main__" and not __package__:
     import sys as _bootstrap_sys
@@ -15,19 +14,23 @@ import codecs
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 # ------------------------------------------------------------
 # Получение версии Ultralytics YOLO (для информационных целей)
 # ------------------------------------------------------------
 from importlib.util import find_spec
 
-from PyQt5.QtCore import QProcess
+from PyQt5.QtCore import QProcess, QTimer
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 
+from utils_new.training.protocol import LineDecoder, worker_arguments
+from utils_new.import_export.json_objects import write_json_atomic
 from path_setup import get_project_root
 from ui_tabs.deep_learning_training_ui import setup_deep_learning_training_ui
 
-ULTRALYTICS_AVAILABLE = find_spec('ultralytics') is not None
+ULTRALYTICS_AVAILABLE = find_spec("ultralytics") is not None
 
 
 class YoloTrainWindow(QMainWindow):
@@ -41,8 +44,8 @@ class YoloTrainWindow(QMainWindow):
         setup_deep_learning_training_ui(self)
 
         # Процессы для каждой модели
-        self.train_process = None          # для YOLO
-        self.unet_process = None           # для U‑Net
+        self.train_process = None  # для YOLO
+        self.unet_process = None  # для U‑Net
         self.deeplab_process = None
         self.segformer_process = None
         self.sam_process = None
@@ -55,52 +58,60 @@ class YoloTrainWindow(QMainWindow):
         self._yolo_run_dir = None
         # Сохраняем параметры последнего запуска DeepLab для анализа моделей
         self.last_deeplab_params = None
+        self._worker_artifacts = {}
+        self._training_decoders = {}
+        self._training_stop_requested = set()
+        self._training_run_dirs = {}
+        self._closing_training = False
 
     # ---------- Логирование (общее) ----------
     def log(self, message):
         self.log_text.append(message)
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
-        QApplication.processEvents()
 
     # ---------- Определение параметров загруженной модели YOLO ----------
     def _detect_model_info(self, model_path):
         """Выводит в лог информацию о модели YOLO (без изменения UI)."""
         if not ULTRALYTICS_AVAILABLE:
-            self.log("⚠️ Библиотека ultralytics не установлена, невозможно определить параметры модели")
+            self.log(
+                "⚠️ Библиотека ultralytics не установлена, невозможно определить параметры модели"
+            )
             return
         try:
             from runtime_policy import configure_ultralytics
+
             configure_ultralytics()
             from ultralytics import YOLO
+
             tmp_model = YOLO(model_path)
-            task = getattr(tmp_model, 'task', 'unknown')
-            version = '?'
-            size = '?'
+            task = getattr(tmp_model, "task", "unknown")
+            version = "?"
+            size = "?"
 
-            if hasattr(tmp_model, 'model') and hasattr(tmp_model.model, 'model'):
+            if hasattr(tmp_model, "model") and hasattr(tmp_model.model, "model"):
                 inner = tmp_model.model.model
-                if hasattr(inner, 'yaml'):
+                if hasattr(inner, "yaml"):
                     yaml_str = str(inner.yaml)
-                    if 'yolov8' in yaml_str:
-                        version = '8'
-                    elif 'yolo11' in yaml_str:
-                        version = '11'
-                    elif 'yolo26' in yaml_str:
-                        version = '26'
+                    if "yolov8" in yaml_str:
+                        version = "8"
+                    elif "yolo11" in yaml_str:
+                        version = "11"
+                    elif "yolo26" in yaml_str:
+                        version = "26"
 
-                if hasattr(inner, 'parameters'):
+                if hasattr(inner, "parameters"):
                     param_count = sum(p.numel() for p in inner.parameters()) / 1e6
                     if param_count < 5:
-                        size = 'n'
+                        size = "n"
                     elif param_count < 10:
-                        size = 's'
+                        size = "s"
                     elif param_count < 25:
-                        size = 'm'
+                        size = "m"
                     elif param_count < 50:
-                        size = 'l'
+                        size = "l"
                     else:
-                        size = 'x'
+                        size = "x"
                     self.log(f"📊 Количество параметров: {param_count:.2f}M")
 
             self.log(f"🔍 Загружена модель: {os.path.basename(model_path)}")
@@ -134,9 +145,9 @@ class YoloTrainWindow(QMainWindow):
         else:
             # Рекурсивный поиск на случай другой структуры
             for root, dirs, files in os.walk(base_dir):
-                if 'weights' in dirs:
-                    weights_path = os.path.join(root, 'weights')
-                    best_path = os.path.join(weights_path, 'best.pt')
+                if "weights" in dirs:
+                    weights_path = os.path.join(root, "weights")
+                    best_path = os.path.join(weights_path, "best.pt")
                     if os.path.exists(best_path):
                         mtime = os.path.getmtime(best_path)
                         if mtime > latest_time:
@@ -153,7 +164,9 @@ class YoloTrainWindow(QMainWindow):
     def _run_yolo_training_from_widget(self, params):
         """Запуск обучения YOLO по параметрам из виджета."""
         if not ULTRALYTICS_AVAILABLE:
-            QMessageBox.critical(self, "Ошибка", "Библиотека ultralytics не установлена.")
+            QMessageBox.critical(
+                self, "Ошибка", "Библиотека ultralytics не установлена."
+            )
             return
 
         if self.train_process and self.train_process.state() != QProcess.NotRunning:
@@ -176,18 +189,6 @@ class YoloTrainWindow(QMainWindow):
         self._yolo_stop_requested = False
         self._yolo_run_dir = None
 
-        params_json = json.dumps(params, ensure_ascii=False)
-
-        worker_script = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "utils_training", "train_yolo_worker.py"
-        )
-        worker_script = os.path.abspath(worker_script)
-        if not os.path.exists(worker_script):
-            self.log("ОШИБКА: скрипт воркера не найден: " + worker_script)
-            QMessageBox.critical(self, "Ошибка", "Не найден скрипт обучения train_yolo_worker.py")
-            return
-
         self.yolo_train_widget.set_running(True)
         self.log("=== Параметры обучения YOLO ===")
         for key, val in params.items():
@@ -200,7 +201,7 @@ class YoloTrainWindow(QMainWindow):
         self.train_process.readyReadStandardOutput.connect(self._on_yolo_output)
         self.train_process.finished.connect(self._on_yolo_finished)
 
-        self.train_process.start(sys.executable, [worker_script, "--params", params_json])
+        self._start_worker("yolo", self.train_process, params)
 
         if not self.train_process.waitForStarted(3000):
             self.log("Ошибка: не удалось запустить процесс обучения YOLO")
@@ -232,30 +233,42 @@ class YoloTrainWindow(QMainWindow):
                         percent, epoch, total = map(int, parts[1:4])
                         bar = self.yolo_train_widget.progress_bar
                         bar.setValue(percent)
-                        bar.setFormat(f"Обучение YOLO: {percent}% ({epoch}/{total} эпох)")
+                        bar.setFormat(
+                            f"Обучение YOLO: {percent}% ({epoch}/{total} эпох)"
+                        )
                     except ValueError:
                         pass
                 continue
             if line.startswith("RESULT_DIR:"):
                 self._yolo_run_dir = line.split(":", 1)[1]
+                self.yolo_train_widget.set_result_directory(self._yolo_run_dir)
                 self.log(f"Папка текущего запуска YOLO: {self._yolo_run_dir}")
                 continue
             self.log(line)
 
     def _on_yolo_finished(self, exit_code, exit_status):
         self._on_yolo_output()
-        self._consume_yolo_output(self._yolo_decoder.decode(b"", final=True), final=True)
+        self._consume_yolo_output(
+            self._yolo_decoder.decode(b"", final=True), final=True
+        )
         self.yolo_train_widget.set_running(False)
 
         if self._yolo_stop_requested or exit_code == 130:
             self.log("=== Обучение YOLO остановлено пользователем ===")
         elif exit_code == 0 and exit_status == QProcess.NormalExit:
             self.log("=== Обучение YOLO успешно завершено ===")
-            QMessageBox.information(self, "Обучение", "Обучение YOLO успешно завершено!")
+            if not self._closing_training:
+                QMessageBox.information(
+                    self, "Обучение", "Обучение YOLO успешно завершено!"
+                )
             # Включаем кнопку открытия папки проекта
             self.yolo_train_widget.open_folder_btn.setEnabled(True)
             # Анализируем best.pt с учётом сохранённых параметров
-            current_best = os.path.join(self._yolo_run_dir, "weights", "best.pt") if self._yolo_run_dir else None
+            current_best = (
+                os.path.join(self._yolo_run_dir, "weights", "best.pt")
+                if self._yolo_run_dir
+                else None
+            )
             if current_best and os.path.isfile(current_best):
                 self._detect_model_info(current_best)
             elif self.last_yolo_params:
@@ -264,25 +277,18 @@ class YoloTrainWindow(QMainWindow):
                 self._analyze_best_model_yolo(project_path=proj, experiment_name=name)
         else:
             self.log("=== Процесс обучения YOLO завершился с ошибкой ===")
-            QMessageBox.critical(self, "Ошибка", "Обучение YOLO завершилось ошибкой. Смотрите лог.")
+            if not self._closing_training:
+                QMessageBox.critical(
+                    self, "Ошибка", "Обучение YOLO завершилось ошибкой. Смотрите лог."
+                )
+        self._cleanup_worker("yolo")
         self.train_process = None
         # Сброс прогресс-бара (выполняется также в set_running, но дополнительно)
         self.yolo_train_widget.progress_bar.setValue(0)
         self.yolo_train_widget.progress_bar.setFormat("Готов")
 
     def on_stop_training(self):
-        process = self.train_process
-        if process and process.state() == QProcess.Running:
-            self._yolo_stop_requested = True
-            self.log("Останавливаем обучение YOLO...")
-            process.terminate()
-            if not process.waitForFinished(5000):
-                process.kill()
-                self.log("Процесс YOLO принудительно завершён.")
-            else:
-                self.log("Процесс YOLO остановлен корректно.")
-            self.yolo_train_widget.set_running(False)
-
+        self._request_training_stop("yolo")
 
     # ===================== U‑NET =====================
     # ---------- Валидация параметров U-Net перед запуском ----------
@@ -310,13 +316,14 @@ class YoloTrainWindow(QMainWindow):
         # Без YAML обязателен dataset_path и его структура.
         if not has_yaml:
             if not dataset_path:
-                return False, ("Не указан ни датасет (папка), "
-                               "ни U-Net YAML (masks_data.yaml).")
+                return False, (
+                    "Не указан ни датасет (папка), ни U-Net YAML (masks_data.yaml)."
+                )
             if not os.path.isdir(dataset_path):
                 return False, f"Папка датасета не существует:\n{dataset_path}"
 
-            train_img = os.path.join(dataset_path, 'images', 'train')
-            train_msk = os.path.join(dataset_path, 'masks', 'train')
+            train_img = os.path.join(dataset_path, "images", "train")
+            train_msk = os.path.join(dataset_path, "masks", "train")
             if not os.path.isdir(train_img):
                 return False, f"Не найдена папка с изображениями:\n{train_img}"
             if not os.path.isdir(train_msk):
@@ -325,8 +332,10 @@ class YoloTrainWindow(QMainWindow):
             # Даже с YAML полезно проверить, что папка, если она указана,
             # существует — иначе воркер всё равно прочитает path из YAML.
             if dataset_path and not os.path.isdir(dataset_path):
-                self.log(f"ℹ️ Папка из UI не существует ({dataset_path}), "
-                         f"но указан YAML — path будет прочитан из него.")
+                self.log(
+                    f"ℹ️ Папка из UI не существует ({dataset_path}), "
+                    f"но указан YAML — path будет прочитан из него."
+                )
 
         # num_classes — минимум 2. Если указан YAML, значение может быть
         # переопределено воркером, но UI всё равно должен содержать валидное число.
@@ -381,35 +390,26 @@ class YoloTrainWindow(QMainWindow):
         unet_yaml = params.get("unet_yaml")
         if unet_yaml:
             self.log(f"📄 U-Net YAML задан: {unet_yaml}")
-            self.log("📄 path и num_classes будут прочитаны из YAML "
-                     "(приоритет над полями UI).")
+            self.log(
+                "📄 path и num_classes будут прочитаны из YAML "
+                "(приоритет над полями UI)."
+            )
         # Явно подсвечиваем критичные для обучения поля
         nc = params.get("num_classes")
         loss = params.get("loss")
         augs = params.get("augmentations") or {}
         enabled_augs = [k for k, v in augs.items() if v]
         self.log("-" * 30)
-        self.log(f"⚠️  num_classes (вкл. фон): {nc}  "
-                 f"→ должно быть = (число классов объектов) + 1")
+        self.log(
+            f"⚠️  num_classes (вкл. фон): {nc}  "
+            f"→ должно быть = (число классов объектов) + 1"
+        )
         self.log(f"⚠️  loss: {loss}")
         if enabled_augs:
             self.log(f"⚠️  аугментации включены: {', '.join(enabled_augs)}")
         else:
             self.log("✅ аугментации выключены")
         self.log("=" * 30)
-
-        params_json = json.dumps(params, ensure_ascii=False)
-
-        worker_script = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "utils_training", "train_unet_worker.py"
-        )
-        worker_script = os.path.abspath(worker_script)
-        if not os.path.exists(worker_script):
-            self.log("ОШИБКА: скрипт воркера U-Net не найден: " + worker_script)
-            QMessageBox.critical(self, "Ошибка", "Не найден скрипт обучения train_unet_worker.py")
-            self.unet_train_widget.set_running(False)
-            return
 
         # --- 3. Запуск процесса ---
         self.unet_process = QProcess()
@@ -418,63 +418,22 @@ class YoloTrainWindow(QMainWindow):
         self.unet_process.readyReadStandardOutput.connect(self._on_unet_output)
         self.unet_process.finished.connect(self._on_unet_finished)
 
-        self.unet_process.start(sys.executable, [worker_script, "--params", params_json])
+        self.unet_train_widget.set_running(True)
+        self._start_worker("unet", self.unet_process, params)
 
         if not self.unet_process.waitForStarted(3000):
             self.log("Ошибка запуска процесса обучения U-Net")
             self.unet_train_widget.set_running(False)
             return
 
-        self.unet_train_widget.set_running(True)
-
     def _on_unet_output(self):
-        data = self.unet_process.readAllStandardOutput()
-        text = bytes(data).decode('utf-8', errors='replace')
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("PROGRESS:"):
-                parts = line.split(":")
-                if len(parts) >= 4:
-                    try:
-                        percent = int(parts[1])
-                        epoch = int(parts[2])
-                        total = int(parts[3])
-                        bar = self.unet_train_widget.progress_bar
-                        bar.setValue(percent)
-                        bar.setFormat(f"Обучение U‑Net: {percent}% ({epoch}/{total} эпох)")
-                    except ValueError:
-                        pass
-                continue
-            self.log(line)
+        self._read_training_output("unet")
 
     def _on_unet_finished(self, exit_code, exit_status):
-        self.unet_train_widget.set_running(False)
-
-        if exit_code == 0 and exit_status == QProcess.NormalExit:
-            self.log("=== Обучение U-Net успешно завершено ===")
-            QMessageBox.information(self, "Обучение", "U-Net успешно обучена!")
-            self.unet_train_widget.open_folder_btn.setEnabled(True)
-        else:
-            self.log("=== Процесс обучения U-Net завершился с ошибкой ===")
-            QMessageBox.critical(self, "Ошибка", "Обучение U-Net завершилось ошибкой. Смотрите лог.")
-        self.unet_process = None
-        self.unet_train_widget.progress_bar.setValue(0)
-        self.unet_train_widget.progress_bar.setFormat("Готов")
+        self._semantic_finished("unet", exit_code, exit_status)
 
     def on_stop_unet(self):
-        if self.unet_process and self.unet_process.state() == QProcess.Running:
-            self.log("Останавливаем обучение U-Net...")
-            self.unet_process.terminate()
-            if not self.unet_process.waitForFinished(5000):
-                self.unet_process.kill()
-                self.log("Процесс U-Net принудительно завершён.")
-            else:
-                self.log("Процесс U-Net остановлен корректно.")
-            self.unet_train_widget.set_running(False)
-
-
+        self._request_training_stop("unet")
 
     # ===================== DeepLabV3 / DeepLabV3+ =====================
     def _validate_deeplab_params(self, params):
@@ -494,15 +453,18 @@ class YoloTrainWindow(QMainWindow):
                 return False, f"DeepLab YAML не найден:\n{deeplab_yaml}"
         else:
             if not dataset_path:
-                return False, ("Укажите либо папку датасета, "
-                               "либо DeepLab YAML с путями.")
+                return False, (
+                    "Укажите либо папку датасета, либо DeepLab YAML с путями."
+                )
             if not os.path.isdir(dataset_path):
                 return False, f"Папка датасета не существует:\n{dataset_path}"
 
         arch = str(params.get("architecture", "deeplabv3plus")).lower()
         if arch not in ("deeplabv3plus", "deeplabv3+", "deeplabv3"):
-            return False, (f"Неизвестная архитектура '{arch}'.\n"
-                           f"Ожидается 'deeplabv3plus' или 'deeplabv3'.")
+            return False, (
+                f"Неизвестная архитектура '{arch}'.\n"
+                f"Ожидается 'deeplabv3plus' или 'deeplabv3'."
+            )
 
         try:
             nc = int(params.get("num_classes", 21))
@@ -527,10 +489,12 @@ class YoloTrainWindow(QMainWindow):
 
         k = (isz - 1) / os_val if os_val > 0 else None
         if k is None or abs(k - round(k)) > 1e-6:
-            self.log(f"⚠️ input_size={isz} не соответствует формуле "
-                     f"crop_size = output_stride * k + 1 "
-                     f"(OS={os_val}). Рекомендуется 513 для OS=16, "
-                     f"1025 для OS=8.")
+            self.log(
+                f"⚠️ input_size={isz} не соответствует формуле "
+                f"crop_size = output_stride * k + 1 "
+                f"(OS={os_val}). Рекомендуется 513 для OS=16, "
+                f"1025 для OS=8."
+            )
 
         ar = params.get("atrous_rates")
         if ar:
@@ -553,8 +517,6 @@ class YoloTrainWindow(QMainWindow):
             return False, f"Файл модели не найден:\n{model_path}"
 
         return True, ""
-
-
 
     def _run_deeplab_training(self, params):
         """Запуск обучения DeepLabV3 / DeepLabV3+ с использованием воркера."""
@@ -581,7 +543,9 @@ class YoloTrainWindow(QMainWindow):
 
         # Ключевые предупреждения
         arch = str(params.get("architecture", "deeplabv3plus")).lower()
-        arch_display = "DeepLabV3+" if arch in ("deeplabv3plus", "deeplabv3+") else "DeepLabV3"
+        arch_display = (
+            "DeepLabV3+" if arch in ("deeplabv3plus", "deeplabv3+") else "DeepLabV3"
+        )
         nc = params.get("num_classes")
         ar = params.get("atrous_rates")
         os_val = params.get("output_stride") or 16
@@ -594,8 +558,10 @@ class YoloTrainWindow(QMainWindow):
             self.log(f"⚠️  atrous_rates: {ar}")
         else:
             self.log(f"⚠️  atrous_rates: авто (по OS={os_val})")
-        self.log(f"⚠️  num_classes (вкл. фон): {nc}  "
-                 f"→ должно быть = (число классов объектов) + 1")
+        self.log(
+            f"⚠️  num_classes (вкл. фон): {nc}  "
+            f"→ должно быть = (число классов объектов) + 1"
+        )
 
         augs = params.get("augmentations") or {}
         enabled_augs = [k for k, v in augs.items() if v]
@@ -606,42 +572,23 @@ class YoloTrainWindow(QMainWindow):
 
         self.log(f"⚠️  two_phase_training: {params.get('two_phase_training')}")
         if params.get("two_phase_training"):
-            self.log(f"     freeze={params.get('freeze_epochs')}, "
-                     f"unfreeze={params.get('unfreeze_epochs')}, "
-                     f"unfreeze_last_n_stages={params.get('unfreeze_last_n_stages')}, "
-                     f"freeze_bn_second_phase={params.get('freeze_bn_second_phase')}")
-        self.log(f"⚠️  use_ema: {params.get('use_ema')}, "
-                 f"use_layerwise_lr: {params.get('use_layerwise_lr')}, "
-                 f"use_amp: {params.get('use_amp')}")
+            self.log(
+                f"     freeze={params.get('freeze_epochs')}, "
+                f"unfreeze={params.get('unfreeze_epochs')}, "
+                f"unfreeze_last_n_stages={params.get('unfreeze_last_n_stages')}, "
+                f"freeze_bn_second_phase={params.get('freeze_bn_second_phase')}"
+            )
+        self.log(
+            f"⚠️  use_ema: {params.get('use_ema')}, "
+            f"use_layerwise_lr: {params.get('use_layerwise_lr')}, "
+            f"use_amp: {params.get('use_amp')}"
+        )
         self.log("=" * 30)
 
         # Сохраняем параметры для анализа после обучения
         self.last_deeplab_params = params
 
         # --- 3. Поиск воркера ---
-        params_json = json.dumps(params, ensure_ascii=False)
-        worker_script = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "utils_training", "train_DeepLabV3_worker.py"
-        )
-        worker_script = os.path.abspath(worker_script)
-        if not os.path.exists(worker_script):
-            # Fallback на старое имя (на случай, если файл ещё не переименован)
-            worker_script_alt = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..", "utils_training", "train_deeplabv3_worker.py"
-            )
-            worker_script_alt = os.path.abspath(worker_script_alt)
-            if os.path.exists(worker_script_alt):
-                worker_script = worker_script_alt
-            else:
-                self.log("ОШИБКА: скрипт воркера DeepLab не найден: " + worker_script)
-                QMessageBox.critical(self, "Ошибка",
-                                     "Не найден скрипт обучения DeepLab "
-                                     "(train_DeepLabV3_worker.py)")
-                self.deeplab_train_widget.set_running(False)
-                return
-
         # --- 4. Запуск процесса ---
         self.deeplab_process = QProcess()
         self.deeplab_process.setWorkingDirectory(get_project_root())
@@ -649,61 +596,19 @@ class YoloTrainWindow(QMainWindow):
         self.deeplab_process.readyReadStandardOutput.connect(self._on_deeplab_output)
         self.deeplab_process.finished.connect(self._on_deeplab_finished)
 
-        self.deeplab_process.start(sys.executable,
-                                   [worker_script, "--params", params_json])
+        self.deeplab_train_widget.set_running(True)
+        self._start_worker("deeplab", self.deeplab_process, params)
 
         if not self.deeplab_process.waitForStarted(3000):
             self.log("Ошибка запуска процесса обучения DeepLab")
             self.deeplab_train_widget.set_running(False)
             return
 
-        self.deeplab_train_widget.set_running(True)
-
     def _on_deeplab_output(self):
-        """Обработка вывода воркера DeepLab."""
-        data = self.deeplab_process.readAllStandardOutput()
-        text = bytes(data).decode('utf-8', errors='replace')
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("PROGRESS:"):
-                parts = line.split(":")
-                if len(parts) >= 4:
-                    try:
-                        percent = int(parts[1])
-                        epoch = int(parts[2])
-                        total = int(parts[3])
-                        bar = self.deeplab_train_widget.progress_bar
-                        bar.setValue(percent)
-                        bar.setFormat(f"Обучение DeepLab: {percent}% "
-                                      f"({epoch}/{total} эпох)")
-                    except ValueError:
-                        pass
-                continue
-            self.log(line)
+        self._read_training_output("deeplab")
 
     def _on_deeplab_finished(self, exit_code, exit_status):
-        """Завершение обучения DeepLab."""
-        self.deeplab_train_widget.set_running(False)
-
-        if exit_code == 0 and exit_status == QProcess.NormalExit:
-            self.log("=== Обучение DeepLab успешно завершено ===")
-            QMessageBox.information(self, "Обучение",
-                                    "DeepLab успешно обучена!")
-            self.deeplab_train_widget.open_folder_btn.setEnabled(True)
-
-            # Анализ обученной модели
-            if self.last_deeplab_params:
-                self._analyze_best_model_deeplab(self.last_deeplab_params)
-        else:
-            self.log("=== Процесс обучения DeepLab завершился с ошибкой ===")
-            QMessageBox.critical(self, "Ошибка",
-                                 "Обучение DeepLab завершилось ошибкой. "
-                                 "Смотрите лог.")
-        self.deeplab_process = None
-        self.deeplab_train_widget.progress_bar.setValue(0)
-        self.deeplab_train_widget.progress_bar.setFormat("Готов")
+        self._semantic_finished("deeplab", exit_code, exit_status)
 
     def _analyze_best_model_deeplab(self, params):
         """
@@ -728,9 +633,11 @@ class YoloTrainWindow(QMainWindow):
             return
 
         self.log("=== Анализ обученных моделей DeepLab ===")
-        for fname, label in (("best_iou.pth", "best_iou"),
-                             ("best_loss.pth", "best_loss"),
-                             ("last.pth", "last")):
+        for fname, label in (
+            ("best_iou.pth", "best_iou"),
+            ("best_loss.pth", "best_loss"),
+            ("last.pth", "last"),
+        ):
             wpath = os.path.join(weights_dir, fname)
             if not os.path.exists(wpath):
                 continue
@@ -742,20 +649,29 @@ class YoloTrainWindow(QMainWindow):
                 with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
                 arch = meta.get("architecture", "?")
-                arch_disp = ("DeepLabV3+"
-                             if str(arch).lower() in ("deeplabv3plus", "deeplabv3+")
-                             else "DeepLabV3")
+                arch_disp = (
+                    "DeepLabV3+"
+                    if str(arch).lower() in ("deeplabv3plus", "deeplabv3+")
+                    else "DeepLabV3"
+                )
                 self.log(f"  {label}: {fname}")
                 self.log(f"     архитектура: {arch_disp}")
-                self.log(f"     backbone: {meta.get('backbone', '?')}, "
-                         f"OS: {meta.get('output_stride', '?')}")
-                self.log(f"     input_size: {meta.get('input_size', '?')}, "
-                         f"num_classes: {meta.get('num_classes', '?')}")
+                self.log(
+                    f"     backbone: {meta.get('backbone', '?')}, "
+                    f"OS: {meta.get('output_stride', '?')}"
+                )
+                self.log(
+                    f"     input_size: {meta.get('input_size', '?')}, "
+                    f"num_classes: {meta.get('num_classes', '?')}"
+                )
                 self.log(f"     atrous_rates: {meta.get('atrous_rates', '?')}")
-                self.log(f"     output_activation: "
-                         f"{meta.get('output_activation', '?')}")
-                self.log(f"     normalize: {meta.get('normalize', '?')}, "
-                         f"resize_mode: {meta.get('resize_mode', '?')}")
+                self.log(
+                    f"     output_activation: {meta.get('output_activation', '?')}"
+                )
+                self.log(
+                    f"     normalize: {meta.get('normalize', '?')}, "
+                    f"resize_mode: {meta.get('resize_mode', '?')}"
+                )
                 if meta.get("best_val_loss") is not None:
                     self.log(f"     best_val_loss: {meta['best_val_loss']}")
                 if meta.get("best_iou") is not None:
@@ -765,21 +681,7 @@ class YoloTrainWindow(QMainWindow):
         self.log("=======================================")
 
     def on_stop_deeplab(self):
-        """Остановка обучения DeepLab."""
-        if self.deeplab_process and self.deeplab_process.state() == QProcess.Running:
-            self.log("Останавливаем обучение DeepLab...")
-            self.deeplab_process.terminate()
-            if not self.deeplab_process.waitForFinished(5000):
-                self.deeplab_process.kill()
-                self.log("Процесс DeepLab принудительно завершён.")
-            else:
-                self.log("Процесс DeepLab остановлен корректно.")
-            self.deeplab_train_widget.set_running(False)
-
-
-
-
-
+        self._request_training_stop("deeplab")
 
     # ===================== SegFormer (заглушка) =====================
     def _run_segformer_training(self, params):
@@ -788,9 +690,12 @@ class YoloTrainWindow(QMainWindow):
         for key, val in params.items():
             self.log(f"{key}: {val}")
         self.log("=" * 30)
-        QMessageBox.information(self, "Информация",
-                                "Обучение SegFormer будет доступно в следующих версиях.\n"
-                                "Параметры переданы в лог.")
+        QMessageBox.information(
+            self,
+            "Информация",
+            "Обучение SegFormer будет доступно в следующих версиях.\n"
+            "Параметры переданы в лог.",
+        )
 
     def on_stop_segformer(self):
         """Остановка обучения SegFormer (заглушка)."""
@@ -803,13 +708,146 @@ class YoloTrainWindow(QMainWindow):
         for key, val in params.items():
             self.log(f"{key}: {val}")
         self.log("=" * 30)
-        QMessageBox.information(self, "Информация",
-                                "Обучение SAM будет доступно в следующих версиях.\n"
-                                "Параметры переданы в лог.")
+        QMessageBox.information(
+            self,
+            "Информация",
+            "Обучение SAM будет доступно в следующих версиях.\n"
+            "Параметры переданы в лог.",
+        )
 
     def on_stop_sam(self):
         """Остановка обучения SAM (заглушка)."""
         self.log("Остановка обучения SAM (не реализовано)")
+
+    def _training_parts(self, kind):
+        return (
+            ("train_process", "yolo_train_widget", "YOLO")
+            if kind == "yolo"
+            else (
+                kind + "_process",
+                kind + "_train_widget",
+                "U-Net" if kind == "unet" else "DeepLab",
+            )
+        )
+
+    def _start_worker(self, kind, process, params):
+        if self._closing_training:
+            return
+        temporary = tempfile.TemporaryDirectory(prefix="neuro-training-")
+        config = Path(temporary.name) / "params.json"
+        stop = Path(temporary.name) / "stop"
+        write_json_atomic(config, params)
+        self._worker_artifacts[kind] = (temporary, stop)
+        self._training_decoders[kind] = LineDecoder()
+        self._training_stop_requested.discard(kind)
+        process.start(
+            sys.executable, worker_arguments(kind, params_file=config, stop_file=stop)
+        )
+
+    def _cleanup_worker(self, kind):
+        entry = self._worker_artifacts.pop(kind, None)
+        if entry:
+            entry[0].cleanup()
+        self._training_decoders.pop(kind, None)
+
+    def _read_training_output(self, kind, final=False):
+        attr, widget_name, label = self._training_parts(kind)
+        process = getattr(self, attr, None)
+        if process is None:
+            return
+        decoder = self._training_decoders.setdefault(kind, LineDecoder())
+        for line in decoder.feed(bytes(process.readAllStandardOutput()), final=final):
+            if line.startswith("PROGRESS:"):
+                try:
+                    _, percentage, epoch, total = line.split(":")
+                    bar = getattr(self, widget_name).progress_bar
+                    bar.setValue(max(0, min(100, int(percentage))))
+                    bar.setFormat(f"{label}: {percentage}% ({epoch}/{total})")
+                except (ValueError, TypeError):
+                    self.log(line)
+            else:
+                if line.startswith("RESULT_DIR:"):
+                    folder = line.partition(":")[2]
+                    self._training_run_dirs[kind] = folder
+                    getattr(self, widget_name).set_result_directory(folder)
+                self.log(line)
+
+    def _semantic_finished(self, kind, exit_code, exit_status):
+        self._read_training_output(kind, final=True)
+        attr, widget_name, label = self._training_parts(kind)
+        widget = getattr(self, widget_name)
+        widget.set_running(False)
+        stopped = kind in self._training_stop_requested or exit_code == 130
+        if stopped:
+            self.log(
+                f"Обучение {label} остановлено пользователем; сохранённые веса доступны в папке результата."
+            )
+        elif exit_code == 0 and exit_status == QProcess.NormalExit:
+            self.log(f"Обучение {label} успешно завершено.")
+            widget.open_folder_btn.setEnabled(True)
+            if not self._closing_training:
+                QMessageBox.information(self, "Обучение", f"{label} успешно обучена!")
+        else:
+            self.log(f"Ошибка обучения {label}; смотрите лог.")
+            if not self._closing_training:
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Обучение {label} завершилось ошибкой. Смотрите лог.",
+                )
+        self._cleanup_worker(kind)
+        setattr(self, attr, None)
+        widget.progress_bar.setValue(0)
+        widget.progress_bar.setFormat("Готов")
+
+    def _request_training_stop(self, kind):
+        attr, widget_name, label = self._training_parts(kind)
+        process = getattr(self, attr, None)
+        if process is None or process.state() == QProcess.NotRunning:
+            return
+        if kind in self._training_stop_requested:
+            return
+        self._training_stop_requested.add(kind)
+        if kind == "yolo":
+            self._yolo_stop_requested = True
+        self.log(f"Останавливаем обучение {label} после безопасной границы шага...")
+        entry = self._worker_artifacts.get(kind)
+        if entry:
+            entry[1].touch()
+
+            def force_stop():
+                if (
+                    getattr(self, attr, None) is process
+                    and process.state() != QProcess.NotRunning
+                ):
+                    self.log(
+                        f"{label}: процесс не завершился за 30 секунд; принудительная остановка."
+                    )
+                    process.kill()
+
+            QTimer.singleShot(30000, force_stop)
+        else:
+            process.terminate()
+            if not process.waitForFinished(3000):
+                process.kill()
+
+    def shutdown_training(self):
+        self._closing_training = True
+        busy = False
+        for kind in ("yolo", "unet", "deeplab"):
+            attr, _, _ = self._training_parts(kind)
+            process = getattr(self, attr, None)
+            if process is not None and process.state() != QProcess.NotRunning:
+                busy = True
+                self._request_training_stop(kind)
+        return busy
+
+    def closeEvent(self, event):
+        if self.shutdown_training():
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+        else:
+            event.accept()
 
 
 if __name__ == "__main__":
@@ -817,4 +855,5 @@ if __name__ == "__main__":
     window = YoloTrainWindow()
     window.show()
     from ui.application import exec_window
+
     sys.exit(exec_window(window, app))
