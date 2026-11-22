@@ -606,6 +606,15 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             return
         try:
             data = self._collect_preset_dict()
+            selected = data.get('deeplab_yaml')
+            if selected and os.path.isfile(selected):
+                import hashlib
+                from pathlib import Path
+                from utils_new.import_export.dataset_sources import persist_source
+                fingerprint = hashlib.sha256(Path(selected).read_bytes()).hexdigest()[:12]
+                target = Path(path).resolve()
+                folder = target.parent / (target.stem + '.dataset_sources') / fingerprint
+                data['deeplab_yaml'] = persist_source(selected, folder)
             with open(path, "w", encoding="utf-8") as f:
                 for k, v in data.items():
                     f.write(f"{k}: {v}\n")

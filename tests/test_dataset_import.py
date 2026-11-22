@@ -196,6 +196,24 @@ class ImportPlans(unittest.TestCase):
             self.assertEqual(len(items), 2)
             self.assertEqual(len(items[1]["annotations"]), 0)
 
+    def test_subset_export_preserves_missing_labels_instead_of_inventing_background(
+        self,
+    ):
+        from utils_new.import_export.dataset_export import export_subset
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = fixture(root)
+            approved = write_manifest(
+                preview(defaults([source], "yolo"), "labels"), root / "view"
+            )[0]
+            pairs = load_yolo_yaml(approved)[0]
+            output = export_subset(pairs, root / "export", {0: "selected", 1: "old"})
+            restored = load_yolo_yaml(output)[0]
+            self.assertEqual(len(restored), 2)
+            self.assertIsNone(restored[1][1])
+            self.assertFalse((root / "export/labels/train/b.txt").exists())
+
     def test_native_yolo_reads_approved_txt_and_does_not_fall_back_for_missing(self):
         from utils_new.import_export.dataset_sources import enable_ultralytics_sources
 
@@ -312,6 +330,10 @@ def accept():
 timer=QTimer();timer.timeout.connect(accept);timer.start(10)
 with TemporaryDirectory() as directory:
  root=Path(directory);source=fixture(root)
+ import numpy as np
+ from utils_new.import_export.images import write_image
+ masks=root/'masks/train/nested';masks.mkdir(parents=True)
+ write_image(masks/'a.png',np.ones((24,32),np.uint8))
  for cls in (Labeler,ViewingDataset,DatasetPreparationWindow,DatasetAnalysisWindow,SahiSlicerWindow):
   window=cls();window.show()
   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(source),'')),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'critical') as errors:
@@ -319,7 +341,9 @@ with TemporaryDirectory() as directory:
   if hasattr(window,'image_paths'):
    assert len(window.image_paths)==2
    assert window._yaml_label_map[str(root/'images/train/nested/b.jpg')] is None
-   if isinstance(window,ViewingDataset):assert window._get_annotations(1)==[]
+   if isinstance(window,ViewingDataset):
+    assert window._get_annotations(1)==[]
+    assert not window._yaml_mask_map
    else:
     window.current_index=1;window.display_current_image();assert window.current_annotations==[]
   else:
@@ -374,6 +398,37 @@ with TemporaryDirectory() as directory:
    assert len(window.image_paths if hasattr(window,'image_paths') else window.pairs)==2
   window.close();window.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
 timer.stop();app.processEvents()
+""")
+
+    def test_deeplab_preset_keeps_selected_paths_after_temporary_view_is_deleted(self):
+        self.gui("""
+import shutil,yaml
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+import numpy as np
+from PyQt5.QtWidgets import QApplication,QMessageBox
+from ui.DL_train_settings_new_model import DeepLabV3TrainWidget
+from ui.dataset_source import set_dataset_path
+from utils_new.import_export.dataset_sources import defaults,preview,write_manifest
+from utils_new.import_export.mask_yaml import load_training_sources
+from utils_new.import_export.images import write_image
+app=QApplication([])
+with TemporaryDirectory() as directory:
+ root=Path(directory);source=fixture(root)
+ masks=root/'masks/train/nested';masks.mkdir(parents=True)
+ write_image(masks/'a.png',np.ones((24,32),np.uint8))
+ source.write_text(yaml.safe_dump(dict(path=str(root),train_images='images/train',train_masks='masks/train',class_names=['background','object'],num_classes=2)))
+ approved=write_manifest(preview(defaults([source],'unet'),'declared'),root/'temporary')[0]
+ widget=DeepLabV3TrainWidget();set_dataset_path(widget.deeplab_yaml,approved)
+ target=root/'preset.txt';widget.preset_path.setText(str(target))
+ with patch.object(QMessageBox,'information'),patch.object(QMessageBox,'critical') as error:
+  widget._save_preset();error.assert_not_called()
+ saved=next(line.partition(':')[2].strip() for line in target.read_text().splitlines() if line.startswith('deeplab_yaml:'))
+ shutil.rmtree(root/'temporary')
+ assert Path(saved).is_file()
+ assert len(load_training_sources(saved)['splits']['train'])==1
+ widget.close();app.processEvents()
 """)
 
     def test_training_fields_display_original_source_and_pass_approved_view(self):

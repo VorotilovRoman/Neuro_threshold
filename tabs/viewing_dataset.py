@@ -1573,7 +1573,8 @@ class ViewingDataset(QMainWindow):
 
             # Ищем маски (необязательно)
             mask_map = {}
-            for img in image_paths:
+            from utils_new.import_export.dataset_sources import metadata
+            for img in ([] if metadata(file_path) else image_paths):
                 m = find_mask_for_image(img, base_path=root)
                 if m:
                     mask_map[img] = m

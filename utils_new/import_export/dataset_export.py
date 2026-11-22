@@ -38,6 +38,8 @@ def export_subset(
     split_by_image=None,
 ):
     target = Path(out_dir).resolve()
+    if dataset_type not in (0, 1, 2):
+        raise ValueError('Неизвестный вид датасета.')
     existed = target.exists()
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise ValueError(
@@ -74,12 +76,12 @@ def export_subset(
             / split
             / (image.stem + (".png" if dataset_type == 1 else ".txt"))
         )
-        for rel in [image_rel] if dataset_type == 2 else [image_rel, label_rel]:
+        for rel in [image_rel] if dataset_type == 2 or aux is None else [image_rel, label_rel]:
             key = os.path.normcase(str(rel))
             if key in outputs:
                 raise ValueError(f"Коллизия выходных имён: {rel}")
             outputs.add(key)
-        if dataset_type != 2 and (not aux or not Path(aux).is_file()):
+        if dataset_type != 2 and aux is not None and not Path(aux).is_file():
             raise FileNotFoundError(f"Нет разметки: {aux}")
         entries.append((image, aux, size, image_rel, label_rel))
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -97,7 +99,9 @@ def export_subset(
 
                 raise CancelledError("Экспорт отменён.")
             shutil.copy2(image, stage / image_rel)
-            if dataset_type == 0:
+            if aux is None:
+                pass  # Preserve an unlabelled image; do not invent a background label/mask.
+            elif dataset_type == 0:
                 annotations = []
                 for value in load_pair_annotations(image, aux, input_format):
                     ann = from_legacy(value, ImageSize(*size))
