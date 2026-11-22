@@ -78,6 +78,10 @@ class ImportPlans(unittest.TestCase):
             self.assertEqual(planned["summaries"][0]["matched"], 1)
             view = write_manifest(planned, root / "voc_view")[0]
             self.assertEqual(len(load_training_sources(view)["splits"]["train"]), 1)
+            from utils_new.import_export.mask_yaml import write_yolo_txt_for_unet_pairs
+            from utils_new.import_export.yolo_labels import load_annotations
+            converted = write_yolo_txt_for_unet_pairs(load_unet_yaml(view)['pairs'], root / 'converted', class_names={})
+            self.assertEqual(len(load_annotations(converted[0][1], 32, 24)), 1)
 
     def test_source_choice_missing_labels_and_originals_survive_roundtrip(self):
         with TemporaryDirectory() as directory:

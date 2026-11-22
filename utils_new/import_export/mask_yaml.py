@@ -243,7 +243,8 @@ def write_yolo_txt_for_unet_pairs(
             anns = mask_to_annotations(
                 mask, encoding=encoding, kind="segment", holes="drop"
             )
-            anns = [a for a in anns if a.class_id in allowed]
+            if class_names:
+                anns = [a for a in anns if a.class_id in allowed]
             if not anns and not include_empty:
                 continue
             target = unique_label_path(output, image_path, used=used)
