@@ -198,6 +198,7 @@ class YoloInspectWindow(QMainWindow):
         self.ae_cfg = None
         self.ae_device = None
         self.ae_arch = "conv"
+        self._ae_device_request = None
         self._ae_calibration = None
         self._ae_ckpt_threshold = None
         self._ae_ckpt_percentile = None
@@ -1075,6 +1076,7 @@ class YoloInspectWindow(QMainWindow):
             calibration = loaded.calibration
             threshold_value = calibration["pixel_threshold"] if calibration else None
             device = self._resolve_torch_device()
+            requested_device = str(device)
 
             try:
                 model.to(device)
@@ -1090,6 +1092,7 @@ class YoloInspectWindow(QMainWindow):
             self.ae_model = model
             self.ae_cfg = cfg
             self.ae_device = device
+            self._ae_device_request = requested_device
             self.ae_arch = arch
             self.ae_model_edit.setText(path)
             self._ae_ckpt_threshold = threshold_value
@@ -1175,6 +1178,7 @@ class YoloInspectWindow(QMainWindow):
         self.ae_cfg = None
         self.ae_device = torch.device("cpu")
         self.ae_arch = "conv"
+        self._ae_device_request = None
         self._ae_calibration = None
         self._ae_ckpt_threshold = None
         self._ae_ckpt_percentile = None
@@ -1230,7 +1234,14 @@ class YoloInspectWindow(QMainWindow):
             self.ae_model,
             deepcopy(self.ae_cfg),
         )
-        device = self._resolve_torch_device()
+        requested_device = self._resolve_torch_device()
+        # Keep a successful CPU fallback until the requested device changes.
+        device = (
+            self.ae_device
+            if self.ae_device is not None
+            and self._ae_device_request == str(requested_device)
+            else requested_device
+        )
 
         def compute(cancel):
             from utils_new.autoencoders.inference import infer_autoencoder

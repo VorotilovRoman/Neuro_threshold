@@ -33,7 +33,17 @@ def inference_contract(config):
         "logvar_min",
         "logvar_max",
     )
-    return {key: config[key] for key in keys}
+    keys += (
+        ("latent_dim",)
+        if config["arch"] in ("conv", "conv_gn")
+        else ("latent_channels",)
+    )
+    if config["arch"] == "unet_v2":
+        keys += ("base", "norm_type", "bottleneck_dilations")
+    return {
+        key: list(config[key]) if isinstance(config[key], tuple) else config[key]
+        for key in keys
+    }
 
 
 def validate_calibration(value, config):
@@ -46,7 +56,7 @@ def validate_calibration(value, config):
     ):
         raise ValueError("Неизвестный формат калибровки AE.")
     if value.get("contract") != inference_contract(config):
-        raise ValueError("Калибровка не соответствует предобработке или режиму VAE.")
+        raise ValueError("Калибровка не соответствует модели, предобработке или режиму VAE.")
     if (
         value.get("image_aggregation") != "mean_valid_pixels"
         or value.get("pixel_aggregation") != "valid_pixels"

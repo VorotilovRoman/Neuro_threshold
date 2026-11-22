@@ -588,29 +588,24 @@ def detect_arch_from_state_dict(state_dict):
 
 
 def detect_arch(cfg, state_dict=None):
-    """
-    Определяет архитектуру AE/VAE.
+    """Use actual weights first, then a versioned config's explicit architecture.
 
-    Приоритет:
-      1) state_dict — если передан, он авторитетен (ключи реальной модели
-         однозначно указывают на архитектуру);
-      2) маркеры unet_v2 в cfg
-         (use_edge_channel / bottleneck_dilations /
-          model_in_channels / norm_type);
-      3) явный 'arch' в cfg;
-      4) 'latent_channels' без маркеров → старый unet;
-      5) 'conv' по умолчанию.
-
-    Такая очерёдность нужна, потому что обучающий скрипт
-    auto-aeb_unet_with_grad.py сохраняет в cfg['arch'] исторический
-    хардкод "unet", хотя реально строит unet_v2. state_dict всегда
-    корректно различает эти две архитектуры.
+    Unversioned historical configs retain their marker-based fallback: some
+    earlier V2 checkpoints were tagged as the original U-Net.
     """
     # 1) state_dict — истина в последней инстанции
     if state_dict is not None:
         detected = detect_arch_from_state_dict(state_dict)
         if detected in ("unet_v2", "unet", "conv", "conv_gn"):
             return detected
+
+    if cfg.get("preprocessing_version") and cfg.get("arch") in (
+        "unet_v2",
+        "unet",
+        "conv",
+        "conv_gn",
+    ):
+        return cfg["arch"]
 
     # 2) специфичные маркеры unet_v2 в cfg
     if (
@@ -699,7 +694,7 @@ def _build_model(cfg):
 def build_ae_model_from_cfg(cfg, arch=None):
     from utils_new.configuration.autoencoder import normalize_model_config
 
-    cfg = normalize_model_config(cfg, arch=arch or cfg.get("arch") or detect_arch(cfg))
+    cfg = normalize_model_config(cfg, arch=arch or detect_arch(cfg))
     model = _build_model(cfg)
     model.logvar_min, model.logvar_max = cfg["logvar_min"], cfg["logvar_max"]
     model.deterministic_eval = cfg["vae_use_mean"]

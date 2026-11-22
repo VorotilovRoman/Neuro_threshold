@@ -78,6 +78,10 @@ class AutoencoderContracts(unittest.TestCase):
             with self.subTest(
                 arch=cfg["arch"], kind=cfg["model_type"], channels=cfg["in_channels"]
             ):
+                from utils_new.configuration.autoencoder import normalize_model_config
+                from utils_new.autoencoders.models import detect_arch
+
+                self.assertEqual(detect_arch(normalize_model_config(cfg)), cfg["arch"])
                 model = build_ae_model_from_cfg(cfg)
                 descriptors = [
                     (k, list(v.shape)) for k, v in model.state_dict().items()
@@ -324,6 +328,52 @@ class AutoencoderContracts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 read_checkpoint(path)
 
+    def test_cpu_rng_snapshot_does_not_initialize_cuda_and_contract_covers_dilations(
+        self,
+    ):
+        from utils_new.autoencoders.training import capture_rng
+        from utils_new.import_export.autoencoder import (
+            inference_contract,
+            validate_calibration,
+        )
+        from utils_new.configuration.autoencoder import normalize_model_config
+
+        generator = torch.Generator()
+        with patch(
+            "torch.cuda.get_rng_state_all",
+            side_effect=AssertionError("CPU touched CUDA"),
+        ):
+            self.assertEqual(
+                capture_rng(generator, generator, device="cpu")["cuda"], []
+            )
+        config = normalize_model_config(
+            dict(
+                arch="unet_v2",
+                model_type="ae",
+                in_channels=1,
+                img_h=32,
+                img_w=48,
+                latent_channels=4,
+            )
+        )
+        calibration = dict(
+            version=1,
+            metric="mae",
+            contract=inference_contract(config),
+            image_threshold=0.2,
+            pixel_threshold=0.5,
+            image_percentile=99.0,
+            pixel_percentile=99.0,
+            images=2,
+            image_aggregation="mean_valid_pixels",
+            pixel_aggregation="valid_pixels",
+        )
+        # Contracts survive the JSON artifact round-trip.
+        validate_calibration(json.loads(json.dumps(calibration)), config)
+        changed = dict(config, bottleneck_dilations=(1, 2))
+        with self.assertRaisesRegex(ValueError, "Калибровка"):
+            validate_calibration(calibration, changed)
+
     def test_real_training_cancel_resume_is_exact_and_changed_dataset_is_rejected(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -436,6 +486,16 @@ with tempfile.TemporaryDirectory() as directory,patch.object(QMessageBox,'critic
  assert window._ae_task is None,window.processing_status.text()
  assert 'MAE' in window.ae_score_label.text() and '0.200000' in window.ae_score_label.text()
  assert window._ae_threshold==.6
+ original_to=torch.nn.Module.to
+ def limited_to(network,device,*args,**kwargs):
+  if str(device).startswith('cuda'):raise RuntimeError('simulated CUDA allocation failure')
+  return original_to(network,device,*args,**kwargs)
+ with patch.object(window,'_resolve_torch_device',return_value=torch.device('cuda:0')),patch.object(torch.nn.Module,'to',new=limited_to):
+  assert window._load_ae_model_from_path(str(weights))
+  window.btn_apply_ae.click();timer.restart()
+  while window._ae_task is not None and timer.elapsed()<10000:QTest.qWait(10)
+  assert window._ae_task is None and window.ae_device.type=='cpu',window.processing_status.text()
+  assert window._ae_err_hw is not None,window.processing_status.text()
  legacy=root/'old.pt';oldcfg=dict(cfg);oldcfg.pop('preprocessing_version')
  torch.save(dict(model=model.state_dict(),config=oldcfg,threshold_value=.001),legacy)
  assert window._load_ae_model_from_path(str(legacy))

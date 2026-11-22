@@ -42,13 +42,15 @@ def cpu_state(model):
     return {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
 
-def capture_rng(train_generator, val_generator):
+def capture_rng(train_generator, val_generator, *, device="cpu"):
     state = np.random.get_state()
     return dict(
         python=random.getstate(),
         numpy=(state[0], state[1].tolist(), state[2], state[3], state[4]),
         torch=torch.get_rng_state(),
-        cuda=torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+        cuda=torch.cuda.get_rng_state_all()
+        if torch.device(device).type == "cuda"
+        else [],
         train_generator=train_generator.get_state(),
         val_generator=val_generator.get_state(),
     )
@@ -297,10 +299,9 @@ def run_training(
     random.seed(config.seed)
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(config.seed)
     torch_device = torch.device(device)
     if torch_device.type == "cuda":
+        torch.cuda.manual_seed_all(config.seed)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
     train_generator = torch.Generator().manual_seed(config.seed)
@@ -443,7 +444,7 @@ def run_training(
                 train_paths=train_paths,
                 val_paths=val_paths,
                 manifest=manifest,
-                rng=capture_rng(train_generator, val_generator),
+                rng=capture_rng(train_generator, val_generator, device=torch_device),
             )
             save_checkpoint(
                 output / "last.pt",
