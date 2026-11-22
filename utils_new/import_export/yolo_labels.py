@@ -173,6 +173,24 @@ def serialize_yolo_labels(annotations, size: ImageSize, *, obb_format='corners')
     return ('\n'.join(rows) + '\n') if rows else ''
 
 
+def unique_label_path(directory, image_path, *, prefix='', used=None):
+    """Reserve a temporary sidecar name without merging same-stem source images.
+
+    ``used`` is a case-folded filename set owned by one import operation. Existing
+    labels are also reserved so repeated imports never overwrite earlier pairs.
+    """
+    directory = Path(directory)
+    if used is None:
+        used = {p.name.casefold() for p in directory.iterdir()} if directory.exists() else set()
+    stem = prefix + Path(image_path).stem
+    name, serial = stem + '.txt', 2
+    while name.casefold() in used or (directory / name).exists():
+        name = f'{stem}__{serial}.txt'
+        serial += 1
+    used.add(name.casefold())
+    return directory / name
+
+
 def write_yolo_labels(path, annotations, size: ImageSize, *, obb_format='corners'):
     text = serialize_yolo_labels(annotations, size, obb_format=obb_format)
     path = Path(path)

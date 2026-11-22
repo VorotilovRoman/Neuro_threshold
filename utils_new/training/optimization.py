@@ -27,6 +27,7 @@ def get_scheduler(optimizer, scheduler_name, epochs, eta_min=1e-6):
     sn = (
         scheduler_name.lower()
         .replace("steplr", "step")
+        .replace("cosineannealinglr", "cosine")
         .replace("cosineannealing", "cosine")
     )
     if sn == "poly":

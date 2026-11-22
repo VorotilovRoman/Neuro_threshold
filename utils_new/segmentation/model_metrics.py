@@ -23,8 +23,6 @@ def prediction_labels(logits, num_classes, threshold=0.5):
 def segmentation_metrics(
     logits, target, num_classes, *, threshold=0.5, ignore_index=None
 ):
-    import torch
-
     matrix = confusion_matrix(
         logits, target, num_classes, threshold=threshold, ignore_index=ignore_index
     ).double()
@@ -35,10 +33,15 @@ def metrics_from_confusion(matrix, num_classes):
     import torch
 
     matrix = torch.as_tensor(matrix, dtype=torch.float64)
+    if type(num_classes) is not int or num_classes < 1:
+        raise ValueError("Число классов должно быть положительным целым.")
+    count = max(2, num_classes)
+    if (matrix.shape != (count, count) or not torch.isfinite(matrix).all()
+            or (matrix < 0).any()):
+        raise ValueError("Ожидается конечная неотрицательная квадратная матрица ошибок по классам.")
     keys = ("IoU", "Dice", "Precision", "Recall", "F1", "Accuracy")
     if not matrix.sum():
         return dict.fromkeys(keys, float("nan"))
-    count = max(2, num_classes)
     tp = matrix.diag()
     actual, detected = matrix.sum(dim=1), matrix.sum(dim=0)
     union = actual + detected - tp

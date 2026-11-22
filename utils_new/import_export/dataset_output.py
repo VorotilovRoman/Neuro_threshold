@@ -54,6 +54,12 @@ def write_classes_and_yaml(
     output_dir = Path(output_dir)
     if input_type == 2 or not class_names:
         return
+    if sorted(class_names) != list(range(len(class_names))):
+        raise ValueError("Output class IDs must be dense 0..N-1; remap selected classes first")
+    if type(out_masks_offset) is not int or not 1 <= out_masks_offset <= 65535:
+        raise ValueError("Output mask offset must be an integer 1..65535")
+    if out_unet_yaml and len(class_names) + out_masks_offset > 65536:
+        raise ValueError("PNG class indices must fit uint16")
     ordered = [str(class_names[k]) for k in sorted(class_names)]
     (output_dir / "classes.txt").write_text("\n".join(ordered) + "\n", encoding="utf-8")
     if out_yolo_txt:
@@ -77,8 +83,8 @@ def write_classes_and_yaml(
             "val_masks": "masks/val",
             "test_images": "images/test",
             "test_masks": "masks/test",
-            "num_classes": len(ordered) + 1,
-            "class_names": ["background", *ordered],
+            "num_classes": len(ordered) + out_masks_offset,
+            "class_names": ["background", *[f"reserved_{i}" for i in range(1, out_masks_offset)], *ordered],
             "mask_class_offset": int(out_masks_offset),
         }
         (output_dir / "masks_data.yaml").write_text(
@@ -111,7 +117,7 @@ def write_coco_split(output_dir, split, rows, class_names, *, masks_offset=1, lo
     images = []
     objects = []
     counter = 0
-    for image_id, (name, size, annotations, mask) in enumerate(rows):
+    for image_id, (name, size, row_annotations, mask) in enumerate(rows):
         images.append(
             {
                 "id": image_id,
@@ -121,11 +127,11 @@ def write_coco_split(output_dir, split, rows, class_names, *, masks_offset=1, lo
                 "license": 1,
             }
         )
-        if annotations is None:
+        if row_annotations is None:
             if mask is None:
-                annotations = []
+                row_annotations = []
             else:
-                annotations = mask_to_annotations(
+                row_annotations = mask_to_annotations(
                     mask,
                     encoding=MaskEncoding(offset=int(masks_offset)),
                     kind="segment",
@@ -134,7 +140,7 @@ def write_coco_split(output_dir, split, rows, class_names, *, masks_offset=1, lo
                 )
                 if log:
                     log(f"[COCO] {name}: mask→polygon — lossy (контуры, без отверстий)")
-        for ann in annotations:
+        for ann in row_annotations:
             objects.append(_coco_record(ann, image_id, counter))
             counter += 1
     data = {

@@ -40,7 +40,9 @@ def decode_output(output, *, output_kind="logits", threshold=0.5, target_shape=N
         raise ValueError(
             "Ожидается выход NCHW (один снимок) или CHW/HW. Detection-выходы не поддерживаются."
         )
-    values = values.astype(np.float32)
+    # Preserve float64 outputs: forcing large finite logits to float32 can turn
+    # them into Inf and silently classify an entire image as background.
+    values = values.astype(np.result_type(values.dtype, np.float32))
     if output_kind == "probabilities" and (values.min() < 0 or values.max() > 1):
         raise ValueError(
             "Вероятности должны быть в диапазоне [0, 1]. Выберите logits для необработанного выхода."
@@ -66,7 +68,8 @@ def decode_output(output, *, output_kind="logits", threshold=0.5, target_shape=N
         return (probability > threshold).astype(np.uint8) * 255
     if channels == 2:
         if output_kind == "logits":
-            values = np.exp(values - values.max(axis=0, keepdims=True))
+            with np.errstate(over="ignore", under="ignore"):
+                values = np.exp(values - values.max(axis=0, keepdims=True))
             values /= values.sum(axis=0, keepdims=True)
         return (values[1] > threshold).astype(np.uint8) * 255
     return values.argmax(axis=0).astype(np.int32)

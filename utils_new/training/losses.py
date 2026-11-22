@@ -108,6 +108,8 @@ class SegmentationLoss(nn.Module):
             target = target.long()
         total = prediction.new_zeros(())
         for key in self.names:
+            if self.weights.get(key, 1.0) == 0:
+                continue
             if key == "ce":
                 if self.num_classes == 1:
                     safe = torch.where(valid, target, 0.0)
@@ -118,14 +120,20 @@ class SegmentationLoss(nn.Module):
                         reduction="none",
                     )[valid].mean()
                 else:
-                    value = F.cross_entropy(
+                    values = F.cross_entropy(
                         prediction,
                         target,
                         weight=self.class_weights,
                         ignore_index=self.ignore_index
                         if self.ignore_index is not None
                         else -100,
+                        reduction="none",
                     )
+                    mass = (valid.sum() if self.class_weights is None
+                            else self.class_weights[target[valid]].sum())
+                    # A batch containing only zero-weight classes is valid. Native
+                    # weighted CE mean divides by zero and poisons mixed losses.
+                    value = values[valid].sum() / torch.where(mass > 0, mass, 1)
             else:
                 value = self.overlap[key](prediction, target)
             total = total + self.weights.get(key, 1.0) * value

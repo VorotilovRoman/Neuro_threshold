@@ -10,7 +10,7 @@ import numpy as np
 
 from utils_new.annotations import ImageSize, from_legacy
 from utils_new.import_export.images import read_image
-from utils_new.import_export.yolo_labels import write_yolo_labels
+from utils_new.import_export.yolo_labels import write_yolo_labels, unique_label_path
 
 
 def _bbox_to_detect(bbox, w, h):
@@ -161,6 +161,19 @@ def load_coco(json_path, log_cb=None, *, preserve_category_ids=False):
                 if bbox and len(bbox) == 4:
                     d = _bbox_to_detect(bbox, w, h)
                     canonical.append(("detect", yolo_cls, *d[2:]))
+                    if log_cb:
+                        log_cb(f"[COCO] crowd annotation {a.get('id')}: converted to BBox (lossy)")
+                continue
+
+            if isinstance(seg, dict):
+                # RLE is not a polygon list. Preserve the object explicitly as a
+                # bounding box instead of silently returning an empty annotation.
+                if not bbox or len(bbox) != 4:
+                    raise ValueError(f"[COCO] RLE annotation {a.get('id')} needs a bbox for conversion")
+                d = _bbox_to_detect(bbox, w, h)
+                canonical.append(("detect", yolo_cls, *d[2:]))
+                if log_cb:
+                    log_cb(f"[COCO] RLE annotation {a.get('id')}: converted to BBox (lossy)")
                 continue
 
             # 1) segmentation есть
@@ -212,9 +225,10 @@ def write_yolo_txt_for_coco_items(
     outdir = Path(output_labels_dir)
     outdir.mkdir(parents=True, exist_ok=True)
     pairs = []
+    used = {p.name.casefold() for p in outdir.iterdir()}
     for item in items:
         image_path = item["img_path"]
-        label_path = outdir / f"{name_prefix}{Path(image_path).stem}.txt"
+        label_path = unique_label_path(outdir, image_path, prefix=name_prefix, used=used)
         size = ImageSize(int(item["width"]), int(item["height"]))
         annotations = []
         for value in item["annotations"]:

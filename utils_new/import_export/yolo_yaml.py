@@ -138,43 +138,32 @@ def _find_label_for_image(img_path, base_path, split, rel_dir):
 
 
 def find_mask_for_image(img_path, base_path=None):
-    """
-    Ищет маску для изображения в стандартных местах YAML-структуры.
-    Возвращает путь к маске или None.
-    """
-    img_path_abs = os.path.abspath(img_path)
-    d = os.path.dirname(img_path_abs)
-    base = os.path.splitext(os.path.basename(img_path_abs))[0]
-    exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+    """Prefer lossless masks/ sidecars over alternate image encodings beside a photo."""
+    from pathlib import Path
 
-    # 1) рядом с изображением (только другой файл)
-    for ext in exts:
-        cand = os.path.join(d, base + ext)
-        if os.path.exists(cand) and os.path.abspath(cand) != img_path_abs:
-            return cand
-
-    # 2) подстановка images → masks в пути
-    norm = img_path_abs.replace("\\", "/")
-    parts = norm.split("/")
-    for i, p in enumerate(parts):
-        if p == "images":
-            for ext in exts:
-                new_parts = parts[:i] + ["masks"] + parts[i + 1 :]
-                new_parts[-1] = base + ext
-                cand = os.sep.join(new_parts)
-                if os.path.exists(cand):
-                    return cand
-
-    # 3) base_path/masks/ и соседняя masks/
-    dirs_to_try = []
+    image = Path(img_path).resolve()
+    folders = []
+    for i, part in enumerate(image.parts[:-1]):
+        if part == "images":
+            folders.append(Path(*image.parts[:i], "masks", *image.parts[i + 1:-1]))
     if base_path:
-        dirs_to_try.append(os.path.join(base_path, "masks"))
-    dirs_to_try.append(os.path.join(os.path.dirname(d), "masks"))
-    for mask_dir in dirs_to_try:
-        for ext in exts:
-            cand = os.path.join(mask_dir, base + ext)
-            if os.path.exists(cand):
-                return cand
+        folders.append(Path(base_path) / "masks")
+    folders.extend([image.parent.parent / "masks", image.parent])
+    seen = set()
+    for folder in folders:
+        if folder in seen:
+            continue
+        seen.add(folder)
+        candidates = set()
+        for extension in (".png", ".tif", ".tiff", ".bmp"):
+            for suffix in (extension, extension.upper()):
+                candidate = (folder / (image.stem + suffix)).resolve()
+                if candidate.is_file() and candidate != image:
+                    candidates.add(candidate)
+        if len(candidates) > 1:
+            raise ValueError(f"Неоднозначная маска для {image}: {sorted(map(str, candidates))}")
+        if candidates:
+            return str(candidates.pop())
     return None
 
 

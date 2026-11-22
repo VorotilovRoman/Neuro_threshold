@@ -4,20 +4,12 @@
 import os
 
 
-from utils_new.import_export.images import collect_image_paths, image_size_from_file
+from utils_new.import_export.images import collect_image_paths, image_size_from_file, index_mask_files
 from utils_new.dataset.validation import (
-    IMG_EXTENSIONS,
     INPUT_FORMAT_AUTO,
     PairValidator,
 )
 from utils_new.import_export.images import read_mask_with_fallback
-
-
-def _list_images(folder):
-    return {
-        os.path.splitext(os.path.basename(path))[0]: path
-        for path in collect_image_paths(folder)
-    }
 
 
 def scan_detection_pairs(
@@ -25,8 +17,8 @@ def scan_detection_pairs(
 ):
     types_stats = {}
     pairs = []
-    img_files = _list_images(images_folder)
-    for name, img_path in img_files.items():
+    for img_path in collect_image_paths(images_folder):
+        name = os.path.splitext(os.path.basename(img_path))[0]
         label_path = os.path.join(labels_folder, name + ".txt")
         if not os.path.exists(label_path):
             continue
@@ -44,30 +36,16 @@ def scan_detection_pairs(
 
 def scan_segmentation_pairs(images_folder, masks_folder, log_cb=None):
     pairs = []
-    img_files = _list_images(images_folder)
-    for name, img_path in img_files.items():
-        mask_path = None
-        for ext in IMG_EXTENSIONS:
-            cand = os.path.join(masks_folder, name + ext)
-            if os.path.exists(cand):
-                if os.path.abspath(cand) == os.path.abspath(img_path):
-                    if log_cb:
-                        log_cb(
-                            f"Предупреждение: маска совпадает с изображением {img_path}"
-                        )
-                    mask_path = None
-                    break
-                mask_path = cand
-                break
+    masks = index_mask_files(masks_folder)
+    for img_path in collect_image_paths(images_folder):
+        name = os.path.splitext(os.path.basename(img_path))[0]
+        mask_path = masks.get(name.casefold())
         if mask_path is None:
-            for f in os.listdir(masks_folder):
-                mask_name, mask_ext = os.path.splitext(f)
-                if mask_name == name and mask_ext.lower() in IMG_EXTENSIONS:
-                    cand = os.path.join(masks_folder, f)
-                    if os.path.abspath(cand) != os.path.abspath(img_path):
-                        mask_path = cand
-                    break
-        if mask_path is None:
+            continue
+        mask_path = str(mask_path)
+        if os.path.realpath(mask_path) == os.path.realpath(img_path):
+            if log_cb:
+                log_cb(f"Предупреждение: маска совпадает с изображением {img_path}")
             continue
         test = read_mask_with_fallback(str(mask_path))
         if test is None:
@@ -79,7 +57,7 @@ def scan_segmentation_pairs(images_folder, masks_folder, log_cb=None):
 
 
 def scan_image_only_pairs(images_folder):
-    return [(p, None) for p in _list_images(images_folder).values()]
+    return [(p, None) for p in collect_image_paths(images_folder)]
 
 
 def build_pair_display(pair, validator, dataset_type, include_empty):
