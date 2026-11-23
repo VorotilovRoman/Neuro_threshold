@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QWidget,
     QHeaderView,
     QPlainTextEdit,
+    QProgressBar,
     QAbstractItemView,
 )
 
@@ -27,6 +28,7 @@ from utils_new.import_export import dataset_sources as sources
 
 class _Signals(QObject):
     finished = pyqtSignal(int, object, object)
+    progress = pyqtSignal(int, int, int, str)
 
 
 class _PathEdit(QPlainTextEdit):
@@ -51,7 +53,8 @@ class _Preview(QRunnable):
     def run(self):
         try:
             self.signals.finished.emit(
-                self.serial, sources.preview(self.spec, self.mode, self.cancel), None
+                self.serial, sources.preview(self.spec, self.mode, self.cancel,
+                    lambda done, total, stage: self.signals.progress.emit(self.serial, done, total, stage)), None
             )
         except Exception as exc:
             self.signals.finished.emit(self.serial, None, str(exc))
@@ -137,6 +140,9 @@ class DatasetImportDialog(QDialog):
         self.notice = QLabel("")
         self.notice.setWordWrap(True)
         layout.addWidget(self.notice)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        layout.addWidget(self.progress)
         help_text = (
             "COCO: разметка читается только из указанных JSON. Снимки без объектов сохраняются."
             if self.base["kind"] == "coco"
@@ -256,6 +262,8 @@ class DatasetImportDialog(QDialog):
         self.plan = None
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(False)
         self.notice.setText("Подсчёт файлов…")
+        self.progress.setRange(0, 0)
+        self.progress.show()
         for job in self._jobs.values():
             job.cancel.set()
         self.timer.start()
@@ -270,12 +278,21 @@ class DatasetImportDialog(QDialog):
         job = _Preview(self._serial, deepcopy(spec), self.mode.currentData())
         self._jobs[job.serial] = job
         job.signals.finished.connect(self._finished)
+        job.signals.progress.connect(self._progress)
         QThreadPool.globalInstance().start(job)
+
+    def _progress(self, serial, done, total, stage):
+        if serial == self._serial and not self._closed:
+            self.progress.setRange(0, total)
+            if total:
+                self.progress.setValue(done)
+            self.notice.setText(f'{stage}: {done} файлов')
 
     def _finished(self, serial, plan, error):
         self._jobs.pop(serial, None)
         if serial != self._serial or self._closed:
             return
+        self.progress.hide()
         if error:
             self.notice.setText(error)
             return

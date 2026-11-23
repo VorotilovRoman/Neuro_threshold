@@ -87,7 +87,7 @@ def _local_image_path(image, source, root):
         return Path(image.name)
 
 
-def label_candidates(img_path, base_path, split, rel_dir=None):
+def label_candidates(img_path, base_path, split, rel_dir=None, *, indices=None):
     """List existing candidates by user-visible source, without choosing a winner."""
     from pathlib import Path
     image, root = Path(img_path).resolve(), Path(base_path).resolve()
@@ -104,17 +104,20 @@ def label_candidates(img_path, base_path, split, rel_dir=None):
                    root / "labels", image.parent.parent / "labels"]:
         if folder:
             candidates.append(("labels" if folder.is_relative_to(root / "labels") else "other", folder / (image.stem + ".txt")))
+    from utils_new.import_export.images import sidecar_matches
+    indices = {} if indices is None else indices
     seen = set()
     for group, path in candidates:
-        path = path.resolve()
-        if path.is_file() and path not in seen:
-            result[group].append(str(path))
-            seen.add(path)
+        for found in sidecar_matches(path.parent, path.name, indices, recursive=False):
+            found = str(found.absolute())
+            if found not in seen:
+                result[group].append(found)
+                seen.add(found)
     return result
 
 
-def _find_label_for_image(img_path, base_path, split, rel_dir):
-    groups = label_candidates(img_path, base_path, split, rel_dir)
+def _find_label_for_image(img_path, base_path, split, rel_dir, *, indices=None):
+    groups = label_candidates(img_path, base_path, split, rel_dir, indices=indices)
     return next((p for paths in groups.values() for p in paths), None)
 
 
@@ -195,6 +198,7 @@ def load_yolo_yaml(yaml_path, log_cb=None):
     pairs = []
     splits_info = {}
     seen_paths = set()
+    label_indices = {}
 
     for split, split_val in split_keys:
         if not split_val:
@@ -218,7 +222,7 @@ def load_yolo_yaml(yaml_path, log_cb=None):
                     lbl = selection["annotations"].get(os.path.realpath(img_path))
                 else:
                     lbl = _find_label_for_image(img_path, base_path, split,
-                                                source if os.path.isdir(source) else None)
+                                                source if os.path.isdir(source) else None, indices=label_indices)
                 pairs.append((img_path, lbl))
                 n_in_split += 1
         splits_info[split] = n_in_split

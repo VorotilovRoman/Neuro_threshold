@@ -115,6 +115,9 @@ assert ultralytics.utils.patches.cv2 is original
     def test_embedded_editor_viewer_buttons_load_and_toggle(self):
         status, output = self.run_python(['-c', """
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 import tempfile
 from unittest.mock import patch
 import cv2, numpy as np
@@ -134,7 +137,7 @@ with tempfile.TemporaryDirectory() as directory:
         app.processEvents()
         with patch.object(QFileDialog, 'getOpenFileNames', return_value=([str(image)], '')) as dialog:
             QTest.mouseClick(editor.nav_widget._load_images_btn, Qt.LeftButton)
-            app.processEvents()
+            wait_dataset(editor)
             dialog.assert_called_once()
         assert editor.image_paths == [str(image)]
         assert (editor.save_button if index == 0 else editor.btn_save).isEnabled()

@@ -4,6 +4,7 @@
 import os
 
 import cv2
+import numpy as np
 
 from utils_new.annotations import ImageSize
 from utils_new.import_export.images import _read_with_fallback, read_mask_with_fallback
@@ -45,17 +46,21 @@ class PairValidator:
             input_format if input_format in _VALID_INPUT_FORMATS else INPUT_FORMAT_AUTO
         )
         self._cache = {}
+        self.details = {}
 
     def set_dataset_type(self, dataset_type):
         self.dataset_type = dataset_type
         self._cache.clear()
+        self.details.clear()
 
     def set_input_format(self, fmt):
         self.input_format = fmt if fmt in _VALID_INPUT_FORMATS else INPUT_FORMAT_AUTO
         self._cache.clear()
+        self.details.clear()
 
     def clear_cache(self):
         self._cache.clear()
+        self.details.clear()
 
     def validate_full(self, pair):
         key = (
@@ -75,6 +80,7 @@ class PairValidator:
         versions = signature(pair[0]), signature(pair[1] if len(pair) > 1 else None)
         if key in self._cache and self._cache[key][0] == versions:
             return self._cache[key][1]
+        self.details[tuple(pair[:2])] = {}
         result = self._validate_impl(pair)
         self._cache[key] = versions, result
         return result
@@ -85,6 +91,7 @@ class PairValidator:
 
     def validate_all(self, pairs, progress_cb=None):
         self._cache.clear()
+        self.details.clear()
         total = len(pairs)
         if total == 0:
             return 0, 0
@@ -123,6 +130,8 @@ class PairValidator:
             img_h, img_w = img.shape[:2]
             if img_h == 0 or img_w == 0:
                 return False, "Zero-size image", "unknown", "unknown"
+            detail = self.details.setdefault(tuple(pair[:2]), {})
+            detail["size"] = (img_w, img_h)
             color_type = ImageStats.detect_color_type(img)
             bit_type = ImageStats.detect_bit_type(img, img_path)
         except Exception as e:
@@ -157,6 +166,9 @@ class PairValidator:
                     )
             except Exception as e:
                 return False, f"Mask read error: {e}", color_type, bit_type
+            detail.update(
+                ann_type="segment", classes=[int(value) for value in np.unique(mask)]
+            )
             return True, "", color_type, bit_type
 
         try:
@@ -167,6 +179,14 @@ class PairValidator:
                 strict=True,
             )
             types = {a.kind for a in annotations}
+            detail.update(
+                ann_type="empty"
+                if not types
+                else next(iter(types))
+                if len(types) == 1
+                else "mixed",
+                classes=sorted({ann.class_id for ann in annotations}),
+            )
             if len(types) > 1 and self.input_format != INPUT_FORMAT_MIXED:
                 return (
                     False,
@@ -203,3 +223,51 @@ class PairValidator:
             )
         except (OSError, ValueError, TypeError, IndexError, cv2.error):
             return "error"
+
+
+class LabelValidationJob:
+    """Validate label files without decoding every image or blocking window closure."""
+
+    def __init__(self, image_paths, label_map=None, label_folder=None):
+        self.images = list(image_paths)
+        self.label_map = dict(label_map or {})
+        self.label_folder = label_folder
+        self.cancelled = False
+        self.progress = lambda *_: None
+        self.log = lambda *_: None
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        from pathlib import Path
+        from utils_new.import_export.images import image_size_from_file
+
+        records = {}
+        for index, image in enumerate(self.images):
+            if self.cancelled:
+                return {"cancelled": True}
+            if self.label_map:
+                path = self.label_map.get(image)
+            else:
+                path = (
+                    Path(self.label_folder) / (Path(image).stem + ".txt")
+                    if self.label_folder
+                    else Path(image).with_suffix(".txt")
+                )
+                if not path.is_file():
+                    path = None
+            try:
+                values = (
+                    read_yolo_labels(
+                        path, ImageSize(*image_size_from_file(image)), strict=True
+                    )
+                    if path
+                    else []
+                )
+                records[index] = [(True, "") for _ in values]
+            except (OSError, ValueError, cv2.error) as exc:
+                records[index] = [(False, str(exc))]
+            if index % 16 == 0 or index + 1 == len(self.images):
+                self.progress(index + 1, len(self.images))
+        return {"records": records}

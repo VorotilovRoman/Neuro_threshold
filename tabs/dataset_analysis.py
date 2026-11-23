@@ -82,8 +82,6 @@ class DatasetAnalysisWindow(
         self._yaml_root = None
         self._yaml_path = None
         self._yaml_names = None
-        self._coco_tmp_labels_dir = None
-        self._coco_json_counter = 0
         self._updating_class_table = False
 
         # Результаты / состояние

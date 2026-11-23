@@ -2,7 +2,7 @@
 
 import threading
 from collections import OrderedDict
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
 
 
 class LazyImageCache:
@@ -38,7 +38,7 @@ class LazyImageCache:
         item, error = None, None
         try:
             with self._lock:
-                if self._shutdown:
+                if self._shutdown or self._pending.get(idx) is not future:
                     return
             item = self.loader(self.paths[idx])
             if item is None:
@@ -47,8 +47,10 @@ class LazyImageCache:
             error = exc
         finally:
             with self._lock:
-                self._pending.pop(idx, None)
-                if not self._shutdown:
+                active = self._pending.get(idx) is future
+                if active:
+                    self._pending.pop(idx, None)
+                if not self._shutdown and active:
                     if error is not None:
                         self._errors[idx] = error
                     elif item is not None:
@@ -70,7 +72,11 @@ class LazyImageCache:
         with self._lock:
             return self._errors.get(idx)
 
-    def get(self, idx):
+    def retry_error(self, idx):
+        with self._lock:
+            self._errors.pop(idx, None)
+
+    def get(self, idx, *, cancel_check=None):
         with self._lock:
             if self._shutdown or not 0 <= idx < len(self.paths):
                 return None
@@ -85,7 +91,14 @@ class LazyImageCache:
                 future = self._pending[idx] = Future()
         if owner:
             self._load(idx, future)
-        return future.result()
+        if cancel_check is None:
+            return future.result()
+        while not cancel_check():
+            try:
+                return future.result(timeout=0.05)
+            except TimeoutError:
+                pass
+        return None
 
     def prefetch(self, indices):
         with self._lock:
@@ -111,6 +124,11 @@ class LazyImageCache:
                 for idx in list(values):
                     if not low <= idx <= high:
                         del values[idx]
+            for idx in list(self._pending):
+                if not low <= idx <= high:
+                    future = self._pending.pop(idx)
+                    if not future.done():
+                        future.set_result(None)
 
     def shutdown(self):
         with self._lock:
@@ -124,3 +142,32 @@ class LazyImageCache:
                     future.set_result(None)
             self._pending.clear()
         self._pool.shutdown(wait=False, cancel_futures=True)
+
+
+class CachedImageJob:
+    """Wait for a requested cache entry away from the Qt event loop."""
+
+    def __init__(self, cache, index):
+        self.cache, self.index = cache, index
+        self.cancelled = False
+        self.progress = lambda *_: None
+        self.log = lambda *_: None
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        self.cache.retry_error(self.index)
+        self.cache.prefetch([self.index])
+        item = (
+            None
+            if self.cancelled
+            else self.cache.get(self.index, cancel_check=lambda: self.cancelled)
+        )
+        if self.cancelled:
+            return {"cancelled": True}
+        if item is None:
+            raise OSError(
+                f"Не удалось прочитать снимок: {self.cache.paths[self.index]}"
+            )
+        return {"item": item}

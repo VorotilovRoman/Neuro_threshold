@@ -220,3 +220,168 @@ def resolve_class_name(names, cid):
 def dense_class_remap(ids):
     """Map selected SOURCE identifiers to zero-based dense IDs, sorted."""
     return {old: new for new, old in enumerate(sorted({int(i) for i in ids}))}
+
+
+class DatasetImportJob:
+    """Cancellable discovery/conversion for shared loaders and lazy dataset editors."""
+
+    def __init__(self, kind, paths, options=None):
+        self.kind, self.paths = kind, list(paths)
+        self.options = dict(options or {})
+        self.cancelled = False
+        self._log_count = 0
+        self.progress = lambda *_: None
+        self.log = lambda *_: None
+
+    def _report(self, message):
+        if str(message).startswith(("[U-Net → YOLO]", "[COCO -> YOLO]")):
+            return
+        self._log_count += 1
+        if self._log_count <= 40:
+            self.log(message)
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        from tempfile import TemporaryDirectory
+        from utils_new.import_export.images import (
+            collect_image_paths,
+            index_mask_files,
+            sidecar_matches,
+        )
+        from utils_new.import_export.coco import write_yolo_txt_for_coco_items
+        from utils_new.import_export.mask_yaml import write_yolo_txt_for_unet_pairs
+        from utils_new.import_export.dataset_sources import (
+            import_save_targets,
+            metadata,
+        )
+        from utils_new.import_export.yolo_yaml import (
+            build_yolo_save_target_map,
+            find_mask_for_image,
+        )
+
+        if self.cancelled:
+            return {"cancelled": True}
+        if self.kind == "yolo" and self.options.get("editor"):
+            from utils_new.import_export.mask_yaml import is_unet_yaml
+
+            if is_unet_yaml(self.paths[0]):
+                self.kind = "unet_editor"
+        resource = None
+        masks = {}
+        if self.kind in ("folder", "images"):
+            files = collect_image_paths(
+                self.paths[0] if len(self.paths) == 1 else self.paths
+            )
+            pairs, cache = [], {}
+            dtype = self.options.get("dataset_type", 2)
+            aux = self.options.get("annotations")
+            mask_index = (
+                index_mask_files(aux)
+                if dtype == 1 and aux and Path(aux).is_dir()
+                else {}
+            )
+            for index, image in enumerate(files):
+                if self.cancelled:
+                    return {"cancelled": True}
+                target = None
+                if dtype == 0 and aux:
+                    matches = sidecar_matches(aux, Path(image).name, cache)
+                    if len(matches) > 1:
+                        raise ValueError(f"Несколько меток для {image}")
+                    target = str(matches[0]) if matches else None
+                elif dtype == 1:
+                    target = mask_index.get(Path(image).stem.casefold())
+                    target = str(target) if target is not None else None
+                pairs.append((image, target))
+                if index % 32 == 0:
+                    self.progress(index + 1, len(files))
+            catalog = DatasetCatalog(pairs, dtype, self.paths[0])
+        elif self.kind == "yolo":
+            catalog = load_yolo_catalog(self.paths[0], log_cb=self._report)
+        elif self.kind in ("unet", "unet_editor"):
+            catalog = load_unet_catalog(self.paths[0], log_cb=self._report)
+            if self.kind == "unet_editor":
+                offset = catalog.metadata["mask_class_offset"]
+                names = {
+                    pixel - offset: name for pixel, name in catalog.class_names.items()
+                }
+                self.log(
+                    "[U-Net] Подготовка контуров из масок: отверстия и тонкие детали могут теряться; оригинальные маски не изменяются."
+                )
+                resource = TemporaryDirectory(prefix="neuro-unet-labels-")
+                pairs = write_yolo_txt_for_unet_pairs(
+                    catalog.pairs,
+                    resource.name,
+                    class_names=names,
+                    mask_offset=offset,
+                    include_empty=True,
+                    cancel_check=lambda: self.cancelled,
+                    progress_cb=self.progress,
+                    log_cb=self._report,
+                )
+                masks = {
+                    image: mask for image, mask in catalog.pairs if mask is not None
+                }
+                catalog = DatasetCatalog(
+                    pairs,
+                    0,
+                    catalog.root,
+                    names,
+                    metadata=dict(mask_class_offset=offset, mask_map=masks),
+                )
+        elif self.kind == "coco":
+            source = import_coco_catalog(
+                self.paths, self.options.get("existing_names"), log_cb=self._report
+            )
+            resource = TemporaryDirectory(prefix="neuro-coco-labels-")
+            pairs = []
+            total = sum(len(part.items) for part in source.sources)
+            for part_index, part in enumerate(source.sources):
+                offset = len(pairs)
+                pairs.extend(
+                    write_yolo_txt_for_coco_items(
+                        part.items,
+                        resource.name,
+                        name_prefix=f"j{part_index:03d}_",
+                        cancel_check=lambda: self.cancelled,
+                        progress_cb=lambda done, _, offset=offset: self.progress(
+                            offset + done, total
+                        ),
+                    )
+                )
+            catalog = DatasetCatalog(
+                pairs, 0, str(Path(self.paths[0]).parent), source.class_names
+            )
+        else:
+            raise ValueError(f"Неизвестный источник: {self.kind}")
+        if self.cancelled:
+            return {"cancelled": True}
+        if self._log_count > 40:
+            self.log(f"Дополнительных сообщений о разметке: {self._log_count - 40}")
+        result = dict(
+            catalog=catalog, resource=resource, paths=self.paths, kind=self.kind
+        )
+        if self.options.get("editor") and self.kind not in ("folder", "images"):
+            images = [pair[0] for pair in catalog.pairs]
+            result["save_targets"] = (
+                build_yolo_save_target_map(self.paths[0], images, root=catalog.root)
+                if self.kind == "yolo"
+                else import_save_targets(self.paths, images)
+            )
+            if (
+                self.kind == "yolo"
+                and self.options.get("overlay")
+                and not metadata(self.paths[0])
+            ):
+                for index, image in enumerate(images):
+                    if self.cancelled:
+                        return {"cancelled": True}
+                    mask = find_mask_for_image(image, base_path=catalog.root)
+                    if mask:
+                        masks[image] = mask
+                    if index % 32 == 0:
+                        self.progress(index + 1, len(images))
+                catalog.metadata["mask_map"] = masks
+        return result

@@ -209,6 +209,8 @@ def write_yolo_txt_for_unet_pairs(
     mask_offset=1,
     include_empty=True,
     log_cb=None,
+    cancel_check=None,
+    progress_cb=None,
 ):
     """Convert indexed masks to editable YOLO-Segment labels (lossy contours).
 
@@ -226,7 +228,11 @@ def write_yolo_txt_for_unet_pairs(
     result = []
     used = {p.name.casefold() for p in output.iterdir()}
     allowed = set(map(int, class_names.keys()))
-    for image_path, mask_path in pairs:
+    for index, (image_path, mask_path) in enumerate(pairs):
+        if cancel_check and cancel_check():
+            break
+        if progress_cb and (index % 16 == 0 or index + 1 == len(pairs)):
+            progress_cb(index + 1, len(pairs))
         if mask_path is None:
             result.append((str(image_path), None))
             continue

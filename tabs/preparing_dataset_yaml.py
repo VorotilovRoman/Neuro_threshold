@@ -75,8 +75,6 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self._yaml_root = None
         self._yaml_path = None
         self._yaml_names = None
-        self._coco_tmp_labels_dir = None
-        self._coco_json_counter = 0
         self._updating_class_table = False
 
         self.progress_bar.setValue(0)
@@ -640,12 +638,15 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             or self.out_coco.isChecked()
             or self.dataset_type == 2
         )
-        self.generate_btn.setEnabled(has_pairs and has_output and any_out)
+        self.generate_btn.setEnabled(has_pairs and has_output and any_out and self._dataset_ready())
 
     # ==================================================================
     # ГЕНЕРАЦИЯ
     # ==================================================================
     def on_generate(self):
+        if not self._dataset_ready():
+            self.log("Проверка датасета ещё выполняется или отменена. Дождитесь результата проверки.")
+            return
         if not self.output_folder:
             QMessageBox.warning(self, "Error", "Please select output folder!")
             return
@@ -797,8 +798,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         pairs_for_generation = []
         skipped_invalid = 0
         for pair in self.pairs:
-            ok, _ = self.validator.validate(pair)
-            if ok:
+            if self._pair_display_cache.get(tuple(pair), {}).get("is_valid", False):
                 pairs_for_generation.append(pair)
             else:
                 skipped_invalid += 1

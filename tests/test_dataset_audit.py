@@ -481,6 +481,9 @@ from pathlib import Path
 import tempfile,cv2,numpy as np,yaml
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication,QMessageBox
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from tabs.dataset_analysis import DatasetAnalysisWindow
 from PyQt5.QtTest import QTest
 from PyQt5.QtCore import QElapsedTimer
@@ -494,15 +497,16 @@ with tempfile.TemporaryDirectory() as directory:
  for split,name in [('alpha','a'),('beta','b')]:
   folder=root/split;folder.mkdir();cv2.imwrite(str(folder/(name+'.png')),np.full((40,80),50,np.uint8));(folder/(name+'.txt')).write_text('0 .5 .5 .5 .5\\n')
  cfg=root/'data.yaml';cfg.write_text(yaml.safe_dump({'path':str(root),'train':'alpha','val':'beta','names':{0:'Object'}}))
- w._load_yolo_yaml_from_path(str(cfg));assert len(w.filtered_pairs)==2 and w._last_filter_stats['total_objects']==2
+ w._load_yolo_yaml_from_path(str(cfg));wait_dataset(w);assert len(w.filtered_pairs)==2 and w._last_filter_stats['total_objects']==2
  assert set().union(*w._analysis_splits.values())=={'train','val'}
  w.run_heatmap_analysis();settled();assert w._last_heatmap['total_objects']==2
- w.filter_min_area.setValue(100000);w.apply_filters_and_update_metrics();assert not w.filtered_pairs and not w._get_analysis_pairs()
+ w.filter_min_area.setValue(100000);w.apply_filters_and_update_metrics();wait_dataset(w);assert not w.filtered_pairs and not w._get_analysis_pairs()
  assert w._last_heatmap is None and w.audit_table.rowCount()==0
  with patch.object(QMessageBox,'warning') as warning:w.run_quality_analysis();warning.assert_called_once()
- w.filter_min_area.setValue(0);w.apply_filters_and_update_metrics();assert len(w.filtered_pairs)==2
+ w.filter_min_area.setValue(0);w.apply_filters_and_update_metrics();wait_dataset(w);assert len(w.filtered_pairs)==2
  mask=root/'alpha'/'a_mask.png';array=np.zeros((40,80),np.uint8);array[3:6,3:6]=7;array[10:12,10:12]=7;cv2.imwrite(str(mask),array)
  w._apply_loaded_pairs(pairs=[(str(root/'alpha'/'a.png'),str(mask))],input_type=1,input_format='auto',class_names_override={7:'Mask'},source_label='Test mask')
+ wait_dataset(w)
  assert w._last_filter_stats['total_objects']==2 and w.filtered_pairs
  w.run_heatmap_analysis();settled();assert w._last_heatmap['total_objects']==2
  # Cancellation must not become a successful empty/full-dataset diagnosis.
@@ -520,6 +524,9 @@ from threading import Event
 import time
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from main import ImagePlayer
 from ui.dataset_audit.workers import LossInspectionWorker
 app=QApplication([]);window=ImagePlayer([('dataset_analysis','Analysis')]);window.show();owner=window._tab_widgets[0]
@@ -547,20 +554,29 @@ from pathlib import Path
 import tempfile,cv2,numpy as np
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from main import ImagePlayer
 app=QApplication([]);window=ImagePlayer([('dataset_analysis','Analysis')]);window.show();owner=window._tab_widgets[0]
 with tempfile.TemporaryDirectory() as directory:
  image=Path(directory)/'frame.png';cv2.imwrite(str(image),np.zeros((40,80),np.uint8));image.with_suffix('.txt').write_text('0 .5 .5 .5 .5\\n')
  owner._apply_loaded_pairs([(str(image),str(image.with_suffix('.txt')))],0,'auto',class_names_from_yaml={0:'Object'})
- original=owner.analyzer.filter_pairs;calls=[]
- def filtering(*args,**kwargs):
-  calls.append(1)
-  QTimer.singleShot(0,owner.apply_filters_and_update_metrics)
+ wait_dataset(owner)
+ from threading import Event
+ from unittest.mock import patch
+ from utils_new.dataset_audit.analysis import DatasetFilterJob
+ started,release=Event(),Event()
+ original=DatasetFilterJob.run
+ def slow(job):
+  started.set();release.wait(5);return original(job)
+ with patch.object(DatasetFilterJob,'run',slow):
+  owner.apply_filters_and_update_metrics()
+  assert started.wait(2)
+  assert owner.btn_folder.isEnabled() and not owner._scan_busy
   QTimer.singleShot(0,window.close)
-  kwargs['progress_cb'](50,100)
-  return original(*args,**kwargs)
- owner.analyzer.filter_pairs=filtering
- owner.apply_filters_and_update_metrics()
- for _ in range(5):app.processEvents()
- assert calls==[1] and not owner._scan_busy and owner._closing and not window.isVisible()
+  for _ in range(5):app.processEvents()
+  assert owner._closing and not window.isVisible()
+  release.set()
+
 """)

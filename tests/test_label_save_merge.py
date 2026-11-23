@@ -68,6 +68,9 @@ from pathlib import Path
 from unittest.mock import patch
 import cv2, numpy as np
 from PyQt5.QtWidgets import QApplication, QMessageBox
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtCore import QCoreApplication, QEvent
 from tabs.layout_dataset import Labeler
 from tabs.viewing_dataset import ViewingDataset
@@ -82,6 +85,7 @@ for cls, save_method, storage in [(Labeler, 'save_labels', 'all_annotations'),
         original.write_text('0 0.5 0.5 0.5 0.5\\n')
         window = cls()
         window._load_images([str(image)], label_map={str(image):str(original)})
+        wait_dataset(window)
         window._save_label_map = {str(image):str(target)}
         window._save_source_kind = 'yolo'
         before = original.read_bytes()

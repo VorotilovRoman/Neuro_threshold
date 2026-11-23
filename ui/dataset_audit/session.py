@@ -16,6 +16,12 @@ class DatasetSessionController:
         super()._sync_all_states(*args)
 
     def _invalidate_analysis_results(self):
+        if hasattr(self, "progress_bar"):
+            self.progress_bar.setVisible(False)
+        if hasattr(self, "_dataset_tasks"):
+            self._dataset_tasks.invalidate("filters")
+        if hasattr(self, "btn_export_filtered"):
+            self.btn_export_filtered.setEnabled(False)
         self._dataset_revision += 1
         if hasattr(self, "scans"):
             self.scans.invalidate()

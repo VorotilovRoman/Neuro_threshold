@@ -19,9 +19,9 @@ class AuditWorker(QObject):
     finished_signal = pyqtSignal(dict)
     job_type = None
 
-    def __init__(self, *args, parent=None, **kwargs):
+    def __init__(self, *args, parent=None, job=None, **kwargs):
         super().__init__(parent)
-        self.job = self.job_type(*deepcopy(args), **deepcopy(kwargs))
+        self.job = job if job is not None else self.job_type(*deepcopy(args), **deepcopy(kwargs))
         self.closed = False
         self._busy = False
         self.revision = 0
@@ -47,6 +47,8 @@ class AuditWorker(QObject):
     def run(self):
         try:
             value = self.job.run()
+            if getattr(self.job, "cancelled", False) is True:
+                value = {"cancelled": True}
             if value is None:
                 value = {"error": "Задача завершилась без результата."}
         except Exception as exc:

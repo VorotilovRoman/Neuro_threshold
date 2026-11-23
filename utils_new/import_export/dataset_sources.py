@@ -156,7 +156,7 @@ def proposed_annotations(spec, row, mode):
     ]
 
 
-def preview(spec, mode, cancel=None):
+def preview(spec, mode, cancel=None, progress=None):
     """Count every image, matched sidecar, missing sidecar and conflicting source."""
     spec = deepcopy(spec)
     for row in spec["rows"]:
@@ -173,6 +173,7 @@ def preview(spec, mode, cancel=None):
 
     entries, summaries, coco_payloads = [], [], []
     roots = {}
+    sidecars = {}
     for row in spec["rows"]:
         checkpoint()
         row_entries = []
@@ -236,6 +237,8 @@ def preview(spec, mode, cancel=None):
                         source, recursive=Path(source).is_dir()
                     ):
                         checkpoint()
+                        if progress and (len(seen) % 32 == 0):
+                            progress(len(seen), 0, f"{row['split']}: сопоставление имён файлов")
                         image = str(Path(image).resolve())
                         if image in seen:
                             continue
@@ -255,7 +258,7 @@ def preview(spec, mode, cancel=None):
                                 image,
                                 spec["root"],
                                 row["split"],
-                                source if Path(source).is_dir() else None,
+                                source if Path(source).is_dir() else None, indices=sidecars,
                             )
                         else:
                             alternatives = {}
@@ -299,11 +302,9 @@ def preview(spec, mode, cancel=None):
                                         folder / local.with_suffix(".txt"),
                                         folder / (Path(image).stem + ".txt"),
                                     ]
-                                    selected.extend(
-                                        str(p.resolve())
-                                        for p in candidates
-                                        if p.is_file()
-                                    )
+                                    from utils_new.import_export.images import sidecar_matches
+                                    for candidate in candidates:
+                                        selected.extend(str(p.absolute()) for p in sidecar_matches(candidate.parent, candidate.name, sidecars, recursive=False))
                                     key = ("label_files", str(folder))
                                     if key not in roots:
                                         roots[key] = (

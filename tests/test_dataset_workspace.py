@@ -114,6 +114,9 @@ from pathlib import Path
 import cv2,numpy as np
 from copy import deepcopy
 from PyQt5.QtWidgets import QApplication,QListWidget
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtCore import Qt,QCoreApplication,QEvent
 from PyQt5.QtTest import QSignalSpy
 from main import ImagePlayer
@@ -129,7 +132,7 @@ try:
   settings.current['dataset_class_palette'][1]=[12,34,56]
   rows=[]
   for owner in window._tab_widgets:
-   owner._load_images([str(image)]);objects=owner.overlap_review.objects
+   owner._load_images([str(image)]);wait_dataset(owner);objects=owner.overlap_review.objects
    assert objects.count()==3
    rows.append([objects.item(i).text().split('  [OVERLAP:')[0].removeprefix('⚠ ') for i in range(3)])
    assert [objects.item(i).data(Qt.UserRole) for i in range(3)]==[0,1,2]
@@ -181,6 +184,9 @@ from pathlib import Path
 from unittest.mock import patch
 import cv2,numpy as np
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtCore import QElapsedTimer
 from PyQt5.QtTest import QTest
 from tabs.dataset_analysis import DatasetAnalysisWindow
@@ -191,7 +197,7 @@ def until(condition):
  assert condition(),w.analysis_status.text()
 with tempfile.TemporaryDirectory() as directory:
  image=Path(directory)/'sample.png';cv2.imwrite(str(image),np.zeros((40,80),np.uint8));label=image.with_suffix('.txt');label.write_text('0 .5 .5 .5 .5\\n')
- w._apply_loaded_pairs([(str(image),str(label))],0,'auto',class_names_from_yaml={0:'Object'})
+ w._apply_loaded_pairs([(str(image),str(label))],0,'auto',class_names_from_yaml={0:'Object'});wait_dataset(w)
  assert w.toolbox.count()==9
  assert "Ошибка операции анализа" not in w.log_text.toPlainText()
  w.btn_run_quality.click();until(lambda:w.scans.worker is None)
@@ -204,11 +210,11 @@ with tempfile.TemporaryDirectory() as directory:
  w.btn_run_basic.click();until(lambda:w.scans.worker is None)
  assert w._last_quality and w._last_dup is not None and w._last_heatmap
  # Decorated filter/export actions must tolerate clicked(bool) as well.
- w.btn_apply_filters.click();assert not w._scan_busy
+ w.btn_apply_filters.click();wait_dataset(w);assert not w._scan_busy
  w.filter_min_area.setValue(999999)
  report=w._collect_report_data();assert report['filter_params']['min_area']==0
  assert report['general']['Фильтры изменены после применения']
- w.btn_apply_filters.click();assert not w._get_analysis_pairs()
+ w.btn_apply_filters.click();wait_dataset(w);assert not w._get_analysis_pairs()
  w.scope_combo.setCurrentIndex(0);assert len(w._get_analysis_pairs())==1
 w.close();app.processEvents()
 """)
@@ -219,6 +225,9 @@ import tempfile
 from pathlib import Path
 import cv2,numpy as np
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtTest import QTest
 from tabs.viewing_dataset import ViewingDataset
 from tabs.layout_dataset import Labeler
@@ -226,7 +235,7 @@ app=QApplication([])
 with tempfile.TemporaryDirectory() as directory:
  image=Path(directory)/'image.png';cv2.imwrite(str(image),np.zeros((40,80),np.uint8));image.with_suffix('.txt').write_text('0 .5 .5 .4 .4\\n0 .6 .5 .4 .4\\n')
  for cls in (ViewingDataset,Labeler):
-  owner=cls();owner.show();owner._load_images([str(image)]);review=owner.overlap_review
+  owner=cls();owner.show();owner._load_images([str(image)]);wait_dataset(owner);review=owner.overlap_review
   review.threshold.setValue(70)
   for _ in range(30):QTest.qWait(10)
   assert all('OVERLAP' in review.objects.item(i).text() for i in range(2))
@@ -247,6 +256,9 @@ import tempfile
 from pathlib import Path
 import cv2,numpy as np
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtTest import QTest
 from tabs.preparing_dataset_yaml import DatasetPreparationWindow
 from ui.pair_validation_dialog_new import PairValidationDialog
@@ -254,7 +266,7 @@ app=QApplication([]);owner=DatasetPreparationWindow();owner.show()
 with tempfile.TemporaryDirectory() as directory:
  image=Path(directory)/'image.png';cv2.imwrite(str(image),np.zeros((40,80),np.uint8));label=image.with_suffix('.txt');label.write_text('0 .5 .5 .4 .4\\n0 .51 .5 .4 .4\\n')
  pairs=[(str(image),str(label))]
- owner._apply_loaded_pairs(pairs,0,'auto',class_names_from_yaml={0:'Object'})
+ owner._apply_loaded_pairs(pairs,0,'auto',class_names_from_yaml={0:'Object'});wait_dataset(owner)
  for _ in range(35):QTest.qWait(10)
  assert not owner.file_list.item(0).icon().isNull()
  dialog=PairValidationDialog(owner,pairs[0],0,owner.validator)
@@ -271,6 +283,9 @@ from pathlib import Path
 from unittest.mock import patch
 import cv2,numpy as np
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtTest import QTest
 from tabs.dataset_analysis import DatasetAnalysisWindow
 from ui.dataset_audit.tasks import ScanWorker
@@ -285,7 +300,7 @@ with tempfile.TemporaryDirectory() as directory:
  image=Path(directory)/'frame.png';cv2.imwrite(str(image),np.zeros((40,80),np.uint8));image.with_suffix('.txt').write_text('0 .5 .5 .5 .5\\n')
  for action in ('invalidate','close'):
   entered.clear();release.clear();done.clear()
-  owner=DatasetAnalysisWindow();owner.show();owner._apply_loaded_pairs([(str(image),str(image.with_suffix('.txt')))],0,'auto',class_names_from_yaml={0:'Object'})
+  owner=DatasetAnalysisWindow();owner.show();owner._apply_loaded_pairs([(str(image),str(image.with_suffix('.txt')))],0,'auto',class_names_from_yaml={0:'Object'});wait_dataset(owner)
   with patch.object(ScanWorker,'job_type',Job):
    owner.btn_run_quality.click();assert entered.wait(2)
    worker=owner.scans.worker

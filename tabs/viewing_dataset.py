@@ -18,7 +18,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QKeySequence, QPalette
 from PyQt5.QtWidgets import (
     QAction,
@@ -48,8 +48,6 @@ from utils_new.annotations.processing import (
     normalized_annotation,
     prepare_annotation_preview,
 )
-from utils_new.import_export.catalog import import_coco_catalog
-from utils_new.import_export.coco import write_yolo_txt_for_coco_items
 
 # V20: shared dataset services; legacy utility imports are not required.
 # The UI import above is intentionally left unchanged.
@@ -62,15 +60,6 @@ from utils_new.import_export.images import (
 from utils_new.images.session import load_one_image_item
 from utils_new.images.processing import normalize_to_uint8
 from utils_new.annotations.rendering import blend_index_mask
-from utils_new.import_export.mask_yaml import (
-    load_unet_yaml_pairs,
-    write_yolo_txt_for_unet_pairs,
-)
-from utils_new.import_export.yolo_yaml import (
-    build_yolo_save_target_map,
-    find_mask_for_image,
-    load_yolo_yaml,
-)
 from utils_new.import_export.yolo_labels import (
     build_label_save_plan,
     format_label_save_confirmation,
@@ -152,56 +141,6 @@ def _detect_annotation_to_obb(ann):
     except Exception:
         pass
     return ("obb", int(cls), corners)
-
-
-class LabelValidationThread(QThread):
-    """Фоновая валидация всех аннотаций загруженного набора."""
-
-    progress = pyqtSignal(int, int)
-    finished_signal = pyqtSignal(dict)  # {idx: [(valid, err), ...]}
-
-    def __init__(self, image_paths, yaml_label_map, label_folder):
-        super().__init__()
-        self.image_paths = list(image_paths)
-        self.yaml_label_map = dict(yaml_label_map) if yaml_label_map else {}
-        self.label_folder = label_folder
-        self._cancel = False
-
-    def cancel(self):
-        self._cancel = True
-
-    def _resolve_label_path(self, img_path):
-        if self.yaml_label_map:
-            lp = self.yaml_label_map.get(img_path)
-            return lp if lp and os.path.exists(lp) else None
-        if self.label_folder:
-            base = os.path.splitext(os.path.basename(img_path))[0]
-            cand = os.path.join(self.label_folder, base + ".txt")
-            if os.path.exists(cand):
-                return cand
-        cand = os.path.splitext(img_path)[0] + ".txt"
-        if os.path.exists(cand):
-            return cand
-        return None
-
-    def run(self):
-        results = {}
-        total = len(self.image_paths)
-        for idx, img_path in enumerate(self.image_paths):
-            if self._cancel:
-                break
-            label_path = self._resolve_label_path(img_path)
-            anns = []
-            if label_path:
-                try:
-                    anns = load_annotations_for_image(label_path, img_path)
-                except Exception:
-                    anns = []
-            results[idx] = [_validate_unified_annotation(a) for a in anns]
-            if (idx + 1) % 25 == 0 or idx == total - 1:
-                self.progress.emit(idx + 1, total)
-        if not self._cancel:
-            self.finished_signal.emit(results)
 
 
 class ViewingDataset(QMainWindow):
@@ -394,6 +333,8 @@ class ViewingDataset(QMainWindow):
         """Обновляет пиксели только при новом снимке/маске/смене палитры."""
         if self._lazy_cache is None or not self.image_paths:
             return
+        if not self._lazy_cache.is_loaded(self.current_idx):
+            return
         item = self._lazy_cache.get(self.current_idx)
         if item is None:
             return
@@ -420,6 +361,8 @@ class ViewingDataset(QMainWindow):
             and self._source_image_for_crop is not None
         ):
             return self._source_image_for_crop
+        if not self._lazy_cache.is_loaded(self.current_idx):
+            return None
         item = self._lazy_cache.get(self.current_idx)
         if item is None:
             return None
@@ -494,9 +437,13 @@ class ViewingDataset(QMainWindow):
             f"Объект #{idx + 1} · класс {cls} · {cw}×{ch} px"
         )
 
+    def _current_frame_ready(self):
+        return (self._lazy_cache is not None and
+                getattr(self, '_displayed_frame', None) == (self._lazy_cache, self.current_idx))
+
     def update_navigation_state(self):
-        has_images = len(self.image_paths) > 0
-        self.nav_widget.set_navigation_enabled(has_images)
+        self.nav_widget.set_navigation_enabled(bool(self.image_paths))
+        has_images = self._current_frame_ready()
         self.btn_save.setEnabled(has_images)
         self.btn_save_all.setEnabled(has_images)
         self.btn_delete.setEnabled(has_images and len(self.current_annotations) > 0)
@@ -510,13 +457,9 @@ class ViewingDataset(QMainWindow):
             except Exception:
                 pass
             self._lazy_cache = None
-        if self._validation_thread is not None:
-            try:
-                self._validation_thread.cancel()
-                self._validation_thread.wait(2000)
-            except Exception:
-                pass
-            self._validation_thread = None
+        if hasattr(self, '_dataset_tasks'):
+            self._dataset_tasks.close()
+        self._validation_thread = None
         self._source_image_for_crop = None
         super().closeEvent(event)
 
@@ -532,6 +475,11 @@ class ViewingDataset(QMainWindow):
         mask_folder=None,
         mask_pixel_offset=1,
     ):
+        from ui.dataset_loading import dataset_tasks, load_editor_folder
+        dataset_tasks(self).invalidate()
+        if isinstance(source, (str, Path)) and os.path.isdir(source):
+            load_editor_folder(self, source, dict(label_map=label_map, mask_map=mask_map, label_folder=label_folder, mask_folder=mask_folder, mask_pixel_offset=mask_pixel_offset))
+            return
         all_files = collect_image_paths(source)
 
         if not all_files:
@@ -583,17 +531,8 @@ class ViewingDataset(QMainWindow):
         self._source_image_for_crop = None
         self._overlap_warnings = {}
 
-        first = self._lazy_cache.get(0)
-        if first is None:
-            self.log("Не удалось загрузить первое изображение.")
-            return
-
         total = len(self._lazy_cache)
-        self._lazy_cache.prefetch(
-            range(1, min(1 + self._lazy_cache.prefetch_ahead + 1, total))
-        )
-
-        self.log(f"Загружено {total} изображений (первое — сразу, остальное в фоне).")
+        self.log(f"Загружено {total} изображений. Текущий снимок и соседи читаются в фоне.")
         self.show_current_image()
         self.update_navigation_state()
         self.nav_widget.set_current_index(self.current_idx, total)
@@ -602,6 +541,8 @@ class ViewingDataset(QMainWindow):
         self._start_annotation_validation()
 
     def _clear_view(self):
+        if hasattr(self, '_dataset_tasks'):
+            self._dataset_tasks.invalidate()
         self.overlap_review.set_dataset([])
         self._source_image_index = None
         self._source_image_for_crop = None
@@ -666,6 +607,8 @@ class ViewingDataset(QMainWindow):
         return ann
 
     def _sync_current_annotations(self):
+        if not self._current_frame_ready():
+            return
         idx = self.current_idx
         while len(self.annotations) <= idx:
             self.annotations.append(None)
@@ -809,10 +752,31 @@ class ViewingDataset(QMainWindow):
             return
         idx = self.current_idx
         total = len(self._lazy_cache)
+        from ui.dataset_loading import request_cached_frame
+        if not request_cached_frame(self, self._lazy_cache, idx, self.show_current_image):
+            self.current_annotations = []
+            self.viewer.set_annotations([], 0, 0)
+            self.viewer.set_pixmap(numpy_to_qpixmap(None))
+            self.viewer.setEnabled(False)
+            self.coord_list.clear()
+            self.crop_view.set_pixmap(numpy_to_qpixmap(None))
+            self.info_label.setText("Чтение снимка…")
+            self.update_navigation_state()
+            return
         item = self._lazy_cache.get(idx)
         if item is None:
             self.log(f"Failed to load image {self.image_paths[idx]}")
+            self.current_annotations = []
+            self.viewer.set_annotations([], 0, 0)
+            self.viewer.set_pixmap(numpy_to_qpixmap(None))
+            self.viewer.setEnabled(False)
+            self.coord_list.clear()
+            self.crop_view.set_pixmap(numpy_to_qpixmap(None))
+            self.info_label.setText("Чтение снимка…")
+            self.update_navigation_state()
             return
+        self._displayed_frame = (self._lazy_cache, idx)
+        self.viewer.setEnabled(True)
         image = item["image"]
         self.current_img_h, self.current_img_w = image.shape[:2]
         self.current_annotations = list(self._get_annotations(idx))
@@ -856,25 +820,13 @@ class ViewingDataset(QMainWindow):
             pairs.append((path, label))
         self.overlap_review.set_dataset(pairs)
         self._apply_validation_colors_to_list()
-        if self._validation_thread is not None and self._validation_thread.isRunning():
-            try:
-                self._validation_thread.cancel()
-                self._validation_thread.wait(2000)
-            except Exception:
-                pass
-
+        from ui.dataset_loading import dataset_tasks
+        from utils_new.dataset.validation import LabelValidationJob
         self._validation_per_image = {}
-        self.validation_status_label.setVisible(False)
-        self.validation_status_label.setText("")
-
-        self._validation_thread = LabelValidationThread(
-            image_paths=self.image_paths,
-            yaml_label_map=self._yaml_label_map,
-            label_folder=self._label_folder,
-        )
-        self._validation_thread.progress.connect(self._on_validation_progress)
-        self._validation_thread.finished_signal.connect(self._on_validation_finished)
-        self._validation_thread.start()
+        self._validation_thread = dataset_tasks(self).start('validation', LabelValidationJob,
+            list(self.image_paths), dict(self._yaml_label_map), self._label_folder,
+            label='Проверка аннотаций…',
+            finished=lambda result: self._on_validation_finished(result['records']))
 
     def _on_validation_progress(self, done, total):
         if total > 0:
@@ -954,6 +906,9 @@ class ViewingDataset(QMainWindow):
     # Сохранение
     # ------------------------------------------------------------------
     def save_current_annotations(self):
+        if not self._current_frame_ready():
+            self.log('Текущий снимок ещё читается; дождитесь его отображения.')
+            return
         if not self.image_paths:
             QMessageBox.warning(self, "No Image", "No image loaded.")
             return
@@ -1021,6 +976,9 @@ class ViewingDataset(QMainWindow):
             self._yaml_label_map[image_path] = target_path
 
     def save_all_annotations(self):
+        if not self._current_frame_ready():
+            self.log('Текущий снимок ещё читается; дождитесь его отображения.')
+            return
         """Save All по образцу вкладки разметки; ленивые None не трогаем."""
         if not self.image_paths:
             QMessageBox.warning(self, "No Image", "No images loaded.")
@@ -1552,62 +1510,10 @@ class ViewingDataset(QMainWindow):
     # YAML датасет
     # ------------------------------------------------------------------
     def load_yaml(self):
-        file_path, _ = source_dialogs.get_open_file(self, "yolo_yaml")
-        if not file_path:
-            return
-        try:
-            from utils_new.import_export.mask_yaml import is_unet_yaml
-            if is_unet_yaml(file_path):
-                self._load_unet_into_viewer(file_path)
-                return
-            pairs, names, root, splits_info = load_yolo_yaml(file_path, log_cb=self.log)
-            if not pairs:
-                QMessageBox.warning(self, "Ошибка", "Не найдено изображений в YAML.")
-                return
-
-            image_paths = [p for p, _ in pairs]
-            label_map = dict(pairs)
-            save_target_map = build_yolo_save_target_map(
-                file_path, image_paths, root=root
-            )
-
-            # Ищем маски (необязательно)
-            mask_map = {}
-            from utils_new.import_export.dataset_sources import metadata
-            for img in ([] if metadata(file_path) else image_paths):
-                m = find_mask_for_image(img, base_path=root)
-                if m:
-                    mask_map[img] = m
-
-            self._load_images(
-                image_paths,
-                label_map=label_map,
-                mask_map=mask_map,
-                label_folder=None,
-                mask_folder=None,
-            )
-            self._save_label_map = save_target_map
-            self._save_source_kind = "yolo"
-
-            self.log(f"=== Загрузка YAML: {source_dialogs.display_dataset_source(file_path)} ===")
-            self.log(f"Root: {root}")
-            for split, n in splits_info.items():
-                if n:
-                    self.log(f"  • {split}: {n} изображений")
-            self.log(
-                f"Загружено {len(image_paths)} изображений "
-                f"(метки: {sum(value is not None for value in label_map.values())}, маски: {len(mask_map)})."
-            )
-            QMessageBox.information(
-                self,
-                "Успех",
-                f"Загружено {len(image_paths)} изображений.\n"
-                f"Метки: {sum(value is not None for value in label_map.values())}\n"
-                f"Маски: {len(mask_map)}",
-            )
-        except Exception as e:
-            self._log_exception("Ошибка загрузки YAML", e)
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить YAML:\n{e}")
+        file_path, _ = source_dialogs.get_open_file(self, 'yolo_yaml')
+        if file_path:
+            from ui.dataset_loading import load_editor_dataset
+            load_editor_dataset(self, 'yolo', [file_path], overlay=True)
 
     # ------------------------------------------------------------------
     # COCO
@@ -1623,46 +1529,10 @@ class ViewingDataset(QMainWindow):
             QMessageBox.critical(self, "Ошибка COCO", str(e))
 
     def _load_coco_into_viewer(self, json_paths):
-        if not json_paths:
-            return
-        catalog = import_coco_catalog(json_paths, log_cb=self.log)
-        if not catalog.sources:
-            QMessageBox.warning(self, "COCO", "Не найдено ни одного изображения.")
-            return
-        tmp_dir = os.path.join(os.path.dirname(str(json_paths[0])), "_coco_labels_tmp")
-        os.makedirs(tmp_dir, exist_ok=True)
-        pairs = []
-        for idx, source in enumerate(catalog.sources):
-            pairs.extend(
-                write_yolo_txt_for_coco_items(
-                    source.items,
-                    tmp_dir,
-                    class_remap=None,
-                    log_cb=self.log,
-                    name_prefix=f"j{idx:03d}_",
-                )
-            )
-        image_paths = [img for img, _ in pairs]
-        label_map = {img: label for img, label in pairs}
-        self._load_images(image_paths, label_map=label_map)
-        from utils_new.import_export.dataset_sources import import_save_targets
-        self._save_label_map = import_save_targets(json_paths, image_paths)
-        self._save_source_kind = "coco"
-        self.log(f"=== Загрузка COCO ({len(catalog.sources)} JSON) ===")
-        self.log(
-            f"Изображений: {len(image_paths)}, классов: {len(catalog.class_names)}"
-        )
-        self.log(f"Временные labels: {tmp_dir}")
-        QMessageBox.information(
-            self,
-            "COCO",
-            f"Загружено изображений: {len(image_paths)}\n"
-            f"Классов: {len(catalog.class_names)}\nВременные labels: {tmp_dir}",
-        )
+        if json_paths:
+            from ui.dataset_loading import load_editor_dataset
+            load_editor_dataset(self, 'coco', json_paths, overlay=True)
 
-    # ------------------------------------------------------------------
-    # U-Net YAML
-    # ------------------------------------------------------------------
     def load_unet_yaml(self):
         yaml_path, _ = source_dialogs.get_open_file(self, "unet_yaml")
         if not yaml_path:
@@ -1674,52 +1544,9 @@ class ViewingDataset(QMainWindow):
             QMessageBox.critical(self, "Ошибка U-Net YAML", str(e))
 
     def _load_unet_into_viewer(self, yaml_path):
-        pairs_raw, class_names, mask_offset, root, _ = load_unet_yaml_pairs(
-            yaml_path, log_cb=self.log
-        )
-        if not pairs_raw:
-            QMessageBox.warning(self, "U-Net", "Не найдено ни одной пары.")
-            return
-        tmp_dir = os.path.join(
-            os.path.dirname(os.path.abspath(yaml_path)), "_unet_labels_tmp"
-        )
-        pairs = write_yolo_txt_for_unet_pairs(
-            pairs_raw,
-            tmp_dir,
-            class_names=class_names,
-            mask_offset=mask_offset,
-            include_empty=True,
-            log_cb=self.log,
-        )
-        if not pairs:
-            QMessageBox.warning(self, "U-Net", "Не удалось сконвертировать маски.")
-            return
-        image_paths = [img for img, _ in pairs]
-        label_map = {img: label for img, label in pairs}
-        original_masks = dict(pairs_raw)
-        mask_map = {img: original_masks[img] for img in image_paths}
-        self._load_images(
-            image_paths,
-            label_map=label_map,
-            mask_map=mask_map,
-            mask_pixel_offset=mask_offset,
-        )
-        from utils_new.import_export.dataset_sources import import_save_targets
-        self._save_label_map = import_save_targets([yaml_path], image_paths)
-        self._save_source_kind = "unet"
-        self.log(f"=== Загрузка U-Net YAML: {source_dialogs.display_dataset_source(yaml_path)} ===")
-        self.log(
-            f"Root: {root}, пар: {len(image_paths)}, "
-            f"classes: {len(class_names)}, offset={mask_offset}"
-        )
-        self.log("Оригинальные маски сохранены для отображения.")
-        QMessageBox.information(
-            self,
-            "U-Net YAML",
-            f"Загружено изображений: {len(image_paths)}\n"
-            f"Классов: {len(class_names)}\nМаски сконвертированы в полигоны.\n"
-            "Оригинальные маски отображаются как overlay.",
-        )
+        from ui.dataset_loading import load_editor_dataset
+        load_editor_dataset(self, 'unet_editor', [yaml_path], overlay=True)
+
 
 
 if __name__ == "__main__":

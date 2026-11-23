@@ -259,14 +259,18 @@ def load_coco(json_path, log_cb=None, *, preserve_category_ids=False, infer_obb=
 
 
 def write_yolo_txt_for_coco_items(
-    items, output_labels_dir, class_remap=None, log_cb=None, name_prefix=""
+    items, output_labels_dir, class_remap=None, log_cb=None, name_prefix="", *, cancel_check=None, progress_cb=None
 ):
     """COCO canonical tuples -> shared YOLO writer, preserving source image pairing."""
     outdir = Path(output_labels_dir)
     outdir.mkdir(parents=True, exist_ok=True)
     pairs = []
     used = {p.name.casefold() for p in outdir.iterdir()}
-    for item in items:
+    for index, item in enumerate(items):
+        if cancel_check and cancel_check():
+            break
+        if progress_cb and (index % 16 == 0 or index + 1 == len(items)):
+            progress_cb(index + 1, len(items))
         image_path = item["img_path"]
         if item.get("annotation_status") == "unlabelled":
             pairs.append((image_path, None))
@@ -424,3 +428,47 @@ def export_coco_yolo(
         if status != "unlabelled":
             write_yolo_labels(target, annotations, size)
     return names
+
+
+class CocoPairsJob:
+    """Prepare SAHI source annotations and its temporary JSON away from the GUI."""
+    def __init__(self, pairs, class_names, input_format='auto'):
+        self.pairs, self.class_names, self.input_format = list(pairs), dict(class_names), input_format
+        self.cancelled = False
+        self.progress = lambda *_: None
+        self.log = lambda *_: None
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        from tempfile import TemporaryDirectory
+        from utils_new.import_export.images import image_size_from_file
+        from utils_new.import_export.yolo_labels import read_yolo_labels
+        from utils_new.import_export.dataset_output import _coco_record
+        from utils_new.import_export.json_objects import write_json_atomic
+        names, images, annotations = {}, [], []
+        for index, pair in enumerate(self.pairs):
+            if self.cancelled:
+                return {'cancelled': True}
+            width, height = image_size_from_file(pair[0])
+            images.append(dict(id=index, file_name=str(Path(pair[0]).absolute()), width=width, height=height,
+                               annotation_status='unlabelled' if pair[1] is None else 'labelled'))
+            values = read_yolo_labels(pair[1], ImageSize(width, height), strict=True,
+                        format_hint=self.input_format) if pair[1] is not None else []
+            for ann in values:
+                if ann.class_id not in self.class_names:
+                    continue
+                name = self.class_names[ann.class_id]
+                names.setdefault(name, len(names))
+                record = _coco_record(ann, index, len(annotations))
+                record['category_id'] = names[name]
+                annotations.append(record)
+            if index % 16 == 0 or index + 1 == len(self.pairs):
+                self.progress(index + 1, len(self.pairs))
+        payload = dict(images=images, annotations=annotations,
+                       categories=[dict(id=index, name=name) for name, index in names.items()])
+        resource = TemporaryDirectory(prefix='neuro-sahi-source-')
+        path = Path(resource.name) / 'source.json'
+        write_json_atomic(path, payload)
+        return dict(coco=payload, path=str(path), resource=resource)

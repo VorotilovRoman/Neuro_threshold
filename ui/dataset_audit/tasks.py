@@ -52,6 +52,9 @@ class ScanController(QObject):
         owner = self.owner
         if owner._closing or self.worker:
             return
+        if not owner._dataset_ready() or (hasattr(owner, '_dataset_tasks') and owner._dataset_tasks.busy('filters')):
+            owner.analysis_status.setText('Список доступен. Дождитесь фоновой проверки и расчёта фильтров; навигация остаётся доступной.')
+            return
         pairs = owner._get_analysis_pairs()
         if not pairs:
             QMessageBox.warning(

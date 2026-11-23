@@ -668,6 +668,8 @@ class SahiExportContracts(unittest.TestCase):
             window = DatasetPreparationWindow()
             try:
                 window._load_yolo_yaml_from_path(str(source))
+                from dataset_test_support import wait_dataset
+                wait_dataset(window)
                 window.output_folder = str(root / "generated")
                 window.resize_keep.setChecked(True)
                 window.train_slider.setValue(100)

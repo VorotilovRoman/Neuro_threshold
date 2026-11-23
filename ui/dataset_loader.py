@@ -1,15 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Qt DatasetLoaderMixin for Preparation/Analysis using V17 format/validation core.
-
-UI attribute/callback contract stays compatible with the old mixin. Does not
-modify other tabs. All label decoding/conversion is via utils_new.
-"""
+"""Shared asynchronous dataset loading and cached presentation for dataset tabs."""
 
 import os
-import tempfile
 import traceback
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QApplication,
@@ -22,23 +17,10 @@ from PyQt5.QtWidgets import (
 from ui import dataset_source as source_dialogs
 from ui.pair_validation_dialog_new import PairValidationDialog
 from utils_new.import_export.catalog import (
-    CatalogSourceError,
-    collect_label_classes,
-    collect_mask_classes,
     dense_class_remap,
-    import_coco_catalog,
-    load_unet_catalog,
-    load_yolo_catalog,
     resolve_class_name,
 )
-from utils_new.import_export.coco import write_yolo_txt_for_coco_items
 from utils_new.images.processing import ImageStats
-from utils_new.dataset.pairs import (
-    build_pair_display,
-    scan_detection_pairs,
-    scan_image_only_pairs,
-    scan_segmentation_pairs,
-)
 from utils_new.import_export.mask_yaml import is_unet_yaml
 
 
@@ -55,7 +37,7 @@ class DatasetLoaderMixin:
          unique_classes, original_ids, mask_class_remap, included_orig_ids,
          class_remap, num_classes,
          _yaml_mode, _yaml_root, _yaml_path, _yaml_names,
-         _coco_tmp_labels_dir, _coco_json_counter, _updating_class_table.
+         _updating_class_table.
       3. Переопределить хуки:
          _after_load_hook()             — после успешной загрузки/сканирования;
          _after_type_change_hook(new)   — после смены dataset_type.
@@ -100,7 +82,6 @@ class DatasetLoaderMixin:
             self.log_text.append(message)
             sb = self.log_text.verticalScrollBar()
             sb.setValue(sb.maximum())
-            QApplication.processEvents()
         except Exception:
             print(f"[log] {message}")
 
@@ -190,51 +171,7 @@ class DatasetLoaderMixin:
         self._load_yolo_yaml_from_path(file_path)
 
     def _load_yolo_yaml_from_path(self, file_path):
-        try:
-            catalog = load_yolo_catalog(file_path, log_cb=self.log)
-            pairs = catalog.pairs
-            names = catalog.class_names
-            root = catalog.root
-            splits_info = catalog.metadata["split_counts"]
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать YAML:\n{e}")
-            return
-
-        if not pairs:
-            QMessageBox.warning(
-                self,
-                "Ошибка",
-                "В YAML не найдено ни одной существующей папки с изображениями.",
-            )
-            return
-
-        missing = sum(1 for _, lbl in pairs if lbl is None)
-
-        self._yaml_mode = True
-        self._yaml_root = root
-        self._yaml_path = file_path
-        self._yaml_names = names
-
-        self.images_folder = root
-        self.labels_folder = root
-        self.masks_folder = None
-
-        self._apply_loaded_pairs(
-            pairs=pairs,
-            input_type=0,
-            input_format="auto",
-            class_names_from_yaml=names,
-            source_label=f"YAML: {source_dialogs.display_dataset_source(file_path)}",
-            source_yaml=file_path,
-        )
-        self.log(f'Загружено снимков: {len(pairs)}, TXT: {len(pairs) - missing}, без меток: {missing}.')
-
-        self.log(f"=== Загрузка из YAML: {file_path} ===")
-        self.log(f"Root: {root}")
-        for split, n in splits_info.items():
-            if n:
-                self.log(f"  • {split}: {n} изображений")
-        self.log(f"Пар с метками: {len(pairs) - missing}, без .txt: {missing}")
+        self._start_dataset_import('yolo', [file_path])
 
     # ---------------- COCO ----------------
     def load_from_coco(self):
@@ -248,95 +185,8 @@ class DatasetLoaderMixin:
         if paths:
             self._load_coco_from_paths(paths, replace=replace)
 
-    def _get_coco_tmp_labels_dir(self, first_json_path=None):
-        existing = getattr(self, "_coco_tmp_labels_dir", None)
-        if existing:
-            return existing
-        tmp = tempfile.mkdtemp(prefix="threshold_coco_labels_")
-        self._coco_tmp_labels_dir = tmp
-        return tmp
-
     def _load_coco_from_paths(self, json_paths, replace=True):
-        if not json_paths:
-            return
-        if replace:
-            self._coco_tmp_labels_dir = None
-            self._coco_json_counter = 0
-            existing_names = {}
-            base_pairs = []
-        else:
-            existing_names = {}
-            for row in range(self.class_table.rowCount()):
-                try:
-                    gid = int(self.class_table.item(row, 0).text())
-                    name_item = self.class_table.item(row, 2)
-                    if name_item is None:
-                        continue
-                    existing_names[name_item.text().strip() or str(gid)] = gid
-                except (ValueError, TypeError, AttributeError):
-                    continue
-            base_pairs = list(self.pairs)
-        try:
-            catalog = import_coco_catalog(json_paths, existing_names, log_cb=self.log)
-        except CatalogSourceError as exc:
-            QMessageBox.critical(self, "Ошибка COCO", f"Не удалось загрузить:\n{exc}")
-            return
-        if not catalog.sources:
-            QMessageBox.warning(self, "COCO", "Не найдено ни одного изображения.")
-            return
-        tmp_dir = self._get_coco_tmp_labels_dir(catalog.sources[0].path)
-        new_pairs = []
-        for source in catalog.sources:
-            prefix = f"j{self._coco_json_counter:03d}_"
-            self._coco_json_counter += 1
-            try:
-                new_pairs.extend(
-                    write_yolo_txt_for_coco_items(
-                        source.items,
-                        tmp_dir,
-                        class_remap=None,
-                        log_cb=self.log,
-                        name_prefix=prefix,
-                    )
-                )
-            except Exception as exc:
-                self._log_exception(f"Ошибка записи .txt из {source.path}", exc)
-                return
-        class_names = catalog.class_names
-        self.pairs = new_pairs if replace else base_pairs + new_pairs
-        self.images_folder = os.path.dirname(json_paths[0])
-        self.labels_folder = tmp_dir
-        self.masks_folder = None
-        self.dataset_type = 0
-        self.input_format = "auto"
-        self.validator.set_dataset_type(0)
-        self.validator.set_input_format("auto")
-        self.dataset_type_combo.blockSignals(True)
-        self.input_format_combo.blockSignals(True)
-        try:
-            self.dataset_type_combo.setCurrentIndex(0)
-            idx = self.input_format_combo.findData("auto")
-            if idx >= 0:
-                self.input_format_combo.setCurrentIndex(idx)
-        finally:
-            self.dataset_type_combo.blockSignals(False)
-            self.input_format_combo.blockSignals(False)
-        self._sync_all_states()
-        self.validator.clear_cache()
-        valid_count, invalid_count = self._validate_all_pairs()
-        self._recompute_color_stats()
-        self._fill_class_table_from_dict(class_names, preserve_include=True)
-        self._rebuild_file_list_display(pairs=self.pairs)
-        action = "Загрузка" if replace else "Добавление"
-        self.log(f"=== {action} COCO ({len(catalog.sources)} файлов) ===")
-        for source in catalog.sources:
-            self.log(f"  • {os.path.basename(source.path)}: images={len(source.items)}")
-        self.log(f"Итого: пар={len(self.pairs)}, классов={len(class_names)}")
-        extra = f"  [COCO: {len(catalog.sources)} json, {action.lower()}]"
-        if invalid_count > 0:
-            extra += f"  ⚠️ некорректных: {invalid_count}"
-        self._update_pair_count_label(extra, error=invalid_count > 0)
-        self._after_load_hook()
+        self._start_dataset_import('coco', json_paths, replace=replace)
 
     # ---------------- U-Net YAML ----------------
     def load_from_unet_yaml(self):
@@ -347,50 +197,69 @@ class DatasetLoaderMixin:
 
     def _load_unet_from_path(self, yaml_path):
         if self.dataset_type_combo.findData(1) < 0:
-            QMessageBox.warning(
-                self,
-                "Неподдерживаемый источник",
-                "Эта вкладка не принимает YAML с индексными масками.",
-            )
+            QMessageBox.warning(self, 'Источник', 'Эта вкладка не принимает индексные маски.')
             return
-        try:
-            catalog = load_unet_catalog(yaml_path, log_cb=self.log)
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Ошибка U-Net YAML", f"Не удалось загрузить:\n{e}"
-            )
-            return
+        self._start_dataset_import('unet', [yaml_path])
 
-        pairs = catalog.pairs
-        mask_offset = catalog.metadata["mask_class_offset"]
-        root = catalog.root
+    def _dataset_task_manager(self):
+        from ui.dataset_loading import dataset_tasks
+        tasks = dataset_tasks(self)
+        if not getattr(self, '_dataset_tasks_connected', False):
+            tasks.settled.connect(self._on_dataset_task_settled)
+            self._dataset_tasks_connected = True
+        return tasks
 
-        if not pairs:
-            QMessageBox.warning(self, "U-Net", "Не найдено ни одной пары.")
-            return
+    def _on_dataset_task_settled(self, key):
+        if key == 'filters':
+            self.progress_bar.setVisible(False)
+            self.btn_export_filtered.setEnabled(self._filters_applied and bool(self.filtered_pairs))
+        if key in ('load', 'inspect'):
+            if key == 'load':
+                self._loading_source = False
+            self._after_loading_state_changed()
 
-        pixel_class_names = catalog.class_names
-        self.images_folder = root
-        self.labels_folder = None
-        self.masks_folder = root
-        self.mask_pixel_offset_in = 0
+    def _after_loading_state_changed(self):
+        if hasattr(self, 'update_generate_button_state'):
+            self.update_generate_button_state()
 
-        ui_pairs = [(img, mask) for (img, mask) in pairs]
+    def _dataset_ready(self):
+        return (not getattr(self, '_loading_source', False)
+                and getattr(self, '_inspection_result', None) is not None)
 
-        self._apply_loaded_pairs(
-            pairs=ui_pairs,
-            input_type=1,
-            input_format="auto",
-            class_names_override=pixel_class_names,
-            source_label=f"U-Net YAML: {source_dialogs.display_dataset_source(yaml_path)}",
-            source_yaml=yaml_path,
-        )
-        self.log(f"=== Загрузка из U-Net YAML: {yaml_path} ===")
-        self.log(f"Root: {root}")
-        self.log(
-            f"Пар: {len(pairs)}, классов: {len(pixel_class_names)}, "
-            f"mask_class_offset: {mask_offset}"
-        )
+    def _start_dataset_import(self, kind, paths, replace=True, options=None):
+        from utils_new.import_export.catalog import DatasetImportJob
+        tasks = self._dataset_task_manager()
+        tasks.invalidate()
+        self._loading_source = True
+        self._after_loading_state_changed()
+        options = dict(options or {})
+        base_pairs = [] if replace else list(self.pairs)
+        if kind == 'coco' and not replace:
+            options['existing_names'] = {self.class_table.item(row, 2).text(): int(self.class_table.item(row, 0).text())
+                                        for row in range(self.class_table.rowCount())}
+        def loaded(result):
+            catalog = result['catalog']
+            if not catalog.pairs:
+                self.log('В выбранном источнике не найдено снимков; текущий набор сохранён.')
+                return
+            self._loading_source = False
+            self._yaml_mode = kind not in ('folder', 'images')
+            self._yaml_root = catalog.root
+            self._yaml_path = paths[0] if self._yaml_mode else None
+            self.images_folder = catalog.root
+            if kind == 'folder':
+                pass
+            elif kind == 'unet':
+                self.labels_folder, self.masks_folder = None, catalog.root
+                self.mask_pixel_offset_in = 0
+            else:
+                self.labels_folder, self.masks_folder = catalog.root, None
+            self._apply_loaded_pairs(base_pairs + catalog.pairs, catalog.dataset_type, catalog.input_format,
+                class_names_from_yaml=catalog.class_names,
+                source_label=source_dialogs.display_dataset_source(paths[0]) if self._yaml_mode else catalog.root,
+                source_yaml=paths[0] if self._yaml_mode else None)
+        tasks.start('load', DatasetImportJob, kind, paths, options,
+                    label='Загрузка списка файлов / разметки…', finished=loaded)
 
     # ---------------- общая инициализация после загрузки ----------------
     def _apply_loaded_pairs(
@@ -404,162 +273,75 @@ class DatasetLoaderMixin:
         source_yaml=None,
     ):
         self._source_yaml_path = source_yaml
-        if input_type != 0 or class_names_override is None:
-            self._coco_tmp_labels_dir = None
-            self._coco_json_counter = 0
-        self.validator.clear_cache()
-        self.color_type_stats = ImageStats.empty_color_stats()
-        self.bit_type_stats = ImageStats.empty_bit_stats()
-        self.annotation_types_stats = {}
-
-        self.dataset_type = input_type
-        self.input_format = input_format
+        self.dataset_type, self.input_format = input_type, input_format
         self.validator.set_dataset_type(input_type)
         self.validator.set_input_format(input_format)
-
+        self.pairs = list(pairs)
+        self._yaml_names = class_names_override or class_names_from_yaml or {}
         self.dataset_type_combo.blockSignals(True)
         self.input_format_combo.blockSignals(True)
         try:
             self.dataset_type_combo.setCurrentIndex(input_type)
-            idx = self.input_format_combo.findData(input_format)
-            if idx >= 0:
-                self.input_format_combo.setCurrentIndex(idx)
+            self.input_format_combo.setCurrentIndex(max(0, self.input_format_combo.findData(input_format)))
         finally:
             self.dataset_type_combo.blockSignals(False)
             self.input_format_combo.blockSignals(False)
-
         self._sync_all_states()
-        self.pairs = list(pairs)
+        if hasattr(self, '_invalidate_analysis_results'):
+            self._invalidate_analysis_results()
+        self._inspection_result = None
+        self.color_type_stats = ImageStats.empty_color_stats()
+        self.bit_type_stats = ImageStats.empty_bit_stats()
+        self._pair_display_cache = {}
+        self._fill_class_table_from_dict(self._yaml_names, preserve_include=False)
+        self._rebuild_file_list_display()
+        self._update_pair_count_label('Проверка и статистика в фоне…')
+        self.log(f'Список загружен: {len(self.pairs)} снимков. {source_label}. Проверки выполняются в фоне.')
+        self._start_pair_inspection()
 
-        valid_count, invalid_count = self._validate_all_pairs()
-        self._recompute_color_stats()
-
-        self._yaml_names = class_names_from_yaml
-        if class_names_override:
-            self._fill_class_table_from_dict(class_names_override)
-        else:
-            self.collect_classes()
-
-        self._rebuild_file_list_display(pairs=self.pairs)
-
-        extra = ""
-        if source_label:
-            extra = f"  [{source_label}]"
-        if invalid_count > 0:
-            extra += f"  ⚠️ некорректных: {invalid_count}"
-        self._update_pair_count_label(extra, error=invalid_count > 0)
-        self.log(
-            f"Пар: {len(self.pairs)} (корректных: {valid_count}, "
-            f"некорректных: {invalid_count})"
-        )
-
-        self._after_load_hook()
+    def _start_pair_inspection(self):
+        self._inspection_revision = getattr(self, "_inspection_revision", 0) + 1
+        from utils_new.dataset.pairs import PairInspectionJob
+        self._inspection_result = None
+        self._after_loading_state_changed()
+        tasks = self._dataset_task_manager()
+        tasks.invalidate('filters')
+        def inspected(result):
+            self._inspection_result = result
+            self._pair_display_cache = {tuple(pair): info for pair, info in zip(result['pairs'], result['rows'])}
+            self.validator._cache = result['validation_cache']
+            self.color_type_stats = result['colors']
+            self.bit_type_stats = result['bits']
+            self.annotation_types_stats = result['types']
+            ids = set(result['classes']) | set(self._yaml_names or {})
+            current_names = {int(self.class_table.item(row, 1).text()): self.class_table.item(row, 2).text()
+                             for row in range(self.class_table.rowCount())}
+            self._fill_class_table_from_dict({cid: current_names.get(cid, resolve_class_name(self._yaml_names, cid) or str(cid))
+                                              for cid in sorted(ids)})
+            self._update_pair_count_label(f"Проверено: {result['valid']}/{len(self.pairs)}")
+            self._rebuild_file_list_display(finished=self._after_load_hook)
+            self._after_loading_state_changed()
+        tasks.start('inspect', PairInspectionJob, list(self.pairs), self.dataset_type, self.input_format,
+                    self._is_include_empty(), label='Проверка пар, классы и свойства снимков…', finished=inspected)
 
     # ---------------- сканирование папок ----------------
     def scan_pairs(self):
-        try:
-            if self._yaml_mode:
-                self.validator.clear_cache()
-                self._recompute_color_stats()
-                self._rebuild_file_list_display(pairs=self.pairs)
-                self._after_load_hook()
-                return
+        if self._yaml_mode:
+            self._start_pair_inspection()
+        elif self.images_folder:
+            self._start_dataset_import('folder', [self.images_folder], options=dict(
+                dataset_type=self.dataset_type,
+                annotations=self.labels_folder if self.dataset_type == 0 else self.masks_folder))
 
-            self.pairs = []
-            self.file_list.clear()
-            self.annotation_types_stats = {}
-            self.color_type_stats = ImageStats.empty_color_stats()
-            self.bit_type_stats = ImageStats.empty_bit_stats()
-            self.validator.clear_cache()
-
-            if not self.images_folder:
-                self.log("Папка с изображениями не выбрана")
-                self._update_color_stats_label()
-                return
-
-            dataset_type_idx = self.dataset_type
-
-            if dataset_type_idx == 0:
-                if not self.labels_folder:
-                    self.log("Папка с метками не выбрана — пары пока не строим.")
-                    self._update_pair_count_label("", error=False)
-                    return
-                self.log("=== Сканирование пар (детекция) ===")
-                self.pairs, self.annotation_types_stats = scan_detection_pairs(
-                    self.images_folder,
-                    self.labels_folder,
-                    log_cb=self.log,
-                    format_hint=self.input_format,
-                )
-            elif dataset_type_idx == 1:
-                if not self.masks_folder:
-                    self.log("Папка с масками не выбрана.")
-                    self._update_pair_count_label("", error=False)
-                    return
-                self.log("=== Сканирование пар (сегментация) ===")
-                self.pairs = scan_segmentation_pairs(
-                    self.images_folder, self.masks_folder, log_cb=self.log
-                )
-            else:
-                self.log("=== Сканирование изображений (без меток) ===")
-                self.pairs = scan_image_only_pairs(self.images_folder)
-                self.annotation_types_stats = {}
-
-            self.log(f"Найдено пар до валидации: {len(self.pairs)}")
-            valid_count, invalid_count = self._validate_all_pairs()
-            self._recompute_color_stats()
-
-            extra_info = ""
-            if self.annotation_types_stats:
-                type_str = ", ".join(
-                    f"{k}:{v}" for k, v in self.annotation_types_stats.items()
-                )
-                extra_info = f"  [{type_str}]"
-            if invalid_count > 0:
-                extra_info += f"  ⚠️ некорректных: {invalid_count}"
-            self._update_pair_count_label(extra_info, error=invalid_count > 0)
-            self.log(
-                f"Валидация: корректных={valid_count}, некорректных={invalid_count}"
-            )
-
-            self.collect_classes()
-            self._rebuild_file_list_display(pairs=self.pairs)
-            self._after_load_hook()
-        except Exception as e:
-            self._log_exception("Ошибка в scan_pairs", e)
-
-    # ---------------- валидация ----------------
     def _validate_all_pairs(self):
-        if not self.pairs:
+        result = getattr(self, '_inspection_result', None)
+        if result is None:
             return 0, 0
-        total = len(self.pairs)
-        self.validation_progress_label.setVisible(True)
-        self.validation_progress_label.setText(f"⏳ Проверка пар: 0/{total}...")
-        QApplication.processEvents()
-
-        def on_progress(current, tot):
-            percent = int(current / tot * 100)
-            self.validation_progress_label.setText(
-                f"⏳ Проверка пар: {current}/{tot} ({percent}%)"
-            )
-            QApplication.processEvents()
-
-        valid, invalid = self.validator.validate_all(
-            self.pairs, progress_cb=on_progress
-        )
-
-        self.validation_progress_label.setVisible(False)
-        self.validation_progress_label.setText("")
-        QApplication.processEvents()
-        return valid, invalid
+        return result['valid'], len(result['rows']) - result['valid']
 
     def _recompute_color_stats(self):
-        try:
-            self.color_type_stats, self.bit_type_stats = self.validator.recompute_stats(
-                self.pairs
-            )
-        except Exception:
-            pass
+        # Populated by PairInspectionJob, never decode a whole dataset in the GUI.
+        return
 
     def _update_color_stats_label(self):
         if not hasattr(self, "color_stats_label"):
@@ -627,111 +409,74 @@ class DatasetLoaderMixin:
             item.setToolTip("Неизвестный формат аннотации.")
         return item
 
-    def _rebuild_file_list_display(self, pairs=None):
-        if pairs is None:
-            pairs = self.pairs
-
-        if not pairs:
-            self.shutdown_annotation_review()
-            self.file_list.clear()
-            self.validation_warning_label.setVisible(False)
-            self.validation_progress_label.setVisible(False)
-            self._update_color_stats_label()
-            return
-
-        self.file_list.blockSignals(True)
+    def _rebuild_file_list_display(self, pairs=None, finished=None):
+        pairs = list(self.pairs if pairs is None else pairs)
+        self._file_list_revision = getattr(self, '_file_list_revision', 0) + 1
+        revision = self._file_list_revision
         self.file_list.clear()
-        valid_count = 0
-        invalid_count = 0
+        cache = getattr(self, '_pair_display_cache', {})
+        position = 0
         invalid_names = []
-        total = len(pairs)
-        step = max(1, total // 100)
-        include_empty = self._is_include_empty()
-
-        self.validation_progress_label.setVisible(True)
-        self.validation_progress_label.setText(f"⏳ Построение списка: 0/{total}...")
-        QApplication.processEvents()
-
-        for idx, pair in enumerate(pairs):
+        def batch():
+            nonlocal position
+            if revision != self._file_list_revision:
+                return
+            self.file_list.blockSignals(True)
             try:
-                info = build_pair_display(
-                    pair, self.validator, self.dataset_type, include_empty
-                )
-            except Exception as e:
-                self._log_exception(f"build_pair_display упал на паре #{idx}", e)
-                info = {
-                    "text": f"<ошибка: {pair!r}>",
-                    "tag": "error",
-                    "err": f"{type(e).__name__}: {e}",
-                    "is_valid": False,
-                    "name": f"pair#{idx}",
-                    "color_type": None,
-                    "bit_type": None,
-                }
-
-            if info["is_valid"]:
-                valid_count += 1
-            else:
-                invalid_count += 1
-                invalid_names.append(info["name"])
-
-            item = self._make_list_item(
-                info["text"], tag=info["tag"], error_msg=info["err"]
-            )
-
-            img_path = pair[0] if isinstance(pair, (tuple, list)) and pair else None
-            aux_path = (
-                pair[1] if isinstance(pair, (tuple, list)) and len(pair) > 1 else None
-            )
-            item.setData(Qt.UserRole, img_path)
-            item.setData(Qt.UserRole + 1, (img_path, aux_path))
-            item.setData(Qt.UserRole + 2, "valid" if info["is_valid"] else "invalid")
-            item.setData(Qt.UserRole + 3, info["color_type"])
-            item.setData(Qt.UserRole + 4, info["bit_type"])
-
-            self.file_list.addItem(item)
-
-            if (idx + 1) % step == 0 or idx == total - 1:
-                percent = int((idx + 1) / total * 100)
-                self.validation_progress_label.setText(
-                    f"⏳ Построение списка: {idx + 1}/{total} ({percent}%)"
-                )
-                QApplication.processEvents()
-
-        self.file_list.blockSignals(False)
-        self.validation_progress_label.setVisible(False)
-        self.validation_progress_label.setText("")
-
-        if invalid_count > 0:
-            preview = ", ".join(invalid_names[:5])
-            more = "" if invalid_count <= 5 else f" и ещё {invalid_count - 5}"
-            self.validation_warning_label.setText(
-                f"⚠️ Обнаружено {invalid_count} некорректных пар: {preview}{more}. "
-                f"Они НЕ будут включены в датасет."
-            )
-            self.validation_warning_label.setVisible(True)
-        else:
-            self.validation_warning_label.setVisible(False)
-
-        self._update_color_stats_label()
-        if not hasattr(self, "_overlap_review_panel"):
-            from ui.annotation_review import AnnotationReviewWidget
-
-            self._overlap_review_panel = AnnotationReviewWidget(
-                external_images=self.file_list, parent=self
-            )
-            layout = self.file_list.parentWidget().layout()
-            if layout is not None:
-                layout.insertWidget(0, self._overlap_review_panel)
-        self._overlap_review_panel.set_dataset(
-            self.pairs, self.dataset_type, self.input_format
-        )
+                for pair in pairs[position:position + 300]:
+                    info = cache.get(tuple(pair))
+                    if info is None:
+                        name = os.path.basename(pair[0])
+                        info = dict(text=name + ' [ожидает проверки]', tag=None, err='', is_valid=None,
+                                    name=name, color_type=None, bit_type=None)
+                    elif info.get('tag') == 'empty':
+                        info = dict(info, text=info['text'].replace('empty → skip', 'empty → include') if self._is_include_empty()
+                                    else info['text'].replace('empty → include', 'empty → skip'))
+                    item = self._make_list_item(info['text'], tag=info['tag'], error_msg=info['err'])
+                    item.setData(Qt.UserRole, pair[0])
+                    item.setData(Qt.UserRole + 1, tuple(pair))
+                    item.setData(Qt.UserRole + 2, 'pending' if info['is_valid'] is None else 'valid' if info['is_valid'] else 'invalid')
+                    item.setData(Qt.UserRole + 3, info['color_type'])
+                    item.setData(Qt.UserRole + 4, info['bit_type'])
+                    self.file_list.addItem(item)
+                    if info['is_valid'] is False:
+                        invalid_names.append(info['name'])
+                position += 300
+            finally:
+                self.file_list.blockSignals(False)
+            if position < len(pairs):
+                self.validation_progress_label.setText(f'Построение списка: {position}/{len(pairs)}')
+                self.validation_progress_label.setVisible(True)
+                QTimer.singleShot(0, batch)
+                return
+            self.validation_progress_label.setVisible(False)
+            self.validation_warning_label.setVisible(bool(invalid_names))
+            if invalid_names:
+                self.validation_warning_label.setText(f'Некорректных пар: {len(invalid_names)}. Они не будут экспортированы. ' + ', '.join(invalid_names[:5]))
+            self._update_color_stats_label()
+            if getattr(self, '_inspection_result', None) is not None:
+                if not hasattr(self, '_overlap_review_panel'):
+                    from ui.annotation_review import AnnotationReviewWidget
+                    self._overlap_review_panel = AnnotationReviewWidget(external_images=self.file_list, parent=self)
+                    layout = self.file_list.parentWidget().layout()
+                    if layout is not None:
+                        layout.insertWidget(0, self._overlap_review_panel)
+                dataset_key = (getattr(self, "_inspection_revision", 0), tuple(map(tuple, self.pairs)), self.dataset_type, self.input_format)
+                if getattr(self, '_review_dataset_key', None) != dataset_key:
+                    self._review_dataset_key = dataset_key
+                    self._overlap_review_panel.set_dataset(self.pairs, self.dataset_type, self.input_format)
+            if finished:
+                finished()
+        batch()
 
     def closeEvent(self, event):
         self.shutdown_annotation_review()
         super().closeEvent(event)
 
     def shutdown_annotation_review(self):
+        self._file_list_revision = getattr(self, "_file_list_revision", 0) + 1
+        if hasattr(self, "_dataset_tasks"):
+            self._dataset_tasks.close()
         if hasattr(self, "_overlap_review_panel"):
             self._overlap_review_panel.close_review()
 
@@ -776,9 +521,7 @@ class DatasetLoaderMixin:
         self.input_format = fmt
         self.validator.set_input_format(fmt)
         if self.pairs:
-            self._validate_all_pairs()
-            self._rebuild_file_list_display(pairs=self.pairs)
-            self._after_load_hook()
+            self._start_pair_inspection()
 
     # ---------------- работа с класс-таблицей ----------------
     def _fill_class_table_from_dict(self, class_names_dict, preserve_include=True):
@@ -829,94 +572,7 @@ class DatasetLoaderMixin:
         return resolve_class_name(self._yaml_names, cid)
 
     def collect_classes(self):
-        if not self.pairs:
-            self._updating_class_table = True
-            self.class_table.blockSignals(True)
-            try:
-                self.class_table.setRowCount(0)
-            finally:
-                self.class_table.blockSignals(False)
-                self._updating_class_table = False
-            return
-
-        if self.dataset_type == 0:
-            unique_ids = collect_label_classes(self.pairs, self.input_format)
-            self.original_ids = sorted(unique_ids)
-            self._updating_class_table = True
-            self.class_table.blockSignals(True)
-            try:
-                self.class_table.setRowCount(len(self.original_ids))
-                for i, cid in enumerate(self.original_ids):
-                    new_item = QTableWidgetItem(str(i))
-                    new_item.setFlags(new_item.flags() & ~Qt.ItemIsEditable)
-                    self.class_table.setItem(i, 0, new_item)
-
-                    orig_item = QTableWidgetItem(str(cid))
-                    orig_item.setFlags(orig_item.flags() & ~Qt.ItemIsEditable)
-                    self.class_table.setItem(i, 1, orig_item)
-
-                    yaml_name = self._get_yaml_name_for_id(cid)
-                    name_item = QTableWidgetItem(yaml_name if yaml_name else str(cid))
-                    self.class_table.setItem(i, 2, name_item)
-
-                    cb = QCheckBox()
-                    cb.setChecked(True)
-                    cb.stateChanged.connect(self.update_included_classes)
-                    self.class_table.setCellWidget(i, 4, cb)
-            finally:
-                self.class_table.blockSignals(False)
-                self._updating_class_table = False
-
-            self.update_included_classes()
-
-        elif self.dataset_type == 1:
-            all_vals, valid_pairs_for_classes = collect_mask_classes(
-                self.pairs, log_cb=self.log
-            )
-            if not valid_pairs_for_classes:
-                self.original_ids = []
-                self._updating_class_table = True
-                self.class_table.blockSignals(True)
-                try:
-                    self.class_table.setRowCount(0)
-                finally:
-                    self.class_table.blockSignals(False)
-                    self._updating_class_table = False
-                return
-            self.pairs = valid_pairs_for_classes
-            self.original_ids = all_vals
-            self._updating_class_table = True
-            self.class_table.blockSignals(True)
-            try:
-                self.class_table.setRowCount(len(all_vals))
-                for i, old_id in enumerate(all_vals):
-                    new_item = QTableWidgetItem(str(i))
-                    new_item.setFlags(new_item.flags() & ~Qt.ItemIsEditable)
-                    self.class_table.setItem(i, 0, new_item)
-                    orig_item = QTableWidgetItem(str(old_id))
-                    orig_item.setFlags(orig_item.flags() & ~Qt.ItemIsEditable)
-                    self.class_table.setItem(i, 1, orig_item)
-                    name_item = QTableWidgetItem(str(old_id))
-                    self.class_table.setItem(i, 2, name_item)
-                    cb = QCheckBox()
-                    cb.setChecked(True)
-                    cb.stateChanged.connect(self.update_included_classes)
-                    self.class_table.setCellWidget(i, 4, cb)
-            finally:
-                self.class_table.blockSignals(False)
-                self._updating_class_table = False
-            self.update_included_classes()
-
-        else:
-            self._updating_class_table = True
-            self.class_table.blockSignals(True)
-            try:
-                self.class_table.setRowCount(0)
-            finally:
-                self.class_table.blockSignals(False)
-                self._updating_class_table = False
-            self.original_ids = []
-            self.update_included_classes()
+        self._start_pair_inspection()
 
     def update_included_classes(self):
         if getattr(self, "_updating_class_table", False):

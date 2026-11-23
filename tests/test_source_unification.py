@@ -96,6 +96,9 @@ class SourceGuiTests(unittest.TestCase):
     def test_all_tabs_use_shared_controls_with_truthful_capabilities(self):
         self.gui("""
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from main import ImagePlayer
 from main_ui import ALL_TABS,StartupDialog
 from ui.dataset_source import DatasetSourceWidget,ACTIONS,TAB_DESCRIPTIONS
@@ -146,6 +149,9 @@ from pathlib import Path
 from unittest.mock import patch
 import cv2,numpy as np
 from PyQt5.QtWidgets import QApplication,QFileDialog
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from main import ImagePlayer
 from ui.dataset_source import DatasetSourceWidget
 keys=['threshold','gradient','interactive','traditional_ml','deep_learning','labeler','test','yolo_demo','yolo_aeb']
@@ -156,14 +162,14 @@ with tempfile.TemporaryDirectory() as directory:
  for key,owner in zip(keys,window._tab_widgets):
   panel=owner.nav_widget.source_widget
   with patch.object(QFileDialog,'getOpenFileNames',return_value=([str(image)],'')) as picker:
-   panel.button('images').click();assert picker.call_count==1,key
+   panel.button('images').click();wait_dataset(owner);assert picker.call_count==1,key
   assert owner.image_paths==[str(image)],key
   assert str(640 if key=='traditional_ml' else 1024) in owner.nav_widget._resize_cb.text()
   with patch.object(QFileDialog,'getOpenFileNames',return_value=([],'')):
    panel.button('images').click()
   assert owner.image_paths==[str(image)],key
   with patch.object(QFileDialog,'getExistingDirectory',return_value=directory) as picker:
-   panel.button('folder').click();assert picker.call_count==1,key
+   panel.button('folder').click();wait_dataset(owner);assert picker.call_count==1,key
   assert owner.image_paths==[str(image)],key
  window.close();app.processEvents()
 """)
@@ -175,6 +181,9 @@ from pathlib import Path
 from unittest.mock import patch
 import cv2,numpy as np,yaml
 from PyQt5.QtWidgets import QApplication,QFileDialog
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from tabs.dataset_analysis import DatasetAnalysisWindow
 from utils_new.import_export.images import read_index_mask
 app=QApplication([]);owner=DatasetAnalysisWindow();owner.show()
@@ -183,7 +192,7 @@ with tempfile.TemporaryDirectory() as directory:
  image=root/'images'/'one.png';cv2.imwrite(str(image),np.zeros((40,80),np.uint8));(root/'labels'/'one.txt').write_text('0 .5 .5 .4 .4\\n')
  data=root/'data.yaml';data.write_text(yaml.safe_dump({'path':str(root),'train':'images','names':{0:'Object'}}))
  with patch.object(QFileDialog,'getOpenFileName',return_value=(str(data),'')):
-  owner.btn_load_yaml.click()
+  owner.btn_load_yaml.click();wait_dataset(owner)
  assert owner._yaml_mode
  pairs=list(owner.pairs);source=owner._source_yaml_path
  with patch.object(QFileDialog,'getExistingDirectory',return_value=''),patch.object(owner.validator,'clear_cache') as clear:
@@ -198,9 +207,9 @@ with tempfile.TemporaryDirectory() as directory:
  owner.dataset_type_combo.setCurrentIndex(1)
  (root/'masks').mkdir();indexed=root/'masks'/'one.png';cv2.imwrite(str(indexed),arr)
  with patch.object(QFileDialog,'getExistingDirectory',return_value=str(root/'images')):
-  owner.btn_folder.click()
+  owner.btn_folder.click();wait_dataset(owner)
  with patch.object(QFileDialog,'getExistingDirectory',return_value=str(root/'masks')):
-  owner.btn_labels.click()
+  owner.btn_labels.click();wait_dataset(owner)
  assert owner.pairs==[(str(image),str(indexed))],owner.pairs
  assert not owner._yaml_mode and owner._source_yaml_path is None
  assert read_index_mask(owner.pairs[0][1]).max()==1000
@@ -214,6 +223,9 @@ from pathlib import Path
 from unittest.mock import patch
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication,QFileDialog,QMessageBox
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from ui.dataset_source import choose_coco_sources
 app=QApplication([])
 def choose(caption):
@@ -238,6 +250,9 @@ with tempfile.TemporaryDirectory() as directory:
         self.gui("""
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from ui.dataset_source import DatasetSourceWidget,ACTIONS
 app=QApplication([])
 panel=DatasetSourceWidget(('images','folder','labels','masks','yolo_yaml','coco','unet_yaml'),types=(0,1,2),formats=True,profile='test')
@@ -271,6 +286,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication,QFileDialog
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from ui.DL_train_settings_base import YOLOTrainWidget,UNetTrainWidget
 from ui.DL_train_settings_new_model import DeepLabV3TrainWidget
 from ui.dataset_source import ACTIONS
@@ -299,6 +317,9 @@ with tempfile.TemporaryDirectory() as directory:
         self.gui("""
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication,QFileDialog
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from ui.DL_predict_settings import YOLOInferenceSettings
 from ui.dataset_source import ACTIONS
 app=QApplication([]);widget=YOLOInferenceSettings();widget.show()

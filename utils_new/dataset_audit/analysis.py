@@ -177,6 +177,7 @@ class DatasetAnalyzer:
             error=None,
             errors=[],
             cancelled=False,
+            dominant_classes={},
         )
         if not pairs:
             return result
@@ -209,6 +210,9 @@ class DatasetAnalyzer:
                 break
             try:
                 (w, h), objects = self.read_objects(pair)
+                from collections import Counter
+                counts = Counter(obj.class_id for obj in objects)
+                result["dominant_classes"][tuple(pair)] = counts.most_common(1)[0][0] if counts else None
                 if (
                     not within(w, params.min_w, params.max_w)
                     or not within(h, params.min_h, params.max_h)
@@ -495,3 +499,23 @@ class TrainingResultsLoader:
         if data["best_model_meta"]:
             lines.append("Best meta: best_meta.json")
         return "\n".join(lines)
+
+
+class DatasetFilterJob:
+    """Filter/statistics snapshot independent of widgets and mutable UI analyzers."""
+    def __init__(self, pairs, dataset_type, input_format, included_ids, total_classes, params, include_empty):
+        self.pairs, self.dataset_type, self.input_format = list(pairs), dataset_type, input_format
+        self.included_ids, self.total_classes, self.params = set(included_ids), total_classes, params
+        self.include_empty = include_empty
+        self.cancelled = False
+        self.progress = lambda *_: None
+        self.log = lambda *_: None
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        analyzer = DatasetAnalyzer(self.dataset_type, self.input_format)
+        return analyzer.filter_pairs(self.pairs, self.included_ids, self.total_classes, self.params,
+            progress_cb=self.progress, include_empty=self.include_empty,
+            cancel_check=lambda: self.cancelled)

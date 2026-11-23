@@ -184,3 +184,37 @@ def index_mask_files(folder):
                 raise ValueError(f"Неоднозначная маска: {path}")
             result[key] = path
     return result
+
+
+def index_sidecars(folder, extensions=('.txt',), *, recursive=True, cancel=None):
+    """Index whole relative stems once; dots/spaces are preserved, case is ignored.
+
+    Keep multiple candidates so callers can report ambiguous sources explicitly.
+    No image pixels or annotation contents are read.
+    """
+    import unicodedata
+    folder = Path(folder)
+    result = {}
+    if not folder.is_dir():
+        return result
+    paths = folder.rglob('*') if recursive else folder.iterdir()
+    for path in paths:
+        if cancel is not None and cancel.is_set():
+            from concurrent.futures import CancelledError
+            raise CancelledError()
+        if path.suffix.lower() not in extensions or not path.is_file():
+            continue
+        stem = path.relative_to(folder).with_suffix('').as_posix()
+        key = unicodedata.normalize('NFC', stem).casefold()
+        result.setdefault(key, []).append(path)
+    return result
+
+
+def sidecar_matches(folder, relative, cache, *, recursive=True):
+    import unicodedata
+    folder = Path(folder)
+    key = (str(folder), recursive)
+    if key not in cache:
+        cache[key] = index_sidecars(folder, recursive=recursive)
+    stem = Path(relative).with_suffix('').as_posix()
+    return cache[key].get(unicodedata.normalize('NFC', stem).casefold(), [])

@@ -3,7 +3,6 @@
 import os
 import subprocess
 import sys as _sys
-from collections import Counter
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
@@ -24,17 +23,15 @@ from utils_new.dataset_audit.analysis import (
     FilterParams,
     clear_brightness_cache,
 )
-from utils_new.dataset_audit.objects import read_objects
 
 get_class_color = settings.get_dataset_class_color
 
 
 class DatasetSelectionController:
-    @serialized_scan
     def apply_filters_and_update_metrics(self):
         self._sync_analyzer()
         self._invalidate_analysis_results()
-        self._filters_applied = True
+        self._filters_applied = False
         if not self.pairs:
             self.filtered_pairs = []
             self._render_metrics({}, 0, [], {})
@@ -83,22 +80,22 @@ class DatasetSelectionController:
         self.progress_bar.setRange(0, len(self.pairs))
         self.progress_bar.setValue(0)
 
-        def on_progress(c, t):
-            self.progress_bar.setValue(c)
-            if c % 50 == 0:
-                QApplication.processEvents()
+        from ui.dataset_loading import dataset_tasks
+        from utils_new.dataset_audit.analysis import DatasetFilterJob
+        self.btn_export_filtered.setEnabled(False)
+        dataset_tasks(self).start('filters', DatasetFilterJob, list(self.pairs), self.dataset_type,
+            self.input_format, included_class_ids, total_classes, params, include_empty,
+            label='Фильтрация и расчёт статистики…', finished=self._filters_finished)
 
-        result = self.analyzer.filter_pairs(
-            self.pairs,
-            included_class_ids,
-            total_classes,
-            params,
-            progress_cb=on_progress,
-            include_empty=include_empty,
-            cancel_check=lambda: self._stop_requested,
-        )
+    def _filters_finished(self, result):
+        if self._closing:
+            return
         self.progress_bar.setVisible(False)
-
+        if result.get('cancelled'):
+            return
+        self._filters_applied = True
+        self._pair_class_cache = result.get('dominant_classes', {})
+        self.btn_export_filtered.setEnabled(bool(result.get('filtered_pairs')))
         if result["error"]:
             self._audit_log(
                 f"Ошибка фильтрации: {result['error']}", tag="ANALYSIS", level="ERROR"
@@ -228,12 +225,7 @@ class DatasetSelectionController:
         )
 
     def _get_pair_dominant_class(self, pair):
-        try:
-            _, objects = read_objects(pair, self.dataset_type, self.input_format)
-            counts = Counter(obj.class_id for obj in objects)
-            return counts.most_common(1)[0][0] if objects else None
-        except (OSError, ValueError):
-            return None
+        return self._pair_class_cache.get(tuple(pair))
 
     def _restyle_and_sort_file_list(self):
         if not self.pairs or not hasattr(self, "file_list"):

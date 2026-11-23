@@ -4,7 +4,11 @@
 import os
 
 
-from utils_new.import_export.images import collect_image_paths, image_size_from_file, index_mask_files
+from utils_new.import_export.images import (
+    collect_image_paths,
+    image_size_from_file,
+    index_mask_files,
+)
 from utils_new.dataset.validation import (
     INPUT_FORMAT_AUTO,
     PairValidator,
@@ -60,14 +64,20 @@ def scan_image_only_pairs(images_folder):
     return [(p, None) for p in collect_image_paths(images_folder)]
 
 
-def build_pair_display(pair, validator, dataset_type, include_empty):
+def build_pair_display(
+    pair, validator, dataset_type, include_empty, *, validated=None, details=None
+):
     img_path = pair[0]
     aux_path = pair[1] if len(pair) > 1 else None
     name = os.path.splitext(os.path.basename(img_path))[0]
 
-    is_valid, err, color_type, bit_type = validator.validate_full(pair)
+    is_valid, err, color_type, bit_type = (
+        validated if validated is not None else validator.validate_full(pair)
+    )
 
-    if dataset_type == 0 and aux_path:
+    if details is not None:
+        ann_type = details.get("ann_type", "error" if not is_valid else None)
+    elif dataset_type == 0 and aux_path:
         try:
             ann_type = PairValidator.detect_annotation_type(
                 aux_path, validator.input_format, image_size_from_file(img_path)
@@ -94,8 +104,8 @@ def build_pair_display(pair, validator, dataset_type, include_empty):
     }.get(bit_type, "")
 
     if is_valid and dataset_type != 2 and aux_path is None:
-        tag = 'unlabelled'
-        text = f'{name}{color_marker}{bit_marker} [Без разметки]'
+        tag = "unlabelled"
+        text = f"{name}{color_marker}{bit_marker} [Без разметки]"
     elif not is_valid:
         tag = "invalid"
         kind = "label" if dataset_type == 0 else ("mask" if dataset_type == 1 else "")
@@ -122,3 +132,58 @@ def build_pair_display(pair, validator, dataset_type, include_empty):
         "tag": tag,
         "text": text,
     }
+
+
+class PairInspectionJob:
+    """File-by-file validation/statistics snapshot; never retain decoded images."""
+
+    def __init__(self, pairs, dataset_type=0, input_format="auto", include_empty=True):
+        self.pairs = list(pairs)
+        self.dataset_type, self.input_format = dataset_type, input_format
+        self.include_empty = include_empty
+        self.cancelled = False
+        self.progress = lambda *_: None
+        self.log = lambda *_: None
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        from collections import Counter
+
+        validator = PairValidator(self.dataset_type, self.input_format)
+        rows, classes = [], set()
+        colors, bits, types = Counter(), Counter(), Counter()
+        for index, pair in enumerate(self.pairs):
+            if self.cancelled:
+                return {"cancelled": True}
+            validated = validator.validate_full(pair)
+            details = validator.details.get(tuple(pair[:2]), {})
+            info = build_pair_display(
+                pair,
+                validator,
+                self.dataset_type,
+                self.include_empty,
+                validated=validated,
+                details=details,
+            )
+            rows.append(info)
+            colors[info["color_type"]] += 1
+            bits[info["bit_type"]] += 1
+            if info.get("ann_type"):
+                types[info["ann_type"]] += 1
+            if info["is_valid"]:
+                classes.update(details.get("classes", []))
+            self.progress(index + 1, len(self.pairs))
+        if self.cancelled:
+            return {"cancelled": True}
+        return dict(
+            rows=rows,
+            classes=sorted(classes),
+            colors=dict(colors),
+            bits=dict(bits),
+            types=dict(types),
+            validation_cache=validator._cache,
+            pairs=self.pairs,
+            valid=sum(row["is_valid"] for row in rows),
+        )

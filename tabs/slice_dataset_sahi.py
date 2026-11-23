@@ -35,7 +35,6 @@ from utils_new.import_export.yolo_labels import read_yolo_labels
 from utils_new.import_export.dataset_output import _coco_record, write_classes_and_yaml
 from utils_new.import_export.coco import export_coco_yolo
 from utils_new.import_export.json_objects import write_json_atomic
-from utils_new.import_export.images import read_image
 from utils_new.dataset.preparation import allocate_split_counts
 
 try:
@@ -473,8 +472,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
         self._yaml_root = None
         self._yaml_path = None
         self._yaml_names = None
-        self._coco_tmp_labels_dir = None
-        self._coco_json_counter = 0
         self._updating_class_table = False
 
         self.coco_path = None
@@ -483,7 +480,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
         self._temp_coco_path = None
         self.detected_format = 'bbox'
         self.seg_hint = ""
-        self._img_size_cache = {}
 
         try:
             self.progress_bar.setRange(0, 100)
@@ -535,7 +531,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
         try:
             self.progress_bar.setRange(0, 0)
             self.status_label.setText(msg)
-            QApplication.processEvents()
         except Exception:
             pass
 
@@ -544,7 +539,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
             self.status_label.setText(final_msg)
-            QApplication.processEvents()
         except Exception:
             pass
 
@@ -621,7 +615,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
             self.log_view.append(message)
             sb = self.log_view.verticalScrollBar()
             sb.setValue(sb.maximum())
-            QApplication.processEvents()
         except Exception:
             print(f"[log] {message}")
 
@@ -645,112 +638,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
                 name = name_item.text().strip() if name_item else str(new_id)
                 names[new_id] = name or str(new_id)
         return names
-
-    def _pairs_to_coco(self, progress_cb=None):
-        if not self.pairs:
-            return None
-        input_format = self.input_format or 'auto'
-
-        orig_to_name = {}
-        if hasattr(self, 'class_table'):
-            for i in range(self.class_table.rowCount()):
-                orig_id_item = self.class_table.item(i, 1)
-                name_item = self.class_table.item(i, 2)
-                cb = self.class_table.cellWidget(i, 4)
-                if orig_id_item and cb and cb.isChecked():
-                    try:
-                        orig_id = int(orig_id_item.text())
-                        name = name_item.text() if name_item else str(orig_id)
-                        orig_to_name[orig_id] = name or str(orig_id)
-                    except (ValueError, TypeError):
-                        pass
-
-        images, annotations = [], []
-        cat_name_to_id = {}
-        next_img_id = next_ann_id = 1
-        total = len(self.pairs)
-
-        for i, pair in enumerate(self.pairs):
-            img_path = pair[0]
-            aux_path = pair[1] if len(pair) > 1 else None
-            if not img_path or not os.path.exists(img_path):
-                if progress_cb:
-                    progress_cb(i + 1, total)
-                continue
-
-            if img_path in self._img_size_cache:
-                img_w, img_h = self._img_size_cache[img_path]
-            else:
-                img = read_image(img_path)
-                if img is None:
-                    if progress_cb:
-                        progress_cb(i + 1, total)
-                    continue
-                img_h, img_w = img.shape[:2]
-                self._img_size_cache[img_path] = (img_w, img_h)
-
-            img_id = next_img_id
-            next_img_id += 1
-            images.append({
-                'id': img_id,
-                'file_name': os.path.abspath(img_path),
-                'width': img_w,
-                'height': img_h,
-            })
-
-            label_path = aux_path
-            images[-1]['annotation_status'] = 'unlabelled' if label_path is None else 'labelled'
-            raw_anns = []
-            if label_path and os.path.exists(label_path):
-                raw_anns = yolo_labels_to_coco_annotations(
-                    label_path, img_w, img_h, input_format)
-
-            for ad in raw_anns:
-                cls_name = orig_to_name.get(ad['cls_id'])
-                if cls_name is None:
-                    continue
-                if cls_name not in cat_name_to_id:
-                    cat_name_to_id[cls_name] = len(cat_name_to_id)
-                cat_id = cat_name_to_id[cls_name]
-
-                bbox = ad['bbox']
-                ann = {
-                    'id': next_ann_id,
-                    'image_id': img_id,
-                    'category_id': cat_id,
-                    'bbox': list(bbox),
-                    'area': ad['area'],
-                    'iscrowd': 0,
-                }
-                if 'segmentation' in ad:
-                    ann['segmentation'] = ad['segmentation']
-                annotations.append(ann)
-                next_ann_id += 1
-
-            if progress_cb:
-                progress_cb(i + 1, total)
-
-        if not images:
-            return None
-
-        cats = [{'id': cid, 'name': name, 'supercategory': 'none'}
-                for name, cid in cat_name_to_id.items()]
-        return {'images': images, 'annotations': annotations, 'categories': cats}
-
-    def _save_temp_coco(self):
-        if self._coco_dict is None:
-            return
-        if self._temp_coco_path and os.path.exists(self._temp_coco_path):
-            try:
-                os.remove(self._temp_coco_path)
-            except Exception:
-                pass
-        fd, temp_path = tempfile.mkstemp(suffix='.json', prefix='sahi_coco_')
-        os.close(fd)
-        with open(temp_path, 'w', encoding='utf-8') as f:
-            json.dump(self._coco_dict, f, ensure_ascii=False)
-        self.coco_path = temp_path
-        self._temp_coco_path = temp_path
 
     def browse_output(self):
         folder = QFileDialog.getExistingDirectory(
@@ -777,16 +664,19 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
     def update_generate_button_state(self):
         has_pairs = bool(self.pairs)
         has_output = bool(self.output_folder)
-        can_run = bool(SAHI_AVAILABLE and has_pairs and has_output)
+        can_run = bool(SAHI_AVAILABLE and has_pairs and has_output and self._dataset_ready())
         self.btn_generate.setEnabled(can_run and not self._is_running())
 
     def _is_running(self):
-        return self.worker is not None and self.worker.isRunning()
+        return (self.worker is not None and self.worker.isRunning()) or (hasattr(self, "_dataset_tasks") and self._dataset_tasks.busy("sahi-source"))
 
     # ==================================================================
     # Генерация
     # ==================================================================
     def on_generate(self):
+        if not self._dataset_ready() or self._is_running():
+            self.log("Дождитесь завершения проверки датасета или текущей нарезки.")
+            return
         if not SAHI_AVAILABLE:
             QMessageBox.critical(self, "SAHI не установлен",
                                  "Установите: pip install sahi")
@@ -808,56 +698,8 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
-        self.log("")
-        self.log("═" * 60)
-        self.log(f"🔄 Сборка COCO из {len(self.pairs)} пар...")
-        self.status_label.setText("Сборка COCO из пар...")
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        QApplication.processEvents()
-
-        def on_build_progress(cur, tot):
-            pct = int(cur / tot * 100) if tot else 0
-            self.progress_bar.setValue(pct)
-            self.status_label.setText(
-                f"Сборка COCO: {cur}/{tot} ({pct}%)")
-            QApplication.processEvents()
-
-        try:
-            self._coco_dict = self._pairs_to_coco(
-                progress_cb=on_build_progress)
-        except Exception as e:
-            self._hide_indeterminate("Ошибка")
-            QMessageBox.critical(self, "Ошибка сборки COCO",
-                                 f"{type(e).__name__}: {e}")
-            return
-
-        if not self._coco_dict or not self._coco_dict.get('images'):
-            self._hide_indeterminate("Ошибка")
-            QMessageBox.warning(
-                self, "Нет данных",
-                "COCO пуст (возможно, все классы исключены или "
-                "ни одна пара не валидна).")
-            return
-
-        self._save_temp_coco()
-        self.detected_format = detect_dataset_format(self._coco_dict)
-        self.seg_hint = describe_segmentation(self._coco_dict)
-
-        n_imgs = len(self._coco_dict.get('images', []))
-        n_anns = len(self._coco_dict.get('annotations', []))
-        self.log(f"✅ COCO собран: {n_imgs} imgs, {n_anns} anns, "
-                 f"format={self.detected_format}"
-                 + (f" — {self.seg_hint}" if self.seg_hint else ""))
-        self.coco_label.setText(
-            f"{os.path.basename(self._temp_coco_path or '')} | "
-            f"изображений: {n_imgs}, аннотаций: {n_anns}")
-
-        self.log(f"📁 COCO:   {self._temp_coco_path}")
-        self.log(f"📁 Output: {self.output_folder}")
-
         params = {
-            'coco': self.coco_path,
+            'coco': None,
             'images': self.images_path or '',
             'out': self.output_folder,
             'slice_size': self.slice_size.value(),
@@ -873,16 +715,24 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
             'visualize': self.visualize_spin.value(),
         }
 
-        self.btn_generate.setEnabled(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.status_label.setText("Запуск нарезки...")
-
-        self.worker = SliceWorker(params)
-        self.worker.log_signal.connect(self._on_log)
-        self.worker.progress_signal.connect(self._on_progress)
-        self.worker.finished_signal.connect(self._on_finished)
-        self.worker.start()
+        from ui.dataset_loading import dataset_tasks
+        from utils_new.import_export.coco import CocoPairsJob
+        names = {int(self.class_table.item(row, 1).text()): self.class_table.item(row, 2).text()
+                 for row in range(self.class_table.rowCount()) if self.class_table.cellWidget(row, 4).isChecked()}
+        def prepared(result):
+            self._coco_dict = result['coco']
+            self._temp_coco_path = self.coco_path = result['path']
+            params['coco'] = result['path']
+            params['detected_format'] = detect_dataset_format(result['coco'])
+            self.worker = SliceWorker(params)
+            self.worker.log_signal.connect(self._on_log)
+            self.worker.progress_signal.connect(self._on_progress)
+            self.worker.finished_signal.connect(self._on_finished)
+            self.worker.start()
+            self.update_generate_button_state()
+        dataset_tasks(self).start('sahi-source', CocoPairsJob, list(self.pairs), names, self.input_format,
+            label='Подготовка COCO для нарезки…', finished=prepared)
+        self.update_generate_button_state()
 
     def _on_log(self, line):
         self.log_view.append(line)

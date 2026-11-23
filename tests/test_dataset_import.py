@@ -285,6 +285,9 @@ class ImportDialogTests(unittest.TestCase):
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from PyQt5.QtWidgets import QApplication,QDialogButtonBox
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtCore import QElapsedTimer
 from PyQt5.QtTest import QTest
 from ui.dataset_import import DatasetImportDialog
@@ -320,6 +323,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication,QFileDialog,QMessageBox
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtCore import QTimer,QCoreApplication,QEvent
 from ui.dataset_import import DatasetImportDialog
 from tabs.layout_dataset import Labeler
@@ -341,7 +347,7 @@ with TemporaryDirectory() as directory:
  for cls in (Labeler,ViewingDataset,DatasetPreparationWindow,DatasetAnalysisWindow,SahiSlicerWindow):
   window=cls();window.show()
   with patch.object(QFileDialog,'getOpenFileName',return_value=(str(source),'')),patch.object(QMessageBox,'information'),patch.object(QMessageBox,'critical') as errors:
-   window.btn_load_yaml.click();errors.assert_not_called()
+   window.btn_load_yaml.click();wait_dataset(window);errors.assert_not_called()
   if hasattr(window,'image_paths'):
    assert len(window.image_paths)==2
    assert window._yaml_label_map[str(root/'images/train/nested/b.jpg')] is None
@@ -349,7 +355,7 @@ with TemporaryDirectory() as directory:
     assert window._get_annotations(1)==[]
     assert not window._yaml_mask_map
    else:
-    window.current_index=1;window.display_current_image();assert window.current_annotations==[]
+    window.current_index=1;window.display_current_image();wait_dataset(window);assert window.current_annotations==[]
   else:
    assert len(window.pairs)==2,window.pairs
    assert window.pairs[1][1] is None
@@ -368,6 +374,9 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import numpy as np
 from PyQt5.QtWidgets import QApplication,QFileDialog,QMessageBox
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtCore import QTimer,QCoreApplication,QEvent
 from ui.dataset_import import DatasetImportDialog
 from tabs.layout_dataset import Labeler
@@ -393,11 +402,11 @@ with TemporaryDirectory() as directory:
   window=cls();window.show()
   with patch.object(QMessageBox,'information'),patch.object(QMessageBox,'critical') as errors:
    with patch.object(QFileDialog,'getOpenFileName',return_value=(str(source),'')):
-    window.btn_load_unet.click()
+    window.btn_load_unet.click();wait_dataset(window)
    errors.assert_not_called()
    assert len(window.image_paths if hasattr(window,'image_paths') else window.pairs)==2
    with patch.object(QFileDialog,'getOpenFileNames',return_value=([str(coco)],'')):
-    window.btn_load_coco.click()
+    window.btn_load_coco.click();wait_dataset(window)
    errors.assert_not_called()
    assert len(window.image_paths if hasattr(window,'image_paths') else window.pairs)==2
   window.close();window.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
@@ -412,6 +421,9 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import numpy as np
 from PyQt5.QtWidgets import QApplication,QMessageBox
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from ui.DL_train_settings_new_model import DeepLabV3TrainWidget
 from ui.dataset_source import set_dataset_path
 from utils_new.import_export.dataset_sources import defaults,preview,write_manifest
@@ -441,6 +453,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication,QFileDialog
+import sys as _dataset_test_sys
+_dataset_test_sys.path.insert(0, str(__import__('pathlib').Path.cwd() / 'tests'))
+from dataset_test_support import wait_dataset
 from PyQt5.QtCore import QTimer
 from ui.dataset_import import DatasetImportDialog
 from ui.dataset_source import dataset_path
