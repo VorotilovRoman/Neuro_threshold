@@ -23,14 +23,12 @@ from utils_new.import_export.images import (
     collect_image_paths,
     image_size_from_file,
     read_index_mask,
-    index_mask_files,
 )
 from utils_new.import_export.dataset_output import write_index_mask
 from utils_new.import_export.yolo_labels import read_yolo_labels
 from utils_new.import_export.yolo_yaml import (
     resolve_split_sources,
     _find_label_for_image,
-    _local_image_path,
 )
 
 
@@ -69,7 +67,7 @@ def read_voc_images(txt_path, jpeg_dir):
 def read_voc_pairs(txt_path, jpeg_dir, seg_dir):
     pairs = []
     for image in read_voc_images(txt_path, jpeg_dir):
-        relative = Path(image).relative_to(Path(jpeg_dir).resolve()).with_suffix('.png')
+        relative = Path(image).relative_to(Path(jpeg_dir).resolve()).with_suffix(".png")
         mask = Path(seg_dir) / relative
         if not mask.is_file():
             raise FileNotFoundError(f"Нет маски: {mask}")
@@ -162,9 +160,36 @@ def build_voc_from_yolo(
     names = config.get("names") or config.get("class_names") or {}
     if isinstance(names, dict):
         names = {int(k): v for k, v in names.items()}
-    identities = {}
-    used = {}
-    mask_indices = {}
+    from utils_new.import_export.mask_yaml import _mask_split_pairs
+
+    selection = config.get("_dataset_sources")
+    selected = selection.get("annotations", {}) if selection else None
+    kind = selection.get("kind") if selection else None
+    mask_pairs = {}
+    if kind == "unet" or (
+        not selection
+        and (
+            config.get("masks")
+            or any(k.endswith("_masks") for k in config)
+            or (root / "masks").is_dir()
+        )
+    ):
+        for split in sources:
+            mask_pairs.update(_mask_split_pairs(config, root, split, strict=False))
+    memberships = {}
+    for split, entries in sources.items():
+        for image, _ in entries:
+            image = image.resolve()
+            if image in memberships and memberships[image] != split:
+                raise ValueError(f"Изображение входит в несколько split: {image}")
+            memberships[image] = split
+    identities, used = {}, set()
+    max_pixel = 0
+    pixel_names = list(config.get("class_names") or [])
+    xml_names = names or {
+        i: name
+        for i, name in enumerate(pixel_names[config.get("mask_class_offset", 1) :])
+    }
     with tempfile.TemporaryDirectory(
         dir=destination.parent, prefix=".voc-"
     ) as temporary:
@@ -175,83 +200,104 @@ def build_voc_from_yolo(
             "Annotations",
             "ImageSets/Segmentation",
             "ImageSets/Main",
+            "ImageSets/All",
         ):
             (stage / folder).mkdir(parents=True)
         for split, entries in sources.items():
-            split_ids = []
-            segmentation_ids = []
+            split_ids, segmentation_ids, all_ids = [], [], []
             for image, resolved in entries:
                 image = image.resolve()
                 if image not in identities:
                     identity = image.stem
-                    if identity in used:
+                    if identity.casefold() in used:
                         identity += (
                             "_" + hashlib.sha256(str(image).encode()).hexdigest()[:12]
                         )
-                    if identity in used:
-                        raise ValueError("Коллизия VOC ID.")
+                    if identity.casefold() in used:
+                        raise ValueError("Коллизия VOC ID")
                     identities[image] = identity
-                    used[identity] = image
+                    used.add(identity.casefold())
+                    # Preserve image bytes and bit depth; do not silently JPEG-encode.
                     filename = identity + image.suffix
                     shutil.copy2(image, stage / "JPEGImages" / filename)
-                    label = _find_label_for_image(
-                        str(image),
-                        str(root),
-                        split,
-                        resolved if Path(resolved).is_dir() else None,
-                    )
+                    if selected is not None:
+                        label = selected.get(str(image)) if kind == "yolo" else None
+                    else:
+                        label = _find_label_for_image(
+                            str(image),
+                            str(root),
+                            split,
+                            resolved if Path(resolved).is_dir() else None,
+                        )
                     if label:
                         convert_yolo_txt_to_voc_xml(
                             label,
                             image,
-                            names,
+                            xml_names,
                             stage / "Annotations" / (identity + ".xml"),
                             image_filename=filename,
                             format_hint=format_hint,
                         )
-                    mask_dirs = config.get(split + "_masks", str(Path("masks") / split))
-                    if not isinstance(mask_dirs, str):
-                        raise ValueError(
-                            "VOC экспорт требует один mask-каталог на split."
+                    mask_path = mask_pairs.get(str(image))
+                    if mask_path:
+                        mask = read_index_mask(mask_path)
+                        width, height = image_size_from_file(image)
+                        if mask.shape != (height, width):
+                            raise ValueError(f"Размер маски не совпадает: {mask_path}")
+                        if binary_masks:
+                            mask = (mask > 0).astype(np.uint8)
+                        max_pixel = max(max_pixel, int(mask.max()))
+                        write_index_mask(
+                            stage / "SegmentationClass" / (identity + ".png"), mask
                         )
-                    mask_root = Path(mask_dirs)
-                    mask_root = (
-                        mask_root if mask_root.is_absolute() else root / mask_root
-                    )
-                    if mask_root not in mask_indices:
-                        mask_indices[mask_root] = (
-                            index_mask_files(mask_root) if mask_root.is_dir() else {}
-                        )
-                    local = _local_image_path(
-                        image, resolved if Path(resolved).is_dir() else None, root
-                    )
-                    match = mask_indices[mask_root].get(
-                        local.with_suffix("").as_posix().casefold()
-                    )
-                    found = [match] if match is not None else []
-                    if found:
-                        convert_mask_to_voc_format(
-                            found[0],
-                            stage / "SegmentationClass" / (identity + ".png"),
-                            binary=binary_masks,
-                        )
-                    elif split + "_masks" in config:
-                        raise FileNotFoundError(f"Нет маски: {image}")
+                identity = identities[image]
+                if identity not in all_ids:
+                    all_ids.append(identity)
                 if (
-                    stage / "Annotations" / (identities[image] + ".xml")
-                ).is_file() and identities[image] not in split_ids:
-                    split_ids.append(identities[image])
+                    stage / "Annotations" / (identity + ".xml")
+                ).is_file() and identity not in split_ids:
+                    split_ids.append(identity)
                 if (
-                    stage / "SegmentationClass" / (identities[image] + ".png")
-                ).is_file() and identities[image] not in segmentation_ids:
-                    segmentation_ids.append(identities[image])
-            write_text_atomic(
-                stage / "ImageSets/Segmentation" / (split + ".txt"),
-                "\n".join(segmentation_ids) + "\n",
-            )
-            write_text_atomic(
-                stage / "ImageSets/Main" / (split + ".txt"), "\n".join(split_ids) + "\n"
-            )
+                    stage / "SegmentationClass" / (identity + ".png")
+                ).is_file() and identity not in segmentation_ids:
+                    segmentation_ids.append(identity)
+            for folder, ids in (
+                ("Main", split_ids),
+                ("Segmentation", segmentation_ids),
+                ("All", all_ids),
+            ):
+                write_text_atomic(
+                    stage / "ImageSets" / folder / (split + ".txt"),
+                    "\n".join(ids) + ("\n" if ids else ""),
+                )
+        count = max_pixel + 1
+        if binary_masks:
+            count, pixel_names = 2, ["background", "object"]
+        else:
+            count = max(count, len(pixel_names), int(config.get("num_classes", 0)))
+            if not pixel_names:
+                offset = int(config.get("mask_class_offset", 1))
+                mapping = names if isinstance(names, dict) else dict(enumerate(names))
+                count = max(count, max(mapping, default=-1) + offset + 1)
+                pixel_names = ["background"] + [
+                    str(mapping.get(i - offset, f"class_{i}")) for i in range(1, count)
+                ]
+            elif len(pixel_names) < count:
+                raise ValueError("Имена масок не покрывают обнаруженные pixel IDs")
+        output_config = dict(
+            jpeg_dir="JPEGImages",
+            seg_dir="SegmentationClass",
+            num_classes=count,
+            class_names=pixel_names,
+            names=names,
+            mask_class_offset=1 if binary_masks else config.get("mask_class_offset", 1),
+        )
+        for split in sources:
+            output_config[split + "_txt"] = f"ImageSets/Segmentation/{split}.txt"
+        write_text_atomic(
+            stage / "voc.yaml",
+            yaml.safe_dump(output_config, allow_unicode=True, sort_keys=False),
+        )
         stage.rename(destination)
     return str(destination)
 

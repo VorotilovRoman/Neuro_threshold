@@ -84,7 +84,9 @@ class FilesystemUtilities(unittest.TestCase):
             cfg = root / "data.yaml"
             cfg.write_text("train: images/train\n")
             messages = []
-            self.assertEqual(len(load_unet_yaml(cfg, messages.append)["pairs"]), 1)
+            pairs = load_unet_yaml(cfg, messages.append)["pairs"]
+            self.assertEqual(len(pairs), 2)
+            self.assertEqual(sum(aux is None for _, aux in pairs), 1)
             self.assertTrue(any("missing" in message for message in messages))
             with self.assertRaises(FileNotFoundError):
                 load_training_sources(cfg)

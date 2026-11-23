@@ -12,13 +12,14 @@ from runtime_torch import prepare_windows_torch
 prepare_windows_torch()
 
 import json
-import math
 import os
 import random
 import shutil
 import sys
 import tempfile
 import traceback
+from copy import deepcopy
+from pathlib import Path
 from contextlib import redirect_stdout
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
@@ -29,6 +30,13 @@ from ui_tabs.slice_dataset_sahi_ui import setup_sahi_slicer_ui
 from ui.dataset_loader import DatasetLoaderMixin
 from utils_new.images.processing import ImageStats
 from utils_new.dataset.validation import PairValidator
+from utils_new.annotations import ImageSize
+from utils_new.import_export.yolo_labels import read_yolo_labels
+from utils_new.import_export.dataset_output import _coco_record, write_classes_and_yaml
+from utils_new.import_export.coco import export_coco_yolo
+from utils_new.import_export.json_objects import write_json_atomic
+from utils_new.import_export.images import read_image
+from utils_new.dataset.preparation import allocate_split_counts
 
 try:
     from sahi.slicing import slice_coco
@@ -42,91 +50,16 @@ except ImportError:
 # ==================================================================
 def yolo_labels_to_coco_annotations(label_path, img_w, img_h,
                                      input_format='auto'):
-    results = []
-    if not label_path or not os.path.exists(label_path):
-        return results
-
-    with open(label_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            if len(parts) < 5:
-                continue
-            try:
-                cls_id = int(parts[0])
-                coords = [float(x) for x in parts[1:]]
-            except ValueError:
-                continue
-
-            n = len(coords)
-            bbox = None
-            seg = None
-            fmt = input_format
-
-            if fmt in ('auto', 'mixed'):
-                if n == 4:
-                    fmt = 'detect'
-                elif n == 5:
-                    fmt = 'obb_xywhr'
-                elif n == 8:
-                    fmt = 'obb_corners'
-                elif n >= 6 and n % 2 == 0:
-                    fmt = 'segment'
-                else:
-                    continue
-
-            if fmt == 'detect' and n == 4:
-                cx, cy, w, h = coords
-                bbox = ((cx - w / 2) * img_w, (cy - h / 2) * img_h,
-                        w * img_w, h * img_h)
-
-            elif fmt == 'obb_corners' and n == 8:
-                pts = [(coords[i] * img_w, coords[i + 1] * img_h)
-                       for i in range(0, 8, 2)]
-                xs = [p[0] for p in pts]
-                ys = [p[1] for p in pts]
-                bbox = (min(xs), min(ys),
-                        max(xs) - min(xs), max(ys) - min(ys))
-                seg = [c for p in pts for c in p]
-
-            elif fmt == 'obb_xywhr' and n == 5:
-                cx, cy, w, h, angle = coords
-                if abs(angle) > 3.2:
-                    angle = math.radians(angle)
-                cos_a, sin_a = math.cos(angle), math.sin(angle)
-                dx, dy = w / 2, h / 2
-                local = [(-dx, -dy), (dx, -dy), (dx, dy), (-dx, dy)]
-                pts = []
-                for lx, ly in local:
-                    rx = cx + lx * cos_a - ly * sin_a
-                    ry = cy + lx * sin_a + ly * cos_a
-                    pts.append((rx * img_w, ry * img_h))
-                xs = [p[0] for p in pts]
-                ys = [p[1] for p in pts]
-                bbox = (min(xs), min(ys),
-                        max(xs) - min(xs), max(ys) - min(ys))
-                seg = [c for p in pts for c in p]
-
-            elif fmt == 'segment' and n >= 6 and n % 2 == 0:
-                pts = [(coords[i] * img_w, coords[i + 1] * img_h)
-                       for i in range(0, n, 2)]
-                xs = [p[0] for p in pts]
-                ys = [p[1] for p in pts]
-                bbox = (min(xs), min(ys),
-                        max(xs) - min(xs), max(ys) - min(ys))
-                seg = [c for p in pts for c in p]
-
-            if bbox is None or bbox[2] <= 0 or bbox[3] <= 0:
-                continue
-
-            item = {'cls_id': cls_id, 'bbox': bbox}
-            if seg is not None:
-                item['segmentation'] = [seg]
-            results.append(item)
-
-    return results
+    if label_path is None:
+        return []
+    annotations = read_yolo_labels(label_path, ImageSize(img_w, img_h), strict=True,
+                                   format_hint='auto' if input_format == 'mixed' else input_format)
+    result = []
+    for index, ann in enumerate(annotations):
+        record = _coco_record(ann, 0, index)
+        record['cls_id'] = ann.class_id
+        result.append(record)
+    return result
 
 
 # ==================================================================
@@ -164,6 +97,24 @@ def slice_dataset(coco_json_path, image_dir, output_dir,
             min_area_ratio=min_area_ratio, verbose=False,
         )
 
+    with open(coco_json_path, encoding='utf-8-sig') as stream:
+        source_images = json.load(stream)['images']
+    # SAHI names tiles <source stem>_<source index>_<crop coordinates>.
+    # Retain source membership: overlapping tiles must not leak across splits.
+    prefixes = [(f"{Path(source['file_name']).stem}_{index}_", source)
+                for index, source in enumerate(source_images)]
+    for tile in coco_dict.get('images', []):
+        name = Path(tile['file_name']).stem
+        parent_prefix, *coordinates = name.rsplit('_', 4)
+        matches = [source for prefix, source in prefixes if parent_prefix + '_' == prefix
+                   and len(coordinates) == 4 and all(c.isdigit() for c in coordinates)]
+        if len(matches) != 1:
+            raise ValueError(f"SAHI: cannot identify source of tile {tile['file_name']}")
+        source = matches[0]
+        tile['source_image'] = str(source['id'])
+        tile['annotation_status'] = source.get('annotation_status', 'labelled')
+    write_json_atomic(output_coco_path, coco_dict)
+
     print(f"   ✅ тайлов: {len(coco_dict.get('images', []))}, "
           f"аннотаций: {len(coco_dict.get('annotations', []))}")
     return coco_dict, output_coco_path
@@ -199,107 +150,79 @@ def describe_segmentation(coco_dict):
 
 
 def subsample_negative_tiles(coco_dict, image_dir, keep_ratio=0.1, seed=42):
-    if not (0 < keep_ratio <= 1):
-        return coco_dict
+    if not 0 <= keep_ratio <= 1:
+        raise ValueError('Background ratio must be in [0, 1]')
+    result = deepcopy(coco_dict)
+    annotated = {a['image_id'] for a in result.get('annotations', [])}
+    unknown = {i['id'] for i in result['images'] if i.get('annotation_status') == 'unlabelled'}
+    negative = [i for i in result['images'] if i['id'] not in annotated | unknown]
+    count = int(len(negative) * keep_ratio)
+    kept = {i['id'] for i in random.Random(seed).sample(negative, count)} | annotated | unknown
+    dropped = [i for i in negative if i['id'] not in kept]
+    # Preflight ALL paths before deleting anything: source datasets are read-only.
+    paths = [_owned_tile(image_dir, image['file_name']) for image in dropped]
+    for path in paths:
+        path.unlink()
+    result['images'] = [i for i in result['images'] if i['id'] in kept]
+    result['annotations'] = [a for a in result.get('annotations', []) if a['image_id'] in kept]
+    print(f"   Фоновых тайлов: {len(negative)} → {count}")
+    return result
 
-    ann_by_img = {}
-    for ann in coco_dict.get("annotations", []):
-        ann_by_img[ann["image_id"]] = ann_by_img.get(ann["image_id"], 0) + 1
 
-    with_objs = [i for i in coco_dict["images"]
-                 if ann_by_img.get(i["id"], 0) > 0]
-    without_objs = [i for i in coco_dict["images"]
-                    if ann_by_img.get(i["id"], 0) == 0]
-
-    if not without_objs:
-        print("   ⚠️ Фоновых тайлов нет.")
-        return coco_dict
-
-    random.seed(seed)
-    keep_count = max(1, int(len(without_objs) * keep_ratio))
-    kept_negative = random.sample(without_objs, keep_count)
-    dropped = [i for i in without_objs if i not in kept_negative]
-
-    for img in dropped:
-        fname = img.get("file_name")
-        if fname:
-            path = fname if os.path.isabs(fname) else os.path.join(image_dir or '', fname)
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except OSError as e:
-                    print(f"   ⚠️ Не удалось удалить {path}: {e}")
-
-    kept_ids = {i["id"] for i in with_objs + kept_negative}
-    coco_dict["images"] = [i for i in coco_dict["images"] if i["id"] in kept_ids]
-    coco_dict["annotations"] = [a for a in coco_dict["annotations"]
-                                if a["image_id"] in kept_ids]
-    print(f"   📉 Фоновых: {len(without_objs)} → {keep_count} "
-          f"({keep_ratio:.0%}), удалено: {len(dropped)}")
-    return coco_dict
+def _owned_tile(output_dir, name):
+    root = Path(output_dir).resolve()
+    path = Path(name)
+    path = (path if path.is_absolute() else root / path).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise ValueError(f'Нет тайла внутри выходной папки: {path}')
+    return path
 
 
 def split_and_move(coco_dict, output_dir, train_ratio=0.8, seed=42,
                    strip_segmentation=False):
-    """
-    strip_segmentation: если True — удалить поле 'segmentation' из всех
-    аннотаций перед сохранением sliced_coco.json. Используется, когда
-    пользователь явно выбрал HBB (bbox) как формат разметки.
-    """
-    images = list(coco_dict["images"])
-    has_val = 0 < train_ratio < 1
-
+    result = deepcopy(coco_dict)
+    images = list(result['images'])
+    random.Random(seed).shuffle(images)
+    n_train, _ = allocate_split_counts(len(images), (train_ratio, 1 - train_ratio))
+    groups = {}
+    for entry in images:
+        groups.setdefault(entry.get('source_image', entry['id']), []).append(entry)
+    # Greedy allocation keeps all overlapping tiles of a source in one split.
+    train_ids, assigned = set(), dict(train=0, val=0)
+    targets = dict(train=len(images) * train_ratio, val=len(images) * (1 - train_ratio))
+    for group in groups.values():
+        split = max((key for key in targets if targets[key] > 0),
+                    key=lambda key: targets[key] - assigned[key])
+        assigned[split] += len(group)
+        if split == 'train':
+            train_ids.update(entry['id'] for entry in group)
+    n_train = len(train_ids)
+    planned, used = [], set()
+    for image in images:
+        source = _owned_tile(output_dir, image['file_name'])
+        split = 'train' if image['id'] in train_ids else 'val'
+        relative = Path('images') / split / source.name
+        key = relative.as_posix().casefold()
+        target = Path(output_dir) / relative
+        if key in used or target.exists():
+            raise ValueError(f'Коллизия тайлов: {target}')
+        used.add(key)
+        planned.append((source, target))
+        image['file_name'] = relative.as_posix()
     for split in ('train', 'val', 'test'):
-        os.makedirs(os.path.join(output_dir, 'images', split), exist_ok=True)
-        os.makedirs(os.path.join(output_dir, 'labels', split), exist_ok=True)
-
-    if has_val:
-        random.seed(seed)
-        random.shuffle(images)
-        n_train = int(len(images) * train_ratio)
-        train_images, val_images = images[:n_train], images[n_train:]
-    else:
-        train_images, val_images = images, []
-
-    train_ids = {i["id"] for i in train_images}
-    val_ids = {i["id"] for i in val_images}
-
-    for img in images:
-        old_fname = img["file_name"]
-        base_name = os.path.basename(old_fname)
-        if img["id"] in train_ids:
-            split_folder = "train"
-        elif img["id"] in val_ids:
-            split_folder = "val"
-        else:
-            split_folder = "test"
-
-        src = os.path.join(output_dir, base_name)
-        if not os.path.exists(src) and os.path.exists(old_fname):
-            src = old_fname
-        dst = os.path.join(output_dir, 'images', split_folder, base_name)
-        if os.path.exists(src):
-            shutil.move(src, dst)
-        img["file_name"] = f"images/{split_folder}/{base_name}"
-
-    # --- Удаление segmentation, если пользователь выбрал HBB ---
-    n_stripped = 0
+        for folder in ('images', 'labels'):
+            (Path(output_dir) / folder / split).mkdir(parents=True, exist_ok=True)
+    for source, target in planned:
+        shutil.move(str(source), str(target))
     if strip_segmentation:
-        for ann in coco_dict.get("annotations", []):
-            if 'segmentation' in ann:
-                del ann['segmentation']
-                n_stripped += 1
-        if n_stripped:
-            print(f"   🧹 Удалён segmentation из {n_stripped} аннотаций "
-                  f"(формат: bbox)")
-        else:
-            print(f"   ℹ️ segmentation не найден — очистка не требуется")
-
-    final_json = os.path.join(output_dir, "sliced_coco.json")
-    with open(final_json, 'w', encoding='utf-8') as f:
-        json.dump(coco_dict, f, ensure_ascii=False, indent=2)
-    print(f"   ✂️ train={len(train_images)}, val={len(val_images)}, test=0")
-    return coco_dict, final_json
+        for ann in result.get('annotations', []):
+            ann.pop('segmentation', None)
+            if len(ann.get('bbox', [])) == 4:
+                ann['area'] = ann['bbox'][2] * ann['bbox'][3]
+    final_json = Path(output_dir) / 'sliced_coco.json'
+    write_json_atomic(final_json, result)
+    print(f'   train={n_train}, val={len(images) - n_train}, test=0')
+    return result, str(final_json)
 
 
 # ==================================================================
@@ -307,137 +230,15 @@ def split_and_move(coco_dict, output_dir, train_ratio=0.8, seed=42,
 # ==================================================================
 def coco_to_yolo(coco_json_path, output_dir, class_names=None,
                  annotation_format="bbox", verbose=True):
-    if annotation_format not in ("bbox", "segmentation"):
-        raise ValueError(f"annotation_format: {annotation_format}")
-
-    np = None
-    if annotation_format == "segmentation":
-        try:
-            import numpy as np  # noqa
-        except ImportError:
-            raise RuntimeError("Для segmentation нужен numpy")
-
-    with open(coco_json_path, "r", encoding="utf-8") as f:
-        coco = json.load(f)
-
-    categories = sorted(coco.get("categories", []), key=lambda c: c["id"])
-    if class_names is None:
-        cat_id_to_idx = {c["id"]: i for i, c in enumerate(categories)}
-    else:
-        name_to_idx = {n: i for i, n in enumerate(class_names)}
-        cat_id_to_idx = {}
-        for c in categories:
-            cname = c.get("name", str(c["id"]))
-            cat_id_to_idx[c["id"]] = name_to_idx.get(cname, 0)
-
-    img_meta = {i["id"]: i for i in coco.get("images", [])}
-    anns_by_img = {}
-    for ann in coco.get("annotations", []):
-        anns_by_img.setdefault(ann["image_id"], []).append(ann)
-
-    n_bbox = n_seg = n_skipped = 0
-    seg_dist = {}
-    prefer_seg = (annotation_format == "segmentation")
-
-    for img_id, img in img_meta.items():
-        w, h = float(img["width"]), float(img["height"])
-        if w <= 0 or h <= 0:
-            continue
-
-        fname = img.get("file_name", "").replace("\\", "/")
-        parts = fname.split("/")
-        split_name = "train"
-        if len(parts) >= 2 and parts[0] == "images":
-            split_name = parts[1]
-
-        base = os.path.splitext(os.path.basename(fname))[0]
-        labels_dir = os.path.join(output_dir, "labels", split_name)
-        os.makedirs(labels_dir, exist_ok=True)
-        txt_path = os.path.join(labels_dir, base + ".txt")
-
-        lines = []
-        for ann in anns_by_img.get(img_id, []):
-            cls_idx = cat_id_to_idx.get(ann["category_id"])
-            if cls_idx is None:
-                n_skipped += 1
-                continue
-
-            bbox = ann.get("bbox")
-            seg = ann.get("segmentation")
-            has_bbox = isinstance(bbox, (list, tuple)) and len(bbox) == 4
-            has_seg = bool(seg)
-
-            if prefer_seg and has_seg:
-                write_bbox, write_seg = False, True
-            elif prefer_seg and has_bbox:
-                write_bbox, write_seg = True, False
-            elif not prefer_seg and has_bbox:
-                write_bbox, write_seg = True, False
-            elif not prefer_seg and has_seg:
-                write_bbox, write_seg = False, True
-            else:
-                n_skipped += 1
-                continue
-
-            if write_bbox:
-                x, y, bw, bh = bbox
-                cx = max(0.0, min(1.0, (x + bw / 2) / w))
-                cy = max(0.0, min(1.0, (y + bh / 2) / h))
-                nw = max(0.0, min(1.0, bw / w))
-                nh = max(0.0, min(1.0, bh / h))
-                if nw <= 0 or nh <= 0:
-                    n_skipped += 1
-                    continue
-                lines.append(f"{cls_idx} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}")
-                n_bbox += 1
-                continue
-
-            if write_seg:
-                try:
-                    flat = seg[0] if isinstance(seg[0], (list, tuple)) else seg
-                    pts = np.array(flat, dtype=np.float32).reshape(-1, 2)
-                except Exception:
-                    n_skipped += 1
-                    continue
-                if len(pts) < 3:
-                    n_skipped += 1
-                    continue
-                npts = len(pts)
-                seg_dist[npts] = seg_dist.get(npts, 0) + 1
-                pts[:, 0] = np.clip(pts[:, 0] / w, 0.0, 1.0)
-                pts[:, 1] = np.clip(pts[:, 1] / h, 0.0, 1.0)
-                coords = " ".join(f"{v:.6f}" for v in pts.flatten())
-                lines.append(f"{cls_idx} {coords}")
-                n_seg += 1
-
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-
-    if verbose:
-        print(f"   📝 YOLO [{annotation_format}]: bbox={n_bbox}, "
-              f"seg={n_seg}, пропущено={n_skipped}")
-        if seg_dist:
-            dist_str = ", ".join(f"{k}pt:{v}" for k, v in sorted(seg_dist.items()))
-            print(f"      сегменты: {dist_str}")
-            non4 = sum(v for k, v in seg_dist.items() if k != 4)
-            if non4 > 0:
-                print(f"      ⚠️ {non4} сегментов не 4-точечные — "
-                      f"YOLO-OBB их не примет (нужен YOLO-seg).")
+    if annotation_format not in ('bbox', 'segmentation'):
+        raise ValueError(f'annotation_format: {annotation_format}')
+    return export_coco_yolo(coco_json_path, output_dir, class_names=class_names,
+                            subtype='detect' if annotation_format == 'bbox' else 'segment',
+                            log=print if verbose else None)
 
 
 def write_yolo_yaml(output_dir, class_names, channels=3):
-    yaml_path = os.path.join(output_dir, "data.yaml")
-    with open(yaml_path, "w", encoding="utf-8") as f:
-        f.write("names:\n")
-        for name in class_names:
-            f.write(f"- '{name}'\n")
-        f.write(f"nc: {len(class_names)}\n")
-        f.write(f"path: {os.path.abspath(output_dir)}\n")
-        f.write("train: images/train\n")
-        f.write("val: images/val\n")
-        f.write("test: images/test\n")
-        f.write(f"channels: {channels}\n")
-    print(f"   📄 data.yaml → {yaml_path}")
+    write_classes_and_yaml(output_dir, dict(enumerate(class_names)), yolo_channels=int(channels))
 
 
 def visualize_samples(coco_json_path, output_dir, n=3):
@@ -511,6 +312,24 @@ class SliceWorker(QThread):
             self.finished_signal.emit(False, str(e))
 
     def _pipeline(self):
+        destination = Path(self.params['out']).resolve()
+        if destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
+            raise FileExistsError('Для экспорта SAHI выберите пустую папку')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=destination.parent, prefix='.sahi-') as temporary:
+            stage = Path(temporary) / 'dataset'
+            stage.mkdir()
+            original = self.params
+            self.params = dict(original, out=str(stage))
+            try:
+                self._pipeline_staged()
+                if destination.exists():
+                    destination.rmdir()
+                os.replace(stage, destination)
+            finally:
+                self.params = original
+
+    def _pipeline_staged(self):
         p = self.params
 
         class _Emitter:
@@ -533,7 +352,7 @@ class SliceWorker(QThread):
             strip_seg = (ann_format_requested == 'bbox')
             self.log_signal.emit(
                 f"   🏷️ Формат разметки (выбор): {ann_format_requested}"
-                + (f" → сегментация будет удалена из sliced_coco.json"
+                + (" → сегментация будет удалена из sliced_coco.json"
                    if strip_seg else ""))
 
             self.progress_signal.emit(
@@ -554,6 +373,9 @@ class SliceWorker(QThread):
                 coco_dict = subsample_negative_tiles(
                     coco_dict=coco_dict, image_dir=p['out'],
                     keep_ratio=p['keep_negative'], seed=p['seed'])
+
+            if not coco_dict.get('images'):
+                raise ValueError('После отбора фоновых тайлов датасет пуст')
 
             self.progress_signal.emit(50, "Разделение и перемещение...")
             final_dict, final_json = split_and_move(
@@ -596,7 +418,7 @@ class SliceWorker(QThread):
 
                 if ann_format == 'segmentation' and n_seg == 0:
                     self.log_signal.emit(
-                        "   ⚠️ Нет segmentation — будет bbox.")
+                        "   Нет segmentation — bbox будут представлены полигонами.")
 
                 coco_to_yolo(
                     coco_json_path=final_json, output_dir=p['out'],
@@ -647,7 +469,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
         self.color_type_stats = ImageStats.empty_color_stats()
         self.bit_type_stats = ImageStats.empty_bit_stats()
 
-        self._last_patched_yaml = None
         self._yaml_mode = False
         self._yaml_root = None
         self._yaml_path = None
@@ -828,8 +649,6 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
     def _pairs_to_coco(self, progress_cb=None):
         if not self.pairs:
             return None
-        import cv2
-
         input_format = self.input_format or 'auto'
 
         orig_to_name = {}
@@ -862,7 +681,7 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
             if img_path in self._img_size_cache:
                 img_w, img_h = self._img_size_cache[img_path]
             else:
-                img = cv2.imread(img_path)
+                img = read_image(img_path)
                 if img is None:
                     if progress_cb:
                         progress_cb(i + 1, total)
@@ -880,12 +699,7 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
             })
 
             label_path = aux_path
-            if not label_path and getattr(self, 'labels_folder', None):
-                base = os.path.splitext(os.path.basename(img_path))[0]
-                cand = os.path.join(self.labels_folder, base + '.txt')
-                if os.path.exists(cand):
-                    label_path = cand
-
+            images[-1]['annotation_status'] = 'unlabelled' if label_path is None else 'labelled'
             raw_anns = []
             if label_path and os.path.exists(label_path):
                 raw_anns = yolo_labels_to_coco_annotations(
@@ -905,7 +719,7 @@ class SahiSlicerWindow(DatasetLoaderMixin, QMainWindow):
                     'image_id': img_id,
                     'category_id': cat_id,
                     'bbox': list(bbox),
-                    'area': float(bbox[2] * bbox[3]),
+                    'area': ad['area'],
                     'iscrowd': 0,
                 }
                 if 'segmentation' in ad:

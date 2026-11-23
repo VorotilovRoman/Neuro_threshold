@@ -425,7 +425,9 @@ def setup_preparing_dataset_yaml_ui(parent):
     form.addRow("Выходной тип:", parent.out_yolo_subtype_row)
     parent.out_yolo_obb_format = QComboBox()
     parent.out_yolo_obb_format.addItem("4 угла (x1…y4)", "corners")
-    parent.out_yolo_obb_format.addItem("xywhr (cx, cy, w, h, angle)", "xywhr")
+    parent.out_yolo_obb_format.addItem("xywhr (обмен, не обучение Ultralytics)", "xywhr")
+    parent.out_yolo_obb_format.setToolTip(
+        "Для обучения YOLO-OBB в Ultralytics выбирайте 4 угла. xywhr — отдельный формат обмена приложения.")
     parent.out_yolo_obb_row = QHBoxLayout()
     parent.out_yolo_obb_row.addWidget(parent.out_yolo_obb_format)
     form.addRow("Запись OBB:", parent.out_yolo_obb_row)
@@ -465,6 +467,15 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.lossy_warning_label.setVisible(False)
     group_layout.addWidget(parent.lossy_warning_label)
     page_layout.addWidget(group)
+    form = QFormLayout()
+    parent.existing_output_policy = QComboBox()
+    parent.existing_output_policy.addItem("Новая папка (по умолчанию)", "error")
+    parent.existing_output_policy.addItem("Добавить к совместимому экспорту", "merge")
+    parent.existing_output_policy.addItem("Заменить предыдущий экспорт", "replace")
+    parent.existing_output_policy.setToolTip(
+        "Добавление требует совпадения классов и форматов. Замена удаляет старые файлы датасета после успешной генерации.")
+    form.addRow("Если датасет уже существует:", parent.existing_output_policy)
+    page_layout.addLayout(form)
     page_layout.addStretch()
     parent.preparation_tabs.addTab(page, "Экспорт")
 
@@ -610,25 +621,11 @@ def setup_preparing_dataset_yaml_ui(parent):
             not is_images_only and parent.out_masks.isChecked()
         )
 
-        # --- Lossy warning при input=masks + (yolo_txt или coco) ---
-        lossy = input_type == 1 and (
-            parent.out_yolo_txt.isChecked() or parent.out_coco.isChecked()
-        )
-        if lossy:
-            parts = []
-            if parent.out_yolo_txt.isChecked():
-                parts.append("YOLO labels (.txt)")
-            if parent.out_coco.isChecked():
-                parts.append("COCO JSON")
-            parent.lossy_warning_label.setText(
-                f"⚠️ Выходные форматы ({', '.join(parts)}) будут получены "
-                f"через findContours из масок. Это lossy-преобразование: "
-                f"теряются дырки и мелкие детали. Маски останутся "
-                f"в masks/{{split}} в исходном виде."
-            )
-            parent.lossy_warning_label.setVisible(True)
-        else:
-            parent.lossy_warning_label.setVisible(False)
+        lossy = input_type == 1 and parent.out_yolo_txt.isChecked()
+        parent.lossy_warning_label.setText(
+            "⚠️ YOLO TXT: контуры из масок теряют отверстия и тонкие детали. "
+            "COCO сохраняет маски через RLE без потери пикселей.")
+        parent.lossy_warning_label.setVisible(lossy)
 
         # --- Augmentation: при input=masks доступны только простые ---
         is_masks_input = input_type == 1

@@ -91,7 +91,7 @@ def _mask_split_pairs(cfg, root, split, *, strict, log=None):
                 raise
             if log:
                 log(f"[U-Net] {exc}")
-            continue
+            mask_index = {}
         sources = resolve_split_sources(entry, root, strict=strict)
         for resolved in sources:
             for value in collect_image_paths(
@@ -116,6 +116,8 @@ def _mask_split_pairs(cfg, root, split, *, strict, log=None):
                         raise FileNotFoundError(message)
                     if log:
                         log(f"[U-Net] {message}")
+                    result.append((str(image), None))
+                    seen.add(image)
                     continue
                 result.append((str(image), str(mask.resolve())))
                 seen.add(image)

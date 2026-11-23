@@ -39,7 +39,7 @@ def export_subset(
 ):
     target = Path(out_dir).resolve()
     if dataset_type not in (0, 1, 2):
-        raise ValueError('Неизвестный вид датасета.')
+        raise ValueError("Неизвестный вид датасета.")
     existed = target.exists()
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise ValueError(
@@ -70,14 +70,18 @@ def export_subset(
         split = next(iter(membership)) if membership else infer_split(image)
         if split == "unknown":
             split = "train"
+        if split not in ("train", "val", "test"):
+            raise ValueError(f"Некорректный split: {split}")
         image_rel = Path("images") / split / image.name
         label_rel = (
             Path("masks" if dataset_type == 1 else "labels")
             / split
             / (image.stem + (".png" if dataset_type == 1 else ".txt"))
         )
-        for rel in [image_rel] if dataset_type == 2 or aux is None else [image_rel, label_rel]:
-            key = os.path.normcase(str(rel))
+        for rel in (
+            [image_rel] if dataset_type == 2 or aux is None else [image_rel, label_rel]
+        ):
+            key = str(rel).casefold()
             if key in outputs:
                 raise ValueError(f"Коллизия выходных имён: {rel}")
             outputs.add(key)
@@ -125,13 +129,19 @@ def export_subset(
             if progress_cb:
                 progress_cb(index + 1, len(entries))
         config = {
-            "path": str(target),
             "train": "images/train",
             "val": "images/val",
             "test": "images/test",
             "nc": len(ids),
             "names": {mapping[old]: names[old] for old in ids},
         }
+        if dataset_type == 2:
+            config = {
+                key: value
+                for key, value in config.items()
+                if key in ("train", "val", "test")
+            }
+            config["dataset_type"] = "images_only"
         if dataset_type == 1:
             config.update(
                 mask_class_offset=1,

@@ -15,14 +15,13 @@ prepare_windows_torch()
 import os
 import sys
 
-import yaml
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QKeySequence
 from PyQt5.QtWidgets import QApplication, QFileDialog, QListWidgetItem, QMainWindow, QMessageBox, QShortcut, QTableWidgetItem
 
 from ui_tabs.preparing_dataset_yaml_ui import setup_preparing_dataset_yaml_ui
 from ui.dataset_loader import DatasetLoaderMixin
-from utils_new.dataset.preparation import mask_classes_from_rows, normalize_generation_pairs
+from utils_new.dataset.preparation import allocate_split_counts, mask_classes_from_rows, normalize_generation_pairs
 from utils_new.images.processing import ImageStats
 from utils_new.dataset.validation import PairValidator
 from utils_new.import_export.image_conversion import convert_pairs_color, convert_pairs_to_8bit_png, select_pairs_for_8bit_png, select_pairs_for_conversion
@@ -72,7 +71,6 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.bit_type_stats = ImageStats.empty_bit_stats()
 
         # --- YAML-режим / COCO / служебные (нужны mixin) ---
-        self._last_patched_yaml = None
         self._yaml_mode = False
         self._yaml_root = None
         self._yaml_path = None
@@ -331,7 +329,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.toggle_log_btn.setText("Скрыть лог" if checked else "Показать лог")
 
     # ==================================================================
-    # YAML-патч для channels
+    # Каналы чтения YOLO
     # ==================================================================
     def _get_selected_channels(self):
         if hasattr(self, "channels_combo"):
@@ -340,41 +338,6 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             except (ValueError, IndexError, AttributeError):
                 pass
         return 3
-
-    def _find_dataset_yaml(self, folder, max_depth=4):
-        if not folder or not os.path.isdir(folder):
-            return None
-        candidates = ("data.yaml", "data.yml", "dataset.yaml", "dataset.yml")
-        for name in candidates:
-            p = os.path.join(folder, name)
-            if os.path.exists(p):
-                return p
-        for root, dirs, files in os.walk(folder):
-            depth = root[len(folder) :].count(os.sep)
-            if depth > max_depth:
-                dirs[:] = []
-                continue
-            for f in files:
-                if f.lower() in candidates:
-                    return os.path.join(root, f)
-        return None
-
-    def _inject_channels_into_yaml(self, yaml_path, channels):
-        try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
-            old = cfg.get("channels", "—")
-            cfg["channels"] = int(channels)
-            with open(yaml_path, "w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, allow_unicode=True, sort_keys=False)
-            self.log(
-                f"✅ {os.path.basename(yaml_path)}: channels = {channels} (было: {old})"
-            )
-            self._last_patched_yaml = yaml_path
-            return True
-        except Exception as e:
-            self.log(f"⚠️ Не удалось обновить {yaml_path}: {e}")
-            return False
 
     # ==================================================================
     # Массовая конвертация
@@ -582,8 +545,8 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             test = self.test_slider.value()
             if source == "train":
                 if val + test == 0:
-                    new_val = 50
-                    new_test = 50
+                    new_val = 100 - train
+                    new_test = 0
                 else:
                     total_remaining = val + test
                     new_val = int(val * (100 - train) / total_remaining)
@@ -634,9 +597,8 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             else 1
         )
         total_generated = total_pairs * multiplier
-        train_count = int(total_generated * train_pct)
-        val_count = int(total_generated * val_pct)
-        test_count = total_generated - train_count - val_count
+        train_count, val_count, test_count = allocate_split_counts(
+            total_generated, (train_pct, val_pct, test_pct))
         self.train_count_label.setText(str(train_count))
         self.val_count_label.setText(str(val_count))
         self.test_count_label.setText(str(test_count))
@@ -725,11 +687,11 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             else:
                 out_unet_yaml = False
 
-        if input_type == 1 and (out_yolo_txt or out_coco):
+        if input_type == 1 and out_yolo_txt:
             reply = QMessageBox.question(
                 self,
                 "⚠️ Lossy-конвертация из масок",
-                "Маски будут преобразованы в полигоны через findContours.\n"
+                "Для YOLO TXT маски будут преобразованы в полигоны через findContours.\n"
                 "Это НЕ воспроизведёт маску пиксель в пиксель:\n"
                 "  • дырки внутри объектов теряются;\n"
                 "  • мелкие детали и тонкие структуры теряются;\n"
@@ -818,7 +780,6 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         )
         aug_multiplier = self.aug_multiplier_slider.value() if has_augmentations else 1
 
-        selected_channels = self._get_selected_channels()
         class_names = self.get_class_names_from_table()
         class_mapping = self.class_remap if input_type == 0 else {}
         mask_class_remap = {}
@@ -942,6 +903,8 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             mask_pixel_offset_in=self.mask_pixel_offset_in,
             min_ann_area_px=min_ann_area_px,
             split_by_source=self.group_augmentations_by_source.isChecked(),
+            existing_output_policy=self.existing_output_policy.currentData(),
+            yolo_channels=self._get_selected_channels(),
             random_seed=(
                 self.random_seed_spin.value()
                 if self.use_random_seed.isChecked()
@@ -988,15 +951,6 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         if success:
             self.progress_bar.setValue(100)
             QMessageBox.information(self, "Успех", message)
-
-            if self.out_yolo_txt.isChecked():
-                yaml_path = self._find_dataset_yaml(self.output_folder)
-                if yaml_path:
-                    self._inject_channels_into_yaml(
-                        yaml_path, self._get_selected_channels()
-                    )
-                else:
-                    self.log("⚠️ data.yaml не найден — channels не прописан")
 
             if self.delete_source_after_success.isChecked():
                 self.pairs = []

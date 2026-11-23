@@ -1017,7 +1017,7 @@ class ViewingDataset(QMainWindow):
 
     def _after_label_saved(self, image_path, target_path):
         """Reopen future lazy reads from the newly saved canonical YOLO path."""
-        if self._save_source_kind == "yolo":
+        if self._save_source_kind in ("yolo", "coco", "unet"):
             self._yaml_label_map[image_path] = target_path
 
     def save_all_annotations(self):
@@ -1645,7 +1645,8 @@ class ViewingDataset(QMainWindow):
         image_paths = [img for img, _ in pairs]
         label_map = {img: label for img, label in pairs}
         self._load_images(image_paths, label_map=label_map)
-        self._save_label_map = dict(label_map)
+        from utils_new.import_export.dataset_sources import import_save_targets
+        self._save_label_map = import_save_targets(json_paths, image_paths)
         self._save_source_kind = "coco"
         self.log(f"=== Загрузка COCO ({len(catalog.sources)} JSON) ===")
         self.log(
@@ -1703,7 +1704,8 @@ class ViewingDataset(QMainWindow):
             mask_map=mask_map,
             mask_pixel_offset=mask_offset,
         )
-        self._save_label_map = dict(label_map)
+        from utils_new.import_export.dataset_sources import import_save_targets
+        self._save_label_map = import_save_targets([yaml_path], image_paths)
         self._save_source_kind = "unet"
         self.log(f"=== Загрузка U-Net YAML: {source_dialogs.display_dataset_source(yaml_path)} ===")
         self.log(

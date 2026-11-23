@@ -5,6 +5,7 @@ The class with source mask pixel 0 is always background, never a trainable
 class. Positive source pixels selected in the GUI become dense class ids.
 This module deliberately has no Qt, filesystem or legacy utility imports.
 """
+
 from __future__ import annotations
 
 from typing import Iterable
@@ -21,14 +22,16 @@ def mask_classes_from_rows(rows: Iterable[tuple[int, str, bool]]):
     for pixel, name, included in rows:
         pixel = int(pixel)
         if pixel < 0:
-            raise ValueError(f'Negative mask pixel value: {pixel}')
+            raise ValueError(f"Negative mask pixel value: {pixel}")
         if pixel == 0 or not included:
             continue
         if pixel in selected:
-            raise ValueError(f'Duplicate source mask pixel: {pixel}')
+            raise ValueError(f"Duplicate source mask pixel: {pixel}")
         selected[pixel] = str(name).strip() or str(pixel)
     ordered = sorted(selected.items())
-    mapping = {source_pixel: dense_id for dense_id, (source_pixel, _) in enumerate(ordered)}
+    mapping = {
+        source_pixel: dense_id for dense_id, (source_pixel, _) in enumerate(ordered)
+    }
     names = {dense_id: name for dense_id, (_, name) in enumerate(ordered)}
     return mapping, names
 
@@ -36,11 +39,11 @@ def mask_classes_from_rows(rows: Iterable[tuple[int, str, bool]]):
 def normalize_generation_pairs(pairs, input_type):
     """Convert legacy (image, label-or-mask) to (image, label, mask)."""
     if input_type not in (0, 1, 2):
-        raise ValueError(f'Invalid input type: {input_type}')
+        raise ValueError(f"Invalid input type: {input_type}")
     result = []
     for pair in pairs:
         if not pair or not pair[0]:
-            raise ValueError('Missing source image path')
+            raise ValueError("Missing source image path")
         image = pair[0]
         aux = pair[1] if len(pair) > 1 else None
         if input_type == 0:
@@ -50,3 +53,26 @@ def normalize_generation_pairs(pairs, input_type):
         else:
             result.append((image, None, None))
     return result
+
+
+def allocate_split_counts(total, fractions):
+    """Largest-remainder allocation; zero-share splits never receive samples."""
+    import math
+
+    values = tuple(float(value) for value in fractions)
+    if total < 0 or int(total) != total or not values:
+        raise ValueError("Invalid sample count or empty split")
+    if any(not math.isfinite(v) or not 0 <= v <= 1 for v in values):
+        raise ValueError("Split fractions must be finite and in [0, 1]")
+    if not math.isclose(sum(values), 1, rel_tol=0, abs_tol=1e-6):
+        raise ValueError("Train/val/test split must total 100%")
+    raw = [int(total) * value for value in values]
+    counts = [math.floor(value) for value in raw]
+    order = sorted(
+        (i for i, v in enumerate(values) if v > 0),
+        key=lambda i: (raw[i] - counts[i], -i),
+        reverse=True,
+    )
+    for i in order[: int(total) - sum(counts)]:
+        counts[i] += 1
+    return tuple(counts)

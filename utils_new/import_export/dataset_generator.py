@@ -26,6 +26,7 @@ from utils_new.import_export.dataset_output import make_index_mask, write_classe
 from utils_new.import_export.images import read_image, read_index_mask, write_image
 from utils_new.import_export.yolo_labels import read_yolo_labels, write_yolo_labels
 from utils_new.images.mask_diagnostics import mask_statistics
+from utils_new.dataset.preparation import allocate_split_counts
 
 INPUT_LABELS = 0
 INPUT_MASKS = 1
@@ -44,6 +45,8 @@ class _Generated:
     mask: Path | None
     size: ImageSize
     annotations: list[Annotation] | None
+    annotation_status: str = "labelled"
+    coco_annotations: list[Annotation] | None = None
 
 
 class DatasetGeneratorCoreNew:
@@ -52,7 +55,7 @@ class DatasetGeneratorCoreNew:
     Added options:
       random_seed: deterministic augmentation and splitting, None=unseeded.
       split_by_source: keep augmented variants of one source in same split;
-                       False by default for compatibility with existing UI.
+                       True by default to avoid train/validation leakage.
       obb_policy: 'promote_to_segment' (exact geometry) or 'refit' (lossy).
       hole_policy: 'error' or 'drop' for cropped polygons.
     """
@@ -72,10 +75,10 @@ class DatasetGeneratorCoreNew:
                  out_yolo_obb_format='corners', out_masks=False,
                  out_masks_offset=1, out_unet_yaml=False,
                  out_coco=False, mask_pixel_offset_in=1, min_ann_area_px=0,
-                 *, random_seed=None, split_by_source=False,
+                 *, random_seed=None, split_by_source=True,
                  obb_policy='promote_to_segment', hole_policy='error',
                  mixed_output_policy='normalize_segment', strict_complete=False,
-                 existing_output_policy='merge',
+                 existing_output_policy='error', yolo_channels=3,
                  log_cb: Callable[[str], None] | None = None,
                  progress_cb: Callable[[int, int], None] | None = None):
         self.images_folder = images_folder
@@ -119,6 +122,7 @@ class DatasetGeneratorCoreNew:
         self.mixed_output_policy = mixed_output_policy
         self.strict_complete = bool(strict_complete)
         self.existing_output_policy = existing_output_policy
+        self.yolo_channels = yolo_channels
         self._log_cb = log_cb or (lambda _message: None)
         self._progress_cb = progress_cb or (lambda _cur, _total: None)
         self._is_cancelled = False
@@ -144,12 +148,16 @@ class DatasetGeneratorCoreNew:
             raise _Cancelled('Генерация отменена пользователем')
 
     def _validate_config(self):
+        if type(self.yolo_channels) is not int or self.yolo_channels not in (1, 3):
+            raise ValueError('YOLO channels must be 1 or 3')
         if self.input_type not in (INPUT_LABELS, INPUT_MASKS, INPUT_IMAGES):
             raise ValueError(f'Unsupported input_type: {self.input_type}')
         if self.out_yolo_subtype not in ('keep', 'detect', 'obb', 'segment'):
             raise ValueError('Unsupported YOLO output subtype')
         if self.out_yolo_obb_format not in ('corners', 'xywhr'):
             raise ValueError('Unsupported OBB output format')
+        if self.out_yolo_txt and self.out_yolo_obb_format == 'xywhr':
+            self.log('[YOLO] xywhr — формат обмена; для обучения Ultralytics OBB нужны 4 угла')
         if self.resize_mode not in ('fixed', 'stretch', 'keep'):
             raise ValueError('resize_mode must be fixed/stretch/keep')
         if self.target_size is not None and self.target_size < 1:
@@ -162,10 +170,9 @@ class DatasetGeneratorCoreNew:
             raise ValueError('Invalid mixed YOLO output policy')
         if self.existing_output_policy not in ('merge', 'error', 'replace'):
             raise ValueError('Invalid existing output policy')
-        if any(x < 0 or x > 1 for x in (self.train_pct, self.val_pct, self.test_pct)):
-            raise ValueError('Split fractions must be in [0,1]')
-        if abs(self.train_pct+self.val_pct+self.test_pct-1) > 0.02:
-            raise ValueError('Train/val/test split must total 100%')
+        allocate_split_counts(0, (self.train_pct, self.val_pct, self.test_pct))
+        if self.input_type != INPUT_IMAGES and sorted(self.class_names) != list(range(len(self.class_names))):
+            raise ValueError('Output class IDs must be dense 0..N-1')
         if self.input_type != INPUT_IMAGES and not (self.out_yolo_txt or self.out_masks or self.out_coco):
             raise ValueError('Select at least one output format')
         if self.input_type == INPUT_IMAGES and (self.out_masks or self.out_coco):
@@ -362,19 +369,19 @@ class DatasetGeneratorCoreNew:
         stem = Path(img_path).stem
         candidate = stem
         n = 2
-        while candidate in self._used_stems:
+        while candidate.casefold() in self._used_stems:
             candidate = f'{stem}__{n}'
             n += 1
-        self._used_stems.add(candidate)
+        self._used_stems.add(candidate.casefold())
         return candidate
 
     def _reserve_stem(self, proposed):
         candidate = proposed
         n = 2
-        while candidate in self._used_stems:
+        while candidate.casefold() in self._used_stems:
             candidate = f'{proposed}__{n}'
             n += 1
-        self._used_stems.add(candidate)
+        self._used_stems.add(candidate.casefold())
         return candidate
 
     def _sanitize_input_annotations(self, annotations, image_path):
@@ -409,6 +416,8 @@ class DatasetGeneratorCoreNew:
             return AnnotationSample(image=image), (image_path, None, None), False
         if self.input_type == INPUT_LABELS:
             label_path = str(pair[1]) if len(pair) > 1 and pair[1] else None
+            if label_path is None:
+                return AnnotationSample(image=image), (image_path, None, None), False
             annotations = read_yolo_labels(label_path, size,
                                            format_hint=self.input_format, log=self.log, strict=True)
             originally_empty = not annotations
@@ -423,7 +432,7 @@ class DatasetGeneratorCoreNew:
         mask_path = (str(pair[2]) if len(pair)>2 and pair[2] else
                      str(pair[1]) if len(pair)>1 and pair[1] else None)
         if mask_path is None:
-            raise ValueError(f'Mask path missing for {image_path}')
+            return AnnotationSample(image=image), (image_path, None, None), False
         mask = read_index_mask(mask_path)
         if mask.shape != image.shape[:2]:
             raise ValueError(f'Image/mask size mismatch: {image_path}, {mask_path}')
@@ -442,6 +451,7 @@ class DatasetGeneratorCoreNew:
             self._skipped += 1
             return
         image_path = source[0]
+        unlabelled = self.input_type != INPUT_IMAGES and source[1] is None and source[2] is None
         stem = self._get_name(image_path)
         extension = Path(image_path).suffix.lower()
         if extension not in ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp'):
@@ -499,7 +509,7 @@ class DatasetGeneratorCoreNew:
                 elif variant.mask is not None:
                     variant = AnnotationSample(variant.image, variant.annotations,
                                                self._filter_mask(variant.mask), variant.mask_encoding)
-                if self.input_type == INPUT_LABELS and not variant.annotations and not originally_empty:
+                if self.input_type == INPUT_LABELS and not unlabelled and not variant.annotations and not originally_empty:
                     if copy_idx == 0:
                         if self.include_empty_annotations:
                             self.log(f'[negative] all objects filtered: {image_path}')
@@ -570,7 +580,9 @@ class DatasetGeneratorCoreNew:
                 annotations = None
                 label_file = None
                 mask_file = None
-                if self.input_type == INPUT_LABELS:
+                if unlabelled:
+                    pass
+                elif self.input_type == INPUT_LABELS:
                     annotations = [convert_annotation(ann, self.out_yolo_subtype, allow_lossy=True)
                                    for ann in variant.annotations]
                     if self.out_yolo_txt:
@@ -579,7 +591,7 @@ class DatasetGeneratorCoreNew:
                                           obb_format=self.out_yolo_obb_format)
                     if self.out_masks:
                         mask_file = stage/'all'/'masks'/f'{output_stem}.png'
-                        mask_array = make_index_mask(annotations, variant.size,
+                        mask_array = make_index_mask(variant.annotations, variant.size,
                                                      offset=self.out_masks_offset)
                         write_index_mask(mask_file, mask_array)
                         self._verify_mask_export(mask_array, mask_file,
@@ -601,7 +613,10 @@ class DatasetGeneratorCoreNew:
                         self.log(f'[lossy] mask→YOLO: {output_stem}')
                 generated.append(_Generated(output_stem, extension, source_key,
                                             img_file, label_file, mask_file,
-                                            variant.size, annotations))
+                                            variant.size, annotations,
+                                            'unlabelled' if unlabelled or self.input_type == INPUT_IMAGES else
+                                            'empty' if not variant.annotations and (variant.mask is None or not np.any(variant.mask)) else 'labelled',
+                                            list(variant.annotations) if self.input_type == INPUT_LABELS else None))
                 self._written += 1
                 if copy_idx == 0:
                     self._processed_source_files.append(source)
@@ -648,8 +663,7 @@ class DatasetGeneratorCoreNew:
     def _assign_splits(self, records):
         self._rng.shuffle(records)
         if not self.split_by_source:
-            n_train = int(len(records)*self.train_pct)
-            n_val = int(len(records)*self.val_pct)
+            n_train, n_val, _ = allocate_split_counts(len(records), (self.train_pct, self.val_pct, self.test_pct))
             return {'train': records[:n_train], 'val': records[n_train:n_train+n_val],
                     'test': records[n_train+n_val:]}
         groups = {}
@@ -673,7 +687,22 @@ class DatasetGeneratorCoreNew:
     def _distribute_and_export(self, stage, records):
         self._ensure_consistent_yolo_kinds(records)
         splits = self._assign_splits(records)
+        if self._previous_manifest:
+            old_splits = {}
+            for split, rows in self._previous_manifest['splits'].items():
+                for row in rows:
+                    source = row.get('source')
+                    if source in old_splits and old_splits[source] != split:
+                        raise ValueError('Existing export has source leakage between splits')
+                    old_splits[source] = split
+            reassigned = {name: [] for name in splits}
+            for name, collection in splits.items():
+                for record in collection:
+                    reassigned[old_splits.get(record.source_key, name)].append(record)
+            splits = reassigned
         for name, collection in splits.items():
+            for folder in ('images', 'labels', 'masks'):
+                (stage / folder / name).mkdir(parents=True, exist_ok=True)
             self.log(f'[split] {name}: {len(collection)} images')
             coco_rows = []
             for rec in collection:
@@ -692,27 +721,77 @@ class DatasetGeneratorCoreNew:
                 else:
                     mask_target = None
                 if self.out_coco and self.input_type != INPUT_IMAGES:
-                    mask = (read_index_mask(mask_target) if self.input_type == INPUT_MASKS else None)
+                    mask = (read_index_mask(mask_target) if self.input_type == INPUT_MASKS and mask_target else None)
                     coco_rows.append((rec.image.name, rec.size,
-                                      None if self.input_type == INPUT_MASKS else rec.annotations, mask))
+                                      rec.coco_annotations, mask, rec.annotation_status))
             if self.out_coco and self.input_type != INPUT_IMAGES and self.class_names:
                 count = write_coco_split(stage, name, coco_rows, self.class_names,
                                          masks_offset=self.out_masks_offset, log=self.log)
                 self.log(f'[COCO] {name}: {count} annotations')
-        # metadata YAML refers to the FINAL folder, not the temporary stage.
+        # Paths are relative to the exported YAML, so the dataset can move as one folder.
         write_classes_and_yaml(stage, self.class_names,
                                out_yolo_txt=self.out_yolo_txt and self.input_type != INPUT_IMAGES,
                                out_unet_yaml=self.out_unet_yaml and self.input_type != INPUT_IMAGES,
                                out_masks_offset=self.out_masks_offset,
-                               input_type=self.input_type,
-                               dataset_path=self.output_folder)
+                               input_type=self.input_type, yolo_channels=self.yolo_channels)
         return splits
+
+    def _formats(self):
+        active = self.input_type != INPUT_IMAGES
+        return dict(yolo=active and self.out_yolo_txt, masks=active and self.out_masks,
+                    unet=active and self.out_unet_yaml, coco=active and self.out_coco,
+                    images_only=not active)
+
+    def _existing_export(self, destination):
+        self._previous_manifest = None
+        existing = any((destination / name).exists() for name in
+                       ('images', 'labels', 'masks', 'data.yaml', 'generation_manifest.json'))
+        if existing and self.existing_output_policy == 'error':
+            raise FileExistsError('Output contains a dataset; choose a new folder or explicitly select merge/replace')
+        if not existing or self.existing_output_policy != 'merge':
+            return
+        manifest_file = destination / 'generation_manifest.json'
+        if not manifest_file.is_file():
+            raise ValueError('Merge requires a compatible generation manifest; choose a new folder')
+        previous = json.loads(manifest_file.read_text(encoding='utf-8'))
+        if (previous.get('manifest_version') != 2 or previous.get('formats') != self._formats()
+                or previous.get('class_names') != {str(k): v for k, v in self.class_names.items()}
+                or previous.get('mask_class_offset') != self.out_masks_offset
+                or (self.out_yolo_txt and previous.get('yolo_obb_format') != self.out_yolo_obb_format)
+                or ((self.out_yolo_txt or self.input_type == INPUT_IMAGES) and previous.get('yolo_channels') != self.yolo_channels)):
+            raise ValueError('Existing export has different classes/formats/mask IDs/YOLO settings; merge refused')
+        self._previous_manifest = previous
+        for path in (destination / 'images').rglob('*'):
+            if path.is_file():
+                self._used_stems.add(path.stem.casefold())
+
+    def _merge_metadata(self, stage, destination, manifest):
+        previous = self._previous_manifest
+        if previous is None:
+            return manifest
+        old_kinds, new_kinds = set(previous.get('yolo_kinds', [])), set(manifest['yolo_kinds'])
+        if self.out_yolo_txt and old_kinds and new_kinds and old_kinds != new_kinds:
+            raise ValueError('Existing YOLO task differs; merge would mix annotation types')
+        manifest['yolo_kinds'] = sorted(old_kinds | new_kinds)
+        manifest['runs'] = previous.get('runs', []) + manifest['runs']
+        for key in ('sources_total', 'sources_successful', 'sources_skipped', 'variants_expected', 'variants_created', 'variants_missing'):
+            manifest[key] += previous[key]
+        for split in ('train', 'val', 'test'):
+            manifest['splits'][split] = previous['splits'][split] + manifest['splits'][split]
+            if self.out_coco:
+                from utils_new.import_export.dataset_output import merge_coco
+                from utils_new.import_export.json_objects import write_json_atomic
+                name = f'annotations_{split}.json'
+                combined = merge_coco(json.loads((destination / name).read_text(encoding='utf-8')),
+                                      json.loads((stage / name).read_text(encoding='utf-8')))
+                write_json_atomic(stage / name, combined)
+        return manifest
 
     def _publish(self, stage, destination):
         """Publish with a reversible file-level transaction on the same volume.
 
-        ``merge`` retains unrelated/stale files for V19 UI compatibility, with
-        an explicit warning; ``error`` rejects existing dataset results; and
+        ``merge`` appends only to a verified compatible export manifest;
+        ``error`` rejects existing dataset results; and
         ``replace`` removes old generated dataset files on successful commit.
         If a move fails, restore all overwritten/removed previous files.
         """
@@ -739,9 +818,7 @@ class DatasetGeneratorCoreNew:
             raise FileExistsError('Output already contains dataset files; choose a new folder '
                                   'or explicitly set existing_output_policy=merge/replace')
         if existing_generated and self.existing_output_policy == 'merge':
-            self.log(f'[publish warning] {len(existing_generated)} existing output files '
-                     'may remain from an earlier run; use a new folder or '
-                     'existing_output_policy=replace for clean output')
+            self.log(f'[merge] retaining {len(existing_generated)} compatible dataset files')
         if self.existing_output_policy == 'replace' and existing_generated:
             output_root = destination.resolve()
             for pair in self.pairs:
@@ -761,7 +838,18 @@ class DatasetGeneratorCoreNew:
         backup_root = stage / 'backup'
         backed_up = []
         installed = []
+        created_dirs = []
         try:
+            for folder in ('images', 'labels', 'masks'):
+                if folder == 'labels' and not self.out_yolo_txt:
+                    continue
+                if folder == 'masks' and not self.out_masks:
+                    continue
+                for name in (folder, *(folder + '/' + split for split in ('train', 'val', 'test'))):
+                    path = destination / name
+                    if not path.exists():
+                        path.mkdir()
+                        created_dirs.append(path)
             for old in sorted(old_to_backup):
                 relative = old.relative_to(destination)
                 backup = backup_root / relative
@@ -781,6 +869,9 @@ class DatasetGeneratorCoreNew:
             for previous, backup in reversed(backed_up):
                 previous.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(backup, previous)
+            for folder in reversed(created_dirs):
+                if folder.exists() and not any(folder.iterdir()):
+                    folder.rmdir()
             raise
 
     def _delete_processed_sources(self):
@@ -819,6 +910,7 @@ class DatasetGeneratorCoreNew:
             self._check_cancelled()
             destination = Path(self.output_folder)
             destination.mkdir(parents=True, exist_ok=True)
+            self._existing_export(destination)
             total = len(self.pairs)*(self.aug_multiplier if self.has_augmentations else 1)
             self.log('[DatasetGenerator_new] start, canonical pixel geometry V14')
             if self.has_augmentations and self.aug_multiplier == 1:
@@ -859,7 +951,12 @@ class DatasetGeneratorCoreNew:
                 splits = self._distribute_and_export(stage, records)
                 manifest = {
                     'generator': 'DatasetGenerator_new',
-                    'manifest_version': 1,
+                    'manifest_version': 2,
+                    'formats': self._formats(),
+                    'class_names': {str(k): v for k, v in self.class_names.items()},
+                    'yolo_obb_format': self.out_yolo_obb_format,
+                    'yolo_channels': self.yolo_channels,
+                    'yolo_kinds': sorted({a.kind for rec in records for a in (rec.annotations or [])}),
                     'sources_total': len(self.pairs),
                     'sources_successful': successful_sources,
                     'sources_skipped': self._skipped,
@@ -875,10 +972,14 @@ class DatasetGeneratorCoreNew:
                         {'image': rec.image.name,
                          'label': rec.label.name if rec.label else None,
                          'mask': rec.mask.name if rec.mask and self.out_masks else None,
-                         'annotations': len(rec.annotations) if rec.annotations is not None else None}
+                         'annotations': len(rec.annotations) if rec.annotations is not None else None,
+                         'annotation_status': rec.annotation_status, 'source': rec.source_key}
                         for rec in collection]
                         for name, collection in splits.items()},
                 }
+                manifest['runs'] = [{key: manifest[key] for key in
+                    ('sources_total', 'variants_created', 'random_seed', 'split_by_source')}]
+                manifest = self._merge_metadata(stage, destination, manifest)
                 (stage/'generation_manifest.json').write_text(
                     json.dumps(manifest, indent=2, ensure_ascii=False), encoding='utf-8')
                 self._check_cancelled()

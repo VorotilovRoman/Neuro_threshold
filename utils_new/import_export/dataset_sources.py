@@ -198,7 +198,7 @@ def preview(spec, mode, cancel=None):
                 row_entries.append(
                     dict(
                         image=str(found),
-                        annotation=str(source),
+                        annotation=None if record.get('annotation_status') == 'unlabelled' else str(source),
                         split=row["split"],
                         alternatives={},
                         objects=counts[record["id"]],
@@ -549,3 +549,37 @@ def enable_ultralytics_sources():
 
     if build.YOLODataset is not SelectedYOLODataset:
         build.YOLODataset = SelectedYOLODataset
+
+
+def import_save_targets(source_paths, image_paths):
+    """Editor writes go to durable labels/, never the session's conversion cache."""
+    roots = []
+    for source in source_paths:
+        info = metadata(source)
+        if info:
+            roots.append(Path(info['root']).resolve())
+        elif Path(source).suffix.lower() in ('.yaml', '.yml'):
+            cfg = yaml.safe_load(Path(source).read_text(encoding='utf-8-sig')) or {}
+            root = Path(cfg.get('path') or Path(source).resolve().parent)
+            roots.append(root if root.is_absolute() else Path(source).resolve().parent / root)
+        else:
+            roots.append(Path(source).resolve().parent)
+    result, used = {}, set()
+    for raw in image_paths:
+        image = Path(raw).resolve()
+        root = next((p for p in roots if image.is_relative_to(p)), roots[0])
+        if image.is_relative_to(root / 'images'):
+            local = image.relative_to(root / 'images').with_suffix('.txt')
+        elif image.is_relative_to(root):
+            local = image.relative_to(root).with_suffix('.txt')
+        else:
+            import hashlib
+            suffix = hashlib.sha256(str(image).encode()).hexdigest()[:12]
+            local = Path(image.stem + '_' + suffix + '.txt')
+        target = root / 'labels' / local
+        key = str(target).casefold()
+        if key in used:
+            raise ValueError(f'Несколько снимков используют один путь сохранения: {target}')
+        used.add(key)
+        result[str(raw)] = str(target)
+    return result
