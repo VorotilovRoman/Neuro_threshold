@@ -103,6 +103,11 @@ TXT-разметка: BBox, OBB или Segment. У четырёхточечно�
 
 ## Разработка
 
+Список всех файлов и подпапок, включая вложенные и пустые:
+`python utils/list_files.py "D:\dataset" "D:\results"`.
+Результат — `D:\results\files_list.txt` в UTF-8 с относительными путями и пометками
+`[FILE]` / `[DIR]`. Вторым аргументом можно передать полный путь к TXT.
+
 Одна вкладка отдельно: `python -m tabs.threshold_methods` из корня проекта.
 Общие виджеты — `ui/`, вычисления и I/O — `utils_new/`, алгоритмы —
 `utils_new/segmentation/backends/`, обучение — процессы `utils_new/training/`.
