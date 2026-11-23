@@ -211,6 +211,34 @@ with TemporaryDirectory() as temporary:
  owner.close()
 """)
 
+    def test_old_overlap_warnings_are_cleared_before_a_new_inspection_finishes(self):
+        self.gui("""
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+from utils_new.dataset.pairs import PairInspectionJob
+owner=DatasetPreparationWindow();owner.show()
+with TemporaryDirectory() as temporary:
+ root=Path(temporary);image,old_label=fixture(root)
+ Path(old_label).write_text('0 .5 .5 .5 .5\\n0 .5 .5 .5 .5\\n')
+ new_label=root/'new.txt';new_label.write_text('0 .5 .5 .2 .2\\n')
+ owner._apply_loaded_pairs([(image,old_label)],0,'auto',class_names_from_yaml={0:'Object'});wait_dataset(owner)
+ review=owner._overlap_review_panel
+ assert review._records[image]
+ started,release=Event(),Event();original=PairInspectionJob.run
+ def slow(job):started.set();release.wait(5);return original(job)
+ with patch.object(PairInspectionJob,'run',slow):
+  owner._start_pair_inspection();until(started.is_set)
+  assert not review._records and not review._pairs
+  release.set();wait_dataset(owner);assert review._records[image]
+  release.clear();started.clear()
+  owner._apply_loaded_pairs([(image,str(new_label))],0,'auto',class_names_from_yaml={0:'Object'})
+  until(started.is_set)
+  assert not review._records and not review._pairs
+  assert owner.file_list.item(0).icon().isNull()
+  release.set();wait_dataset(owner)
+ assert not review._records[image]
+ owner.close()
+""")
+
     def test_filter_snapshot_finishes_in_background_and_rejects_previous_dataset(self):
         self.gui("""
 from tabs.dataset_analysis import DatasetAnalysisWindow

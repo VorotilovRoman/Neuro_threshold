@@ -294,15 +294,19 @@ class DatasetLoaderMixin:
         self.bit_type_stats = ImageStats.empty_bit_stats()
         self._pair_display_cache = {}
         self._fill_class_table_from_dict(self._yaml_names, preserve_include=False)
-        self._rebuild_file_list_display()
         self._update_pair_count_label('Проверка и статистика в фоне…')
         self.log(f'Список загружен: {len(self.pairs)} снимков. {source_label}. Проверки выполняются в фоне.')
         self._start_pair_inspection()
 
     def _start_pair_inspection(self):
+        self._inspection_result = None
+        if hasattr(self, '_overlap_review_panel'):
+            self._overlap_review_panel.set_dataset([])
+        self._review_dataset_key = None
+        self._pair_display_cache = {}
+        self._rebuild_file_list_display()
         self._inspection_revision = getattr(self, "_inspection_revision", 0) + 1
         from utils_new.dataset.pairs import PairInspectionJob
-        self._inspection_result = None
         self._after_loading_state_changed()
         tasks = self._dataset_task_manager()
         tasks.invalidate('filters')
