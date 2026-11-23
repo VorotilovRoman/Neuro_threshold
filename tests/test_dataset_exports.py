@@ -652,6 +652,62 @@ class SahiExportContracts(unittest.TestCase):
                 )
             self.assertTrue(all(len(splits) == 1 for splits in memberships.values()))
 
+    def test_real_preparation_generate_action_publishes_selected_formats(self):
+        from PyQt5.QtWidgets import QApplication, QMessageBox
+        from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+
+        app = QApplication.instance() or QApplication([])
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image(root)
+            label(root)
+            source = root / "data.yaml"
+            source.write_text(
+                yaml.safe_dump(dict(train="images/train", names=["object"]))
+            )
+            window = DatasetPreparationWindow()
+            try:
+                window._load_yolo_yaml_from_path(str(source))
+                window.output_folder = str(root / "generated")
+                window.resize_keep.setChecked(True)
+                window.train_slider.setValue(100)
+                window.channels_combo.setCurrentIndex(1)
+                window.out_masks.setChecked(True)
+                window.out_unet_yaml.setChecked(True)
+                window.out_coco.setChecked(True)
+                with (
+                    patch.object(QMessageBox, "information"),
+                    patch.object(QMessageBox, "critical") as errors,
+                    patch.object(QMessageBox, "warning") as warnings,
+                ):
+                    window.on_generate()
+                    self.assertIsNotNone(window.generator_thread)
+                    self.assertTrue(window.generator_thread.wait(30000))
+                    app.processEvents()
+                    errors.assert_not_called()
+                    warnings.assert_not_called()
+                output = root / "generated"
+                for relative in (
+                    "data.yaml",
+                    "masks_data.yaml",
+                    "annotations_train.json",
+                    "labels/train/one.txt",
+                    "masks/train/one.png",
+                ):
+                    self.assertTrue((output / relative).is_file(), relative)
+                self.assertEqual(
+                    yaml.safe_load((output / "data.yaml").read_text())["channels"], 1
+                )
+            finally:
+                if (
+                    window.generator_thread is not None
+                    and window.generator_thread.isRunning()
+                ):
+                    window.generator_thread.cancel()
+                    window.generator_thread.wait()
+                window.close()
+                app.processEvents()
+
     def test_export_ui_defaults_and_split_slider_total(self):
         from PyQt5.QtWidgets import QApplication
         from tabs.preparing_dataset_yaml import DatasetPreparationWindow

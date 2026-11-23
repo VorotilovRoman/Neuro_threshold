@@ -717,18 +717,6 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
-        error_msg = PairValidator.check_pair_type_consistency()
-        if error_msg:
-            reply = QMessageBox.question(
-                self,
-                "Несоответствие типа",
-                f"{error_msg}\nВсё равно продолжить?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if reply == QMessageBox.No:
-                return
-
         non_8bit = (
             self.bit_type_stats.get("uint16", 0)
             + self.bit_type_stats.get("int16", 0)
