@@ -11,10 +11,23 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from utils_new.segmentation.backends.sam import LocalSAM, SamPrompt, SamResult
+from utils_new.segmentation.backends.sam import LocalSAM, SamPrompt, SamResult, find_sam3_tokenizer
 
 
 class SamBackendTests(unittest.TestCase):
+    def test_separate_sam3_weights_find_downloaded_tokenizer_and_prefer_adjacent_file(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            weights = root / "SAM3.pt"
+            name = "bpe_simple_vocab_16e6.txt.gz"
+            nested = root / "sam3" / name
+            nested.parent.mkdir()
+            nested.write_bytes(b"vocabulary")
+            self.assertEqual(find_sam3_tokenizer(weights), nested)
+            adjacent = root / name
+            adjacent.write_bytes(b"vocabulary")
+            self.assertEqual(find_sam3_tokenizer(weights), adjacent)
+
     def backend(self):
         backend = LocalSAM()
         backend.model, backend.model_key = object(), "sam2.1-tiny"

@@ -3,6 +3,7 @@
 from contextlib import redirect_stdout, redirect_stderr
 from http.client import IncompleteRead
 import io
+import gzip
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+import zipfile
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request
@@ -17,7 +19,12 @@ from urllib.request import Request
 from utils_new.import_export import sam_weights as downloader
 
 
-WEIGHTS = b"PK\x03\x04test-checkpoint"
+_checkpoint = io.BytesIO()
+with zipfile.ZipFile(_checkpoint, "w") as _archive:
+    _archive.writestr("archive/data.pkl", b"pickle not executed by downloader")
+    _archive.writestr("archive/data/0", b"tensor storage")
+WEIGHTS = _checkpoint.getvalue()
+TOKENIZER = gzip.compress(b"test vocabulary")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -82,8 +89,8 @@ class SAMDownloadTests(unittest.TestCase):
                     downloader.download_asset(asset, output, {}, opener=Opener(response), force=True)
                 self.assertEqual(target.read_bytes(), WEIGHTS)
                 self.assertFalse(list(output.rglob("*.part")))
-            with self.assertRaisesRegex(ValueError, "--force"):
-                downloader.download_asset(asset, output, {}, opener=Opener())
+            receipt = downloader.download_asset(asset, output, {}, opener=Opener())
+            self.assertEqual(receipt["origin"], "existing-local")
 
     def test_wrong_auxiliary_files_are_not_published(self):
         with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
@@ -133,17 +140,18 @@ class SAMDownloadTests(unittest.TestCase):
             captured = io.StringIO()
             failure = HTTPError("https://cdn.example/SIGNED_SECRET", 403, "hf_SECRET", {},
                                 io.BytesIO(b"private response hf_SECRET"))
-            opener = Opener(failure, Response(WEIGHTS))
+            opener = Opener(failure, Response(TOKENIZER), Response(WEIGHTS))
             with redirect_stdout(captured), redirect_stderr(captured), \
                     patch.object(downloader, "build_opener", return_value=opener), \
                     patch.dict(os.environ, {"HF_TOKEN": "hf_SECRET"}):
                 result = downloader.main(["--models", "sam3", "sam", "--output", directory])
             self.assertEqual(result, 1)
-            self.assertEqual(len(opener.requests), 2)
+            self.assertEqual(len(opener.requests), 3)
             self.assertIn("--ask-token", captured.getvalue())
             self.assertNotIn("hf_SECRET", captured.getvalue())
             self.assertNotIn("SIGNED_SECRET", captured.getvalue())
             self.assertTrue((Path(directory) / "sam/sam_vit_b_01ec64.pth").is_file())
+            self.assertTrue((Path(directory) / "sam3/bpe_simple_vocab_16e6.txt.gz").is_file())
 
     def test_interrupted_body_retries_and_keyboard_interrupt_cleans_up(self):
         class BrokenResponse(Response):
@@ -178,13 +186,15 @@ class SAMDownloadTests(unittest.TestCase):
     def test_invalid_token_is_rejected_without_logging_it(self):
         with TemporaryDirectory() as directory:
             captured = io.StringIO()
+            opener = Opener(Response(TOKENIZER))
             with patch.dict(os.environ, {"HF_TOKEN": "hf_SECRET\nBAD"}), \
                     redirect_stdout(captured), redirect_stderr(captured), \
-                    patch.object(downloader, "build_opener") as opener:
+                    patch.object(downloader, "build_opener", return_value=opener):
                 result = downloader.main(["--models", "sam3", "--output", directory])
             self.assertEqual(result, 1)
             self.assertNotIn("hf_SECRET", captured.getvalue())
-            opener.assert_not_called()
+            self.assertEqual(len(opener.requests), 1)
+            self.assertNotIn("huggingface.co", opener.requests[0].full_url)
 
     def test_cli_works_without_site_packages(self):
         result = subprocess.run([sys.executable, "-S", "-m", "utils_new.import_export.sam_weights", "--list"],
@@ -192,6 +202,89 @@ class SAMDownloadTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("sam2.1-tiny", result.stdout)
         self.assertIn("sam3", result.stdout)
+
+    def test_existing_uppercase_weights_without_manifest_need_only_tokenizer(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            output = Path(directory)
+            weights = output / "sam3" / "SAM3.pt"
+            weights.parent.mkdir()
+            weights.write_bytes(WEIGHTS)
+            original_mtime = weights.stat().st_mtime_ns
+            opener = Opener(Response(TOKENIZER))
+            with patch.object(downloader, "build_opener", return_value=opener), \
+                    patch.object(downloader.getpass, "getpass") as getpass:
+                result = downloader.main(["--models", "sam3", "--output", directory, "--ask-token"])
+            self.assertEqual(result, 0)
+            self.assertEqual(weights.stat().st_mtime_ns, original_mtime)
+            self.assertEqual(weights.read_bytes(), WEIGHTS)
+            self.assertEqual(len(opener.requests), 1)
+            self.assertNotIn("huggingface.co", opener.requests[0].full_url)
+            getpass.assert_not_called()
+            manifest = json.loads((output / downloader.MANIFEST_NAME).read_text())
+            self.assertEqual(manifest["sam3/sam3.pt"]["origin"], "existing-local")
+            self.assertEqual(Path(manifest["sam3/sam3.pt"]["local_path"]), weights)
+
+    def test_explicit_weights_default_to_auxiliary_files_beside_original(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            weights = Path(directory) / "my SAM3.pt"
+            weights.write_bytes(WEIGHTS)
+            opener = Opener(Response(TOKENIZER))
+            args = ["--models", "sam3", "--weights-file", str(weights), "--ask-token"]
+            with patch.object(downloader, "build_opener", return_value=opener), \
+                    patch.object(downloader.getpass, "getpass") as getpass:
+                self.assertEqual(downloader.main(args), 0)
+                self.assertEqual(downloader.main(args), 0)  # Both assets are now verified locally.
+            self.assertEqual(len(opener.requests), 1)
+            self.assertEqual((weights.parent / "bpe_simple_vocab_16e6.txt.gz").read_bytes(), TOKENIZER)
+            self.assertFalse((weights.parent / "sam3" / "sam3.pt").exists())
+            getpass.assert_not_called()
+
+    def test_extras_only_does_not_read_or_download_weights(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            # An invalid existing weights file must be irrelevant to this mode.
+            weights = Path(directory) / "SAM3.pt"
+            weights.write_text("not checked")
+            opener = Opener(Response(TOKENIZER))
+            with patch.object(downloader, "build_opener", return_value=opener), \
+                    patch.object(downloader.getpass, "getpass") as getpass:
+                result = downloader.main(["--models", "sam3", "--extras-only", "--output", directory, "--ask-token"])
+            self.assertEqual(result, 0)
+            self.assertEqual(weights.read_text(), "not checked")
+            self.assertEqual(len(opener.requests), 1)
+            getpass.assert_not_called()
+
+    def test_invalid_existing_weights_are_preserved_but_auxiliary_download_continues(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            weights = Path(directory) / "SAM3.pt"
+            weights.write_bytes(b"PK\x03\x04incomplete archive")
+            opener = Opener(Response(TOKENIZER))
+            with patch.object(downloader, "build_opener", return_value=opener):
+                result = downloader.main(["--models", "sam3", "--weights-file", str(weights)])
+            self.assertEqual(result, 1)
+            self.assertEqual(weights.read_bytes(), b"PK\x03\x04incomplete archive")
+            self.assertTrue((weights.parent / "bpe_simple_vocab_16e6.txt.gz").is_file())
+            self.assertEqual(len(opener.requests), 1)
+
+    def test_explicit_weights_can_use_separate_output_without_copying_checkpoint(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            weights = Path(directory) / "SAM3.pt"
+            weights.write_bytes(WEIGHTS)
+            output = Path(directory) / "resources"
+            opener = Opener(Response(TOKENIZER))
+            with patch.object(downloader, "build_opener", return_value=opener):
+                result = downloader.main(["--models", "sam3", "--weights-file", str(weights), "--output", str(output)])
+            self.assertEqual(result, 0)
+            self.assertFalse(list(output.rglob("*.pt")))
+            self.assertTrue((output / "bpe_simple_vocab_16e6.txt.gz").is_file())
+
+    def test_truncated_gzip_is_not_adopted_or_published(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            asset = downloader.MODELS["sam3"].assets[1]
+            output = Path(directory)
+            with self.assertRaises((ValueError, OSError, EOFError)):
+                downloader.download_asset(asset, output, {}, opener=Opener(Response(TOKENIZER[:-5])))
+            self.assertFalse((output / asset.path).exists())
+            self.assertFalse(list(output.rglob("*.part")))
 
 
 if __name__ == "__main__":

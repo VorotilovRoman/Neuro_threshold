@@ -22,6 +22,16 @@ from utils_new.import_export.sam_weights import MODELS
 MODELS_DIR = Path(__file__).resolve().parents[3] / "models"
 
 
+def find_sam3_tokenizer(weights):
+    """Find local BPE assets for a separately downloaded checkpoint, without I/O scans."""
+    parent = Path(weights).expanduser().resolve().parent
+    name = "bpe_simple_vocab_16e6.txt.gz"
+    candidates = (parent / name, parent / "sam3" / name,
+                  parent / "segment_anything" / "sam3" / name,
+                  MODELS_DIR / "segment_anything" / "sam3" / name)
+    return next((path for path in candidates if path.is_file()), None)
+
+
 @dataclass(frozen=True)
 class SamPrompt:
     points: tuple = ()
@@ -152,8 +162,8 @@ class LocalSAM:
         predictors = importlib.import_module("ultralytics.models.sam.predict")
         builders = importlib.import_module("ultralytics.models.sam.build_sam3")
         if self.prompt_mode == "text":
-            bpe = Path(tokenizer).expanduser().resolve(strict=True) if tokenizer else path.parent / "bpe_simple_vocab_16e6.txt.gz"
-            if not bpe.is_file():
+            bpe = Path(tokenizer).expanduser().resolve(strict=True) if tokenizer else find_sam3_tokenizer(path)
+            if bpe is None or not bpe.is_file():
                 raise ValueError("Не найден bpe_simple_vocab_16e6.txt.gz: выберите токенизатор SAM3")
             clip = importlib.import_module("clip")  # Check before the builder can request installation.
             tokenizer = clip.simple_tokenizer.SimpleTokenizer(bpe_path=str(bpe))

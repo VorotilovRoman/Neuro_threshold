@@ -19,7 +19,7 @@ from utils_new.annotations.adapters import from_legacy
 from utils_new.annotations.geometry import bounds
 from utils_new.annotations.model import ImageSize
 from utils_new.import_export.sam_weights import MODELS
-from utils_new.segmentation.backends.sam import LocalSAM, MODELS_DIR, SamPrompt
+from utils_new.segmentation.backends.sam import LocalSAM, MODELS_DIR, SamPrompt, find_sam3_tokenizer
 
 
 class AutoLabelStack(QStackedWidget):
@@ -376,12 +376,12 @@ class SamAutoLabelController:
         if path:
             self.panel.weights.setText(path)
             for key, model in MODELS.items():
-                if Path(path).name == Path(model.assets[0].path).name:
+                if Path(path).name.casefold() == Path(model.assets[0].path).name.casefold():
                     self.panel.model.setCurrentIndex(self.panel.model.findData(key))
                     break
-            bpe = Path(path).parent / "bpe_simple_vocab_16e6.txt.gz"
-            if bpe.is_file():
-                self.panel.tokenizer.setText(str(bpe))
+            if self.panel.model.currentData() == "sam3":
+                bpe = find_sam3_tokenizer(path)
+                self.panel.tokenizer.setText(str(bpe) if bpe else "")
 
     def browse_tokenizer(self):
         path, _ = source_dialogs.get_open_file(self.owner, "sam_tokenizer", directory=str(MODELS_DIR))

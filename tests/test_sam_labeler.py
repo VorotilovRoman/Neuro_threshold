@@ -85,6 +85,19 @@ class SamLabelerTests(unittest.TestCase):
         self.assertIs(self.owner.auto_stack.currentWidget(), self.owner.auto_group)
         self.assertEqual(self.owner.auto_conf_spin.value(), 0.25)
 
+    def test_browse_separately_downloaded_uppercase_sam3_detects_model_and_bpe(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            weights = root / "SAM3.pt"
+            weights.write_bytes(b"checkpoint")
+            bpe = root / "sam3" / "bpe_simple_vocab_16e6.txt.gz"
+            bpe.parent.mkdir()
+            bpe.write_bytes(b"vocabulary")
+            with patch("ui.sam_auto_label.source_dialogs.get_open_file", return_value=(str(weights), "")):
+                self.controller.browse_weights()
+            self.assertEqual(self.panel.model.currentData(), "sam3")
+            self.assertEqual(self.panel.tokenizer.text(), str(bpe))
+
     def test_preview_accept_updates_actual_editor_storage_and_can_save_yolo(self):
         from utils_new.import_export.yolo_labels import save_annotations_for_image, load_annotations
 
