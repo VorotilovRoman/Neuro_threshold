@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import QAction, QApplication, QColorDialog, QDialog, QDialo
 from ui import dataset_source as source_dialogs
 from ui.image_view import numpy_to_qpixmap, set_fill_color_button_preview
 from ui.settings_service import settings
+from ui.sam_auto_label import SamAutoLabelController
 from ui_tabs.layout_dataset_ui import setup_layout_dataset_ui
 
 # V20: shared dataset services; legacy utility imports are not required.
@@ -212,6 +213,7 @@ class Labeler(QMainWindow):
         self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
 
         # Начальное состояние
+        self.sam_controller = SamAutoLabelController(self)
         self.update_navigation_state()
         self.log_widget.setVisible(False)
 
@@ -272,6 +274,7 @@ class Labeler(QMainWindow):
         self.tool_group.setExclusive(True)
 
     def on_tool_selected(self, btn):
+        self.sam_controller.stop_tool()
         if btn is self.btn_tool_rect:
             tool = "rect"
         elif btn is self.btn_tool_segment:
@@ -314,6 +317,7 @@ class Labeler(QMainWindow):
             self.log("Drawing mode OFF (panning mode).")
 
     def reset_drawing_tool(self):
+        self.image_view.sam_tool = self.image_view._sam_start = None
         self._uncheck_all_tools()
         self.image_view.set_drawing_tool(None)
         self.image_view.set_selected_index(-1)
@@ -468,6 +472,7 @@ class Labeler(QMainWindow):
         self.update_navigation_state()
 
     def closeEvent(self, event):
+        self.sam_controller.close()
         self.overlap_review.close_review()
         if self._lazy_cache is not None:
             try:
@@ -566,6 +571,7 @@ class Labeler(QMainWindow):
     #  Отображение текущего изображения
     # ----------------------------------------------------------------------
     def display_current_image(self):
+        self.sam_controller.frame_changed()
         if self._lazy_cache is None or len(self._lazy_cache) == 0:
             return
 
@@ -645,6 +651,7 @@ class Labeler(QMainWindow):
         Ключ изображения предотвращает повторное формирование QPixmap при выборе
         или редактировании рамок, а слой Qt перерисовывается самостоятельно.
         """
+        self.sam_controller.frame_changed()
         if self._lazy_cache is None or not self.image_paths:
             return
         if not self._lazy_cache.is_loaded(self.current_index):

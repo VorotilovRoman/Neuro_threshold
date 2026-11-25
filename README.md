@@ -35,7 +35,7 @@ python dependency_health.py --torch-profile cu126 --cuda-test
 Вспомогательный `onnxruntime` остаётся CPU-сборкой и не влияет на CUDA-обучение.
 
 Дополнительные функции: `--extra training`, `--extra audit`, `--extra sahi`,
-`--extra export` — флаги можно сочетать. Версии находятся в `requirements/` и `requirements.txt`.
+`--extra export`, `--extra sam` — флаги можно сочетать. Версии находятся в `requirements/` и `requirements.txt`.
 Без `--torch` установщик сохраняет установленный CPU/CUDA-профиль; в новом окружении
 выбирает CPU. Для смены профиля задайте `--torch` явно.
 Файлы `requirements/torch-*.txt` включают общие зависимости и точную сборку:
@@ -65,7 +65,7 @@ python dependency_health.py --torch-profile cu126 --cuda-test
 | [Традиционные методы ML](docs/traditional_ml.md) | Кластеризация и обучение классификаторов |
 | [Deep Learning](docs/deep_learning.md) | Применение моделей сегментации |
 | [Анализ отчётов](docs/reports.md) | Выбор методов по ручному эталону |
-| [Добавить аннотации](docs/labeler.md) | Создание и исправление разметки |
+| [Добавить аннотации](docs/labeler.md) | Ручная разметка, YOLO и локальные SAM/SAM2/SAM3 |
 | [Просмотр аннотаций](docs/test.md) | Просмотр, маски и кандидаты в дубли |
 | [Подготовка датасета](docs/dataset.md) | Обработка, аугментации, split и экспорт |
 | [Анализ датасета](docs/dataset_analysis.md) | Качество, разметка, повторы и утечки |

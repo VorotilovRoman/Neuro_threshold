@@ -11,7 +11,7 @@ from dependency_health import (
 )
 
 ROOT = Path(__file__).resolve().parent
-EXTRAS = ('training', 'audit', 'sahi', 'export')
+EXTRAS = ('training', 'audit', 'sahi', 'export', 'sam')
 
 
 def run_pip(*args, dry_run=False):

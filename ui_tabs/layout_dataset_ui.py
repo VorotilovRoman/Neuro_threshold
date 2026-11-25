@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
 
 from ui.dataset_source import make_source_button
 from ui.image_navigation import ImageNavigationWidget
-from ui.image_view import SmartGraphicsViewNew
+from ui.sam_auto_label import AutoLabelStack, SamPanel, SamPromptView
 from ui.log_widget import LogWidget
 
 
@@ -130,7 +130,7 @@ def setup_layout_dataset_ui(parent):
     left_layout = QVBoxLayout(left_widget)
     left_layout.setContentsMargins(0, 0, 0, 0)
 
-    parent.image_view = SmartGraphicsViewNew()
+    parent.image_view = SamPromptView()
     parent.image_view.setMinimumSize(600, 500)
     parent.image_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     left_layout.addWidget(parent.image_view)
@@ -144,6 +144,15 @@ def setup_layout_dataset_ui(parent):
     # ----- Правая часть: авторазметка, объекты, лог -----
     right_widget = QWidget()
     right_layout = QVBoxLayout(right_widget)
+
+    provider_row = QHBoxLayout()
+    provider_row.addWidget(QLabel("Авторазметка:"))
+    parent.auto_backend_combo = QComboBox()
+    parent.auto_backend_combo.addItems(["YOLO", "SAM"])
+    provider_row.addWidget(parent.auto_backend_combo, 1)
+    right_layout.addLayout(provider_row)
+    parent.auto_stack = AutoLabelStack()
+    right_layout.addWidget(parent.auto_stack)
 
     # --- Группа автразметки YOLO (сверху справа) ---
     parent.auto_group = QGroupBox("Auto-label (YOLO)")
@@ -241,20 +250,20 @@ def setup_layout_dataset_ui(parent):
     # NEW: второй ряд — управление отображением разметки
     view_ctrl_row = QHBoxLayout()
 
-    parent.btn_hide_frames = QPushButton("Скрыть рамки")
+    parent.btn_hide_frames = QPushButton("Без рамок")
     parent.btn_hide_frames.setCheckable(True)
     parent.btn_hide_frames.setToolTip(
         "Скрыть с отображения все рамки объектов.\n"
         "Метки классов при этом остаются видны."
     )
 
-    parent.btn_hide_labels = QPushButton("Скрыть метки")
+    parent.btn_hide_labels = QPushButton("Без меток")
     parent.btn_hide_labels.setCheckable(True)
     parent.btn_hide_labels.setToolTip(
         "Скрыть с отображения метки классов.\nРамки объектов при этом остаются видны."
     )
 
-    parent.btn_fill_objects = QPushButton("Закрасить объекты")
+    parent.btn_fill_objects = QPushButton("Заливка")
     parent.btn_fill_objects.setCheckable(True)
     parent.btn_fill_objects.setToolTip(
         "Закрасить выбранным цветом все области объектов (внутри рамок).\n"
@@ -271,9 +280,12 @@ def setup_layout_dataset_ui(parent):
     view_ctrl_row.addWidget(parent.btn_fill_objects)
     view_ctrl_row.addWidget(parent.btn_fill_color)
     view_ctrl_row.addStretch()
-    auto_layout.addLayout(view_ctrl_row)
+    # Display controls belong to the editor, independently of the selected model.
+    right_layout.addLayout(view_ctrl_row)
 
-    right_layout.addWidget(parent.auto_group)
+    parent.auto_stack.addWidget(parent.auto_group)
+    parent.sam_panel = SamPanel()
+    parent.auto_stack.addWidget(parent.sam_panel)
 
     # ============================================================
     # Строка предупреждения о некорректной разметке (перенесена сюда)
