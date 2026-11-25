@@ -98,6 +98,51 @@ class SamLabelerTests(unittest.TestCase):
             self.assertEqual(self.panel.model.currentData(), "sam3")
             self.assertEqual(self.panel.tokenizer.text(), str(bpe))
 
+    def test_grounding_dino_text_mode_loads_and_previews_without_automatic_annotation_changes(self):
+        from utils_new.segmentation.backends.sam import SamResult
+        from unittest.mock import Mock
+
+        masks = np.zeros((1, 60, 100), bool)
+        masks[:, 10:40, 20:70] = True
+        backend = SimpleNamespace(model_key="sam2.1-tiny", device="cpu", supports_text=True,
+                                  predict=Mock(return_value=SamResult(masks, np.array([.8]), np.array([.91]), ("screw",))))
+        self.panel.mode.setCurrentIndex(self.panel.mode.findData("grounded"))
+        self.assertTrue(self.panel.text.isEnabled())
+        self.assertFalse(self.panel.positive.isEnabled())
+        self.assertFalse(self.panel.grounding_group.isHidden())
+        self.panel.weights.setText("sam2.pt")
+        self.panel.dino_directory.setText("local detector")
+        with patch("ui.sam_auto_label.GroundedSAM2.load", return_value=backend) as loader:
+            self.controller.load()
+            self.wait_until(lambda: self.controller.job is None)
+        self.assertEqual(loader.call_args.args, ("sam2.1-tiny", "sam2.pt", "local detector"))
+        self.assertEqual(loader.call_args.kwargs["detector_device"], "cpu")
+        self.panel.text.setText("screw")
+        self.panel.dino_box_score.setValue(.4)
+        self.panel.dino_text_score.setValue(.3)
+        self.panel.dino_max_objects.setValue(12)
+        self.controller.run()
+        self.wait_until(lambda: self.controller.job is None)
+        arguments = backend.predict.call_args.kwargs
+        self.assertEqual(arguments["box_threshold"], .4)
+        self.assertEqual(arguments["text_threshold"], .3)
+        self.assertEqual(arguments["max_objects"], 12)
+        self.assertEqual(self.owner.current_annotations, [])
+        self.assertEqual(len(self.view.sam_preview), 1)
+        self.assertIn("IoU SAM2", self.panel.status.text())
+        self.assertIn("screw: 0.910", self.panel.status.text())
+
+    def test_grounding_mode_is_reset_for_sam1_and_sam3(self):
+        self.panel.mode.setCurrentIndex(self.panel.mode.findData("grounded"))
+        self.assertEqual(self.panel.mode.currentData(), "grounded")
+        self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-b"))
+        self.assertEqual(self.panel.mode.currentData(), "points")
+        self.assertTrue(self.panel.grounding_group.isHidden())
+        self.panel.model.setCurrentIndex(self.panel.model.findData("sam3"))
+        self.panel.mode.setCurrentIndex(self.panel.mode.findData("text"))
+        self.assertTrue(self.panel.text.isEnabled())
+        self.assertTrue(self.panel.grounding_group.isHidden())
+
     def test_preview_accept_updates_actual_editor_storage_and_can_save_yolo(self):
         from utils_new.import_export.yolo_labels import save_annotations_for_image, load_annotations
 

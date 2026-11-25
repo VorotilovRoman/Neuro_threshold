@@ -35,7 +35,8 @@ python dependency_health.py --torch-profile cu126 --cuda-test
 Вспомогательный `onnxruntime` остаётся CPU-сборкой и не влияет на CUDA-обучение.
 
 Дополнительные функции: `--extra training`, `--extra audit`, `--extra sahi`,
-`--extra export`, `--extra sam` — флаги можно сочетать. Версии находятся в `requirements/` и `requirements.txt`.
+`--extra export`, `--extra sam`, `--extra grounding-dino` — флаги можно сочетать.
+Версии находятся в `requirements/` и `requirements.txt`.
 Без `--torch` установщик сохраняет установленный CPU/CUDA-профиль; в новом окружении
 выбирает CPU. Для смены профиля задайте `--torch` явно.
 Файлы `requirements/torch-*.txt` включают общие зависимости и точную сборку:

@@ -286,6 +286,42 @@ class SAMDownloadTests(unittest.TestCase):
             self.assertFalse((output / asset.path).exists())
             self.assertFalse(list(output.rglob("*.part")))
 
+    def test_grounding_model_bundle_is_public_pinned_and_separate_from_sam_ui_catalog(self):
+        self.assertNotIn("grounding-dino-tiny", downloader.MODELS)
+        self.assertEqual(downloader.select_models(["grounding-dino-tiny"]), ["grounding-dino-tiny"])
+        assets = downloader.DOWNLOAD_MODELS["grounding-dino-tiny"].assets
+        self.assertTrue(assets[0].is_weights)
+        self.assertEqual(assets[0].kind, "safetensors")
+        self.assertTrue(any(asset.path.endswith("tokenizer.json") for asset in assets))
+        self.assertTrue(all("/resolve/a2bb814dd30d776dcf7e30523b00659f4f141c71/" in asset.url for asset in assets))
+
+    def test_grounding_extras_only_does_not_download_weights_or_request_hf_token(self):
+        assets = downloader.GROUNDING_MODELS["grounding-dino-tiny"].assets
+        responses = [Response(b"{}" if asset.kind == "json" else b"vocabulary")
+                     for asset in assets if not asset.is_weights]
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            opener = Opener(*responses)
+            with patch.object(downloader, "build_opener", return_value=opener), \
+                    patch.object(downloader.getpass, "getpass") as getpass:
+                result = downloader.main(["--models", "grounding-dino-tiny", "--extras-only", "--ask-token", "--output", directory])
+            self.assertEqual(result, 0)
+            getpass.assert_not_called()
+            self.assertTrue(all(not request.has_header("Authorization") for request in opener.requests))
+            self.assertFalse(list(Path(directory).rglob("*.safetensors")))
+            self.assertTrue((Path(directory) / "grounding_dino/tiny/config.json").is_file())
+
+    def test_safetensors_container_rejects_truncation_and_accepts_existing_weight(self):
+        header = json.dumps({"weight": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+        payload = len(header).to_bytes(8, "little") + header + b"\x00" * 4
+        asset = downloader.GROUNDING_MODELS["grounding-dino-tiny"].assets[0]
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            output = Path(directory)
+            receipt = downloader.download_asset(asset, output, {}, opener=Opener(Response(payload)), token=lambda: self.fail("Public model requested a token"))
+            self.assertEqual(receipt["size"], len(payload))
+            (output / asset.path).write_bytes(payload[:-1])
+            with self.assertRaises(ValueError):
+                downloader.download_asset(asset, output, {}, opener=Opener())
+
 
 if __name__ == "__main__":
     unittest.main()

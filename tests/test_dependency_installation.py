@@ -107,6 +107,14 @@ class InstallationTests(unittest.TestCase):
         self.assertIn('github.com/ultralytics/CLIP.git@', requirements)
         self.assertNotIn('sam3.git', requirements)
 
+    def test_grounding_and_sam_extras_resolve_with_selected_cuda_profile(self):
+        with patch.object(install, 'run_pip') as pip, patch.object(install, 'normalize_opencv'):
+            self.assertEqual(install.main(['--torch', 'cu126', '--extra', 'sam', '--extra', 'grounding-dino', '--dry-run']), 0)
+        pip.assert_called_once_with(
+            'install', '-r', str(install.ROOT / 'requirements/torch-cu126.txt'),
+            '-r', str(install.ROOT / 'requirements/optional-grounding-dino.txt'),
+            '-r', str(install.ROOT / 'requirements/optional-sam.txt'), dry_run=True)
+
     def test_installed_profile_uses_metadata_without_guessing_unknown_builds(self):
         for profile in install.TORCH_PROFILES:
             with self.subTest(profile=profile), patch.object(

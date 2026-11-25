@@ -1,0 +1,2 @@
+# Native Transformers kernels avoid GroundingDINO's compiled extension on Windows.
+transformers==5.24.1

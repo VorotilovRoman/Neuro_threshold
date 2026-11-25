@@ -15,7 +15,7 @@ import numpy as np
 from utils_new.annotations.adapters import to_legacy_many
 from utils_new.annotations.masks import mask_to_annotations
 from utils_new.annotations.model import Annotation, ImageSize
-from utils_new.images.processing import normalize_to_uint8
+from utils_new.images.processing import ImageStats
 from utils_new.import_export.sam_weights import MODELS
 
 
@@ -56,9 +56,9 @@ class SamPrompt:
                 raise ValueError("Рамка должна иметь формат x1,y1,x2,y2 и находиться внутри снимка")
         text = self.text.strip()
         if text and not supports_text:
-            raise ValueError("Текстовый запрос поддерживает только SAM3")
+            raise ValueError("Текст поддерживают SAM3 и SAM2 с Grounding DINO")
         if text and len(points):
-            raise ValueError("Для SAM3 выберите текст с рамкой либо точки с рамкой")
+            raise ValueError("Выберите текст с рамкой либо точки с рамкой")
         if not text and box is None and not (labels == 1).any():
             raise ValueError("Укажите рамку, точку объекта или текстовый запрос SAM3")
         return points, labels.astype(np.int32), box, text
@@ -68,6 +68,9 @@ class SamPrompt:
 class SamResult:
     masks: np.ndarray
     scores: np.ndarray
+    detection_scores: np.ndarray | None = None
+    phrases: tuple = ()
+    detected_count: int | None = None
 
     def annotations(self, *, class_id=0, kind="segment", min_area=10):
         """One model instance per mask; explicitly discard holes for YOLO polygons."""
@@ -219,13 +222,7 @@ class LocalSAM:
             if key != self._image_key:
                 # If encoding fails/cancels, never reuse the previous image's features.
                 self._image_key = self._state = self._image_ref = None
-                work = normalize_to_uint8(image)
-                if work.ndim == 2 or (work.ndim == 3 and work.shape[2] == 1):
-                    rgb = cv2.cvtColor(work.reshape(height, width), cv2.COLOR_GRAY2RGB)
-                elif work.ndim == 3 and work.shape[2] in (3, 4):
-                    rgb = cv2.cvtColor(work, cv2.COLOR_BGR2RGB if work.shape[2] == 3 else cv2.COLOR_BGRA2RGB)
-                else:
-                    raise ValueError("SAM принимает серый, BGR или BGRA снимок")
+                rgb = ImageStats.to_rgb3(image)
                 if self.model_key == "sam3":
                     self.predictor.reset_image()
                     self.predictor.set_image(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))

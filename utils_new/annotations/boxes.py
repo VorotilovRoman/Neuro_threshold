@@ -49,8 +49,8 @@ def _thresholds(iou_threshold, conf_threshold):
         raise ValueError("Пороги IoU и оценки должны быть конечными числами 0..1.")
 
 
-def non_max_suppression(boxes, scores, iou_threshold=0.5, conf_threshold=0.1):
-    """Stable single-class NMS over xyxy boxes; callers separate class IDs."""
+def non_max_suppression_indices(boxes, scores, iou_threshold=0.5, conf_threshold=0.1):
+    """Stable single-class NMS indices, preserving associations with object metadata."""
     _thresholds(iou_threshold, conf_threshold)
     if len(boxes) != len(scores):
         raise ValueError("Количество боксов и оценок различается.")
@@ -66,6 +66,12 @@ def non_max_suppression(boxes, scores, iou_threshold=0.5, conf_threshold=0.1):
             for j in kept
         ):
             kept.append(index)
+    return kept
+
+
+def non_max_suppression(boxes, scores, iou_threshold=0.5, conf_threshold=0.1):
+    """Stable single-class NMS over xyxy boxes; callers separate class IDs."""
+    kept = non_max_suppression_indices(boxes, scores, iou_threshold, conf_threshold)
     return [list(boxes[i]) for i in kept], [float(scores[i]) for i in kept]
 
 

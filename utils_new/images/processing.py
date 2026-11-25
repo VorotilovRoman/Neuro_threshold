@@ -106,6 +106,14 @@ class ImageStats:
         return img
 
     @staticmethod
+    def to_rgb3(img):
+        """Shared RGB uint8 input for prompt models, retaining the project's depth policy."""
+        if (img is None or img.ndim not in (2, 3) or not img.size
+                or (img.ndim == 3 and img.shape[2] not in (1, 3, 4))):
+            raise ValueError("Ожидается непустой серый, BGR или BGRA снимок")
+        return cv2.cvtColor(ImageStats.to_bgr3(img), cv2.COLOR_BGR2RGB)
+
+    @staticmethod
     def format_stats_text(color_stats, bit_stats, has_pairs):
         if not has_pairs:
             return "", False

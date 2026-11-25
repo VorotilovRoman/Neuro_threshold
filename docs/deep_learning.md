@@ -26,6 +26,7 @@ python -m utils_new.import_export.sam_weights --models sam sam2 --output "D:/mod
 python -m utils_new.import_export.sam_weights --models sam3 --output "D:/models/SAM" --ask-token
 python -m utils_new.import_export.sam_weights --models sam3 --weights-file "D:/models/SAM3.pt"
 python -m utils_new.import_export.sam_weights --models sam3 --extras-only --output "D:/models/SAM"
+python -m utils_new.import_export.sam_weights --models grounding-dino-tiny
 ```
 
 `sam` означает SAM ViT-B, `sam2` — SAM2.1 Hiera Tiny. Без `--models` скачивается
@@ -33,6 +34,10 @@ python -m utils_new.import_export.sam_weights --models sam3 --extras-only --outp
 и требует значительно больше места. Для предварительного просмотра добавьте `--dry-run`.
 По умолчанию файлы сохраняются в `models/segment_anything/` относительно проекта.
 Варианты исходного SAM2 доступны как `sam2-tiny`, `sam2-small`, `sam2-base-plus`, `sam2-large`.
+`grounding-dino-tiny` и `grounding-dino-base` скачивают полные локальные папки
+Transformers в `grounding_dino/tiny/` или `grounding_dino/base/` внутри `--output`.
+Включены safetensors, конфигурация, препроцессор и токенизатор. Доступ к этим
+моделям публичный, токен не нужен. `all` включает варианты SAM; DINO выбирается явно.
 
 Если веса уже скачаны отдельно, укажите `--weights-file`: файл используется на месте,
 без копирования, а вспомогательные файлы по умолчанию сохраняются **рядом с весами**.

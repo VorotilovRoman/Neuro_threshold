@@ -58,7 +58,7 @@ class ArchitectureTests(unittest.TestCase):
         self.run_python('''import importlib, sys
 import utils_new.segmentation.backends
 assert not ({'cv2','numpy','torch','PyQt5'} & sys.modules.keys())
-for name in ('gradient','interactive','traditional_ml','deep_learning','sam'):
+for name in ('gradient','interactive','traditional_ml','deep_learning','sam','grounding_dino'):
     importlib.import_module('utils_new.segmentation.backends.' + name)
 assert not ({'torch','torchvision','ultralytics','onnxruntime','PyQt5'} & sys.modules.keys())
 ''')

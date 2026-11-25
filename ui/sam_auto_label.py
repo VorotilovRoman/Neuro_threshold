@@ -9,7 +9,7 @@ from pathlib import Path
 from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPen, QPolygonF
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
-                             QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                             QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                              QProgressBar, QPushButton, QSizePolicy, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from ui.image_view import SmartGraphicsViewNew
@@ -20,6 +20,7 @@ from utils_new.annotations.geometry import bounds
 from utils_new.annotations.model import ImageSize
 from utils_new.import_export.sam_weights import MODELS
 from utils_new.segmentation.backends.sam import LocalSAM, MODELS_DIR, SamPrompt, find_sam3_tokenizer
+from utils_new.segmentation.backends.grounding_dino import GroundedSAM2
 
 
 class AutoLabelStack(QStackedWidget):
@@ -178,12 +179,51 @@ class SamPanel(QWidget):
         self.mode = QComboBox()
         self.mode.addItem("Точки и рамка", "points")
         self.mode.addItem("Текст и рамка (SAM3)", "text")
-        self.mode.setToolTip("При смене режима SAM3 загрузите модель заново: в памяти хранится один backend.")
+        self.mode.addItem("Текст + DINO (SAM2)", "grounded")
+        self.mode.setToolTip("При смене режима загрузите модель заново: в памяти хранится один выбранный backend.")
         form.addRow("Подсказки:", self.mode)
         self.mode_label = form.labelForField(self.mode)
+        self.grounding_group = QGroupBox("Grounding DINO (локально)")
+        grounding_layout = QVBoxLayout(self.grounding_group)
+        grounding_form = QFormLayout()
+        grounding_layout.addLayout(grounding_form)
+        self.dino_directory, self.browse_dino = self._path_row(grounding_form, "Папка:", "config.json + model.safetensors + токенизатор")
+        defaults = (MODELS_DIR / "grounding_dino" / "tiny",
+                    MODELS_DIR / "segment_anything" / "grounding_dino" / "tiny")
+        self.dino_directory.setText(str(next((path for path in defaults if (path / "config.json").is_file()
+                                              and (path / "model.safetensors").is_file()), defaults[1])))
+        self.dino_options_button = QPushButton("Параметры Grounding DINO…")
+        self.dino_options_button.setCheckable(True)
+        grounding_layout.addWidget(self.dino_options_button)
+        self.dino_options = QWidget()
+        grounding_form = QFormLayout(self.dino_options)
+        grounding_layout.addWidget(self.dino_options)
+        self.dino_options.setVisible(False)
+        self.dino_options_button.toggled.connect(self.dino_options.setVisible)
+        self.dino_device = QComboBox()
+        self.dino_device.addItem("CPU — меньше VRAM", "cpu")
+        self.dino_device.addItem("Как SAM2", "same")
+        grounding_form.addRow("Устройство:", self.dino_device)
+        for name, caption, value, tip in (
+            ("dino_box_score", "Порог боксов:", 0.35, "Минимальная уверенность детектора Grounding DINO."),
+            ("dino_text_score", "Порог текста:", 0.25, "Порог токенов, формирующих текстовую метку детектора."),
+            ("dino_nms", "IoU дублей:", 0.5, "NMS: подавление перекрывающихся рамок до сегментации."),
+        ):
+            spin = QDoubleSpinBox()
+            spin.setRange(0, 1)
+            spin.setSingleStep(0.05)
+            spin.setValue(value)
+            spin.setToolTip(tip)
+            setattr(self, name, spin)
+            grounding_form.addRow(caption, spin)
+        self.dino_max_objects = QSpinBox()
+        self.dino_max_objects.setRange(1, 500)
+        self.dino_max_objects.setValue(50)
+        grounding_form.addRow("Макс. объектов:", self.dino_max_objects)
+        form.addRow(self.grounding_group)
         self.text = QLineEdit()
         self.text.setPlaceholderText("Например: metal screw")
-        self.text.setToolTip("Только SAM3. Короткое английское название объекта; класс датасета задаётся отдельно.")
+        self.text.setToolTip("SAM3 или Grounding DINO + SAM2. Короткое английское описание одного класса; ID датасета задаётся отдельно.")
         form.addRow("Текст:", self.text)
         self.text_label = form.labelForField(self.text)
         buttons = QHBoxLayout()
@@ -212,7 +252,7 @@ class SamPanel(QWidget):
         self.score.setRange(0, 1)
         self.score.setSingleStep(0.05)
         self.score.setValue(0.5)
-        self.score.setToolTip("SAM/SAM2: предсказанный IoU; SAM3 с текстом: уверенность. Это разные оценки.")
+        self.score.setToolTip("SAM/SAM2: предсказанный IoU маски; SAM3 с текстом: уверенность. Порог боксов DINO задаётся отдельно.")
         form.addRow("Мин. оценка:", self.score)
         self.area = QSpinBox()
         self.area.setRange(1, 1000000000)
@@ -262,20 +302,31 @@ class SamPanel(QWidget):
         return edit, button
 
     def capabilities(self):
-        sam3 = self.model.currentData() == "sam3"
-        self.mode.setEnabled(sam3)
-        self.mode.setVisible(sam3)
-        self.mode_label.setVisible(sam3)
-        if not sam3:
+        key = self.model.currentData()
+        sam3, sam2 = key == "sam3", key.startswith(("sam2-", "sam2.1-"))
+        self.mode.model().item(1).setEnabled(sam3)
+        self.mode.model().item(2).setEnabled(sam2)
+        self.mode.setEnabled(sam3 or sam2)
+        self.mode.setVisible(sam3 or sam2)
+        self.mode_label.setVisible(sam3 or sam2)
+        if not ((self.mode.currentData() == "text" and sam3) or (self.mode.currentData() == "grounded" and sam2)):
             self.mode.setCurrentIndex(0)
-        text_mode = sam3 and self.mode.currentData() == "text"
-        self.tokenizer_row.setVisible(text_mode)
-        self.tokenizer_label.setVisible(text_mode)
+        native_text = sam3 and self.mode.currentData() == "text"
+        grounded = sam2 and self.mode.currentData() == "grounded"
+        text_mode = native_text or grounded
+        self.grounding_group.setVisible(grounded)
+        self.tokenizer_row.setVisible(native_text)
+        self.tokenizer_label.setVisible(native_text)
         self.text.setEnabled(text_mode)
         self.text.setVisible(text_mode)
         self.text_label.setVisible(text_mode)
         self.positive.setEnabled(not text_mode)
         self.negative.setEnabled(not text_mode)
+        self.box.setToolTip("Ограничить область текстового поиска DINO (ROI)." if grounded else "Нарисовать рамку-подсказку.")
+        self.load.setText("Загрузить SAM2 + DINO" if grounded else "Загрузить SAM")
+        self.hint.setText("Grounding DINO находит рамки по тексту, SAM2 строит маски. Рамка ограничивает область поиска."
+                          if grounded else "SAM3: текст описывает объекты, рамка задаёт визуальную подсказку."
+                          if native_text else "Точки: ЛКМ — объект, ПКМ — фон. Рамка: протяните ЛКМ.")
 
 
 class SamAutoLabelController:
@@ -290,6 +341,7 @@ class SamAutoLabelController:
         panel = self.panel
         panel.browse_weights.clicked.connect(self.browse_weights)
         panel.browse_tokenizer.clicked.connect(self.browse_tokenizer)
+        panel.browse_dino.clicked.connect(self.browse_dino)
         panel.load.clicked.connect(self.load)
         panel.run.clicked.connect(self.run)
         panel.accept.clicked.connect(self.accept)
@@ -301,12 +353,15 @@ class SamAutoLabelController:
         panel.box.clicked.connect(lambda: self.tool("box"))
         panel.model.currentIndexChanged.connect(self.model_changed)
         panel.mode.currentIndexChanged.connect(self.mode_changed)
-        for edit in (panel.weights, panel.tokenizer):
+        for edit in (panel.weights, panel.tokenizer, panel.dino_directory):
             edit.textChanged.connect(self.model_changed)
         panel.device.currentIndexChanged.connect(self.model_changed)
+        panel.dino_device.currentIndexChanged.connect(self.model_changed)
         for widget, signal in ((panel.text, "textChanged"), (panel.class_id, "valueChanged"),
                                (panel.kind, "currentIndexChanged"), (panel.area, "valueChanged"),
-                               (panel.score, "valueChanged"), (panel.replace, "toggled")):
+                               (panel.score, "valueChanged"), (panel.replace, "toggled"),
+                               (panel.dino_box_score, "valueChanged"), (panel.dino_text_score, "valueChanged"),
+                               (panel.dino_nms, "valueChanged"), (panel.dino_max_objects, "valueChanged")):
             getattr(widget, signal).connect(self.invalidate)
         self.view.prompts_changed.connect(self.invalidate)
         owner.auto_backend_combo.currentIndexChanged.connect(self.provider_changed)
@@ -358,8 +413,7 @@ class SamAutoLabelController:
         self.stop_tool()
         self.view.clear_sam_prompts()
         self.panel.capabilities()
-        if self.panel.model.currentData() == "sam3":
-            self.panel.status.setText("Режим SAM3 изменён. Нажмите «Загрузить SAM».")
+        self.panel.status.setText(f"Режим изменён. Нажмите «{self.panel.load.text()}».")
 
     def model_changed(self, *_):
         self.invalidate(cancel_load=True)
@@ -369,7 +423,9 @@ class SamAutoLabelController:
         panel = self.panel
         return (panel.model.currentData(), panel.weights.text().strip(),
                 panel.device.currentText(), panel.tokenizer.text().strip(),
-                panel.mode.currentData() if panel.model.currentData() == "sam3" else "points")
+                panel.mode.currentData(),
+                panel.dino_directory.text().strip() if panel.mode.currentData() == "grounded" else "",
+                panel.dino_device.currentData() if panel.mode.currentData() == "grounded" else "cpu")
 
     def browse_weights(self):
         path, _ = source_dialogs.get_open_file(self.owner, "model_torch", directory=str(MODELS_DIR))
@@ -387,6 +443,11 @@ class SamAutoLabelController:
         path, _ = source_dialogs.get_open_file(self.owner, "sam_tokenizer", directory=str(MODELS_DIR))
         if path:
             self.panel.tokenizer.setText(path)
+
+    def browse_dino(self):
+        path = source_dialogs.get_directory(self.owner, "model_directory", directory=str(MODELS_DIR))
+        if path:
+            self.panel.dino_directory.setText(path)
 
     def selected_box(self):
         index = self.view.selected_index
@@ -460,9 +521,18 @@ class SamAutoLabelController:
                 self.loaded_key = key
                 self.panel.status.setText(f"Модель загружена: {key[0]} ({backend.device}). Укажите подсказки.")
                 self.owner.log(f"[SAM] Локальные веса: {key[1]}; архитектура: {key[0]}; устройство: {backend.device}")
+                if key[4] == "grounded":
+                    detector_device = getattr(getattr(backend, "detector", None), "device", key[6])
+                    self.owner.log(f"[Grounding DINO] Локальная папка: {key[5]}; устройство: {detector_device}")
+                    self.panel.status.setText(f"SAM2: {backend.device}; Grounding DINO: {detector_device}. Введите текстовый запрос.")
 
-        self._start(lambda cancel: LocalSAM.load(key[0], key[1], device=key[2], tokenizer=key[3] or None, prompt_mode=key[4]),
-                    accept, "Загрузка локальной модели SAM…", loading=True)
+        def compute(cancel):
+            if key[4] == "grounded":
+                return GroundedSAM2.load(key[0], key[1], key[5], device=key[2], detector_device=key[6], cancel=cancel)
+            return LocalSAM.load(key[0], key[1], device=key[2], tokenizer=key[3] or None, prompt_mode=key[4])
+
+        self._start(compute, accept, "Загрузка SAM2 и Grounding DINO…" if key[4] == "grounded"
+                    else "Загрузка локальной модели SAM…", loading=True)
 
     def run(self):
         if self.job is not None:
@@ -476,12 +546,12 @@ class SamAutoLabelController:
         image = self.owner._lazy_cache.get(self.owner.current_index)["image"]
         panel = self.panel
         prompt = SamPrompt(tuple(self.view.sam_points), tuple(self.view.sam_labels), self.view.sam_box,
-                           panel.text.text() if panel.mode.currentData() == "text" else "")
-        if panel.mode.currentData() == "text" and not prompt.text.strip():
+                           panel.text.text() if panel.mode.currentData() in ("text", "grounded") else "")
+        if panel.mode.currentData() in ("text", "grounded") and not prompt.text.strip():
             panel.status.setText("Введите текстовый запрос или выберите режим «Точки и рамка» и загрузите модель заново.")
             return
         try:
-            prompt.validated(image.shape[1], image.shape[0], supports_text=self.backend.model_key == "sam3")
+            prompt.validated(image.shape[1], image.shape[0], supports_text=(self.backend.model_key == "sam3" or getattr(self.backend, "supports_text", False)))
         except ValueError as error:
             panel.status.setText(str(error))
             return
@@ -490,15 +560,17 @@ class SamAutoLabelController:
         backend = self.backend
         options = dict(class_id=panel.class_id.value(), kind=panel.kind.currentData(), min_area=panel.area.value())
         min_score = panel.score.value()
+        detector_options = dict(box_threshold=panel.dino_box_score.value(), text_threshold=panel.dino_text_score.value(),
+                                nms_threshold=panel.dino_nms.value(), max_objects=panel.dino_max_objects.value()) if panel.mode.currentData() == "grounded" else {}
 
         def compute(cancel):
-            result = backend.predict(image, prompt, image_key=key[0], min_score=min_score, cancel=cancel)
-            return result.annotations(**options), result.scores
+            result = backend.predict(image, prompt, image_key=key[0], min_score=min_score, cancel=cancel, **detector_options)
+            return result.annotations(**options), result.scores, result.detection_scores, result.phrases, result.detected_count
 
         def accept(value):
             if key[:2] != (self.identity(), self.revision):
                 return
-            annotations, scores = value
+            annotations, scores, detections, phrases, detected_count = value
             self.preview_key = key
             self.view.sam_preview = annotations
             self.view.viewport().update()
@@ -506,8 +578,15 @@ class SamAutoLabelController:
             score_text = ", ".join(f"{score:.3f}" for score in scores[:10])
             panel.status.setText(f"Предпросмотр: {len(annotations)} объектов. Оценки: {score_text or '—'}. "
                                  "Проверьте контуры и нажмите «Принять результат».")
+            if detections is not None:
+                detection_text = ", ".join(f"{phrase}: {score:.3f}" for phrase, score in list(zip(phrases, detections))[:10])
+                count = len(detections) if detected_count is None else detected_count
+                panel.status.setText(f"Рамок DINO: {count}; масок SAM2: {len(scores)}; объектов: {len(annotations)}. "
+                                     f"IoU SAM2: {score_text or '—'}. Grounding DINO: {detection_text or '—'}. "
+                                     "Проверьте результат и пороги перед принятием.")
 
-        self._start(compute, accept, "Вычисление маски SAM…")
+        self._start(compute, accept, "Поиск Grounding DINO и сегментация SAM2…" if detector_options
+                    else "Вычисление маски SAM…")
 
     def accept(self):
         if (self.preview_key is None or self.preview_key[:2] != (self.identity(), self.revision)

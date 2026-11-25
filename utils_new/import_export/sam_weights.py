@@ -35,6 +35,10 @@ class Asset:
     url: str
     kind: str = "weights"
 
+    @property
+    def is_weights(self):
+        return self.kind in ("weights", "safetensors")
+
 
 @dataclass(frozen=True)
 class Model:
@@ -72,6 +76,27 @@ def _catalog():
 
 
 MODELS = _catalog()
+
+
+def _grounding_catalog():
+    models = {}
+    for variant, revision in (("tiny", "a2bb814dd30d776dcf7e30523b00659f4f141c71"),
+                              ("base", "12bdfa3120f3e7ec7b434d90674b3396eccf88eb")):
+        repo = f"IDEA-Research/grounding-dino-{variant}"
+        files = [("model.safetensors", "safetensors"), ("config.json", "json"),
+                 ("preprocessor_config.json", "json"), ("tokenizer_config.json", "json"),
+                 ("tokenizer.json", "json"), ("special_tokens_map.json", "json"),
+                 ("vocab.txt", "text"), ("README.md", "text")]
+        if variant == "tiny":
+            files.append(("added_tokens.json", "json"))
+        models[f"grounding-dino-{variant}"] = Model(f"Grounding DINO {variant} (Transformers)", tuple(
+            Asset(f"grounding_dino/{variant}/{name}", f"https://huggingface.co/{repo}/resolve/{revision}/{name}", kind)
+            for name, kind in files))
+    return models
+
+
+GROUNDING_MODELS = _grounding_catalog()
+DOWNLOAD_MODELS = {**MODELS, **GROUNDING_MODELS}
 ALIASES = {"sam": "sam-vit-b", "sam2": "sam2.1-tiny"}
 
 
@@ -92,7 +117,7 @@ def select_models(names):
     for name in names:
         keys = MODELS if name == "all" else (ALIASES.get(name, name),)
         for key in keys:
-            if key not in MODELS:
+            if key not in DOWNLOAD_MODELS:
                 raise ValueError(f"Неизвестная модель: {key}. Список: --list")
             if key not in selected:
                 selected.append(key)
@@ -125,7 +150,35 @@ def validate_asset_file(path, asset):
     """Check containers without loading Torch or executing checkpoint pickle."""
     with path.open("rb") as stream:
         prefix = stream.read(1024)
-    if asset.kind == "weights":
+    if asset.kind == "safetensors":
+        header_size = int.from_bytes(prefix[:8], "little")
+        size = path.stat().st_size
+        if not 2 <= header_size <= min(100 * 1024 * 1024, size - 8):
+            raise ValueError("Некорректный заголовок safetensors")
+        with path.open("rb") as stream:
+            stream.read(8)
+            header = json.loads(stream.read(header_size))
+        if not isinstance(header, dict):
+            raise ValueError("Некорректный заголовок safetensors")
+        tensors = [value for key, value in header.items() if key != "__metadata__"]
+        ends = []
+        for tensor in tensors:
+            offsets = tensor.get("data_offsets") if isinstance(tensor, dict) else None
+            if (not isinstance(offsets, list) or len(offsets) != 2
+                    or not all(type(value) is int for value in offsets)
+                    or not 0 <= offsets[0] <= offsets[1] <= size - 8 - header_size):
+                raise ValueError("Некорректный или неполный safetensors checkpoint")
+            ends.append(offsets[1])
+        if not ends or max(ends) != size - 8 - header_size:
+            raise ValueError("Некорректный размер safetensors checkpoint")
+    elif asset.kind == "json":
+        with path.open(encoding="utf-8") as stream:
+            if not isinstance(json.load(stream), dict):
+                raise ValueError("Ожидается JSON-объект конфигурации модели")
+    elif asset.kind == "text":
+        if not path.read_text(encoding="utf-8").strip():
+            raise ValueError("Получен пустой текстовый ресурс модели")
+    elif asset.kind == "weights":
         if prefix.startswith(b"PK\x03\x04"):
             try:
                 with zipfile.ZipFile(path) as archive:
@@ -161,7 +214,8 @@ def existing_asset_path(asset, output, receipt, explicit=None):
         if recorded.is_file():
             return recorded
     # Check only the expected directory and its supplied root, never scan a dataset/venv.
-    for directory in dict.fromkeys((canonical.parent, output)):
+    directories = (canonical.parent, output) if asset.kind in ("weights", "tokenizer") else (canonical.parent,)
+    for directory in dict.fromkeys(directories):
         if directory.is_dir():
             matches = [path for path in directory.iterdir()
                        if path.is_file() and path.name.casefold() == canonical.name.casefold()]
@@ -192,7 +246,7 @@ def download_asset(asset, output, manifest, *, opener, token=None, force=False, 
 
     target.parent.mkdir(parents=True, exist_ok=True)
     headers = {"User-Agent": "Neuro-threshold-SAM-downloader/1", "Accept-Encoding": "identity"}
-    if urlsplit(asset.url).hostname == "huggingface.co":
+    if asset.url.startswith("https://huggingface.co/facebook/sam3/"):
         credential = token() if callable(token) else token
         if credential and any(character.isspace() or not character.isascii() for character in credential):
             raise ValueError("Некорректный HF_TOKEN: ожидается токен без пробелов и переносов строк")
@@ -235,7 +289,7 @@ def download_asset(asset, output, manifest, *, opener, token=None, force=False, 
 
 def _http_error_message(error, asset):
     # Never print a signed CDN URL, headers, bearer token or response body.
-    if urlsplit(asset.url).hostname == "huggingface.co" and error.code in (401, 403):
+    if asset.url.startswith("https://huggingface.co/facebook/sam3/") and error.code in (401, 403):
         return (f"HTTP {error.code}: SAM3 требует доступа к https://huggingface.co/facebook/sam3. "
                 "Примите условия, дождитесь доступа и задайте HF_TOKEN с правом чтения "
                 "этого репозитория либо используйте --ask-token.")
@@ -244,7 +298,7 @@ def _http_error_message(error, asset):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Скачать официальные веса SAM/SAM2/SAM3 и файлы для локальной загрузки. "
+        description="Скачать веса SAM/SAM2/SAM3, Grounding DINO и файлы для локальной загрузки. "
                     "Без установки PyTorch и моделей. По умолчанию: SAM ViT-B, SAM2.1 Tiny, SAM3.")
     parser.add_argument("--models", nargs="+", default=["sam", "sam2", "sam3"],
                         metavar="MODEL", help="Имена из --list; sam, sam2 и all — сокращения")
@@ -261,9 +315,9 @@ def main(argv=None):
     parser.add_argument("--retries", type=int, default=2, help="Повторы после временного сетевого сбоя (0–5)")
     args = parser.parse_args(argv)
     if args.list:
-        for key, model in MODELS.items():
+        for key, model in DOWNLOAD_MODELS.items():
             print(f"{key:20} {model.name}")
-        print("Сокращения: sam = sam-vit-b; sam2 = sam2.1-tiny; all = все варианты.")
+        print("Сокращения: sam = sam-vit-b; sam2 = sam2.1-tiny; all = все варианты SAM. Grounding DINO выбирается отдельно.")
         return 0
     if not 0 <= args.retries <= 5 or not 0 < args.timeout < float("inf"):
         parser.error("--retries: от 0 до 5; --timeout: положительное конечное число")
@@ -277,20 +331,20 @@ def main(argv=None):
         output = (args.output or (weights_file.parent if weights_file else DEFAULT_OUTPUT)).expanduser().resolve()
 
         def assets_for(key):
-            assets = MODELS[key].assets
+            assets = DOWNLOAD_MODELS[key].assets
             if args.extras_only:
-                return tuple(asset for asset in assets if asset.kind != "weights")
+                return tuple(asset for asset in assets if not asset.is_weights)
             if weights_file:
                 # Keep auxiliary files beside the explicitly selected weights by default.
-                return tuple(asset if asset.kind == "weights" else replace(
-                    asset, path=Path(asset.path).relative_to(Path(assets[0].path).parts[0]).as_posix()) for asset in assets)
+                return tuple(asset if asset.is_weights else replace(
+                    asset, path=Path(asset.path).relative_to(Path(assets[0].path).parent).as_posix()) for asset in assets)
             return assets
 
         print(f"Папка: {output}")
         if args.dry_run:
             for key in selected:
                 for asset in assets_for(key):
-                    if weights_file and asset.kind == "weights":
+                    if weights_file and asset.is_weights:
                         print(f"Готовые веса: {weights_file}")
                     else:
                         print(f"{asset.path}\n  {asset.url}")
@@ -312,13 +366,13 @@ def main(argv=None):
         opener = build_opener(SafeRedirectHandler())
         failed = []
         for key in selected:
-            print(f"\n{MODELS[key].name}", flush=True)
+            print(f"\n{DOWNLOAD_MODELS[key].name}", flush=True)
             for asset in assets_for(key):
                 for attempt in range(args.retries + 1):
                     try:
                         receipt = download_asset(asset, output, manifest, opener=opener,
                                                  token=auth_token, force=args.force, timeout=args.timeout,
-                                                 existing_path=weights_file if asset.kind == "weights" else None)
+                                                 existing_path=weights_file if asset.is_weights else None)
                     except HTTPError as error:
                         message = _http_error_message(error, asset)
                         retry = error.code in (408, 429, 500, 502, 503, 504)
