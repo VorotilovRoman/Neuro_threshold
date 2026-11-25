@@ -41,6 +41,18 @@ def installed_opencv():
     return versions
 
 
+def inherited_opencv():
+    """Locate visible cv2 distributions that pip cannot safely repair in this venv."""
+    prefix = Path(sys.prefix).resolve()
+    inherited = {}
+    for name in OPENCV_PROVIDERS:
+        for distribution in metadata.distributions(name=name):
+            location = Path(distribution.locate_file('')).resolve()
+            if not location.is_relative_to(prefix):
+                inherited[name] = str(location)
+    return inherited
+
+
 def direct_requirement_errors(requirements_file=None):
     """Validate the declared direct pins, accepting local Torch build suffixes."""
     requirements_file = requirements_file or Path(__file__).with_name('requirements.txt')
@@ -71,6 +83,10 @@ def check_environment(torch_profile=None):
     """
     providers = installed_opencv()
     errors = direct_requirement_errors()
+    external = inherited_opencv()
+    if external and sys.prefix != sys.base_prefix:
+        errors.append('OpenCV is inherited from outside the virtual environment: ' + repr(external)
+                      + '. Use an isolated venv without global site-packages/PYTHONPATH.')
     if torch_profile is not None:
         if torch_profile not in TORCH_PROFILES:
             raise ValueError(f'Unknown Torch profile: {torch_profile}')

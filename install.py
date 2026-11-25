@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Install a consistent dependency profile into the current Python environment."""
 import argparse
+import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from dependency_health import (
     OPENCV_PROVIDERS, SELECTED_OPENCV, TORCH_PROFILES,
-    installed_opencv, installed_torch_profile,
+    inherited_opencv, installed_opencv, installed_torch_profile,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -19,6 +21,39 @@ def run_pip(*args, dry_run=False):
     print('+', ' '.join(command), flush=True)
     if not dry_run:
         subprocess.run(command, cwd=ROOT, check=True)
+
+
+def check_installation_environment():
+    """Fail before pip changes packages; never import cv2 just to diagnose it."""
+    external = inherited_opencv()
+    if external:
+        locations = '; '.join(f'{name}: {path}' for name, path in external.items())
+        raise ValueError(
+            'OpenCV из глобального Python виден внутри .venv: ' + locations + '. '
+            'pip не может удалить эти пакеты из текущего окружения. Создайте изолированное '
+            'окружение без Inherit global site-packages и внешнего PYTHONPATH: '
+            'python -m venv .venv_clean. Веса в models сохраняются.')
+    if sys.platform != 'win32':
+        return
+    spec = importlib.util.find_spec('cv2')
+    if spec is None:
+        return
+    files = []
+    if spec.origin and spec.origin.lower().endswith('.pyd'):
+        files.append(Path(spec.origin))
+    for directory in spec.submodule_search_locations or ():
+        files.extend(Path(directory).glob('*.pyd'))
+    for path in files:
+        try:
+            # OPEN_EXISTING semantics: request write access without changing bytes.
+            descriptor = os.open(path, os.O_RDWR | getattr(os, 'O_BINARY', 0))
+            os.close(descriptor)
+        except OSError as error:
+            raise ValueError(
+                f'Нельзя обновить {path}: {error}. Закройте приложение, Python Console '
+                'в PyCharm и Jupyter, использующие это окружение, затем повторите установку. '
+                'Если доступ по-прежнему запрещён, проверьте права и защиту файла. '
+                'Проверка не изменяла DLL; pip ещё не запускался.') from error
 
 
 def normalize_opencv(dry_run=False, force=False):
@@ -51,6 +86,8 @@ def main(argv=None):
     if sys.prefix == sys.base_prefix and not args.dry_run:
         parser.error('Activate a virtual environment first: python -m venv .venv')
     try:
+        if not args.dry_run:
+            check_installation_environment()
         if not args.repair_opencv:
             selected_profile = args.torch or installed_torch_profile() or 'cpu'
             # One resolution includes the exact local Torch build and all extras.

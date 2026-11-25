@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 from unittest.mock import patch
 
 import dependency_health
@@ -55,10 +56,12 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(len(notes), 1)
 
     def test_installer_stops_after_pip_failure(self):
-        with patch.object(install, 'run_pip', side_effect=subprocess.CalledProcessError(1, 'pip')), \
+        with patch.object(install, 'run_pip', side_effect=subprocess.CalledProcessError(1, 'pip')) as pip, \
                 patch.object(install.sys, 'prefix', '/temporary/venv'), \
+                patch.object(install, 'check_installation_environment'), \
                 patch.object(install, 'normalize_opencv') as normalize:
             self.assertEqual(install.main([]), 1)
+        pip.assert_called_once()
         normalize.assert_not_called()
 
     def test_direct_pin_check_accepts_local_torch_builds(self):
@@ -161,6 +164,7 @@ class InstallationTests(unittest.TestCase):
 
     def test_gpu_installation_requires_successful_real_cuda_verification(self):
         with patch.object(install, 'run_pip'), \
+                patch.object(install, 'check_installation_environment'), \
                 patch.object(install, 'normalize_opencv'), \
                 patch.object(install.sys, 'prefix', '/temporary/venv'), \
                 patch.object(install.subprocess, 'run',
@@ -171,6 +175,7 @@ class InstallationTests(unittest.TestCase):
 
     def test_cpu_installation_does_not_require_a_gpu(self):
         with patch.object(install, 'run_pip'), \
+                patch.object(install, 'check_installation_environment'), \
                 patch.object(install, 'normalize_opencv'), \
                 patch.object(install.sys, 'prefix', '/temporary/venv'), \
                 patch.object(install.subprocess, 'run') as verify:
@@ -216,6 +221,68 @@ class InstallationTests(unittest.TestCase):
             self.assertIn(f'https://download.pytorch.org/whl/{backend}', text)
             self.assertIn('-r ../requirements.txt', text)
             self.assertIn('--extra-index-url ', text)
+
+    def test_inherited_opencv_including_shadowed_global_distribution_is_detected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prefix, global_site = root / 'venv', root / 'base' / 'site-packages'
+            local = Mock(locate_file=Mock(return_value=prefix / 'Lib/site-packages'))
+            external = Mock(locate_file=Mock(return_value=global_site))
+            def visible(name):
+                return [local, external] if name == 'opencv-python' else [local] if name == 'opencv-python-headless' else []
+            with patch.object(dependency_health.sys, 'prefix', str(prefix)), \
+                    patch.object(dependency_health.metadata, 'distributions', side_effect=visible):
+                self.assertEqual(dependency_health.inherited_opencv(), {'opencv-python': str(global_site)})
+
+    def test_inherited_opencv_stops_installer_before_any_package_changes(self):
+        with patch.object(install.sys, 'prefix', '/temporary/venv'), \
+                patch.object(install, 'inherited_opencv', return_value={'opencv-python': '/base/site-packages'}), \
+                patch.object(install, 'run_pip') as pip, \
+                patch.object(install, 'normalize_opencv') as normalize:
+            self.assertEqual(install.main(['--extra', 'sam']), 1)
+        pip.assert_not_called()
+        normalize.assert_not_called()
+
+    def test_locked_windows_cv2_is_reported_without_importing_or_rewriting_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            native = Path(directory) / 'cv2.pyd'
+            native.write_bytes(b'unchanged native extension')
+            spec = SimpleNamespace(origin=str(Path(directory) / '__init__.py'), submodule_search_locations=[directory])
+            with patch.object(install, 'inherited_opencv', return_value={}), \
+                    patch.object(install.sys, 'platform', 'win32'), \
+                    patch.object(install.importlib.util, 'find_spec', return_value=spec), \
+                    patch.object(install.os, 'open', side_effect=PermissionError('WinError 5')), \
+                    self.assertRaisesRegex(ValueError, 'Python Console'):
+                install.check_installation_environment()
+            self.assertEqual(native.read_bytes(), b'unchanged native extension')
+
+    def test_windows_cv2_probe_never_truncates_extension(self):
+        with tempfile.TemporaryDirectory() as directory:
+            native = Path(directory) / 'cv2.pyd'
+            native.write_bytes(b'unchanged native extension')
+            spec = SimpleNamespace(origin=str(native), submodule_search_locations=[])
+            with patch.object(install, 'inherited_opencv', return_value={}), \
+                    patch.object(install.sys, 'platform', 'win32'), \
+                    patch.object(install.importlib.util, 'find_spec', return_value=spec):
+                install.check_installation_environment()
+            self.assertEqual(native.read_bytes(), b'unchanged native extension')
+
+    def test_dry_run_does_not_probe_or_block_global_environment(self):
+        with patch.object(install, 'check_installation_environment') as preflight, \
+                patch.object(install, 'run_pip'), patch.object(install, 'normalize_opencv'):
+            self.assertEqual(install.main(['--torch', 'cu126', '--extra', 'sam', '--dry-run']), 0)
+        preflight.assert_not_called()
+
+    def test_health_rejects_inherited_cv2_before_importing_native_modules(self):
+        output = subprocess.CompletedProcess([], 0, 'No broken requirements found.\n', '')
+        with patch.object(dependency_health.sys, 'prefix', '/temporary/venv'), \
+                patch.object(dependency_health, 'inherited_opencv', return_value={'opencv-python': '/base/site-packages'}), \
+                patch.object(dependency_health, 'installed_opencv', return_value={'opencv-python-headless': '4.13.0.92'}), \
+                patch.object(dependency_health, 'direct_requirement_errors', return_value=[]), \
+                patch.object(dependency_health.subprocess, 'run', return_value=output), \
+                patch.object(dependency_health.importlib, 'import_module') as imports:
+            self.assertEqual(dependency_health.main(['--load']), 1)
+        imports.assert_not_called()
 
 
 if __name__ == '__main__':

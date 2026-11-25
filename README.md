@@ -48,6 +48,21 @@ python dependency_health.py --torch-profile cu126 --cuda-test
 исключение метаданных. После ручной установки пакетов выполните
 `python install.py --repair-opencv` и диагностику.
 
+При `WinError 5` на `cv2.pyd` остановите приложение, Python Console в PyCharm
+и Jupyter, использующие это окружение. Установщик проверяет доступ к DLL до pip.
+Если в логе есть пакеты из глобального Python (`AppData/.../Python312/Lib/site-packages`),
+создайте изолированное окружение без **Inherit global site-packages** и внешнего
+`PYTHONPATH`. Пример для NVIDIA и моделей SAM/DINO, из корня проекта:
+
+```powershell
+python -m venv .venv_clean
+.\.venv_clean\Scripts\python.exe install.py --torch cu126 --extra sam --extra grounding-dino
+.\.venv_clean\Scripts\python.exe main.py
+```
+
+В PyCharm выберите `.venv_clean/Scripts/python.exe` как интерпретатор проекта.
+Папка `models/` и старое окружение сохраняются; веса повторно скачивать не нужно.
+
 При Windows-ошибке `c10.dll` сначала проверьте окружение командой
 `python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"`.
 Если падает и она, проверьте совместимость wheel, драйвера и Visual C++ Runtime.
