@@ -52,6 +52,9 @@ python dependency_health.py --torch-profile cu126 --cuda-test
 Если падает и она, проверьте совместимость wheel, драйвера и Visual C++ Runtime.
 Повторный Python-import использует кеш модуля и сам по себе не меняет версию библиотеки.
 
+Локальные веса SAM/SAM2/SAM3: `python -m utils_new.import_export.sam_weights --help`.
+[Выбор моделей, скачивание и доступ к SAM3](docs/deep_learning.md#скачивание-весов-sam-для-локального-применения).
+
 ## Вкладки
 
 | Вкладка | Для чего |
