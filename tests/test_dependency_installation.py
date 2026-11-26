@@ -12,6 +12,13 @@ import install
 
 
 class InstallationTests(unittest.TestCase):
+    def setUp(self):
+        # Installer policy tests must not depend on a developer's legacy XGBoost wheel.
+        for target in ('install.installed_xgboost', 'dependency_health.installed_xgboost'):
+            probe = patch(target, return_value={})
+            probe.start()
+            self.addCleanup(probe.stop)
+
     def test_removing_desktop_always_restores_headless_files(self):
         with patch.object(install, 'installed_opencv', return_value={
                 'opencv-python': '4.13.0.92', 'opencv-python-headless': '4.13.0.92'}), \
@@ -54,6 +61,18 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn('example', errors[0])
         self.assertEqual(len(notes), 1)
+
+    def test_sahi_headless_exception_does_not_hide_its_other_missing_dependencies(self):
+        result = subprocess.CompletedProcess([], 1,
+            'sahi 0.14.1 requires opencv-python, which is not installed.\n'
+            'sahi 0.14.1 requires pillow, which is not installed.\n', '')
+        with patch.object(dependency_health, 'installed_opencv', return_value={'opencv-python-headless': '4.13.0.92'}), \
+                patch.object(dependency_health, 'direct_requirement_errors', return_value=[]), \
+                patch.object(dependency_health.subprocess, 'run', return_value=result):
+            errors, notes = dependency_health.check_environment()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIn('pillow', errors[0])
 
     def test_installer_stops_after_pip_failure(self):
         with patch.object(install, 'run_pip', side_effect=subprocess.CalledProcessError(1, 'pip')) as pip, \

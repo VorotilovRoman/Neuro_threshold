@@ -3,7 +3,7 @@ import argparse
 import importlib
 import importlib.metadata as metadata
 import json
-import re
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +14,43 @@ OPENCV_PROVIDERS = (
     'opencv-contrib-python', 'opencv-contrib-python-headless',
 )
 TORCH_PROFILES = ('cpu', 'cu126', 'cu130')
+CORE_MODULES = ('torch', 'torchvision', 'numpy', 'cv2', 'ultralytics', 'onnxruntime',
+    'albumentations', 'PyQt5.QtCore', 'scipy', 'skimage', 'sklearn', 'xgboost', 'pyamg',
+    'shapely', 'joblib', 'networkx', 'pandas', 'tqdm', 'requests', 'yaml', 'PIL',
+    'matplotlib', 'seaborn', 'packaging')
+EXTRA_MODULES = {
+    'training': ('segmentation_models_pytorch', 'psutil'),
+    'audit': ('imagehash', 'open_clip', 'transformers', 'umap', 'hdbscan'),
+    'sahi': ('sahi',),
+    'export': ('onnx', 'tifffile'),
+    'sam': ('segment_anything', 'sam2', 'clip', 'ftfy', 'regex'),
+    'grounding-dino': ('transformers',),
+}
+
+
+def selected_extras(values=()):
+    result = []
+    for value in values:
+        for key in EXTRA_MODULES if value == 'all' else (value,):
+            if key not in EXTRA_MODULES:
+                raise ValueError(f'Unknown dependency extra: {key}')
+            if key not in result:
+                result.append(key)
+    return result
+
+
+def installed_xgboost():
+    result = {}
+    for name in ('xgboost', 'xgboost-cpu'):
+        try:
+            result[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            pass
+    return result
+
+
+def selected_xgboost():
+    return 'xgboost' if platform.system() == 'Darwin' else 'xgboost-cpu'
 
 
 def installed_torch_profile():
@@ -54,35 +91,51 @@ def inherited_opencv():
 
 
 def direct_requirement_errors(requirements_file=None):
-    """Validate the declared direct pins, accepting local Torch build suffixes."""
+    """Validate pins, ranges, markers, unpinned and VCS distributions without native imports."""
+    from packaging.requirements import Requirement
     requirements_file = requirements_file or Path(__file__).with_name('requirements.txt')
     errors = []
     for line in requirements_file.read_text(encoding='utf-8').splitlines():
-        match = re.fullmatch(r'([A-Za-z0-9_.-]+)==([^\s#]+)', line.strip())
-        if not match:
+        line = line.strip()
+        if not line or line.startswith(('#', '-')):
             continue
-        name, expected = match.groups()
+        requirement = Requirement(line)
+        if requirement.marker and not requirement.marker.evaluate():
+            continue
+        name = requirement.name
+        expected = str(requirement.specifier) or 'installed'
         try:
             actual = metadata.version(name)
         except metadata.PackageNotFoundError:
             errors.append(f'{name}: required {expected}, not installed')
             continue
-        comparable = (actual.split('+')[0]
-                      if name in {'torch', 'torchvision'} and '+' not in expected else actual)
-        if comparable != expected:
+        if requirement.specifier and not requirement.specifier.contains(actual):
             errors.append(f'{name}: expected {expected}, installed {actual}')
+        if requirement.url and requirement.url.startswith('git+'):
+            expected_repo, _, revision = requirement.url[4:].rpartition('@')
+            data = metadata.distribution(name).read_text('direct_url.json')
+            source = json.loads(data) if data else {}
+            if (source.get('url', '').removesuffix('.git') != expected_repo.removesuffix('.git')
+                    or source.get('vcs_info', {}).get('commit_id') != revision):
+                errors.append(f'{name}: expected pinned Git source {revision}; reinstall this extra with install.py')
     return errors
 
 
-def check_environment(torch_profile=None):
+def check_environment(torch_profile=None, extras=()):
     """Return errors and explicitly allowed metadata exceptions.
 
-    Ultralytics requests opencv-python by distribution name, but uses the same
+    Ultralytics and SAHI request opencv-python by distribution name, but use the same
     cv2 API from the headless wheel. PyQt supplies our GUI. Do not install both to make
     pip check quiet: their shared files would become ambiguous again.
     """
     providers = installed_opencv()
     errors = direct_requirement_errors()
+    for extra in selected_extras(extras):
+        errors.extend(direct_requirement_errors(Path(__file__).with_name('requirements') / f'optional-{extra}.txt'))
+    xgb = installed_xgboost()
+    selected_xgb = selected_xgboost()
+    if xgb and set(xgb) != {selected_xgb}:
+        errors.append(f'Expected only {selected_xgb}; found {xgb}. Run python install.py to repair shared xgboost files.')
     external = inherited_opencv()
     if external and sys.prefix != sys.base_prefix:
         errors.append('OpenCV is inherited from outside the virtual environment: ' + repr(external)
@@ -102,7 +155,7 @@ def check_environment(torch_profile=None):
             continue
         fields = line.lower().split()
         if (set(providers) == {SELECTED_OPENCV} and fields and
-                fields[0] == 'ultralytics' and
+                fields[0] in {'ultralytics', 'sahi'} and
                 'requires opencv-python, which is not installed.' in line.lower()):
             notes.append(line + ' Using the selected headless cv2 provider (GUI is PyQt5).')
         elif line.strip():
@@ -166,9 +219,17 @@ def main(argv=None):
                         help='Require this exact Torch/torchvision CPU/CUDA wheel pair')
     parser.add_argument('--cuda-test', action='store_true',
                         help='Load libraries and execute CUDA forward/backward and torchvision NMS')
+    parser.add_argument('--extra', action='append', choices=(*EXTRA_MODULES, 'all'), default=[],
+                        help='Also validate optional features; repeat or use all')
     args = parser.parse_args(argv)
-    errors, notes = check_environment(args.torch_profile)
+    extras = selected_extras(args.extra)
+    try:
+        errors, notes = check_environment(args.torch_profile, extras=extras)
+    except ImportError:
+        print('ERROR: packaging is missing. Run python -m pip install packaging==26.3', file=sys.stderr)
+        return 1
     print('OpenCV providers:', json.dumps(installed_opencv(), ensure_ascii=False))
+    print('Checked extras:', ', '.join(extras) if extras else 'none (use --extra all to check optional features)')
     for note in notes:
         print('METADATA EXCEPTION:', note)
     for error in errors:
@@ -176,8 +237,8 @@ def main(argv=None):
     if (args.load or args.cuda_test) and not errors:
         loaded = {}
         # Match the application bootstrap: Torch before cv2/Qt native DLLs on Windows.
-        for name in ('torch', 'torchvision', 'numpy', 'cv2', 'ultralytics',
-                     'onnxruntime', 'albumentations', 'PyQt5.QtCore'):
+        modules = (*CORE_MODULES, *(name for extra in extras for name in EXTRA_MODULES[extra]))
+        for name in dict.fromkeys(modules):
             try:
                 if name == 'ultralytics':
                     from runtime_policy import configure_ultralytics

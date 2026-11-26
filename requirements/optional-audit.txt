@@ -1,7 +1,6 @@
-# Optional features; versions are not locked. Validate your model backend.
-ImageHash
-open-clip-torch
-transformers
-umap-learn
-hdbscan
-xgboost
+# Dataset audit backends resolved against the pinned core and imported together.
+ImageHash==4.3.2
+open-clip-torch==4.2.2
+transformers==5.24.1
+umap-learn==0.6.0
+hdbscan==0.8.44

@@ -37,7 +37,9 @@ def export_onnx(model, metadata, imgsz, run_dir=None, *, log=print):
         log("[EXPORT][SKIPPED] ONNX не установлен; веса и метрики обучения сохранены.")
         return
     try:
-        result = model.export(format="onnx", imgsz=imgsz, device="cpu", batch=1)
+        # Ultralytics simplification requests onnxruntime-gpu whenever CUDA exists,
+        # even for CPU export. Keep a single ORT provider and an explicit exporter.
+        result = model.export(format="onnx", imgsz=imgsz, device="cpu", batch=1, simplify=False)
         path = Path(result) if result else None
         if path is None or not path.is_file():
             raise RuntimeError("Экспорт не создал ONNX-файл.")

@@ -38,12 +38,34 @@ python main.py
 `requirements/torch-*.txt`. После ручной установки восстановите OpenCV:
 `python install.py --repair-opencv`.
 
-Дополнительные пакеты подключаются флагами `--extra training`, `--extra audit`,
-`--extra sahi`, `--extra export`, `--extra sam`, `--extra grounding-dino`;
-флаги можно сочетать. Версии и состав — в [requirements](requirements/).
+В базу входят XGBoost и `pyamg` для Random Walker `cg_mg`. XGBoost работает на CPU
+(`xgboost-cpu` на Windows/Linux); нейросети используют выбранный профиль PyTorch.
+Установщик удаляет конкурирующий провайдер XGBoost и восстанавливает общие файлы.
+
+| Дополнение `--extra` | Функции и библиотеки |
+| --- | --- |
+| `training` | U-Net/DeepLab: segmentation-models-pytorch, psutil |
+| `audit` | ImageHash, OpenCLIP, Transformers, UMAP, HDBSCAN |
+| `sahi` | Нарезка датасетов SAHI |
+| `export` | Экспорт ONNX и TIFF: onnx, tifffile |
+| `sam` | SAM/SAM2 и CLIP для SAM3 |
+| `grounding-dino` | Grounding DINO через Transformers |
+
+Флаги можно сочетать; `--extra all` устанавливает все эти дополнения, веса моделей
+скачиваются отдельно. Версии — в [requirements](requirements/). Для обновления базы
+достаточно `python install.py`: установленный CPU/CUDA-профиль сохраняется.
+
+```bash
+python install.py --extra all
+python dependency_health.py --load --extra all
+```
+
+Без `--extra` диагностика проверяет базу; с выбранными дополнениями — их версии,
+источники Git и реальный импорт библиотек при `--load`. Отсутствующие дополнения
+не считаются ошибкой базовой установки. Установщик проверяет именно выбранные профили.
 
 Приложение использует один `opencv-python-headless`, окна создаёт PyQt5.
-Требование Ultralytics установить `opencv-python` — известное исключение метаданных.
+Требование Ultralytics/SAHI установить `opencv-python` — известное исключение метаданных.
 При `WinError 5` на `cv2.pyd` закройте использующие окружение процессы Python.
 При глобальных пакетах в `.venv` создайте окружение без **Inherit global site-packages**.
 При `c10.dll` проверьте импорт Torch отдельно, драйвер и Visual C++ Runtime.

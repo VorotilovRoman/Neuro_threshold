@@ -1,5 +1,7 @@
 """Pixel/superpixel features and classical estimator training."""
 
+from importlib.util import find_spec
+
 import cv2
 import numpy as np
 from skimage import feature, segmentation
@@ -8,13 +10,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 
-# Для XGBoost (если установлен)
-try:
-    import xgboost as xgb
-    XGBOOST_AVAILABLE = True
-except ImportError:
-    XGBOOST_AVAILABLE = False
-    print("XGBoost not installed, XGBoost model will be disabled")
+XGBOOST_AVAILABLE = find_spec("xgboost") is not None
 
 def extract_pixel_features(image, use_intensity=True, use_texture=False, use_spatial=False):
     h, w = image.shape[:2]
@@ -105,7 +101,11 @@ def train_random_forest(X, y, n_estimators=100):
 
 def train_xgboost(X, y, n_estimators=100):
     if not XGBOOST_AVAILABLE:
-        raise ImportError("XGBoost is not installed")
+        raise ImportError("XGBoost не установлен. Обновите базовые зависимости: python install.py")
+    try:
+        import xgboost as xgb
+    except (ImportError, OSError) as error:
+        raise ImportError("XGBoost установлен, но не загружается. Выполните python dependency_health.py --load") from error
     model = xgb.XGBClassifier(n_estimators=n_estimators, random_state=42, n_jobs=-1)
     model.fit(X, y)
     return model

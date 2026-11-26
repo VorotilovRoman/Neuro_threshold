@@ -17,6 +17,9 @@ YOLO принимает корень датасета/YOLO YAML; U-Net и DeepLa
 
 YOLO обучается из PT, не из ONNX/engine. AutoBatch — штатный механизм Ultralytics
 на CUDA; OOM означает, что нужна меньшая нагрузка, а не повторный импорт библиотек.
+Для ONNX установите `--extra export`. Экспорт YOLO выполняется на CPU с
+`simplify=false`: упрощение onnxslim не используется, второй ONNX Runtime GPU
+не требуется. Полученный граф проверяется через ONNX checker.
 Базовые U-Net/DeepLab ожидают целые ID масок и согласованный фон/ignore_index;
 U-Net считает число классов вместе с фоном. YAML имеет приоритет над полями.
 DeepLab импортирует TXT-пресет «ключ: значение», веса классов — JSON-массив.

@@ -246,6 +246,7 @@ class YoloWorkerTests(unittest.TestCase):
         model = self.models[-1]
         self.assertEqual(model.calls["export"]["device"], "cpu")
         self.assertEqual(model.calls["export"]["batch"], 1)
+        self.assertFalse(model.calls["export"]["simplify"])
         path = model.run_dir / "weights" / "best_onnx_meta.json"
         self.assertEqual(json.loads(path.read_text())["task"], "obb")
 

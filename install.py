@@ -10,10 +10,11 @@ from pathlib import Path
 from dependency_health import (
     OPENCV_PROVIDERS, SELECTED_OPENCV, TORCH_PROFILES,
     inherited_opencv, installed_opencv, installed_torch_profile,
+    EXTRA_MODULES, installed_xgboost, selected_extras, selected_xgboost,
 )
 
 ROOT = Path(__file__).resolve().parent
-EXTRAS = ('training', 'audit', 'sahi', 'export', 'sam', 'grounding-dino')
+EXTRAS = tuple(EXTRA_MODULES)
 
 
 def run_pip(*args, dry_run=False):
@@ -73,11 +74,22 @@ def normalize_opencv(dry_run=False, force=False):
         run_pip('install', '--no-deps', '--force-reinstall', pin, dry_run=dry_run)
 
 
+def normalize_xgboost(dry_run=False):
+    """Restore the selected provider after removing a legacy wheel sharing xgboost/ files."""
+    selected = selected_xgboost()
+    competing = [name for name in installed_xgboost() if name != selected]
+    if competing:
+        run_pip('uninstall', '-y', *competing, dry_run=dry_run)
+        pin = next(line.split(';')[0].strip() for line in (ROOT / 'requirements.txt').read_text().splitlines()
+                   if line.startswith(selected + '=='))
+        run_pip('install', '--no-deps', '--force-reinstall', pin, dry_run=dry_run)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--torch', choices=TORCH_PROFILES,
                         help='Torch/torchvision profile (default: keep installed build; cpu for a new environment)')
-    parser.add_argument('--extra', action='append', choices=EXTRAS, default=[],
+    parser.add_argument('--extra', action='append', choices=(*EXTRAS, 'all'), default=[],
                         help='Optional feature dependencies; may be repeated')
     parser.add_argument('--dry-run', action='store_true', help='Print commands without installing')
     parser.add_argument('--repair-opencv', action='store_true',
@@ -93,15 +105,19 @@ def main(argv=None):
             # One resolution includes the exact local Torch build and all extras.
             # A conflicting extra must fail rather than replace CUDA with CPU.
             requirements = ['-r', str(ROOT / 'requirements' / f'torch-{selected_profile}.txt')]
-            for extra in sorted(set(args.extra)):
+            extras = selected_extras(args.extra)
+            for extra in sorted(extras):
                 requirements.extend(['-r', str(ROOT / 'requirements' / f'optional-{extra}.txt')])
             run_pip('install', *requirements, dry_run=args.dry_run)
+            normalize_xgboost(dry_run=args.dry_run)
         normalize_opencv(dry_run=args.dry_run, force=args.repair_opencv)
         if not args.dry_run:
             # No native modules have been imported by this installer. Validate in
             # a new process after all wheel files have reached their final state.
             verification = [sys.executable, str(ROOT / 'dependency_health.py'), '--load']
             if not args.repair_opencv:
+                for extra in extras:
+                    verification.extend(['--extra', extra])
                 verification += ['--torch-profile', selected_profile]
                 if selected_profile != 'cpu':
                     verification.append('--cuda-test')

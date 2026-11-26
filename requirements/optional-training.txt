@@ -1,3 +1,3 @@
 # Training backend validated by CPU loss/forward/optimizer tests.
 segmentation-models-pytorch==0.6.0
-psutil
+psutil==7.2.2

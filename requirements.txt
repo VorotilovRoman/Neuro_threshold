@@ -5,6 +5,11 @@ shapely==2.1.2
 scipy==1.17.1
 scikit-image==0.26.0
 scikit-learn==1.8.0
+# Classical XGBoost uses CPU; avoid a second CUDA/NCCL stack beside the Torch profile.
+xgboost-cpu==3.4.1; platform_system != "Darwin"
+xgboost==3.4.1; platform_system == "Darwin"
+pyamg==5.4.1
+packaging==26.3
 joblib==1.5.3
 networkx==3.6.1
 pandas==3.0.2

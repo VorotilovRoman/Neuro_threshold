@@ -1,4 +1,5 @@
 from ui.dataset_source import make_source_button
+from importlib.util import find_spec
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +27,10 @@ def setup_traditional_ml_ui(parent):
     parent.model_combo = QComboBox()
     models = ["K-Means Clustering", "MeanShift", "SVM (pixel-wise)", "Random Forest", "XGBoost", "Decision Tree"]
     parent.model_combo.addItems(models)
+    if find_spec("xgboost") is None:
+        item = parent.model_combo.model().item(parent.model_combo.findText("XGBoost"))
+        item.setEnabled(False)
+        item.setToolTip("XGBoost отсутствует. Обновите зависимости: python install.py")
     model_layout.addWidget(parent.model_combo)
     controls_layout.addLayout(model_layout)
 
