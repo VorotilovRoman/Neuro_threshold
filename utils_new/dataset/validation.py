@@ -167,7 +167,8 @@ class PairValidator:
             except Exception as e:
                 return False, f"Mask read error: {e}", color_type, bit_type
             detail.update(
-                ann_type="segment", classes=[int(value) for value in np.unique(mask)]
+                ann_type="segment", classes=[int(value) for value in np.unique(mask)],
+                is_background=not np.any(mask),
             )
             return True, "", color_type, bit_type
 
@@ -186,6 +187,7 @@ class PairValidator:
                 if len(types) == 1
                 else "mixed",
                 classes=sorted({ann.class_id for ann in annotations}),
+                is_background=not annotations,
             )
             if len(types) > 1 and self.input_format != INPUT_FORMAT_MIXED:
                 return (

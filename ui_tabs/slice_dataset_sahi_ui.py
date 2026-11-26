@@ -93,7 +93,7 @@ def setup_sahi_slicer_ui(parent):
     )
     left_layout.addWidget(parent.file_list, 1)
 
-    parent.pair_count_label = QLabel("Всего пар: 0")
+    parent.pair_count_label = QLabel("Снимков: 0")
     parent.pair_count_label.setWordWrap(True)
     parent.pair_count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     left_layout.addWidget(parent.pair_count_label)

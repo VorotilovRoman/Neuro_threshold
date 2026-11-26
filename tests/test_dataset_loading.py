@@ -17,6 +17,46 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_summary_separates_images_files_objects_background_and_errors(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pairs = []
+            for name, text in (('object', '2 .5 .5 .5 .5\n'), ('background', ''),
+                               ('unlabelled', None), ('invalid', 'bad row')):
+                image = root / (name + '.png')
+                write_image(image, np.zeros((20, 40, 3), np.uint8))
+                label = image.with_suffix('.txt')
+                if text is not None:
+                    label.write_text(text)
+                pairs.append((str(image), str(label) if text is not None else None))
+            broken = root / 'broken.png'
+            broken.write_bytes(b'not an image')
+            label = broken.with_suffix('.txt')
+            label.write_text('0 .5 .5 .5 .5\n')
+            pairs.append((str(broken), str(label)))
+            result = PairInspectionJob(pairs).run()
+            self.assertEqual(result['summary'], dict(images=5, checked=5, labelled=4, unlabelled=1,
+                                                     errors=2, with_objects=1, background=1, classes=1))
+            self.assertEqual(result['valid'], 3)
+
+    def test_zero_mask_is_background_and_not_an_object_class(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pairs = []
+            for index in range(3):
+                image, mask = root / f'image{index}.png', root / f'mask{index}.png'
+                write_image(image, np.zeros((20, 40, 3), np.uint8))
+                pixels = np.zeros((20, 40), np.uint8)
+                if index == 0:
+                    pixels[5:10, 10:20] = 4
+                write_image(mask, pixels)
+                pairs.append((str(image), str(mask) if index < 2 else None))
+            result = PairInspectionJob(pairs, dataset_type=1, include_empty=False).run()
+            self.assertEqual(result['summary'], dict(images=3, checked=3, labelled=2, unlabelled=1,
+                                                     errors=0, with_objects=1, background=1, classes=1))
+            self.assertEqual(result['rows'][1]['tag'], 'empty')
+            self.assertIn('image + mask', result['rows'][1]['text'])
+
     def test_folder_labels_follow_relative_subfolders_and_explicit_split(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -182,6 +222,33 @@ with TemporaryDirectory() as temporary:
  assert owner.input_format=='detect'
  assert owner._dataset_ready()
  assert 'с разметкой: 1' in owner.log_text.toPlainText()
+owner.close()
+""")
+
+    def test_preparation_summary_for_200_images_without_labels_and_cancelled_recheck(self):
+        self.gui("""
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+from utils_new.dataset.pairs import PairInspectionJob
+owner=DatasetPreparationWindow();owner.show()
+with TemporaryDirectory() as temporary:
+ root=Path(temporary)
+ for index in range(200):write_image(root/(str(index)+'.png'),np.zeros((12,20,3),np.uint8))
+ owner.images_folder=str(root);owner.scan_pairs();wait_dataset(owner)
+ widget=owner.dataset_summary
+ assert {key:label.text() for key,label in widget.values.items()}==dict(
+  images='200',labelled='0',unlabelled='200',with_objects='0',background='0',errors='0')
+ assert widget.status.text()=='Проверено: 200/200'
+ assert owner._overlap_review_panel.isHidden()
+ assert '8 бит PNG: 200' in widget.properties_label.text()
+ started,release=Event(),Event();original=PairInspectionJob.run
+ def slow(job):started.set();release.wait(5);return original(job)
+ with patch.object(PairInspectionJob,'run',slow):
+  owner._start_pair_inspection();until(started.is_set)
+  assert widget.values['labelled'].text()=='—'
+  assert 'Проверка:' in widget.status.text()
+  owner._dataset_tasks.cancel('inspect');release.set();wait_dataset(owner)
+ assert 'не завершена' in widget.status.text()
+ assert widget.values['errors'].text()=='—'
 owner.close()
 """)
 

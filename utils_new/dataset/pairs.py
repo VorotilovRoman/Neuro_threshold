@@ -77,6 +77,8 @@ def build_pair_display(
 
     if details is not None:
         ann_type = details.get("ann_type", "error" if not is_valid else None)
+        if is_valid and details.get('is_background'):
+            ann_type = 'empty'
     elif dataset_type == 0 and aux_path:
         try:
             ann_type = PairValidator.detect_annotation_type(
@@ -113,7 +115,8 @@ def build_pair_display(
     elif ann_type == "empty":
         tag = "empty"
         marker = "empty → include" if include_empty else "empty → skip"
-        text = f"{name}{color_marker}{bit_marker} (image + label) [{marker}]"
+        kind = 'mask' if dataset_type == 1 else 'label'
+        text = f"{name}{color_marker}{bit_marker} (image + {kind}) [{marker}]"
     elif ann_type in ("detect", "obb", "segment", "error", "mixed", "unknown"):
         tag = ann_type
         text = f"{name}{color_marker}{bit_marker} (image + label) [{ann_type}]"
@@ -168,6 +171,8 @@ class PairInspectionJob:
                 details=details,
             )
             rows.append(info)
+            info['annotation_found'] = bool(self.dataset_type != 2 and len(pair) > 1
+                                            and pair[1] is not None and os.path.isfile(pair[1]))
             colors[info["color_type"]] += 1
             bits[info["bit_type"]] += 1
             if info.get("ann_type"):
@@ -177,6 +182,13 @@ class PairInspectionJob:
             self.progress(index + 1, len(self.pairs))
         if self.cancelled:
             return {"cancelled": True}
+        valid = sum(row['is_valid'] for row in rows)
+        labelled = sum(row['annotation_found'] for row in rows)
+        summary = dict(images=len(self.pairs), checked=len(rows), labelled=labelled,
+                       unlabelled=len(rows) - labelled, errors=len(rows) - valid,
+                       with_objects=sum(row['is_valid'] and row['annotation_found'] and row['ann_type'] != 'empty' for row in rows),
+                       background=sum(row['is_valid'] and row['annotation_found'] and row['ann_type'] == 'empty' for row in rows),
+                       classes=len(classes - {0} if self.dataset_type == 1 else classes))
         return dict(
             rows=rows,
             classes=sorted(classes),
@@ -185,5 +197,6 @@ class PairInspectionJob:
             types=dict(types),
             validation_cache=validator._cache,
             pairs=self.pairs,
-            valid=sum(row["is_valid"] for row in rows),
+            valid=valid,
+            summary=summary,
         )

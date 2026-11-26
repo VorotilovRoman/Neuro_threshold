@@ -2,6 +2,7 @@
 """Dataset Preparation V18: compact task-oriented UI, same data-loading strip/log."""
 
 from ui.dataset_source import DatasetSourceWidget
+from ui.dataset_summary import DatasetSummary
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
@@ -124,16 +125,14 @@ def setup_preparing_dataset_yaml_ui(parent):
     pair_head = QHBoxLayout()
     pair_title = QLabel("Исходные данные")
     pair_title.setObjectName("workspaceTitle")
-    parent.pair_count_label = QLabel("Всего пар: 0")
-    parent.pair_count_label.setObjectName("countChip")
-    parent.pair_count_label.setWordWrap(True)
-    parent.pair_count_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     pair_head.addWidget(pair_title)
     pair_head.addStretch()
-    pair_head.addWidget(parent.pair_count_label)
     left_layout.addLayout(pair_head)
+    parent.dataset_summary = DatasetSummary()
+    parent.color_stats_label = parent.dataset_summary.properties_label
+    left_layout.addWidget(parent.dataset_summary)
     instruction = QLabel(
-        "Двойной щелчок — просмотр и проверка пары. Ctrl+C — копировать."
+        "Двойной щелчок — просмотр снимка и разметки. Ctrl+C — копировать."
     )
     instruction.setObjectName("sectionHint")
     instruction.setWordWrap(True)
@@ -142,7 +141,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.file_list.setAlternatingRowColors(True)
     parent.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
     parent.file_list.setToolTip(
-        "Ctrl+C — скопировать выделенные строки; двойной клик — проверить пару."
+        "Ctrl+C — скопировать выделенные строки; двойной клик — проверить снимок и разметку."
     )
     left_layout.addWidget(parent.file_list, 1)
 
@@ -157,12 +156,6 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.validation_warning_label.setObjectName("warningLabel")
     parent.validation_warning_label.setVisible(False)
     left_layout.addWidget(parent.validation_warning_label)
-    parent.color_stats_label = QLabel("")
-    parent.color_stats_label.setWordWrap(True)
-    parent.color_stats_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    parent.color_stats_label.setObjectName("statsLabel")
-    left_layout.addWidget(parent.color_stats_label)
-
     convert_group, convert_layout = _section("Конвертация изображений")
     parent.color_convert_buttons_layout = QHBoxLayout()
     parent.btn_convert_gray = QPushButton("В Ч/Б")

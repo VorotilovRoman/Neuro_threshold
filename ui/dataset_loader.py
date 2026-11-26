@@ -216,9 +216,13 @@ class DatasetLoaderMixin:
         if key in ('load', 'inspect'):
             if key == 'load':
                 self._loading_source = False
+            else:
+                self._inspection_pending = False
             self._after_loading_state_changed()
 
     def _after_loading_state_changed(self):
+        if hasattr(self, 'dataset_summary'):
+            self._update_color_stats_label()
         if hasattr(self, 'update_generate_button_state'):
             self.update_generate_button_state()
 
@@ -300,6 +304,8 @@ class DatasetLoaderMixin:
 
     def _start_pair_inspection(self):
         self._inspection_result = None
+        self._inspection_pending = True
+        self._inspection_progress = (0, len(self.pairs))
         if hasattr(self, '_overlap_review_panel'):
             self._overlap_review_panel.set_dataset([])
         self._review_dataset_key = None
@@ -322,11 +328,18 @@ class DatasetLoaderMixin:
                              for row in range(self.class_table.rowCount())}
             self._fill_class_table_from_dict({cid: current_names.get(cid, resolve_class_name(self._yaml_names, cid) or str(cid))
                                               for cid in sorted(ids)})
-            self._update_pair_count_label(f"Проверено: {result['valid']}/{len(self.pairs)}")
+            self._update_pair_count_label(f"Проверено: {len(result['rows'])}/{len(self.pairs)}")
             self._rebuild_file_list_display(finished=self._after_load_hook)
             self._after_loading_state_changed()
-        tasks.start('inspect', PairInspectionJob, list(self.pairs), self.dataset_type, self.input_format,
+        worker = tasks.start('inspect', PairInspectionJob, list(self.pairs), self.dataset_type, self.input_format,
                     self._is_include_empty(), label='Проверка пар, классы и свойства снимков…', finished=inspected)
+        if worker is not None and hasattr(self, 'dataset_summary'):
+            def progress(done, total):
+                active = tasks.jobs.get('inspect')
+                if active is not None and active[0] is worker:
+                    self._inspection_progress = (done, total)
+                    self._update_color_stats_label()
+            worker.progress.connect(progress)
 
     # ---------------- сканирование папок ----------------
     def scan_pairs(self):
@@ -469,7 +482,9 @@ class DatasetLoaderMixin:
                 dataset_key = (getattr(self, "_inspection_revision", 0), tuple(map(tuple, self.pairs)), self.dataset_type, self.input_format)
                 if getattr(self, '_review_dataset_key', None) != dataset_key:
                     self._review_dataset_key = dataset_key
-                    self._overlap_review_panel.set_dataset(self.pairs, self.dataset_type, self.input_format)
+                    has_objects = self._inspection_result.get('summary', {}).get('with_objects', 1) > 0
+                    self._overlap_review_panel.setVisible(has_objects)
+                    self._overlap_review_panel.set_dataset(self.pairs if has_objects else [], self.dataset_type, self.input_format)
             if finished:
                 finished()
         batch()
@@ -671,7 +686,10 @@ class DatasetLoaderMixin:
             self.update_included_classes()
 
     def _update_pair_count_label(self, extra_text, error=False):
-        text = f"Всего пар: {len(self.pairs)}"
+        if hasattr(self, 'dataset_summary'):
+            self._update_color_stats_label()
+            return
+        text = f"Снимков: {len(self.pairs)}"
         if extra_text:
             text += f"  {extra_text}"
         self.pair_count_label.setText(text)

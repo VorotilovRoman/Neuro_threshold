@@ -205,15 +205,16 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     # ==================================================================
     def _update_color_stats_label(self):
         """Override: дополнительно включает/выключает кнопки конвертации."""
-        if not hasattr(self, "color_stats_label"):
+        if not hasattr(self, "dataset_summary"):
             return
-        text, enabled = ImageStats.format_stats_text(
-            self.color_type_stats, self.bit_type_stats, bool(self.pairs)
-        )
-        self.color_stats_label.setText(text)
+        self.dataset_summary.update_summary(
+            len(self.pairs), self.dataset_type, getattr(self, '_inspection_result', None),
+            loading=getattr(self, '_loading_source', False),
+            checking=getattr(self, '_inspection_pending', False),
+            progress=getattr(self, '_inspection_progress', (0, 0)))
         for name in ("btn_convert_gray", "btn_convert_rgb", "btn_convert_8bit_png"):
             if hasattr(self, name):
-                getattr(self, name).setEnabled(enabled and self._dataset_ready())
+                getattr(self, name).setEnabled(bool(self.pairs) and self._dataset_ready())
 
     def _make_list_item(self, text, tag=None, error_msg=""):
         """Override: другой tooltip для invalid-пар."""
