@@ -74,15 +74,18 @@ CLI работает на стандартном Python без PyTorch:
 
 ```bash
 python -m utils_new.import_export.sam_weights --list
+python -m utils_new.import_export.sam_weights
 python -m utils_new.import_export.sam_weights --models sam sam2 sam3 --ask-token
 python -m utils_new.import_export.sam_weights --models sam3 sam3.1 --ask-token
+python -m utils_new.import_export.sam_weights --models sam3 sam3.1 grounding-dino-tiny
 python -m utils_new.import_export.sam_weights --models sam3 --weights-file "C:/models/SAM3.pt"
 python -m utils_new.import_export.sam_weights --models sam3 --extras-only
 python -m utils_new.import_export.sam_weights --models sam3.1 --weights-file "C:/models/sam3.1_multiplex.pt" --ask-token
 python -m utils_new.import_export.sam_weights --models grounding-dino-tiny
 ```
 
-По умолчанию — `models/segment_anything/`. `sam` означает ViT-B, `sam2` — SAM2.1 Tiny;
+Без аргументов обрабатываются **SAM ViT-B → SAM2.1 Tiny → SAM3 → Grounding DINO tiny**.
+По умолчанию файлы сохраняются в `models/segment_anything/`. `sam` означает ViT-B, `sam2` — SAM2.1 Tiny;
 `all` скачивает все варианты SAM и не включает DINO. `--output` меняет папку,
 `--dry-run` показывает план. Для готовых весов `--weights-file` использует файл на месте,
 а вспомогательные ресурсы по умолчанию кладёт рядом. `--extras-only` пропускает веса.
@@ -100,7 +103,11 @@ python -m utils_new.import_export.sam_weights --models grounding-dino-tiny
 сохранятся, готовые файлы можно будет использовать с отдельным видеобэкендом.
 
 Примите условия и получите доступ **к каждому нужному репозиторию**: токен не заменяет
-одобрение доступа. Используйте `--ask-token` для скрытого ввода либо `HF_TOKEN`.
+одобрение доступа. В обычной консоли **отсутствующий токен запрашивается автоматически**
+со скрытым вводом. Enter пропускает закрытые файлы SAM; обработка публичных ресурсов
+и следующих моделей, в том числе DINO, продолжается. `--ask-token` принудительно
+запрашивает новый токен, даже если он найден; Enter в этом запросе также означает пропуск.
+Без запроса можно использовать `HF_TOKEN`.
 Без явного токена загрузчик читает активный токен после `hf auth login`
 из `HF_TOKEN_PATH` или `HF_HOME/token` (обычно `~/.cache/huggingface/token`).
 `HF_HUB_DISABLE_IMPLICIT_TOKEN=1` отключает чтение кеша; `HF_TOKEN` остаётся явным выбором.
@@ -108,6 +115,11 @@ python -m utils_new.import_export.sam_weights --models grounding-dino-tiny
 Если все файлы уже есть, повторная авторизация не нужна. Для SAM3.1 токен может
 понадобиться и при наличии весов: её `config.json` также скачивается из gated-репозитория.
 Публичный BPE-токенизатор и DINO не требуют токена.
+`--non-interactive` (или `--no-prompt`) отключает вопросы для автоматических запусков;
+без терминала скрипт также не ждёт ввод. Пропуск закрытых файлов и HTTP 401/403 не
+останавливают очередь. Код возврата 1 в конце означает неполный комплект, даже если
+DINO и остальные доступные модели скачаны успешно. `--models` обрабатывает только
+перечисленные модели: для DINO добавьте `grounding-dino-tiny`; `all` по-прежнему означает все SAM.
 
 Пример для вашей папки проекта (PowerShell, токен вводится скрыто после запуска):
 

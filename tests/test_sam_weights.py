@@ -30,6 +30,19 @@ TOKENIZER = gzip.compress(b"test vocabulary")
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def payload_for(asset):
+    if asset.kind == "weights":
+        return WEIGHTS
+    if asset.kind == "safetensors":
+        header = json.dumps({"weight": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+        return len(header).to_bytes(8, "little") + header + b"\x00" * 4
+    if asset.kind == "tokenizer":
+        return TOKENIZER
+    if asset.kind == "config":
+        return b"model:\n  _target_: sam2.modeling.sam2_base.SAM2Base\n"
+    return b"{}" if asset.kind == "json" else b"vocabulary"
+
+
 class Response(io.BytesIO):
     def __init__(self, payload, *, length=None):
         super().__init__(payload)
@@ -59,6 +72,99 @@ class SAMDownloadTests(unittest.TestCase):
             HF_HUB_DISABLE_IMPLICIT_TOKEN="0"))
         credentials.start()
         self.addCleanup(credentials.stop)
+
+    def test_default_console_prompts_for_missing_token_and_downloads_dino(self):
+        assets = [asset for key in downloader.select_models(downloader.DEFAULT_MODELS)
+                  for asset in downloader.DOWNLOAD_MODELS[key].assets]
+        opener = Opener(*(Response(payload_for(asset)) for asset in assets))
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()) as captured, \
+                patch.object(downloader.sys.stdin, "isatty", return_value=True), \
+                patch.object(downloader.getpass, "getpass", return_value="hf_CONSOLE") as ask, \
+                patch.object(downloader, "build_opener", return_value=opener):
+            self.assertEqual(downloader.main(["--output", directory]), 0)
+            ask.assert_called_once()
+            self.assertTrue((Path(directory) / "grounding_dino/tiny/model.safetensors").is_file())
+            self.assertIn("grounding-dino-tiny", captured.getvalue())
+            self.assertNotIn("hf_CONSOLE", captured.getvalue())
+            for request in opener.requests:
+                if "/facebook/sam3/" in request.full_url:
+                    self.assertEqual(request.get_header("Authorization"), "Bearer hf_CONSOLE")
+                else:
+                    self.assertFalse(request.has_header("Authorization"))
+
+    def test_enter_skips_closed_sam_files_then_continues_default_dino_bundle(self):
+        assets = [asset for key in downloader.select_models(downloader.DEFAULT_MODELS)
+                  for asset in downloader.DOWNLOAD_MODELS[key].assets if not downloader.gated_repository(asset)]
+        opener = Opener(*(Response(payload_for(asset)) for asset in assets))
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()) as captured, redirect_stderr(captured), \
+                patch.object(downloader.sys.stdin, "isatty", return_value=True), \
+                patch.object(downloader.getpass, "getpass", return_value="") as ask, \
+                patch.object(downloader, "build_opener", return_value=opener):
+            self.assertEqual(downloader.main(["--output", directory]), 1)
+            ask.assert_called_once()
+            output = Path(directory)
+            self.assertFalse((output / "sam3/sam3.pt").exists())
+            self.assertTrue((output / "sam3/bpe_simple_vocab_16e6.txt.gz").is_file())
+            for asset in downloader.GROUNDING_MODELS["grounding-dino-tiny"].assets:
+                self.assertTrue((output / asset.path).is_file(), asset.path)
+            self.assertIn("Пропущены закрытые файлы", captured.getvalue())
+            self.assertFalse(any("/facebook/sam3/" in request.full_url for request in opener.requests))
+
+    def test_no_prompt_mode_does_not_wait_for_input_and_continues_dino(self):
+        selected = ["sam3.1", "grounding-dino-tiny"]
+        assets = [asset for key in selected for asset in downloader.DOWNLOAD_MODELS[key].assets
+                  if not downloader.gated_repository(asset)]
+        opener = Opener(*(Response(payload_for(asset)) for asset in assets))
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                patch.object(downloader.sys.stdin, "isatty", return_value=True), \
+                patch.object(downloader.getpass, "getpass") as ask, \
+                patch.object(downloader, "build_opener", return_value=opener):
+            self.assertEqual(downloader.main(["--models", *selected, "--non-interactive", "--output", directory]), 1)
+            ask.assert_not_called()
+            self.assertTrue((Path(directory) / "grounding_dino/tiny/tokenizer.json").is_file())
+
+    def test_gated_http_failure_does_not_prevent_dino_download(self):
+        assets = downloader.GROUNDING_MODELS["grounding-dino-tiny"].assets
+        failure = HTTPError("https://cdn.example/SIGNED", 401, "hf_PRIVATE", {}, io.BytesIO(b"private"))
+        opener = Opener(failure, Response(TOKENIZER), *(Response(payload_for(asset)) for asset in assets))
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()) as captured, redirect_stderr(captured), \
+                patch.dict(os.environ, {"HF_TOKEN": "hf_TOKEN"}), \
+                patch.object(downloader, "build_opener", return_value=opener):
+            self.assertEqual(downloader.main(["--models", "sam3", "grounding-dino-tiny", "--output", directory]), 1)
+            self.assertTrue((Path(directory) / "grounding_dino/tiny/model.safetensors").is_file())
+            self.assertNotIn("hf_PRIVATE", captured.getvalue())
+            self.assertNotIn("SIGNED", captured.getvalue())
+
+    def test_non_terminal_with_no_token_does_not_prompt(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                patch.object(downloader.sys.stdin, "isatty", return_value=False), \
+                patch.object(downloader.getpass, "getpass") as ask, \
+                patch.object(downloader, "build_opener", return_value=Opener(Response(TOKENIZER))):
+            self.assertEqual(downloader.main(["--models", "sam3", "--output", directory]), 1)
+            ask.assert_not_called()
+
+    def test_force_prompt_enter_skips_even_if_a_cached_token_exists(self):
+        assets = [downloader.MODELS["sam3"].assets[1], *downloader.GROUNDING_MODELS["grounding-dino-tiny"].assets]
+        opener = Opener(*(Response(payload_for(asset)) for asset in assets))
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()) as captured, redirect_stderr(captured), \
+                patch.dict(os.environ, {"HF_TOKEN": "hf_PREVIOUS"}), \
+                patch.object(downloader.getpass, "getpass", return_value=""), \
+                patch.object(downloader, "build_opener", return_value=opener):
+            result = downloader.main(["--models", "sam3", "grounding-dino-tiny", "--ask-token", "--output", directory])
+            self.assertEqual(result, 1)
+            self.assertTrue((Path(directory) / "grounding_dino/tiny/model.safetensors").is_file())
+            self.assertFalse(any(request.has_header("Authorization") for request in opener.requests))
+            self.assertNotIn("hf_PREVIOUS", captured.getvalue())
+
+    def test_no_secure_console_input_does_not_stop_public_downloads(self):
+        assets = [downloader.MODELS["sam3"].assets[1], *downloader.GROUNDING_MODELS["grounding-dino-tiny"].assets]
+        opener = Opener(*(Response(payload_for(asset)) for asset in assets))
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                patch.object(downloader.getpass, "getpass", side_effect=downloader.getpass.GetPassWarning("No secure terminal")), \
+                patch.object(downloader, "build_opener", return_value=opener):
+            result = downloader.main(["--models", "sam3", "grounding-dino-tiny", "--ask-token", "--output", directory])
+            self.assertEqual(result, 1)
+            self.assertTrue((Path(directory) / "grounding_dino/tiny/model.safetensors").is_file())
 
     def test_sam31_has_separate_revision_paths_and_is_not_an_image_architecture(self):
         self.assertNotIn("sam3.1", downloader.MODELS)

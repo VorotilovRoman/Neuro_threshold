@@ -17,6 +17,7 @@ import sys
 import tempfile
 from threading import Lock
 import time
+import warnings
 import zipfile
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -30,6 +31,11 @@ SAM31_WEIGHTS_REVISION = "daa63191845a41281374e725f4c9e51c7a824460"
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[2] / "models" / "segment_anything"
 MANIFEST_NAME = "download_manifest.json"
 CHUNK_SIZE = 1024 * 1024
+DEFAULT_MODELS = ("sam", "sam2", "sam3", "grounding-dino-tiny")
+
+
+class SkipGatedFiles(Exception):
+    """No credential was supplied; continue public assets and the remaining models."""
 
 
 @dataclass(frozen=True)
@@ -475,8 +481,8 @@ def download_model(plan, *, cancel=None, progress=None, token=None, opener=None,
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Скачать веса SAM/SAM2/SAM3/SAM3.1, Grounding DINO и файлы для локальной загрузки. "
-                    "Без установки PyTorch и моделей. По умолчанию: SAM ViT-B, SAM2.1 Tiny, SAM3.")
-    parser.add_argument("--models", nargs="+", default=["sam", "sam2", "sam3"],
+                    "Без установки PyTorch и моделей. По умолчанию: SAM ViT-B, SAM2.1 Tiny, SAM3 и Grounding DINO tiny.")
+    parser.add_argument("--models", nargs="+", default=list(DEFAULT_MODELS),
                         metavar="MODEL", help="Имена из --list; sam, sam2 и all — сокращения")
     parser.add_argument("--output", type=Path,
                         help="Папка сохранения; по умолчанию models/segment_anything или рядом с --weights-file")
@@ -486,14 +492,19 @@ def main(argv=None):
     parser.add_argument("--list", action="store_true", help="Показать модели без скачивания")
     parser.add_argument("--dry-run", action="store_true", help="Показать файлы и URL без сети")
     parser.add_argument("--force", action="store_true", help="Повторно скачать и заменить выбранные файлы")
-    parser.add_argument("--ask-token", action="store_true", help="Скрытый ввод токена Hugging Face для SAM3/SAM3.1")
+    credentials = parser.add_mutually_exclusive_group()
+    credentials.add_argument("--ask-token", action="store_true",
+                             help="Принудительно запросить токен; без флага консоль спросит автоматически, если токен не найден")
+    credentials.add_argument("--non-interactive", "--no-prompt", action="store_true",
+                             help="Не спрашивать токен; без него пропустить закрытые файлы и продолжить другие модели")
     parser.add_argument("--timeout", type=float, default=30, help="Тайм-аут сетевой операции, секунды")
     parser.add_argument("--retries", type=int, default=2, help="Повторы после временного сетевого сбоя (0–5)")
     args = parser.parse_args(argv)
     if args.list:
         for key, model in DOWNLOAD_MODELS.items():
             print(f"{key:20} {model.name}")
-        print("Сокращения: sam = sam-vit-b; sam2 = sam2.1-tiny; all = все варианты SAM. Grounding DINO выбирается отдельно.")
+        print("Сокращения: sam = sam-vit-b; sam2 = sam2.1-tiny; all = все варианты SAM без DINO.")
+        print("По умолчанию: sam, sam2, sam3, grounding-dino-tiny. --models заменяет этот список.")
         return 0
     if not 0 <= args.retries <= 5 or not 0 < args.timeout < float("inf"):
         parser.error("--retries: от 0 до 5; --timeout: положительное конечное число")
@@ -517,6 +528,7 @@ def main(argv=None):
             return assets
 
         print(f"Папка: {output}")
+        print(f"Выбранные модели: {', '.join(selected)}", flush=True)
         if args.dry_run:
             for key in selected:
                 for asset in assets_for(key):
@@ -532,27 +544,47 @@ def main(argv=None):
         token = None
         token_resolved = False
         token_asked = False
+        interactive = not args.non_interactive and sys.stdin is not None and sys.stdin.isatty()
 
-        def auth_token():
+        def auth_token(repository):
             nonlocal token, token_asked, token_resolved
             if not token_resolved:
                 token = resolve_hf_token()
                 token_resolved = True
-            if args.ask_token and not token_asked:
-                token = getpass.getpass("Hugging Face token (ввод скрыт): ").strip() or token
+            if (args.ask_token or (interactive and not token)) and not token_asked:
+                print(f"Доступ к {repository}: токен с правом чтения; условия репозитория должны быть приняты.", flush=True)
                 token_asked = True
+                try:
+                    with warnings.catch_warnings():
+                        # Never fall back to an input mode that echoes credentials.
+                        warnings.simplefilter("error", getpass.GetPassWarning)
+                        entered = getpass.getpass("Hugging Face token (ввод скрыт; Enter — пропустить закрытые файлы SAM): ")
+                    token = entered.strip() or None
+                except (EOFError, OSError, getpass.GetPassWarning):
+                    token = None
+            if not token:
+                raise SkipGatedFiles(
+                    f"нет токена для {repository}; следующие модели будут обработаны. "
+                    "Задайте HF_TOKEN или повторите запуск с --ask-token.")
             return token
         output.mkdir(parents=True, exist_ok=True)
         opener = build_opener(SafeRedirectHandler())
         failed = []
+        skipped = []
         for key in selected:
             print(f"\n{DOWNLOAD_MODELS[key].name}", flush=True)
             for asset in assets_for(key):
                 for attempt in range(args.retries + 1):
                     try:
                         receipt = download_asset(asset, output, manifest, opener=opener,
-                                                 token=auth_token, force=args.force, timeout=args.timeout,
+                                                 token=lambda: auth_token(gated_repository(asset)),
+                                                 force=args.force, timeout=args.timeout,
                                                  existing_path=weights_file if asset.is_weights else None)
+                    except SkipGatedFiles as error:
+                        print(f"  Пропуск {asset.path}: {error}", file=sys.stderr)
+                        if key not in skipped:
+                            skipped.append(key)
+                        break
                     except HTTPError as error:
                         message = _http_error_message(error, asset)
                         retry = error.code in (408, 429, 500, 502, 503, 504)
@@ -574,11 +606,18 @@ def main(argv=None):
                         if key not in failed:
                             failed.append(key)
                         break
-        print("\nСкачивание завершено." if not failed else f"\nНе скачаны полностью: {', '.join(failed)}.")
+        if failed:
+            print(f"\nНе скачаны полностью: {', '.join(failed)}.")
+        elif skipped:
+            print("\nОбработка завершена; доступные файлы скачаны или проверены.")
+        else:
+            print("\nСкачивание завершено.")
+        if skipped:
+            print(f"Пропущены закрытые файлы моделей: {', '.join(skipped)}. Остальные выбранные модели обработаны.")
         print("Веса не устанавливают backend: для применения нужны соответствующие пакеты моделей.")
         if "sam3.1" in selected:
             print("SAM3.1 Multiplex скачивается отдельно: видеобэкенд ещё не подключён к вкладкам применения.")
-        return 1 if failed else 0
+        return 1 if failed or skipped else 0
     except KeyboardInterrupt:
         print("\nСкачивание остановлено. Готовые файлы сохранены; незавершённый файл удалён.", file=sys.stderr)
         return 130
