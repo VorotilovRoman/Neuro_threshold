@@ -5,7 +5,7 @@ from runtime_torch import prepare_windows_torch
 prepare_windows_torch()
 
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 from utils_new.import_export.sam_weights import MODELS
 from utils_new.segmentation.backends.sam import MODELS_DIR
 from ui.segmentation.prompt_tools import PromptTools
@@ -59,9 +59,14 @@ class SamPanel(QWidget):
         self.set_model_loaded(False)
         self.download = QPushButton("Скачать файлы…")
         self.download.setToolTip("Найти локальные веса выбранной архитектуры и предложить скачать отсутствующие файлы.")
+        self.download_more = QToolButton()
+        self.download_more.setText("⋯")
+        self.download_more.setToolTip("Дополнительные веса: SAM3.1 Multiplex. Скачивание без подключения к текущему backend.")
+        self.download_more.setPopupMode(QToolButton.InstantPopup)
         model_actions = QHBoxLayout()
         model_actions.addWidget(self.load)
         model_actions.addWidget(self.download)
+        model_actions.addWidget(self.download_more)
         form.addRow(model_actions)
         self.mode = QComboBox()
         self.mode.addItem("Точки и рамка", "points")

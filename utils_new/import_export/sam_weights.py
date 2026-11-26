@@ -26,6 +26,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 SAM2_REVISION = "2b90b9f5ceec907a1c18123530e92e794ad901a4"
 SAM3_REVISION = "31cb7e624e4fe95301b1be1d4e809111593d2e45"
 SAM3_WEIGHTS_REVISION = "3c879f39826c281e95690f02c7821c4de09afae7"
+SAM31_WEIGHTS_REVISION = "daa63191845a41281374e725f4c9e51c7a824460"
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[2] / "models" / "segment_anything"
 MANIFEST_NAME = "download_manifest.json"
 CHUNK_SIZE = 1024 * 1024
@@ -79,6 +80,47 @@ def _catalog():
 
 MODELS = _catalog()
 
+# Multiplex needs the official video backend, not the image backend used by our tabs.
+# Keep downloadable checkpoints separate from architectures supported for inference.
+DOWNLOAD_ONLY_MODELS = {
+    "sam3.1": Model("SAM3.1 Object Multiplex (видеотрекинг; только скачивание)", (
+        Asset("sam3.1/sam3.1_multiplex.pt",
+              f"https://huggingface.co/facebook/sam3.1/resolve/{SAM31_WEIGHTS_REVISION}/sam3.1_multiplex.pt"),
+        Asset("sam3.1/config.json",
+              f"https://huggingface.co/facebook/sam3.1/resolve/{SAM31_WEIGHTS_REVISION}/config.json", "json"),
+        Asset("sam3.1/bpe_simple_vocab_16e6.txt.gz",
+              f"https://raw.githubusercontent.com/facebookresearch/sam3/{SAM3_REVISION}"
+              "/sam3/assets/bpe_simple_vocab_16e6.txt.gz", "tokenizer"),
+    )),
+}
+SAM_DOWNLOAD_MODELS = {**MODELS, **DOWNLOAD_ONLY_MODELS}
+
+
+def gated_repository(asset):
+    """Only the two official gated repos may receive the user's bearer token."""
+    parsed = urlsplit(asset.url)
+    parts = parsed.path.strip("/").split("/")
+    if (parsed.scheme == "https" and parsed.netloc == "huggingface.co" and len(parts) > 2
+            and parts[:2] in (["facebook", "sam3"], ["facebook", "sam3.1"])):
+        return "https://huggingface.co/" + "/".join(parts[:2])
+    return None
+
+
+def resolve_hf_token():
+    """Read the active HF credential without importing hub/model libraries or logging it."""
+    token = os.environ.get("HF_TOKEN", "").strip() or os.environ.get("HUGGING_FACE_HUB_TOKEN", "").strip()
+    if token:
+        return token
+    if os.environ.get("HF_HUB_DISABLE_IMPLICIT_TOKEN", "").upper() in ("1", "TRUE", "YES", "ON"):
+        return None
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    home = Path(os.environ.get("HF_HOME") or cache / "huggingface").expanduser()
+    path = Path(os.environ.get("HF_TOKEN_PATH") or home / "token").expanduser()
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except (OSError, UnicodeError):
+        return None
+
 
 def _grounding_catalog():
     models = {}
@@ -98,7 +140,7 @@ def _grounding_catalog():
 
 
 GROUNDING_MODELS = _grounding_catalog()
-DOWNLOAD_MODELS = {**MODELS, **GROUNDING_MODELS}
+DOWNLOAD_MODELS = {**SAM_DOWNLOAD_MODELS, **GROUNDING_MODELS}
 ALIASES = {"sam": "sam-vit-b", "sam2": "sam2.1-tiny"}
 
 
@@ -117,7 +159,7 @@ class SafeRedirectHandler(HTTPRedirectHandler):
 def select_models(names):
     selected = []
     for name in names:
-        keys = MODELS if name == "all" else (ALIASES.get(name, name),)
+        keys = SAM_DOWNLOAD_MODELS if name == "all" else (ALIASES.get(name, name),)
         for key in keys:
             if key not in DOWNLOAD_MODELS:
                 raise ValueError(f"Неизвестная модель: {key}. Список: --list")
@@ -262,7 +304,7 @@ def download_asset(asset, output, manifest, *, opener, token=None, force=False, 
 
     target.parent.mkdir(parents=True, exist_ok=True)
     headers = {"User-Agent": "Neuro-threshold-SAM-downloader/1", "Accept-Encoding": "identity"}
-    if asset.url.startswith("https://huggingface.co/facebook/sam3/"):
+    if gated_repository(asset):
         credential = token() if callable(token) else token
         if credential and any(character.isspace() or not character.isascii() for character in credential):
             raise ValueError("Некорректный HF_TOKEN: ожидается токен без пробелов и переносов строк")
@@ -318,8 +360,9 @@ def download_asset(asset, output, manifest, *, opener, token=None, force=False, 
 
 def _http_error_message(error, asset):
     # Never print a signed CDN URL, headers, bearer token or response body.
-    if asset.url.startswith("https://huggingface.co/facebook/sam3/") and error.code in (401, 403):
-        return (f"HTTP {error.code}: SAM3 требует доступа к https://huggingface.co/facebook/sam3. "
+    repository = gated_repository(asset)
+    if repository and error.code in (401, 403):
+        return (f"HTTP {error.code}: требуется доступ к {repository}. "
                 "Примите условия, дождитесь доступа и задайте HF_TOKEN с правом чтения "
                 "этого репозитория либо используйте --ask-token.")
     return f"HTTP {error.code}; источник: {urlsplit(asset.url).hostname}"
@@ -353,7 +396,7 @@ def plan_model_download(model_key, output=DEFAULT_OUTPUT, *, weights_file=None, 
     hashing take place here, so the GUI can display this plan immediately.
     """
     output = Path(output).expanduser().resolve()
-    model = MODELS[model_key]
+    model = DOWNLOAD_MODELS[model_key]
     manifest = read_manifest(output)
     weights_asset = model.assets[0]
     weights = existing_asset_path(weights_asset, output, manifest.get(weights_asset.path),
@@ -431,7 +474,7 @@ def download_model(plan, *, cancel=None, progress=None, token=None, opener=None,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Скачать веса SAM/SAM2/SAM3, Grounding DINO и файлы для локальной загрузки. "
+        description="Скачать веса SAM/SAM2/SAM3/SAM3.1, Grounding DINO и файлы для локальной загрузки. "
                     "Без установки PyTorch и моделей. По умолчанию: SAM ViT-B, SAM2.1 Tiny, SAM3.")
     parser.add_argument("--models", nargs="+", default=["sam", "sam2", "sam3"],
                         metavar="MODEL", help="Имена из --list; sam, sam2 и all — сокращения")
@@ -443,7 +486,7 @@ def main(argv=None):
     parser.add_argument("--list", action="store_true", help="Показать модели без скачивания")
     parser.add_argument("--dry-run", action="store_true", help="Показать файлы и URL без сети")
     parser.add_argument("--force", action="store_true", help="Повторно скачать и заменить выбранные файлы")
-    parser.add_argument("--ask-token", action="store_true", help="Скрытый ввод токена Hugging Face для SAM3")
+    parser.add_argument("--ask-token", action="store_true", help="Скрытый ввод токена Hugging Face для SAM3/SAM3.1")
     parser.add_argument("--timeout", type=float, default=30, help="Тайм-аут сетевой операции, секунды")
     parser.add_argument("--retries", type=int, default=2, help="Повторы после временного сетевого сбоя (0–5)")
     args = parser.parse_args(argv)
@@ -486,11 +529,15 @@ def main(argv=None):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
         if not isinstance(manifest, dict):
             raise ValueError(f"Некорректный манифест: {manifest_path}")
-        token = os.environ.get("HF_TOKEN", "").strip() or None
+        token = None
+        token_resolved = False
         token_asked = False
 
         def auth_token():
-            nonlocal token, token_asked
+            nonlocal token, token_asked, token_resolved
+            if not token_resolved:
+                token = resolve_hf_token()
+                token_resolved = True
             if args.ask_token and not token_asked:
                 token = getpass.getpass("Hugging Face token (ввод скрыт): ").strip() or token
                 token_asked = True
@@ -529,6 +576,8 @@ def main(argv=None):
                         break
         print("\nСкачивание завершено." if not failed else f"\nНе скачаны полностью: {', '.join(failed)}.")
         print("Веса не устанавливают backend: для применения нужны соответствующие пакеты моделей.")
+        if "sam3.1" in selected:
+            print("SAM3.1 Multiplex скачивается отдельно: видеобэкенд ещё не подключён к вкладкам применения.")
         return 1 if failed else 0
     except KeyboardInterrupt:
         print("\nСкачивание остановлено. Готовые файлы сохранены; незавершённый файл удалён.", file=sys.stderr)

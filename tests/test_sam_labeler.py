@@ -281,6 +281,51 @@ class SamLabelerTests(unittest.TestCase):
             self.assertNotIn("0.9900", self.panel.checkpoint_info.text())
             self.assertIn("Неполная эпоха", self.panel.checkpoint_info.text())
 
+    def test_sam31_download_keeps_current_image_model_and_uses_gated_token(self):
+        from PyQt5.QtWidgets import QMessageBox
+        from test_sam_weights import Opener, Response, WEIGHTS, TOKENIZER
+        with TemporaryDirectory() as directory:
+            before = self.panel.get_settings()
+            backend = self.fake_backend()
+            opener = Opener(Response(WEIGHTS), Response(b'{"model_type":"sam3"}'), Response(TOKENIZER))
+            with patch("ui.sam.downloads.DEFAULT_OUTPUT", Path(directory)), \
+                    patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.Yes), \
+                    patch("ui.sam.downloads.resolve_hf_token", return_value="hf_TEST"), \
+                    patch("ui.sam.downloads.QInputDialog.getText") as ask, \
+                    patch("utils_new.import_export.sam_weights.build_opener", return_value=opener):
+                self.panel.download_more.menu().actions()[0].trigger()
+                self.wait_until(lambda: self.controller.job is None)
+                ask.assert_not_called()
+            self.assertTrue((Path(directory) / "sam3.1/sam3.1_multiplex.pt").is_file())
+            self.assertEqual(self.panel.get_settings(), before)
+            self.assertIs(self.controller.backend, backend)
+            self.assertTrue(self.panel.load.property("modelLoaded"))
+            self.assertIn("отдельный видеобэкенд", self.panel.status.text())
+
+    def test_sam31_missing_gated_config_prompts_even_with_local_weights(self):
+        from PyQt5.QtWidgets import QMessageBox
+        from test_sam_weights import Opener, Response, WEIGHTS, TOKENIZER
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "sam3.1"
+            root.mkdir()
+            weights = root / "sam3.1_multiplex.pt"
+            weights.write_bytes(WEIGHTS)
+            (root / "bpe_simple_vocab_16e6.txt.gz").write_bytes(TOKENIZER)
+            modified = weights.stat().st_mtime_ns
+            opener = Opener(Response(b'{"model_type":"sam3"}'))
+            with patch("ui.sam.downloads.DEFAULT_OUTPUT", Path(directory)), \
+                    patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.Yes), \
+                    patch("ui.sam.downloads.resolve_hf_token", return_value=None), \
+                    patch("ui.sam.downloads.QInputDialog.getText", return_value=("hf_TYPED", True)) as ask, \
+                    patch("utils_new.import_export.sam_weights.build_opener", return_value=opener):
+                self.controller.downloads.request(model_key="sam3.1")
+                self.wait_until(lambda: self.controller.job is None)
+            ask.assert_called_once()
+            self.assertIn("facebook/sam3.1", ask.call_args.args[2])
+            self.assertEqual(weights.stat().st_mtime_ns, modified)
+            self.assertEqual(len(opener.requests), 1)
+            self.assertEqual(opener.requests[0].get_header("Authorization"), "Bearer hf_TYPED")
+
     def test_grounding_dino_text_mode_loads_and_previews_without_automatic_annotation_changes(self):
         from utils_new.segmentation.backends.sam import SamResult
         from unittest.mock import Mock

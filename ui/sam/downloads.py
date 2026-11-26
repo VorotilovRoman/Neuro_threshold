@@ -1,13 +1,13 @@
 """Explicit online preparation of local SAM assets for both SAM hosts."""
 
-import os
 from pathlib import Path
 
 from PyQt5.QtCore import QSignalBlocker, Qt, pyqtSignal
-from PyQt5.QtWidgets import QInputDialog, QLineEdit, QMessageBox
+from PyQt5.QtWidgets import QInputDialog, QLineEdit, QMenu, QMessageBox
 
 from ui.segmentation.jobs import BackgroundTask
-from utils_new.import_export.sam_weights import DEFAULT_OUTPUT, MODELS, download_model, plan_model_download
+from utils_new.import_export.sam_weights import (DEFAULT_OUTPUT, DOWNLOAD_MODELS, DOWNLOAD_ONLY_MODELS,
+    download_model, gated_repository, plan_model_download, resolve_hf_token)
 
 
 class SamDownloadTask(BackgroundTask):
@@ -37,6 +37,11 @@ class SamDownloads:
         # activated is a user action; preset restoration must never start a download.
         panel.model.activated.connect(self.select_architecture)
         panel.download.clicked.connect(self.request)
+        self.menu = QMenu(panel.download_more)
+        for key, model in DOWNLOAD_ONLY_MODELS.items():
+            action = self.menu.addAction(model.name)
+            action.triggered.connect(lambda _, model_key=key: self.request(model_key=model_key))
+        panel.download_more.setMenu(self.menu)
 
     def remember_weights(self, *_):
         path = self.panel.weights.text().strip()
@@ -48,7 +53,7 @@ class SamDownloads:
         key = panel.model.currentData()
         weights = panel.weights.text().strip()
         if selecting:
-            expected = Path(MODELS[key].assets[0].path).name.casefold()
+            expected = Path(DOWNLOAD_MODELS[key].assets[0].path).name.casefold()
             weights = weights if Path(weights).name.casefold() == expected else self.paths.get(key, "")
         weights = weights if weights and Path(weights).is_file() else None
         tokenizer = panel.tokenizer.text().strip()
@@ -75,23 +80,26 @@ class SamDownloads:
     def select_architecture(self, *_):
         self.request(selecting=True)
 
-    def request(self, *_, selecting=False):
+    def request(self, *_, selecting=False, model_key=None):
         controller, panel = self.controller, self.panel
         if controller.closed or controller.job is not None or not controller.host.can_start():
             return
+        standalone = model_key in DOWNLOAD_ONLY_MODELS
         try:
-            plan = self.plan(selecting=selecting)
+            plan = plan_model_download(model_key, DEFAULT_OUTPUT) if standalone else self.plan(selecting=selecting)
         except (OSError, ValueError) as error:
             QMessageBox.warning(controller.owner, "Файлы SAM", str(error))
             return
-        self.apply_paths(plan, existing_only=True)
+        if not standalone:
+            self.apply_paths(plan, existing_only=True)
         if not plan.missing:
-            panel.status.setText("Локальные файлы найдены. Нажмите «Загрузить SAM» для запуска модели.")
+            panel.status.setText(f"Файлы SAM3.1 уже есть: {plan.files[0][1]}. Видеобэкенд не подключён к вкладкам."
+                                if standalone else "Локальные файлы найдены. Нажмите «Загрузить SAM» для запуска модели.")
             return
         details = "\n".join(f"• {path}" for _, path in plan.missing)
         answer = QMessageBox.question(
             controller.owner, "Скачать файлы SAM?",
-            f"{MODELS[plan.model_key].name}: отсутствуют файлы:\n{details}\n\n"
+            f"{DOWNLOAD_MODELS[plan.model_key].name}: отсутствуют файлы:\n{details}\n\n"
             "Скачать их из официальных источников? Веса могут занимать несколько ГБ. "
             "Готовые файлы будут проверены и использованы повторно.\n"
             "Скачивание идёт в фоне; его можно отменить. Пакеты Python устанавливаются отдельно.",
@@ -99,15 +107,16 @@ class SamDownloads:
         if answer != QMessageBox.Yes:
             panel.status.setText("Скачивание не запущено. Выберите локальные веса или нажмите «Скачать файлы…».")
             return
-        token = os.environ.get("HF_TOKEN", "").strip() or None
-        if plan.model_key == "sam3" and any(asset.is_weights for asset, _ in plan.missing) and not token:
+        repository = next((gated_repository(asset) for asset, _ in plan.missing if gated_repository(asset)), None)
+        token = resolve_hf_token() if repository else None
+        if repository and not token:
             token, accepted = QInputDialog.getText(
-                controller.owner, "Доступ к весам SAM3",
-                "Для SAM3 примите условия и получите доступ к https://huggingface.co/facebook/sam3.\n"
+                controller.owner, "Доступ к Hugging Face",
+                f"Примите условия и получите доступ к {repository}.\n"
                 "Введите токен Hugging Face с правом чтения (хранится только на время скачивания):",
                 QLineEdit.Password)
             if not accepted:
-                panel.status.setText("Скачивание SAM3 отменено.")
+                panel.status.setText("Скачивание отменено.")
                 return
             token = token.strip() or None
         key = panel.model.currentData()
@@ -130,8 +139,11 @@ class SamDownloads:
         def accept(paths):
             if panel.model.currentData() != key:
                 return
-            self.apply_paths(plan)
-            panel.status.setText("Файлы готовы. Нажмите «Загрузить SAM», чтобы загрузить модель в память.")
+            if standalone:
+                panel.status.setText(f"SAM3.1 скачана: {plan.files[0][1]}. Нужен отдельный видеобэкенд; текущая модель не заменена.")
+            else:
+                self.apply_paths(plan)
+                panel.status.setText("Файлы готовы. Нажмите «Загрузить SAM», чтобы загрузить модель в память.")
             for path in paths.values():
                 controller.owner.log(f"[SAM] Локальный файл готов: {path}")
 

@@ -75,8 +75,10 @@ CLI работает на стандартном Python без PyTorch:
 ```bash
 python -m utils_new.import_export.sam_weights --list
 python -m utils_new.import_export.sam_weights --models sam sam2 sam3 --ask-token
+python -m utils_new.import_export.sam_weights --models sam3 sam3.1 --ask-token
 python -m utils_new.import_export.sam_weights --models sam3 --weights-file "C:/models/SAM3.pt"
 python -m utils_new.import_export.sam_weights --models sam3 --extras-only
+python -m utils_new.import_export.sam_weights --models sam3.1 --weights-file "C:/models/sam3.1_multiplex.pt" --ask-token
 python -m utils_new.import_export.sam_weights --models grounding-dino-tiny
 ```
 
@@ -85,9 +87,35 @@ python -m utils_new.import_export.sam_weights --models grounding-dino-tiny
 `--dry-run` показывает план. Для готовых весов `--weights-file` использует файл на месте,
 а вспомогательные ресурсы по умолчанию кладёт рядом. `--extras-only` пропускает веса.
 
-SAM3 требует доступа к [facebook/sam3](https://huggingface.co/facebook/sam3): примите
-условия и используйте скрытый ввод либо `HF_TOKEN`. Токен не сохраняется и не нужен,
-если веса уже есть или скачивается только токенизатор. DINO доступен без токена.
+| Выбор | Официальный репозиторий | Файлы в папке сохранения |
+| --- | --- | --- |
+| `sam3` | [facebook/sam3](https://huggingface.co/facebook/sam3) | `sam3/sam3.pt` + BPE-токенизатор |
+| `sam3.1` | [facebook/sam3.1](https://huggingface.co/facebook/sam3.1) | `sam3.1/sam3.1_multiplex.pt`, `config.json` + BPE-токенизатор |
+
+Это разные checkpoints: SAM3.1 Object Multiplex предназначена для видеотрекинга
+и требует обновлённого официального кода SAM3. Она **не подставляется вместо SAM3**
+в существующий Ultralytics backend вкладок. Сейчас доступны её скачивание и подготовка
+локальных файлов; применение видеомодели пока не подключено. В UI выберите **«⋯»**
+рядом с **«Скачать файлы…» → SAM3.1 Object Multiplex**. Текущие веса/архитектура
+сохранятся, готовые файлы можно будет использовать с отдельным видеобэкендом.
+
+Примите условия и получите доступ **к каждому нужному репозиторию**: токен не заменяет
+одобрение доступа. Используйте `--ask-token` для скрытого ввода либо `HF_TOKEN`.
+Без явного токена загрузчик читает активный токен после `hf auth login`
+из `HF_TOKEN_PATH` или `HF_HOME/token` (обычно `~/.cache/huggingface/token`).
+`HF_HUB_DISABLE_IMPLICIT_TOKEN=1` отключает чтение кеша; `HF_TOKEN` остаётся явным выбором.
+Сам загрузчик не сохраняет токен в проекте, логах или манифесте, не передаёт его GitHub/CDN.
+Если все файлы уже есть, повторная авторизация не нужна. Для SAM3.1 токен может
+понадобиться и при наличии весов: её `config.json` также скачивается из gated-репозитория.
+Публичный BPE-токенизатор и DINO не требуют токена.
+
+Пример для вашей папки проекта (PowerShell, токен вводится скрыто после запуска):
+
+```powershell
+python -m utils_new.import_export.sam_weights --models sam3 sam3.1 --output "C:/Users/prodis/PycharmProjects/Neuro_threshold/models/segment_anything" --ask-token
+```
+
+Веса и вспомогательные файлы привязаны к фиксированным версиям источников.
 `download_manifest.json` хранит SHA-256 для повторной проверки локальных файлов;
 это не сверка с опубликованным автором хешем. Повреждённые файлы заменяются только
 через `--force`; незавершённые удаляются. Переносите на автономный компьютер

@@ -51,6 +51,83 @@ class Opener:
 
 
 class SAMDownloadTests(unittest.TestCase):
+    def setUp(self):
+        home = TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        credentials = patch.dict(os.environ, dict(HF_TOKEN="", HUGGING_FACE_HUB_TOKEN="",
+            HF_HOME=home.name, HF_TOKEN_PATH=str(Path(home.name) / "token"),
+            HF_HUB_DISABLE_IMPLICIT_TOKEN="0"))
+        credentials.start()
+        self.addCleanup(credentials.stop)
+
+    def test_sam31_has_separate_revision_paths_and_is_not_an_image_architecture(self):
+        self.assertNotIn("sam3.1", downloader.MODELS)
+        model = downloader.DOWNLOAD_MODELS["sam3.1"]
+        self.assertTrue(model.assets[0].path.endswith("sam3.1_multiplex.pt"))
+        self.assertIn(downloader.SAM31_WEIGHTS_REVISION, model.assets[0].url)
+        self.assertNotEqual(model.assets[0].path, downloader.MODELS["sam3"].assets[0].path)
+        self.assertIn("sam3.1", downloader.select_models(["all"]))
+        self.assertNotIn("grounding-dino-tiny", downloader.select_models(["all"]))
+
+    def test_environment_and_active_hub_login_token_are_resolved_without_writing(self):
+        path = Path(os.environ["HF_TOKEN_PATH"])
+        path.write_text("hf_ACTIVE_LOGIN\n")
+        self.assertEqual(downloader.resolve_hf_token(), "hf_ACTIVE_LOGIN")
+        with patch.dict(os.environ, dict(HF_TOKEN="hf_ENV")):
+            self.assertEqual(downloader.resolve_hf_token(), "hf_ENV")
+        with patch.dict(os.environ, dict(HF_HUB_DISABLE_IMPLICIT_TOKEN="1")):
+            self.assertIsNone(downloader.resolve_hf_token())
+        self.assertEqual(path.read_text(), "hf_ACTIVE_LOGIN\n")
+
+    def test_sam31_authenticates_weights_and_config_but_not_public_tokenizer(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()) as captured:
+            opener = Opener(Response(WEIGHTS), Response(b'{"model_type":"sam3"}'), Response(TOKENIZER))
+            plan = downloader.plan_model_download("sam3.1", Path(directory))
+            paths = downloader.download_model(plan, opener=opener, token="hf_TEST_SECRET")
+            for request in opener.requests:
+                auth = request.get_header("Authorization")
+                self.assertEqual(auth, "Bearer hf_TEST_SECRET" if "huggingface.co" in request.full_url else None)
+            manifest = json.loads((Path(directory) / downloader.MANIFEST_NAME).read_text())
+            self.assertNotIn("hf_TEST_SECRET", captured.getvalue() + json.dumps(manifest))
+            self.assertEqual(len(paths), 3)
+
+    def test_both_gated_models_prompt_once_and_keep_distinct_files(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            opener = Opener(Response(WEIGHTS), Response(TOKENIZER), Response(WEIGHTS),
+                            Response(b'{"model_type":"sam3"}'), Response(TOKENIZER))
+            with patch.object(downloader, "build_opener", return_value=opener), \
+                    patch.object(downloader.getpass, "getpass", return_value="hf_INPUT") as ask:
+                code = downloader.main(["--models", "sam3", "sam3.1", "--ask-token", "--output", directory])
+            self.assertEqual(code, 0)
+            ask.assert_called_once()
+            self.assertTrue((Path(directory) / "sam3/sam3.pt").is_file())
+            self.assertTrue((Path(directory) / "sam3.1/sam3.1_multiplex.pt").is_file())
+
+    def test_sam31_existing_bundle_needs_no_token_or_network(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            output = Path(directory)
+            plan = downloader.plan_model_download("sam3.1", output)
+            for asset, path in plan.files:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(WEIGHTS if asset.is_weights else TOKENIZER if asset.kind == "tokenizer" else b'{}')
+            with patch.object(downloader, "resolve_hf_token") as token, \
+                    patch.object(downloader.getpass, "getpass") as ask, \
+                    patch.object(downloader, "build_opener") as opener:
+                self.assertEqual(downloader.main(["--models", "sam3.1", "--ask-token", "--output", directory]), 0)
+            token.assert_not_called()
+            ask.assert_not_called()
+            opener.return_value.open.assert_not_called()
+
+    def test_sam31_gated_error_identifies_its_own_repo_without_secrets(self):
+        error = HTTPError("https://cdn.example/SIGNED_SECRET", 403, "hf_PRIVATE", {}, None)
+        message = downloader._http_error_message(error, downloader.DOWNLOAD_MODELS["sam3.1"].assets[1])
+        self.assertIn("https://huggingface.co/facebook/sam3.1", message)
+        self.assertNotIn("SIGNED_SECRET", message)
+        self.assertNotIn("hf_PRIVATE", message)
+        for url in ("http://huggingface.co/facebook/sam3.1/file", "https://huggingface.co.evil/facebook/sam3/file",
+                    "https://huggingface.co/facebook/sam3.1-other/file"):
+            self.assertIsNone(downloader.gated_repository(downloader.Asset("weights.pt", url)))
+
     def test_plan_is_local_and_reuses_uppercase_weights_without_copying(self):
         with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             root = Path(directory)
@@ -141,7 +218,7 @@ class SAMDownloadTests(unittest.TestCase):
     def test_aliases_and_matching_sam2_assets(self):
         self.assertEqual(downloader.select_models(["sam", "sam-vit-b", "sam2", "sam3"]),
                          ["sam-vit-b", "sam2.1-tiny", "sam3"])
-        self.assertEqual(len(downloader.select_models(["all"])), 12)
+        self.assertEqual(len(downloader.select_models(["all"])), 13)
         for version in ("sam2", "sam2.1"):
             weights, config = downloader.MODELS[f"{version}-base-plus"].assets
             self.assertTrue(weights.path.endswith(f"{version}_hiera_base_plus.pt"))
