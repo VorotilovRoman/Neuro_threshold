@@ -9,7 +9,7 @@ from threading import Event
 
 WORKERS = {
     kind: f"utils_new.training.{kind}"
-    for kind in ("yolo", "unet", "deeplab", "autoencoder")
+    for kind in ("yolo", "unet", "deeplab", "sam", "autoencoder")
 }
 CANCELLED = 130
 

@@ -137,6 +137,32 @@ def load_sam_backend(model_key, weights, *, device="auto", tokenizer=None, promp
     return result
 
 
+def load_prompt_model(model_key, weights, device, *, training=False):
+    """Native differentiable SAM/SAM2 model; shared checkpoint contract with inference."""
+    from utils_new.import_export.training import read_model_meta
+
+    torch = require_torch()
+    meta = read_model_meta(weights)
+    if meta.get("model_key") and meta["model_key"] != model_key:
+        raise ValueError(f"Веса обучены для {meta['model_key']}, выбрана {model_key}")
+    state = torch.load(str(weights), map_location="cpu", weights_only=True)
+    if isinstance(state, dict) and isinstance(state.get("model"), dict):
+        if state.get("model_key", model_key) != model_key:
+            raise ValueError("Архитектура checkpoint не совпадает с выбранной SAM.")
+        state = state["model"]
+    if model_key.startswith("sam-vit-"):
+        package = importlib.import_module("segment_anything")
+        model = package.sam_model_registry["vit_" + model_key[-1]](checkpoint=None)
+    elif model_key.startswith(("sam2-", "sam2.1-")):
+        config = MODELS[model_key].assets[1].path.removeprefix("sam2/")
+        builder = importlib.import_module("sam2.build_sam").build_sam2
+        model = builder(config, ckpt_path=None, device="cpu", apply_postprocessing=not training)
+    else:
+        raise ValueError("Нужна архитектура SAM или SAM2/2.1.")
+    model.load_state_dict(state, strict=True)
+    return model.to(device).eval()
+
+
 class LocalSAM:
     """Load once, reuse image embeddings; access serially from a worker."""
 
@@ -171,14 +197,10 @@ class LocalSAM:
         try:
             if model_key.startswith("sam-vit-"):
                 package = importlib.import_module("segment_anything")
-                model_type = "vit_" + model_key[-1]
-                instance.model = package.sam_model_registry[model_type](checkpoint=str(path))
-                instance.model.to(device=device).eval()
+                instance.model = load_prompt_model(model_key, path, device)
                 instance.predictor = package.SamPredictor(instance.model)
             elif model_key.startswith(("sam2-", "sam2.1-")):
-                config = MODELS[model_key].assets[1].path.removeprefix("sam2/")
-                builder = importlib.import_module("sam2.build_sam").build_sam2
-                instance.model = builder(config, str(path), device=device)
+                instance.model = load_prompt_model(model_key, path, device)
                 predictor = importlib.import_module("sam2.sam2_image_predictor").SAM2ImagePredictor
                 instance.predictor = predictor(instance.model)
             else:

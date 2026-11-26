@@ -701,23 +701,38 @@ class YoloTrainWindow(QMainWindow):
         """Остановка обучения SegFormer (заглушка)."""
         self.log("Остановка обучения SegFormer (не реализовано)")
 
-    # ===================== SAM (заглушка) =====================
+    # ===================== SAM / SAM2 =====================
     def _run_sam_training(self, params):
-        """Запуск обучения SAM (пока заглушка)."""
-        self.log("=== Параметры обучения SAM ===")
-        for key, val in params.items():
-            self.log(f"{key}: {val}")
-        self.log("=" * 30)
-        QMessageBox.information(
-            self,
-            "Информация",
-            "Обучение SAM будет доступно в следующих версиях.\n"
-            "Параметры переданы в лог.",
-        )
+        from utils_new.configuration.sam_training import sam_training_config
+        if self.sam_process and self.sam_process.state() != QProcess.NotRunning:
+            self.log("Обучение SAM уже запущено.")
+            return
+        try:
+            params = sam_training_config(params)
+        except ValueError as error:
+            QMessageBox.warning(self, "Параметры SAM", str(error))
+            return
+        self.log("=== Дообучение SAM ===")
+        for key, value in params.items():
+            self.log(f"{key}: {value}")
+        self.sam_process = process = QProcess(self)
+        process.setWorkingDirectory(get_project_root())
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(lambda: self._read_training_output("sam"))
+        process.finished.connect(lambda code, status: self._semantic_finished("sam", code, status))
+        process.errorOccurred.connect(lambda error: self._sam_process_error(process, error))
+        self.sam_train_widget.set_running(True)
+        self._start_worker("sam", process, params)
+
+    def _sam_process_error(self, process, error):
+        if error == QProcess.FailedToStart and self.sam_process is process:
+            self.log(f"Не удалось запустить обучение SAM: {process.errorString()}")
+            self.sam_train_widget.set_running(False)
+            self._cleanup_worker("sam")
+            self.sam_process = None
 
     def on_stop_sam(self):
-        """Остановка обучения SAM (заглушка)."""
-        self.log("Остановка обучения SAM (не реализовано)")
+        self._request_training_stop("sam")
 
     def _training_parts(self, kind):
         return (
@@ -726,7 +741,7 @@ class YoloTrainWindow(QMainWindow):
             else (
                 kind + "_process",
                 kind + "_train_widget",
-                "U-Net" if kind == "unet" else "DeepLab",
+                {"unet": "U-Net", "sam": "SAM"}.get(kind, "DeepLab"),
             )
         )
 
@@ -761,6 +776,7 @@ class YoloTrainWindow(QMainWindow):
                 try:
                     _, percentage, epoch, total = line.split(":")
                     bar = getattr(self, widget_name).progress_bar
+                    bar.setRange(0, 100)
                     bar.setValue(max(0, min(100, int(percentage))))
                     bar.setFormat(f"{label}: {percentage}% ({epoch}/{total})")
                 except (ValueError, TypeError):
@@ -834,7 +850,7 @@ class YoloTrainWindow(QMainWindow):
     def shutdown_training(self):
         self._closing_training = True
         busy = False
-        for kind in ("yolo", "unet", "deeplab"):
+        for kind in ("yolo", "unet", "deeplab", "sam"):
             attr, _, _ = self._training_parts(kind)
             process = getattr(self, attr, None)
             if process is not None and process.state() != QProcess.NotRunning:

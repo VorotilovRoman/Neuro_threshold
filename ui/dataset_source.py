@@ -7,6 +7,10 @@ from PyQt5.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel, QLayout
 
 # Stable action keys; one caption/filter/meaning across every consumer.
 ACTIONS = {
+    "dataset_any": (
+        "Датасет…", "Выберите YAML или COCO JSON", "Датасеты (*.yaml *.yml *.json)", False,
+        "Выберите описание датасета. Затем подтвердите пути снимков и разметки.",
+    ),
     "model_ml": (
         "Модель ML…",
         "Выберите модель классического ML",
@@ -216,7 +220,7 @@ TAB_DESCRIPTIONS = {
     "dataset": "Подготовка и экспорт датасета: снимки + TXT, индексные маски или снимки без разметки; YOLO YAML, COCO и YAML с масками.",
     "dataset_analysis": "Проверка качества, разметки, повторов и split: TXT/индексные маски/снимки без разметки; общий отчёт и экспорт.",
     "sahi": "Тайловая нарезка датасета из снимков с TXT, YOLO YAML или COCO. Индексные маски как вход здесь не поддерживаются.",
-    "yolo_train": "Обучение YOLO, U-Net и DeepLab: папка либо YAML соответствующего формата. SAM/SegFormer остаются заготовками интерфейса.",
+    "yolo_train": "Обучение YOLO, U-Net, DeepLab и дообучение SAM/SAM2: источник соответствующего формата. SAM требует маски объектов. Обучение SAM3 и SegFormer пока не подключено.",
     "yolo_demo": "Сравнение YOLO и пороговых пресетов и объединение BBox по классам через NMS/WBF; снимки и папки.",
     "yolo_sort": "Рекурсивный поиск снимков по классу YOLO и геометрии объекта; список, миниатюры и перенос только изображений.",
     "yolo_aeb": "YOLO и AE/VAE: снимки/папки, выбор объекта, кропы, преобразования и карта ошибки реконструкции по checkpoint.",

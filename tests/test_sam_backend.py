@@ -107,7 +107,8 @@ class SamBackendTests(unittest.TestCase):
         self.assertEqual(result.annotations(min_area=10000), [])
 
     def test_sam_and_sam2_builders_receive_only_local_paths(self):
-        torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
+        torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False),
+                                load=Mock(return_value={"model": {"weight": object()}}))
         model = Mock()
         model.to.return_value = model
         package = SimpleNamespace(sam_model_registry={"vit_b": Mock(return_value=model)}, SamPredictor=Mock())
@@ -121,9 +122,12 @@ class SamBackendTests(unittest.TestCase):
             with patch("utils_new.segmentation.backends.sam.require_torch", return_value=torch), \
                     patch("utils_new.segmentation.backends.sam.importlib.import_module", side_effect=modules.__getitem__):
                 LocalSAM.load("sam-vit-b", weights)
-                package.sam_model_registry["vit_b"].assert_called_once_with(checkpoint=str(weights))
+                package.sam_model_registry["vit_b"].assert_called_once_with(checkpoint=None)
+                torch.load.assert_called_with(str(weights), map_location="cpu", weights_only=True)
+                model.load_state_dict.assert_called_with(torch.load.return_value["model"], strict=True)
                 LocalSAM.load("sam2.1-base-plus", weights, device="cpu")
-                builder.assert_called_once_with("configs/sam2.1/sam2.1_hiera_b+.yaml", str(weights), device="cpu")
+                builder.assert_called_once_with("configs/sam2.1/sam2.1_hiera_b+.yaml", ckpt_path=None,
+                                                device="cpu", apply_postprocessing=True)
             with self.assertRaises(FileNotFoundError):
                 LocalSAM.load("sam-vit-b", weights.with_name("missing.pth"))
 

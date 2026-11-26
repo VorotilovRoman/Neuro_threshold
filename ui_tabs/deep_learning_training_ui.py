@@ -5,9 +5,9 @@ from PyQt5.QtWidgets import QScrollArea, QSplitter, QTabWidget, QVBoxLayout, QWi
 from ui.DL_train_settings_base import UNetTrainWidget, YOLOTrainWidget
 from ui.DL_train_settings_new_model import (
     DeepLabV3TrainWidget,
-    SAMTrainWidget,
     SegFormerTrainWidget,
 )
+from ui.sam.training import SAMTrainWidget
 from ui.log_widget import LogWidget
 
 
