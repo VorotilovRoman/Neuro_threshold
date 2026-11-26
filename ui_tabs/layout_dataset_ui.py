@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
 from ui.dataset_source import make_source_button
 from ui.image_navigation import ImageNavigationWidget
 from ui.sam.panel import AutoLabelStack, SamPanel
-from ui.sam.view import SamPromptView
+from ui.segmentation.prompt_view import PromptInputView
 from ui.log_widget import LogWidget
 
 
@@ -131,7 +131,7 @@ def setup_layout_dataset_ui(parent):
     left_layout = QVBoxLayout(left_widget)
     left_layout.setContentsMargins(0, 0, 0, 0)
 
-    parent.image_view = SamPromptView()
+    parent.image_view = PromptInputView()
     parent.image_view.setMinimumSize(600, 500)
     parent.image_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     left_layout.addWidget(parent.image_view)

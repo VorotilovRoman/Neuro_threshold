@@ -318,7 +318,7 @@ class Labeler(QMainWindow):
             self.log("Drawing mode OFF (panning mode).")
 
     def reset_drawing_tool(self):
-        self.image_view.sam_tool = self.image_view._sam_start = None
+        self.image_view.set_prompt_tool(None)
         self._uncheck_all_tools()
         self.image_view.set_drawing_tool(None)
         self.image_view.set_selected_index(-1)

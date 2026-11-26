@@ -25,6 +25,7 @@ class SamController:
         self.preview_key = None
         self.preview_result = None
         panel = self.panel
+        panel.prompt_tools.bind_view(self.view)
         panel.browse_weights.clicked.connect(self.browse_weights)
         panel.browse_tokenizer.clicked.connect(self.browse_tokenizer)
         panel.browse_dino.clicked.connect(self.browse_dino)
@@ -32,11 +33,9 @@ class SamController:
         panel.run.clicked.connect(self.run)
         panel.accept.clicked.connect(self.accept)
         panel.cancel.clicked.connect(self.cancel)
-        panel.clear.clicked.connect(self.view.clear_sam_prompts)
+        panel.clear.clicked.connect(self.view.clear_prompts)
         panel.selected_box.clicked.connect(self.selected_box)
-        panel.positive.clicked.connect(lambda: self.tool("positive"))
-        panel.negative.clicked.connect(lambda: self.tool("negative"))
-        panel.box.clicked.connect(lambda: self.tool("box"))
+        panel.prompt_tools.tool_requested.connect(self.tool)
         panel.model.currentIndexChanged.connect(self.model_changed)
         panel.mode.currentIndexChanged.connect(self.mode_changed)
         for edit in (panel.weights, panel.tokenizer, panel.dino_directory):
@@ -50,6 +49,7 @@ class SamController:
                                (panel.dino_nms, "valueChanged"), (panel.dino_max_objects, "valueChanged")):
             getattr(widget, signal).connect(self.invalidate)
         self.view.prompts_changed.connect(self.invalidate)
+        panel.merge.toggled.connect(self.merge_changed)
         host.bind(self)
         from ui.sam.downloads import SamDownloads
         self.downloads = SamDownloads(self)
@@ -61,7 +61,7 @@ class SamController:
         self.revision += 1
         self.preview_key = None
         self.preview_result = None
-        self.view.sam_preview = []
+        self.view.prompt_preview = []
         self.view.viewport().update()
         self.panel.accept.setEnabled(False)
         if self.job is not None and (cancel_load or not self.loading):
@@ -71,34 +71,44 @@ class SamController:
         if self.identity() != self.frame:
             self.frame = self.identity()
             self.stop_tool()
-            self.view.clear_sam_prompts()
+            self.view.clear_prompts()
             self.host.frame_changed()
 
     def stop_tool(self):
-        self.view.sam_tool = self.view._sam_start = None
-        self.view.set_drawing_tool(None)
+        self.view.set_prompt_tool(None)
 
     def tool(self, name):
         if self.job is not None or not self.host.image_ready():
             return
+        previous = self.view.prompt_tool
         self.host.reset_tool()
-        self.view.set_edit_mode(False)
-        self.view.setDragMode(self.view.NoDrag)
-        self.view.setCursor(Qt.CrossCursor)
-        self.view.sam_tool = name
+        self.view.set_prompt_tool(None if previous == name else name)
         self.panel.status.setText({"positive": "Кликните внутри объекта; ПКМ добавляет фон.",
                                    "negative": "Кликните по области фона.",
                                    "box": "Протяните рамку вокруг объекта."}[name])
 
+    def merge_changed(self):
+        if self.job is not None and not self.loading:
+            self.invalidate()
+        if self.preview_result is not None:
+            panel = self.panel
+            annotations = self.preview_result.annotations(class_id=panel.class_id.value(), kind=panel.kind.currentData(),
+                                                         min_area=panel.area.value(), merge_all=panel.merge.isChecked())
+            self.view.prompt_preview = annotations
+            self.view.viewport().update()
+            panel.accept.setEnabled(self.host.can_accept(self.preview_result, annotations))
+            panel.status.setText(f'Предпросмотр: {len(annotations)} объектов. Проверьте контур перед принятием.')
+        self.host.output_changed()
+
     def provider_changed(self):
         self.invalidate(cancel_load=True)
         self.stop_tool()
-        self.view.clear_sam_prompts()
+        self.view.clear_prompts()
 
     def mode_changed(self):
         self.invalidate(cancel_load=True)
         self.stop_tool()
-        self.view.clear_sam_prompts()
+        self.view.clear_prompts()
         self.panel.capabilities()
         self.host.model_changed()
         self.panel.status.setText(f"Режим изменён. Нажмите «{self.panel.load.text()}».")
@@ -143,10 +153,8 @@ class SamController:
         if ann is None:
             self.panel.status.setText("Сначала выделите объект в списке или на снимке.")
             return
-        self.view.sam_box = tuple(ann.points_px.min(axis=0)) + tuple(ann.points_px.max(axis=0))
         self.panel.class_id.setValue(ann.class_id)
-        self.view.prompts_changed.emit()
-        self.view.viewport().update()
+        self.view.set_prompt_box(tuple(ann.points_px.min(axis=0)) + tuple(ann.points_px.max(axis=0)))
 
     def _start(self, compute, accept, status, *, loading=False, job=None):
         if self.closed or self.job is not None or not self.host.can_start():
@@ -235,7 +243,8 @@ class SamController:
             return
         image = self.host.image()
         panel = self.panel
-        prompt = SamPrompt(tuple(self.view.sam_points), tuple(self.view.sam_labels), self.view.sam_box,
+        box = None if panel.mode.currentData() == 'text' and self.view.full_image else self.view.effective_box()
+        prompt = SamPrompt(tuple(self.view.prompt_points), tuple(self.view.prompt_labels), box,
                            panel.text.text() if panel.mode.currentData() in ("text", "grounded") else "")
         if panel.mode.currentData() in ("text", "grounded") and not prompt.text.strip():
             panel.status.setText("Введите текстовый запрос или выберите режим «Точки и рамка» и загрузите модель заново.")
@@ -248,7 +257,8 @@ class SamController:
         self.invalidate()
         key = (self.identity(), self.revision, id(image))
         backend = self.backend
-        options = dict(class_id=panel.class_id.value(), kind=panel.kind.currentData(), min_area=panel.area.value())
+        options = dict(class_id=panel.class_id.value(), kind=panel.kind.currentData(), min_area=panel.area.value(),
+                       merge_all=panel.merge.isChecked())
         min_score = panel.score.value()
         detector_options = dict(box_threshold=panel.dino_box_score.value(), text_threshold=panel.dino_text_score.value(),
                                 nms_threshold=panel.dino_nms.value(), max_objects=panel.dino_max_objects.value()) if panel.mode.currentData() == "grounded" else {}
@@ -264,7 +274,7 @@ class SamController:
             scores, detections, phrases, detected_count = result.scores, result.detection_scores, result.phrases, result.detected_count
             self.preview_key = key
             self.preview_result = result
-            self.view.sam_preview = annotations
+            self.view.prompt_preview = annotations
             self.view.viewport().update()
             panel.accept.setEnabled(self.host.can_accept(result, annotations))
             score_text = ", ".join(f"{score:.3f}" for score in scores[:10])
@@ -288,14 +298,14 @@ class SamController:
         if id(image) != self.preview_key[2]:
             self.invalidate()
             return
-        annotations = list(self.view.sam_preview)
+        annotations = list(self.view.prompt_preview)
         if self.host.confirm_replace and self.panel.replace.isChecked() and QMessageBox.question(
                 self.owner, "SAM", "Заменить все существующие аннотации текущего снимка?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self.host.apply_result(self.preview_result, annotations, self.panel.replace.isChecked())
         self.owner.log(f"[SAM] Принято объектов: {len(annotations)}; класс: {self.panel.class_id.value()}")
-        self.view.clear_sam_prompts()
+        self.view.clear_prompts()
         self.stop_tool()
         self.panel.status.setText(self.host.accepted_message(len(annotations)))
 

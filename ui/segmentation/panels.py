@@ -21,7 +21,7 @@ from ui.annotation_review_view import DatasetReviewGraphicsView
 from ui.image_navigation import ImageNavigationWidget
 from ui.log_widget import LogWidget
 from ui.segmentation.histogram import HistogramCanvas
-from ui.segmentation.interactive_view import SegmentationInputView
+from ui.segmentation.prompt_view import PromptInputView
 from utils_new.annotations.modes import MODE_LABELS
 
 STAGES = {
@@ -125,15 +125,10 @@ def begin_layout(owner, kind):
     for index, (name, title) in enumerate(STAGES[kind]):
         group = QGroupBox(title)
         group_layout = QVBoxLayout(group)
-        if kind == 'deep_learning' and name == 'original_view':
-            from ui.sam.view import SamPromptView
-            view = SamPromptView()
+        if kind in ('deep_learning', 'interactive') and name == 'original_view':
+            view = PromptInputView()
         else:
-            view = (
-                SegmentationInputView()
-                if kind == "interactive" and name == "original_view"
-                else DatasetReviewGraphicsView()
-            )
+            view = DatasetReviewGraphicsView()
         view.setMinimumSize(280, 220)
         view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         if name == "annotated_view":

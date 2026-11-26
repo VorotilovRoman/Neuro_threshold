@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ui.morphology_ui import MorphologyWidget
+from ui.segmentation.prompt_tools import PromptTools
 
 # interactive_methods_ui.py
 from ui.segmentation.panels import ResultPanel, begin_layout, finish_layout
@@ -63,25 +64,23 @@ def setup_interactive_ui(parent):
     controls_layout.addWidget(parent.params_widget)
 
     # ---------- Инструменты интерактивного ввода ----------
-    input_group = QGroupBox("Interactive Input")
+    input_group = QGroupBox("Подсказки сегментации")
     input_layout = QVBoxLayout()
 
-    row1 = QHBoxLayout()
-    parent.rect_mode_btn = QPushButton("Draw Bounding Box")
-    parent.rect_mode_btn.setCheckable(True)
-    parent.fg_scribble_btn = QPushButton("Scribble FG")
-    parent.fg_scribble_btn.setCheckable(True)
-    parent.bg_scribble_btn = QPushButton("Scribble BG")
-    parent.bg_scribble_btn.setCheckable(True)
-    row1.addWidget(parent.rect_mode_btn)
-    row1.addWidget(parent.fg_scribble_btn)
-    row1.addWidget(parent.bg_scribble_btn)
-    input_layout.addLayout(row1)
+    parent.prompt_tools = PromptTools()
+    parent.prompt_tools.full_image.setToolTip(
+        'Рамка по умолчанию — весь снимок. GrabCut, SuperCut, OneCut и Chan–Vese '
+        'используют край как начальный фон. Если объект касается края, уточните рамку '
+        'или используйте метод с метками объекта и фона.')
+    parent.rect_mode_btn = parent.prompt_tools.box
+    parent.fg_scribble_btn = parent.prompt_tools.positive
+    parent.bg_scribble_btn = parent.prompt_tools.negative
+    parent.merge_objects_checkbox = parent.prompt_tools.merge
+    parent.reset_mask_btn = parent.prompt_tools.clear
+    input_layout.addWidget(parent.prompt_tools)
 
     row2 = QHBoxLayout()
-    parent.reset_mask_btn = QPushButton("Reset Input")
     parent.run_seg_btn = QPushButton("Run Segmentation")
-    row2.addWidget(parent.reset_mask_btn)
     row2.addWidget(parent.run_seg_btn)
     input_layout.addLayout(row2)
 

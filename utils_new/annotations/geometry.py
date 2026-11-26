@@ -25,6 +25,28 @@ class LossyConversionError(GeometryError):
     pass
 
 
+def enclose_annotations(annotations):
+    """One enclosing object for same-class fragments; does not alter a mask.
+
+    Disconnected YOLO segments cannot be one simple polygon without adding area.
+    Use a convex hull explicitly, and a common envelope for axis/rotated boxes.
+    """
+    annotations = list(annotations)
+    if len(annotations) < 2:
+        return annotations
+    kind, class_id = annotations[0].kind, annotations[0].class_id
+    if any(ann.kind != kind or ann.class_id != class_id for ann in annotations):
+        raise GeometryError('Объединение требует одинакового типа и класса объектов.')
+    points = np.concatenate([ann.points_px for ann in annotations])
+    if kind == 'detect':
+        points = rectangle_points(*bounds(points))
+    elif kind == 'obb':
+        points = canonical_obb_points(points)
+    else:
+        points = cv2.convexHull(points.astype(np.float32)).reshape(-1, 2)
+    return [Annotation(kind, class_id, points)]
+
+
 def polygon_area(points) -> float:
     p = np.asarray(points, dtype=np.float64)
     if len(p) < 3:

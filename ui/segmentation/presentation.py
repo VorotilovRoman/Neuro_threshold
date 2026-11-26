@@ -81,8 +81,10 @@ def geometry_changed(owner, *_):
         return
     hook = getattr(owner, '_result_objects', None)
     objects = hook() if hook is not None else None
+    merge = getattr(owner, 'merge_objects_checkbox', None)
     owner.current_objects_full = objects if objects is not None else extract_objects(
-        owner.current_base_image, owner.final_mask, mode, owner.hull_checkbox.isChecked())[1]
+        owner.current_base_image, owner.final_mask, mode, owner.hull_checkbox.isChecked(),
+        merge_all=bool(merge is not None and merge.isChecked()))[1]
     owner.update_object_list()
 
 

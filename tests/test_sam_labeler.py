@@ -71,7 +71,7 @@ class SamLabelerTests(unittest.TestCase):
         return backend
 
     def prompt(self):
-        self.view.sam_points, self.view.sam_labels = [(30, 20)], [1]
+        self.view.prompt_points, self.view.prompt_labels = [(30, 20)], [1]
         self.view.prompts_changed.emit()
 
     def test_provider_switch_keeps_yolo_controls_and_sam_capabilities(self):
@@ -289,7 +289,7 @@ class SamLabelerTests(unittest.TestCase):
         self.assertEqual(arguments["text_threshold"], .3)
         self.assertEqual(arguments["max_objects"], 12)
         self.assertEqual(self.owner.current_annotations, [])
-        self.assertEqual(len(self.view.sam_preview), 1)
+        self.assertEqual(len(self.view.prompt_preview), 1)
         self.assertIn("IoU SAM2", self.panel.status.text())
         self.assertIn("screw: 0.910", self.panel.status.text())
 
@@ -313,13 +313,13 @@ class SamLabelerTests(unittest.TestCase):
         self.controller.run()
         self.wait_until(lambda: self.controller.job is None)
         self.assertEqual(self.owner.current_annotations, [])
-        self.assertEqual(len(self.view.sam_preview), 1)
+        self.assertEqual(len(self.view.prompt_preview), 1)
         self.assertTrue(self.panel.accept.isEnabled())
         self.controller.accept()
         self.assertEqual(len(self.owner.current_annotations), 1)
         self.assertEqual(self.owner.current_annotations[0][:2], ("segment", 4))
         self.assertEqual(self.owner.all_annotations[0], self.owner.current_annotations)
-        self.assertEqual(self.view.sam_preview, [])
+        self.assertEqual(self.view.prompt_preview, [])
         # Exercise the same save path as the editor, then read the YOLO file back.
         with TemporaryDirectory() as directory:
             target = Path(directory) / "one.txt"
@@ -349,8 +349,8 @@ class SamLabelerTests(unittest.TestCase):
         finally:
             release.set()
         self.wait_until(lambda: self.controller.job is None)
-        self.assertEqual(self.view.sam_preview, [])
-        self.assertEqual(self.view.sam_points, [])
+        self.assertEqual(self.view.prompt_preview, [])
+        self.assertEqual(self.view.prompt_points, [])
         self.assertEqual(self.owner.all_annotations, [[], []])
         self.assertFalse(self.panel.accept.isEnabled())
 
@@ -374,14 +374,14 @@ class SamLabelerTests(unittest.TestCase):
         finally:
             release.set()
         self.wait_until(lambda: self.controller.job is None)
-        self.assertEqual(self.view.sam_preview, [])
+        self.assertEqual(self.view.prompt_preview, [])
         self.assertTrue(self.owner.auto_group.isEnabled())
 
     def test_selected_annotation_supplies_pixel_box_and_dataset_class(self):
         self.owner.current_annotations = [("detect", 8, .5, .5, .4, .6)]
         self.view.selected_index = 0
         self.controller.selected_box()
-        np.testing.assert_allclose(self.view.sam_box, [30, 12, 70, 48])
+        np.testing.assert_allclose(self.view.prompt_box, [30, 12, 70, 48])
         self.assertEqual(self.panel.class_id.value(), 8)
 
     def test_prompt_coordinates_follow_zoom_and_do_not_create_annotations(self):
@@ -397,11 +397,33 @@ class SamLabelerTests(unittest.TestCase):
         expected = self.view.mapToScene(position)
         QTest.mouseClick(self.view.viewport(), Qt.LeftButton, pos=position)
         QTest.mouseClick(self.view.viewport(), Qt.RightButton, pos=position)
-        self.assertEqual(self.view.sam_labels, [1, 0])
-        np.testing.assert_allclose(self.view.sam_points[0], [expected.x(), expected.y()])
+        self.assertEqual(self.view.prompt_labels, [0])  # Latest opposite mark replaces the old point.
+        np.testing.assert_allclose(self.view.prompt_points[0], [expected.x(), expected.y()])
         self.assertEqual(self.owner.current_annotations, [])
         self.owner.on_tool_selected(self.owner.btn_tool_rect)
-        self.assertIsNone(self.view.sam_tool)
+        self.assertIsNone(self.view.prompt_tool)
+
+    def test_default_full_frame_and_merge_preview_do_not_repeat_inference(self):
+        from unittest.mock import Mock
+        from utils_new.segmentation.backends.sam import SamResult
+
+        masks = np.zeros((2, 60, 100), bool)
+        masks[0, 5:20, 10:25] = True
+        masks[1, 30:50, 60:85] = True
+        predict = Mock(return_value=SamResult(masks, np.array([.9, .8])))
+        self.fake_backend(predict)
+        self.controller.run()
+        self.wait_until(lambda: self.controller.job is None)
+        self.assertEqual(predict.call_args.args[1].box, (0, 0, 100, 60))
+        self.assertEqual(len(self.view.prompt_preview), 2)
+        self.panel.merge.setChecked(True)
+        self.assertEqual(len(self.view.prompt_preview), 1)
+        self.panel.merge.setChecked(False)
+        self.assertEqual(len(self.view.prompt_preview), 2)
+        self.panel.merge.setChecked(True)
+        self.controller.accept()
+        self.assertEqual(len(self.owner.current_annotations), 1)
+        predict.assert_called_once()
 
     def test_load_is_background_and_mode_change_requires_reload(self):
         backend = SimpleNamespace(model_key="sam3", device="cpu")

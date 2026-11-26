@@ -34,6 +34,9 @@ class SamHost:
     def model_changed(self):
         pass
 
+    def output_changed(self):
+        pass
+
 
 class LabelerSamHost(SamHost):
     confirm_replace = True
@@ -139,6 +142,10 @@ class DeepLearningSamHost(SamHost):
         if self.active:
             self.owner.schedule_update()
 
+    def output_changed(self):
+        if self.active and self.result is not None:
+            self.owner.display_current_image()
+
     def apply_result(self, result, annotations, replace):
         self.result = result
         self.class_id, self.min_area = self.panel.class_id.value(), self.panel.area.value()
@@ -161,7 +168,8 @@ class DeepLearningSamHost(SamHost):
             # Invert the combined mask once; complement is a semantic background.
             result = SamResult.from_binary_mask(self.owner.final_mask)
         return result.annotations(class_id=self.class_id, kind=self.owner.draw_combo.currentData(),
-                                  min_area=self.min_area, use_hull=self.owner.hull_checkbox.isChecked())
+                                  min_area=self.min_area, use_hull=self.owner.hull_checkbox.isChecked(),
+                                  merge_all=self.panel.merge.isChecked())
 
     def accepted_message(self, count):
         return 'Маска применена. Проверьте морфологию, отметьте объекты в списке и сохраните разметку.'

@@ -16,7 +16,7 @@ def _image(image):
     return image
 
 
-def _rect(rect, shape):
+def _rect(rect, shape, *, exterior=False):
     if rect is None or len(rect) != 4:
         raise ValueError("Выделите прямоугольную область объекта (ROI).")
     x1, y1, x2, y2 = map(int, rect)
@@ -25,6 +25,10 @@ def _rect(rect, shape):
         raise ValueError(
             "ROI должен иметь положительную площадь и находиться внутри изображения."
         )
+    if exterior and (x1, y1, x2, y2) == (0, 0, w, h):
+        if min(w, h) < 4:
+            raise ValueError('Для начального фона по краю нужен снимок размером минимум 4×4.')
+        return 1, 1, w - 1, h - 1
     return x1, y1, x2, y2
 
 
@@ -75,7 +79,7 @@ def grabcut_segmentation(
     cv_rect = None
     init = cv2.GC_INIT_WITH_MASK
     if mode == "GC_INIT_WITH_RECT" or (mode == "Both" and rect is not None):
-        x1, y1, x2, y2 = _rect(rect, img.shape)
+        x1, y1, x2, y2 = _rect(rect, img.shape, exterior=mode == 'GC_INIT_WITH_RECT' or not bg.any())
         labels.fill(cv2.GC_BGD)
         labels[y1:y2, x1:x2] = cv2.GC_PR_FGD
         cv_rect = (x1, y1, x2 - x1, y2 - y1)
@@ -252,7 +256,7 @@ def morphological_chan_vese_segmentation(
     """Region-based evolution, useful when an object has a weak edge."""
     from skimage.segmentation import morphological_chan_vese
 
-    x1, y1, x2, y2 = _rect(rect, gray.shape)
+    x1, y1, x2, y2 = _rect(rect, gray.shape, exterior=True)
     for name, value in (
         ("Iterations", iterations),
         ("Lambda inside", lambda_inside),
@@ -381,7 +385,7 @@ def supercut_segmentation(
     sigma_color=10.0,
 ):
     """Project variant: ROI-occupancy prior and color-sensitive SLIC graph."""
-    x1, y1, x2, y2 = _rect(rect, img.shape)
+    x1, y1, x2, y2 = _rect(rect, img.shape, exterior=True)
     _positive("Lambda", lambda_val, zero=True)
     segments, colors, pairs = _superpixels(img, superpixel_size, compactness, sigma)
     inside = np.zeros(img.shape[:2], np.uint8)
@@ -405,7 +409,7 @@ def onecut_segmentation(
     color_sigma=10.0,
 ):
     """Project variant: GMM learned from ROI/exterior and a SLIC graph cut."""
-    x1, y1, x2, y2 = _rect(rect, img.shape)
+    x1, y1, x2, y2 = _rect(rect, img.shape, exterior=True)
     _positive("Data weight", data_weight, zero=True)
     segments, colors, pairs = _superpixels(img, superpixel_size, compactness, sigma)
     inside = np.zeros(img.shape[:2], bool)

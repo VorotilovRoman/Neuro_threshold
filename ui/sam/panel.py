@@ -8,6 +8,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 from utils_new.import_export.sam_weights import MODELS
 from utils_new.segmentation.backends.sam import MODELS_DIR
+from ui.segmentation.prompt_tools import PromptTools
 
 
 class AutoLabelStack(QStackedWidget):
@@ -29,7 +30,7 @@ class SamPanel(QWidget):
 
     preset_fields = ('model', 'weights', 'tokenizer', 'device', 'mode', 'dino_directory',
                      'dino_device', 'dino_box_score', 'dino_text_score', 'dino_nms',
-                     'dino_max_objects', 'text', 'class_id', 'kind', 'score', 'area')
+                     'dino_max_objects', 'text', 'class_id', 'kind', 'score', 'area', 'merge')
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -106,19 +107,11 @@ class SamPanel(QWidget):
         self.text.setToolTip("SAM3 или Grounding DINO + SAM2. Короткое английское описание одного класса; ID датасета задаётся отдельно.")
         form.addRow("Текст:", self.text)
         self.text_label = form.labelForField(self.text)
-        buttons = QHBoxLayout()
-        self.positive, self.negative, self.box = (QPushButton(text) for text in ("+ Объект", "− Фон", "Рамка"))
-        for button in (self.positive, self.negative, self.box):
-            buttons.addWidget(button)
-        form.addRow(buttons)
-        buttons = QHBoxLayout()
-        self.selected_box = QPushButton("Бокс из объекта")
-        self.selected_box.setToolTip("Взять рамку и ID класса из выделенной аннотации, не изменяя её.")
-        self.clear = QPushButton("Очистить")
+        self.prompt_tools = PromptTools()
+        for name in ('positive', 'negative', 'box', 'selected_box', 'clear', 'merge'):
+            setattr(self, name, getattr(self.prompt_tools, name))
         self.clear.setToolTip("Очистить все точки, рамку и предпросмотр SAM.")
-        buttons.addWidget(self.selected_box)
-        buttons.addWidget(self.clear)
-        form.addRow(buttons)
+        form.addRow(self.prompt_tools)
         self.class_id = QSpinBox()
         self.class_id.setRange(0, 1000000)
         self.class_id.setToolTip("ID класса вашего датасета. SAM не назначает классы YOLO автоматически.")

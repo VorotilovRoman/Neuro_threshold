@@ -11,6 +11,7 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
+import math
 import sys
 
 import cv2
@@ -21,7 +22,6 @@ from PyQt5.QtWidgets import (
     QMainWindow,
 )
 
-from ui.image_conversion import numpy_to_qpixmap
 from ui.segmentation import actions as segmentation_actions
 from ui.segmentation import computation as segmentation_computation
 from ui.segmentation import controller as segmentation_controller
@@ -71,14 +71,16 @@ class InteractiveMethodsWindow(QMainWindow):
         # Ссылка на основной вид (SmartGraphicsView)
         self.image_view = self.original_view
 
-        # Настройка коллбэков SmartGraphicsView
-        self.image_view.set_callbacks(
-            on_rect_drawn=self.on_rect_drawn,
-            on_scribble_added=self.on_scribble_added,
-            on_display_update=self.update_scribble_display,
-            on_reset_tool=self.activate_pan_zoom
-        )
-
+        self.prompt_tools.bind_view(self.image_view)
+        self.image_view.box_drawn.connect(self.on_rect_drawn)
+        self.image_view.stroke_added.connect(
+            lambda x, y, label, serial: self.on_scribble_added(int(x), int(y), 'fg' if label else 'bg'))
+        self.image_view.prompts_changed.connect(self._sync_prompt_box)
+        self.image_view.tool_changed.connect(self._sync_tool_buttons)
+        self.prompt_tools.selected_box.clicked.connect(self.box_from_active_object)
+        self.merge_objects_checkbox.toggled.connect(lambda _: segmentation_presentation.geometry_changed(self))
+        self.params_widget.brush_radius.valueChanged.connect(self._set_brush_radius)
+        self._set_brush_radius(self.params_widget.brush_radius.value())
 
         # Пресеты
         self.preset_manager = InteractivePresetManager(self, preset_file="presets_interactive.json")
@@ -88,9 +90,7 @@ class InteractiveMethodsWindow(QMainWindow):
         # Навигация
 
         # Кнопки инструментов
-        self.rect_mode_btn.clicked.connect(self.activate_rect_tool)
-        self.fg_scribble_btn.clicked.connect(self.activate_fg_tool)
-        self.bg_scribble_btn.clicked.connect(self.activate_bg_tool)
+        self.prompt_tools.tool_requested.connect(self._activate_prompt_tool)
         self.pan_zoom_btn.clicked.connect(self.activate_pan_zoom)
         self.run_seg_btn.clicked.connect(self.run_segmentation)
         self.reset_mask_btn.clicked.connect(self.reset_mask)
@@ -142,58 +142,60 @@ class InteractiveMethodsWindow(QMainWindow):
     # ----------------------------------------------------------------------
     #  Управление инструментами (через SmartGraphicsView)
     # ----------------------------------------------------------------------
+    def _set_brush_radius(self, value):
+        self.image_view.brush_radius = value
+
+    def _sync_tool_buttons(self):
+        self.current_tool = {'positive': 'fg', 'negative': 'bg', 'box': 'rect'}.get(self.image_view.prompt_tool)
+        self.pan_zoom_btn.setChecked(self.current_tool is None)
+
+    def _activate_prompt_tool(self, name):
+        self.image_view.set_prompt_tool(None if self.image_view.prompt_tool == name else name)
+
     def activate_rect_tool(self):
-        self.current_tool = "rect"
-        self.rect_mode_btn.setChecked(True)
-        self.fg_scribble_btn.setChecked(False)
-        self.bg_scribble_btn.setChecked(False)
-        self.pan_zoom_btn.setChecked(False)
-        self.image_view.set_drawing_tool("rect")
-        self.log("Режим: рисование прямоугольника (один бокс, затем сброс)")
+        self._activate_prompt_tool('box')
 
     def activate_fg_tool(self):
-        if self.current_tool == "fg":
-            self.activate_pan_zoom()
-        else:
-            self.current_tool = "fg"
-            self.rect_mode_btn.setChecked(False)
-            self.fg_scribble_btn.setChecked(True)
-            self.bg_scribble_btn.setChecked(False)
-            self.pan_zoom_btn.setChecked(False)
-            self.image_view.set_drawing_tool("fg")
-            self.log("Режим: штрихи переднего плана (повторное нажатие – выход)")
+        self._activate_prompt_tool('positive')
 
     def activate_bg_tool(self):
-        if self.current_tool == "bg":
-            self.activate_pan_zoom()
-        else:
-            self.current_tool = "bg"
-            self.rect_mode_btn.setChecked(False)
-            self.fg_scribble_btn.setChecked(False)
-            self.bg_scribble_btn.setChecked(True)
-            self.pan_zoom_btn.setChecked(False)
-            self.image_view.set_drawing_tool("bg")
-            self.log("Режим: штрихи фона (повторное нажатие – выход)")
+        self._activate_prompt_tool('negative')
 
     def activate_pan_zoom(self):
-        self.current_tool = None
-        self.rect_mode_btn.setChecked(False)
-        self.fg_scribble_btn.setChecked(False)
-        self.bg_scribble_btn.setChecked(False)
-        self.pan_zoom_btn.setChecked(True)
-        self.image_view.set_drawing_tool(None)
-        self.log("Режим панорамирования/зума")
+        self.image_view.set_prompt_tool(None)
 
-    # ----------------------------------------------------------------------
-    #  Обработка рисования
-    # ----------------------------------------------------------------------
-    def on_rect_drawn(self, rect):
-        self.rect = rect
-        self.on_segmentation_parameters_changed()
-        self.log(f"Прямоугольник задан: {self.rect}")
+    def effective_roi(self):
+        box = self.image_view.effective_box()
+        if box is None:
+            return None
+        return math.floor(box[0]), math.floor(box[1]), math.ceil(box[2]), math.ceil(box[3])
+
+    def _sync_prompt_box(self):
+        box = self.image_view.prompt_box
+        self.rect = tuple(map(int, box)) if box is not None and not self.image_view.full_image else None
+        if not getattr(self, '_resetting_input', False):
+            self.on_segmentation_parameters_changed()
         self.update_input_ui()
+
+    def on_rect_drawn(self, rect):
+        # Also used by callers supplying an ROI directly in working pixels.
+        box = tuple(map(int, rect))
+        if self.image_view.prompt_box != box or self.image_view.full_image:
+            self.image_view.set_prompt_box(box)
+        self.rect = box
         self.activate_pan_zoom()
-        self.update_scribble_display()
+        self.update_input_ui()
+
+    def box_from_active_object(self):
+        from utils_new.annotations.adapters import from_legacy
+        from utils_new.annotations.model import ImageSize
+        index = getattr(self, '_focused_object_index', -1)
+        if not 0 <= index < len(self.current_objects_full):
+            self.log('Сначала выберите активный объект в списке или на снимке результата.')
+            return
+        ann = from_legacy(self.current_objects_full[index], ImageSize(self.current_img_w, self.current_img_h))
+        self.image_view.set_prompt_box(tuple(ann.points_px.min(axis=0)) + tuple(ann.points_px.max(axis=0)))
+        self.activate_pan_zoom()
 
     def on_scribble_added(self, x, y, tool):
         if self.original_image is None:
@@ -220,7 +222,7 @@ class InteractiveMethodsWindow(QMainWindow):
     def update_input_ui(self):
         try:
             method = self.method_combo.currentText()
-            rect_ok = bool(self.rect is not None)
+            rect_ok = self.effective_roi() is not None
             fg_ok = bool(self.fg_scribbles is not None and np.any(self.fg_scribbles == 255))
             bg_ok = bool(self.bg_scribbles is not None and np.any(self.bg_scribbles == 255))
 
@@ -267,9 +269,9 @@ class InteractiveMethodsWindow(QMainWindow):
                 can_run = False
                 requirements = "Метод не реализован"
 
-            self.rect_mode_btn.setText(f"Draw Bounding Box {'(✓)' if rect_ok else '(✗)'}")
-            self.fg_scribble_btn.setText(f"Scribble FG {'(✓)' if fg_ok else '(✗)'}")
-            self.bg_scribble_btn.setText(f"Scribble BG {'(✓)' if bg_ok else '(✗)'}")
+            self.rect_mode_btn.setText(f"Рамка {'(✓)' if rect_ok else '(✗)'}")
+            self.fg_scribble_btn.setText(f"+ Объект {'(✓)' if fg_ok else '(✗)'}")
+            self.bg_scribble_btn.setText(f"− Фон {'(✓)' if bg_ok else '(✗)'}")
 
             def set_style(btn, active, required, ok):
                 btn.setEnabled(bool(active))
@@ -295,32 +297,8 @@ class InteractiveMethodsWindow(QMainWindow):
             self.log(f"Ошибка в update_input_ui: {e}\n{traceback.format_exc()}")
 
     def update_scribble_display(self):
-        if self.original_image is None:
-            return
-        original = self.original_image
-        if len(original.shape) == 3 and original.shape[2] == 4:
-            original = cv2.cvtColor(original, cv2.COLOR_BGRA2BGR)
-        display = original.copy()
-        if len(display.shape) == 2:
-            display = cv2.cvtColor(display, cv2.COLOR_GRAY2BGR)
-
-        if self.fg_scribbles is not None:
-            display[self.fg_scribbles == 255] = [0, 255, 0]
-        if self.bg_scribbles is not None:
-            display[self.bg_scribbles == 255] = [0, 0, 255]
-        if self.rect is not None:
-            x1, y1, x2, y2 = self.rect
-            cv2.rectangle(display, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        if self.image_view.temp_rect is not None:
-            x1, y1, x2, y2 = self.image_view.temp_rect
-            cv2.rectangle(display, (x1, y1), (x2, y2), (255, 255, 0), 2)
-        if self.image_view.temp_scribble is not None:
-            x, y, r = self.image_view.temp_scribble
-            color = (0, 255, 0) if self.current_tool == "fg" else (0, 0, 255)
-            cv2.circle(display, (x, y), r, color, -1)
-
-        pixmap = numpy_to_qpixmap(display)
-        self.original_view.set_pixmap(pixmap)
+        # Prompts are painted as vectors; never rebuild the source pixmap per mouse move.
+        self.image_view.viewport().update()
         self.update_input_ui()
 
     # ----------------------------------------------------------------------
@@ -392,6 +370,8 @@ class InteractiveMethodsWindow(QMainWindow):
         self.bg_scribbles = None
         self.image_view.set_image_data(self.current_img_w, self.current_img_h,
                                        self.fg_scribbles, self.bg_scribbles)
+        self.image_view.clear_prompts()
+        self.activate_pan_zoom()
         self.log("Маска и все вводные данные сброшены.")
         self.update_input_ui()
         self.update_scribble_display()
@@ -433,6 +413,14 @@ class InteractiveMethodsWindow(QMainWindow):
         segmentation_navigation.update_state(self)
 
     def _reset_interactive_state(self):
+        # Dataset/navigation orchestration displays the next frame itself. Do not
+        # queue an extra read of the old cache while it is being shut down.
+        self._resetting_input = True
+        try:
+            self.image_view.clear_prompts()
+            self.activate_pan_zoom()
+        finally:
+            self._resetting_input = False
         self._stroke_point = None
         self.mask = None
         self.rect = None

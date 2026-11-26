@@ -86,22 +86,29 @@ class SamResult:
         masks = [apply_morphology(mask.astype(np.uint8) * 255, steps, shape=shape) > 0 for mask in self.masks]
         return replace(self, masks=np.stack(masks) if masks else np.empty(self.masks.shape, bool))
 
-    def annotations(self, *, class_id=0, kind="segment", min_area=10, use_hull=False):
+    def annotations(self, *, class_id=0, kind="segment", min_area=10, use_hull=False, merge_all=False):
         """One model instance per mask; explicitly discard holes for YOLO polygons."""
         if not isinstance(class_id, int) or class_id < 0:
             raise ValueError("ID класса должен быть неотрицательным целым числом")
         if kind == "none":
             return []
+        if not np.isfinite(min_area) or min_area < 0:
+            raise ValueError('Минимальная площадь должна быть конечным неотрицательным числом')
         size = ImageSize(self.masks.shape[2], self.masks.shape[1])
+        if merge_all and np.count_nonzero(self.combined_mask()) < min_area:
+            return []
         result = []
         for mask in self.masks:
             components = mask_to_annotations(mask.astype(np.uint8), kind=kind,
-                                             min_area=min_area, holes="drop")
+                                             min_area=0 if merge_all else min_area, holes="drop")
             for ann in components:
                 points = ann.points_px
                 if use_hull and kind == "segment":
                     points = cv2.convexHull(points.astype(np.float32)).reshape(-1, 2)
                 result.append(Annotation(ann.kind, class_id, points))
+        if merge_all:
+            from utils_new.annotations.geometry import enclose_annotations
+            result = enclose_annotations(result)
         return to_legacy_many(result, size)
 
 

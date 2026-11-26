@@ -319,7 +319,7 @@ class GradientPresetManager(MethodPresetManager):
 
 class InteractivePresetManager(MethodPresetManager):
     kind = "interactive"
-    fields = {"method": "method_combo"}
+    fields = {"method": "method_combo", "merge_objects": "merge_objects_checkbox"}
 
     def _parameter_controls(self):
         return {
@@ -346,6 +346,7 @@ class InteractivePresetManager(MethodPresetManager):
         return {controls[name]: value for name, value in values.items()}
 
     def _after_apply(self, state):
+        self.main._set_brush_radius(self.main.params_widget.brush_radius.value())
         self.main.on_method_changed(self.main.method_combo.currentIndex())
         self.main.schedule_update()
 

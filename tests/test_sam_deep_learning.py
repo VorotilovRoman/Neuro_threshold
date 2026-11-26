@@ -78,8 +78,8 @@ class SamDeepLearningTests(unittest.TestCase):
                                   predict=predict or Mock(return_value=self.result()))
         self.controller.backend = backend
         self.controller.loaded_key = self.controller.settings_key()
-        self.owner.original_view.sam_points = [(20, 20)]
-        self.owner.original_view.sam_labels = [1]
+        self.owner.original_view.prompt_points = [(20, 20)]
+        self.owner.original_view.prompt_labels = [1]
         self.owner.original_view.prompts_changed.emit()
         return backend
 
@@ -112,13 +112,13 @@ class SamDeepLearningTests(unittest.TestCase):
         from tabs.layout_dataset import Labeler
         from ui.sam.panel import SamPanel
         from ui.sam.controller import SamController
-        from ui.sam.view import SamPromptView
+        from ui.segmentation.prompt_view import PromptInputView
         editor = Labeler()
         try:
             for owner in (editor, self.owner):
                 self.assertIsInstance(owner.sam_panel, SamPanel)
                 self.assertIsInstance(owner.sam_controller, SamController)
-            self.assertIsInstance(self.owner.original_view, SamPromptView)
+            self.assertIsInstance(self.owner.original_view, PromptInputView)
             self.assertTrue(self.owner.model_combo.model().item(self.owner.model_combo.findText('SAM')).isEnabled())
             self.assertTrue(self.owner.segment_button.isHidden())
         finally:
@@ -130,7 +130,7 @@ class SamDeepLearningTests(unittest.TestCase):
         self.owner.run_segmentation()
         self.until(lambda: self.controller.job is None)
         self.assertIsNone(self.owner.prediction_mask)
-        self.assertEqual(len(self.owner.original_view.sam_preview), 2)
+        self.assertEqual(len(self.owner.original_view.prompt_preview), 2)
         self.controller.accept()
         np.testing.assert_array_equal(self.owner.prediction_mask, self.result().combined_mask())
         self.assertEqual(len(self.owner.current_objects_full), 2)
@@ -138,6 +138,19 @@ class SamDeepLearningTests(unittest.TestCase):
         self.assertIsNotNone(self.owner.dl_view._current_pixmap)
         self.assertIsNotNone(self.owner.morph_view._current_pixmap)
         self.assertTrue(self.owner.save_button.isEnabled())
+
+    def test_merge_accepted_sam_instances_preserves_mask_and_skips_inference(self):
+        backend = self.fake_backend()
+        self.owner.run_segmentation()
+        self.until(lambda: self.controller.job is None)
+        self.controller.accept()
+        before = self.owner.prediction_mask.copy()
+        self.panel.merge.setChecked(True)
+        self.assertEqual(len(self.owner.current_objects_full), 1)
+        np.testing.assert_array_equal(self.owner.prediction_mask, before)
+        self.panel.merge.setChecked(False)
+        self.assertEqual(len(self.owner.current_objects_full), 2)
+        backend.predict.assert_called_once()
 
     def test_empty_result_can_be_applied_and_inverted_as_a_binary_mask(self):
         self.fake_backend(Mock(return_value=SamResult(np.empty((0, 60, 100), bool), np.empty(0))))
@@ -180,7 +193,7 @@ class SamDeepLearningTests(unittest.TestCase):
         self.owner.update_timer.stop()
         self.assertIsNone(self.owner.prediction_mask)
         self.assertEqual(self.owner.current_objects_full, [])
-        self.assertEqual(self.owner.original_view.sam_points, [])
+        self.assertEqual(self.owner.original_view.prompt_points, [])
         self.assertEqual(backend.predict.call_count, 1)
 
     def test_background_stale_frame_cancel_and_close(self):

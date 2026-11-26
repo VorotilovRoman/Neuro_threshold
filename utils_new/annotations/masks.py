@@ -239,7 +239,7 @@ def mask_to_annotations(
                     raise ValueError("holes must be error or drop")
             points = contour.reshape(-1, 2).astype(np.float64)
             area = cv2.contourArea(contour)
-            if area < min_area or len(points) < 3:
+            if area <= 0 or area < min_area or len(points) < 3:
                 continue
             if kind == "detect":
                 # findContours vertices are pixel centers. Convert to a bounding

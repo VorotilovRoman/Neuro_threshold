@@ -43,7 +43,7 @@ class InteractiveAlgorithms(unittest.TestCase):
 
     def test_grabcut_invalid_roi_or_seeds_do_not_fallback(self):
         with self.assertRaises(ValueError):
-            ops.grabcut_segmentation(self.image, (0, 0, 96, 48))
+            ops.grabcut_segmentation(self.image, (0, 0, 97, 48))
         with self.assertRaises(ValueError):
             ops.grabcut_segmentation(
                 self.image, (44, 8, 84, 40), mode="GC_INIT_WITH_MASK"
@@ -91,8 +91,22 @@ class InteractiveAlgorithms(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "test failure"),
             ):
                 function(self.image, (48, 12, 80, 36), superpixel_size=8)
-        with self.assertRaises(ValueError):
-            ops.onecut_segmentation(self.image, (0, 0, 96, 48))
+        result = ops.onecut_segmentation(self.image, (0, 0, 96, 48), superpixel_size=8)
+        self.assertEqual(result.shape, self.gray.shape)
+
+    def test_full_image_initialization_has_background_and_preserves_hard_marks(self):
+        full = (0, 0, 96, 48)
+        for mode in ('Both', 'GC_INIT_WITH_RECT'):
+            result = ops.grabcut_segmentation(self.image, full, mode=mode)
+            self.assertGreater(np.mean(result[14:34, 50:78]), 240)
+            self.assertFalse(result[0].any())
+        fg = self.fg.copy()
+        fg[0, 60:66] = 255  # A real foreground object may touch the edge.
+        result = ops.grabcut_segmentation(self.image, full, fg_scribbles=fg, bg_scribbles=self.bg)
+        self.assertTrue(np.all(result[fg > 0] == 255))
+        self.assertTrue(np.all(result[self.bg > 0] == 0))
+        result = ops.morphological_chan_vese_segmentation(self.gray, full, iterations=10)
+        self.assertEqual(result.shape, self.gray.shape)
 
     def test_watershed_min_distance_is_peak_spacing_not_area(self):
         with patch(

@@ -60,6 +60,7 @@
             "mcv_inside": 1.0,
             "mcv_outside": 1.0
         },
-        "annotation_mode": "none"
+        "annotation_mode": "none",
+        "merge_objects": false
     }
 }

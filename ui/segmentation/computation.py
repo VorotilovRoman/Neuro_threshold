@@ -47,12 +47,13 @@ def run_interactive(owner):
         return
     method = owner.method_combo.currentText()
     widget = owner.params_widget
+    rect = owner.effective_roi()
     if method in (
         "SuperCut",
         "OneCut",
         "Active Contours",
         "Morphological Chan–Vese",
-    ) and not errors.require(owner, owner.rect is not None, "Нарисуйте ROI."):
+    ) and not errors.require(owner, rect is not None, "Задайте рамку или выберите «Весь снимок»."):
         return
     fg = (
         np.zeros(frame.gray.shape, np.uint8)
@@ -79,7 +80,6 @@ def run_interactive(owner):
         "Morphological Chan–Vese": widget.get_mcv_params,
     }
     params = getters[method]()
-    rect = owner.rect
     image, gray = frame.image.copy(), frame.gray.copy()
     owner.jobs.start(
         "Интерактивная сегментация",
