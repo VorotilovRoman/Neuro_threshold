@@ -118,8 +118,12 @@ class EnsembleAndSearchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "снимок.png"
             cv2.imwrite(str(path), np.zeros((800, 1600), np.uint16))
+            weights = Path(directory) / 'stub.pt'
+            weights.touch()
+            bad_weights = Path(directory) / 'bad.pt'
+            bad_weights.touch()
             worker = ScanThread(
-                directory, "stub.pt", 5, 0.25, 0.45, 640, "cpu", edge_margin=75
+                directory, str(weights), 5, 0.25, 0.45, 640, "cpu", edge_margin=75
             )
             outputs = []
             worker.results_ready.connect(outputs.append)
@@ -133,7 +137,7 @@ class EnsembleAndSearchTests(unittest.TestCase):
             self.assertEqual(seen, [(800, 1600, 3)])
             self.assertEqual(outputs[0][0][0], str(path))
             self.assertEqual(worker.checked, 1)
-            failed = ScanThread(directory, "bad.pt", 5, 0.25, 0.45, 640, "cpu")
+            failed = ScanThread(directory, str(bad_weights), 5, 0.25, 0.45, 640, "cpu")
             result = []
             failed.results_ready.connect(result.append)
             with (

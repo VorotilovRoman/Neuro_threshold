@@ -952,7 +952,7 @@ class Labeler(QMainWindow):
         from runtime_policy import configure_ultralytics
 
         configure_ultralytics()
-        from ultralytics import YOLO
+        from utils_new.import_export.model_load import load_yolo as YOLO
 
         path, _ = source_dialogs.get_open_file(self, "model_yolo")
         if not path:

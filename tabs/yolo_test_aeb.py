@@ -560,7 +560,7 @@ class YoloInspectWindow(QMainWindow):
             from runtime_policy import configure_ultralytics
 
             configure_ultralytics()
-            from ultralytics import YOLO
+            from utils_new.import_export.model_load import load_yolo as YOLO
 
             self.model = YOLO(path)
             self.model_edit.setText(path)

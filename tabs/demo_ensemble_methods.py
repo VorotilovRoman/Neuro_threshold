@@ -76,7 +76,7 @@ class YoloInferThread(BackgroundTask):
             from runtime_policy import configure_ultralytics
 
             configure_ultralytics()
-            from ultralytics import YOLO
+            from utils_new.import_export.model_load import load_yolo as YOLO
 
             model = YOLO(self.model_path)
             self.publish(self.progress_signal, 30)

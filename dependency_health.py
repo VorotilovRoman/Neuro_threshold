@@ -22,7 +22,7 @@ EXTRA_MODULES = {
     'training': ('segmentation_models_pytorch', 'psutil'),
     'audit': ('imagehash', 'open_clip', 'transformers', 'umap', 'hdbscan'),
     'sahi': ('sahi',),
-    'export': ('onnx', 'tifffile'),
+    'export': ('onnx', 'tifffile', 'ncnn', 'pnnx', 'psutil'),
     'sam': ('segment_anything', 'sam2', 'clip', 'ftfy', 'regex'),
     'grounding-dino': ('transformers',),
 }

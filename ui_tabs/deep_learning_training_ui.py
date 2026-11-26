@@ -9,6 +9,7 @@ from ui.DL_train_settings_new_model import (
 )
 from ui.sam.training import SAMTrainWidget
 from ui.log_widget import LogWidget
+from ui.model_export import ModelExportWidget
 
 
 def setup_deep_learning_training_ui(parent):
@@ -86,6 +87,10 @@ def setup_deep_learning_training_ui(parent):
     sam_widget.run_training.connect(parent._run_sam_training)
     sam_widget.stop_training.connect(parent.on_stop_sam)
     parent.sam_train_widget = sam_widget
+
+    parent.model_export_widget = ModelExportWidget(parent)
+    parent.model_export_widget.log_message.connect(parent.log_text.append)
+    parent.tab_widget.addTab(wrap_in_scroll(parent.model_export_widget), "Экспорт модели")
 
     splitter.addWidget(right_widget)
     splitter.setStretchFactor(0, 1)

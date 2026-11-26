@@ -7,6 +7,10 @@ from PyQt5.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel, QLayout
 
 # Stable action keys; one caption/filter/meaning across every consumer.
 ACTIONS = {
+    "model_export_dir": (
+        "Папка…", "Папка экспортированных моделей", "", True,
+        "Каждый экспорт сохраняется в новую подпапку с моделью и метаданными.",
+    ),
     "dataset_any": (
         "Датасет…", "Выберите YAML или COCO JSON", "Датасеты (*.yaml *.yml *.json)", False,
         "Выберите описание датасета. Затем подтвердите пути снимков и разметки.",
@@ -112,9 +116,9 @@ ACTIONS = {
     "model_yolo": (
         "Модель YOLO…",
         "Выберите модель YOLO",
-        "YOLO (*.pt *.onnx *.engine)",
+        "YOLO (*.pt *.onnx *.engine *.param *.gguf)",
         False,
-        "Веса YOLO для инференса. Возможность ONNX/engine зависит от установленного backend.",
+        "PT/ONNX/engine или .param из папки *_ncnn_model (рядом .bin и metadata.yaml). NCNN: python install.py --extra export. GGUF требует отдельного backend и пока не поддерживается.",
     ),
     "model_yolo_train": (
         "Веса YOLO…",
@@ -142,11 +146,11 @@ ACTIONS = {
         "Полная папка Transformers: config.json, веса, настройки препроцессора и токенизатор.",
     ),
     "model_onnx": (
-        "Модель ONNX…",
-        "Выберите модель ONNX",
-        "ONNX (*.onnx)",
+        "ONNX / NCNN…",
+        "Выберите семантическую модель ONNX или NCNN",
+        "Модели (*.onnx *.param *.gguf)",
         False,
-        "ONNX-модель; проверьте входы, выходы и метаданные предобработки.",
+        "Семантическая модель: ONNX или NCNN .param + .bin и *_meta.json. GGUF пока не поддерживается: нужен runtime архитектуры.",
     ),
     "preset": (
         "Импорт пресета…",
@@ -220,7 +224,7 @@ TAB_DESCRIPTIONS = {
     "dataset": "Подготовка и экспорт датасета: снимки + TXT, индексные маски или снимки без разметки; YOLO YAML, COCO и YAML с масками.",
     "dataset_analysis": "Проверка качества, разметки, повторов и split: TXT/индексные маски/снимки без разметки; общий отчёт и экспорт.",
     "sahi": "Тайловая нарезка датасета из снимков с TXT, YOLO YAML или COCO. Индексные маски как вход здесь не поддерживаются.",
-    "yolo_train": "Обучение YOLO, U-Net, DeepLab и дообучение SAM/SAM2: источник соответствующего формата. SAM требует маски объектов. Обучение SAM3 и SegFormer пока не подключено.",
+    "yolo_train": "Обучение YOLO, U-Net, DeepLab и дообучение SAM/SAM2; экспорт YOLO/U-Net/DeepLab в ONNX и NCNN. SAM требует маски объектов. Обучение SAM3 и SegFormer пока не подключено.",
     "yolo_demo": "Сравнение YOLO и пороговых пресетов и объединение BBox по классам через NMS/WBF; снимки и папки.",
     "yolo_sort": "Рекурсивный поиск снимков по классу YOLO и геометрии объекта; список, миниатюры и перенос только изображений.",
     "yolo_aeb": "YOLO и AE/VAE: снимки/папки, выбор объекта, кропы, преобразования и карта ошибки реконструкции по checkpoint.",

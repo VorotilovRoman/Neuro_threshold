@@ -61,7 +61,7 @@ class LossInspectionJob:
             from runtime_torch import require_torch
 
             require_torch()
-            from ultralytics import YOLO
+            from utils_new.import_export.model_load import load_yolo as YOLO
         except (ImportError, OSError, RuntimeError) as exc:
             return {"error": f"PyTorch/Ultralytics недоступен: {exc}", "suspicious": []}
         try:
@@ -831,7 +831,7 @@ class YoloValidationJob:
             from runtime_torch import require_torch
 
             require_torch()
-            from ultralytics import YOLO
+            from utils_new.import_export.model_load import load_yolo as YOLO
             from ultralytics.utils import LOGGER
         except (ImportError, OSError, RuntimeError) as exc:
             return {"error": f"PyTorch/Ultralytics недоступен: {exc}", "metrics": None}

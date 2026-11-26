@@ -29,7 +29,7 @@ def setup_deep_learning_methods_ui(parent):
     model_layout = QHBoxLayout()
     model_layout.addWidget(QLabel("Model:"))
     parent.model_combo = QComboBox()
-    models = ["YOLO-seg", "U-Net", "DeepLabV3+", "SegFormer", "SAM", "Custom ONNX"]
+    models = ["YOLO-seg", "U-Net", "DeepLabV3+", "SegFormer", "SAM", "ONNX / NCNN"]
     parent.model_combo.addItems(models)
     for pending in ("SegFormer",):
         item = parent.model_combo.model().item(parent.model_combo.findText(pending))

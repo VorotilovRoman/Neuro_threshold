@@ -55,7 +55,7 @@ class YOLOInferenceSettings(BaseInferenceSettings):
         # Выбор файла
         path_layout = QHBoxLayout()
         self._model_path = QLineEdit()
-        self._model_path.setPlaceholderText("Выберите файл .pt")
+        self._model_path.setPlaceholderText("YOLO: .pt / .onnx / .engine / NCNN .param")
         self._browse_btn = source_dialogs.make_source_button("model_yolo", self)
         path_layout.addWidget(self._model_path)
         path_layout.addWidget(self._browse_btn)
@@ -900,14 +900,14 @@ class CustomONNXInferenceSettings(BaseInferenceSettings):
     model_path_changed = pyqtSignal(str)
 
     def __init__(self, parent=None):
-        super().__init__("Custom ONNX", parent)
+        super().__init__("ONNX / NCNN", parent)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
         path_layout = QHBoxLayout()
         self._model_path = QLineEdit()
-        self._model_path.setPlaceholderText("Выберите ONNX модель")
+        self._model_path.setPlaceholderText("ONNX или NCNN .param (+ .bin и *_meta.json)")
         self._browse_btn = source_dialogs.make_source_button("model_onnx", self)
         path_layout.addWidget(self._model_path)
         path_layout.addWidget(self._browse_btn)
@@ -922,7 +922,7 @@ class CustomONNXInferenceSettings(BaseInferenceSettings):
         )
         layout.addWidget(self._threshold)
         hint = QLabel(
-            "Требуется <имя>_meta.json с input_size, normalize, resize_mode, output_kind. Поддерживается семантическая модель NCHW RGB float32 с одним выходом. Выполнение ONNX — на CPU."
+            "ONNX / NCNN: требуется <имя>_meta.json с input_size, normalize, resize_mode, output_kind. Семантическая модель RGB float32 с одним выходом, CPU. NCNN: выберите .param рядом с .bin. GGUF требует отдельного backend и пока не поддерживается. Для YOLO используйте раздел YOLO."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)

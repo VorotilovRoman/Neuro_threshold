@@ -154,39 +154,15 @@ def save_training_reports(
 
 def export_semantic_onnx(model, metadata, output, *, log=print):
     """Export on CPU and publish only after graph and runtime validation."""
-    import torch
-    import numpy as np
-    from utils_new.import_export.model_export import stride_padded_model
+    from utils_new.import_export.model_export import export_semantic
 
     try:
-        import onnx
-        import onnxruntime as ort
-
-        model = model.to("cpu").eval()
-        size = metadata["input_size"]
-        dummy = torch.zeros(1, 3, size, size)
         with atomic_path(output, suffix=".onnx") as temporary:
-            torch.onnx.export(
-                stride_padded_model(model),
-                dummy,
-                temporary,
-                opset_version=18,
-                input_names=["input"],
-                output_names=["output"],
-                dynamic_axes={
-                    "input": {0: "batch", 2: "height", 3: "width"},
-                    "output": {0: "batch", 2: "height", 3: "width"},
-                },
-                dynamo=False,
-            )
-            onnx.checker.check_model(onnx.load(str(temporary)))
-            session = ort.InferenceSession(
-                str(temporary), providers=["CPUExecutionProvider"]
-            )
-            actual = session.run(None, {"input": dummy.numpy()})[0]
-            with torch.inference_mode():
-                expected = stride_padded_model(model)(dummy).numpy()
-            np.testing.assert_allclose(actual, expected, rtol=1e-3, atol=1e-4)
+            sidecar = temporary.with_name(temporary.stem + "_meta.json")
+            try:
+                export_semantic(model, metadata, metadata['input_size'], temporary, 'ONNX')
+            finally:
+                sidecar.unlink(missing_ok=True)
         save_model_meta(
             dict(metadata, format="ONNX", output_kind="logits", onnx_opset=18), output
         )

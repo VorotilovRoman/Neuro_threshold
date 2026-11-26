@@ -56,3 +56,7 @@ python -m utils_new.training.autoencoder --data "normal_images" --output "runs/a
 
 Снимки читаются через ограниченный кеш. Инференс, подготовка кропов и отмена
 не должны применить результат к другому снимку после навигации.
+
+YOLO также загружает NCNN: выберите `.param` в папке `*_ncnn_model` рядом
+с `.bin` и `metadata.yaml`. Нужен `--extra export`; GGUF пока не поддерживается.
+[Экспорт и форматы моделей](yolo_train.md#экспорт-модели).

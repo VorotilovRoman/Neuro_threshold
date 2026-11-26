@@ -849,7 +849,7 @@ class YoloTrainWindow(QMainWindow):
 
     def shutdown_training(self):
         self._closing_training = True
-        busy = False
+        busy = self.model_export_widget.shutdown()
         for kind in ("yolo", "unet", "deeplab", "sam"):
             attr, _, _ = self._training_parts(kind)
             process = getattr(self, attr, None)

@@ -121,7 +121,7 @@ def run_dl(owner):
             save=widget._save.isChecked(),
             allow_box_otsu=widget._box_otsu.isChecked(),
         )
-    if name == "Custom ONNX":
+    if name == "ONNX / NCNN":
         parameters["threshold"] = owner.custom_settings._threshold.value()
     if name in ("U-Net", "DeepLabV3+", "DeepLabV3"):
         widget = owner.unet_settings if name == "U-Net" else owner.deeplab_settings
@@ -307,7 +307,7 @@ def load_dl(owner, name):
         "DeepLabV3+": owner.deeplab_settings,
         "DeepLabV3": owner.deeplab_settings,
         "YOLO-seg": owner.yolo_settings,
-        "Custom ONNX": owner.custom_settings,
+        "ONNX / NCNN": owner.custom_settings,
         "SegFormer": owner.segformer_settings,
     }
     if not errors.require(
@@ -318,7 +318,7 @@ def load_dl(owner, name):
         return
     path = widgets[name]._model_path.text().strip()
     if not errors.require(
-        owner, bool(path) and Path(path).is_file(), "Выберите существующий файл модели."
+        owner, bool(path) and Path(path).exists(), "Выберите существующий файл или папку модели."
     ):
         return
     device = owner.device
@@ -330,7 +330,7 @@ def load_dl(owner, name):
         owner.ignore_ui_changes = True
         try:
             metadata = getattr(model, "metadata", None)
-            if metadata and name == "Custom ONNX":
+            if metadata and name == "ONNX / NCNN":
                 owner.custom_settings._threshold.setValue(
                     metadata.get("threshold", 0.5)
                 )

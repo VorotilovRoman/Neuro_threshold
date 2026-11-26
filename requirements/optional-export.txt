@@ -1,3 +1,6 @@
 # ONNX graphs use the CPU runtime from the core profile.
 onnx==1.23.2
 tifffile==2026.11.8
+ncnn==1.0.20261020
+pnnx==20261020
+psutil==7.2.2

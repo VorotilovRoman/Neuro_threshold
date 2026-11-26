@@ -8,9 +8,20 @@
 2. Укажите устройство, размер входа, нормализацию и порог/классы. Запустите обработку.
 3. Проверьте маску, морфологию и список объектов; сохраните выбранные BBox/OBB/Segment.
 
-YOLO принимает PT/ONNX/engine при наличии backend. U-Net/DeepLab используют
-совместимые checkpoints и `*_meta.json` своего обучения. Custom ONNX ожидает
-один RGB float32 NCHW-вход и один выход семантической сегментации с метаданными.
+YOLO принимает PT/ONNX/engine и NCNN при наличии backend. Для NCNN выберите
+`.param` из папки `*_ncnn_model`: рядом нужны одноимённый `.bin` и `metadata.yaml`.
+Тип задачи YOLO ONNX/NCNN читается из метаданных, а не имени файла.
+U-Net/DeepLab используют совместимые checkpoints и `*_meta.json` своего обучения.
+Раздел **ONNX / NCNN** ожидает один RGB float32 NCHW-вход и один выход
+семантической сегментации с метаданными. Для NCNN выберите `.param` рядом с `.bin`
+и `<имя_param>_meta.json`; для ONNX — `.onnx` и `<имя>_meta.json`. Предобработка,
+порог и обратное масштабирование общие. Обе переносимые семантические модели
+выполняются на CPU; NCNN требует `python install.py --extra export`.
+Готовые экспорты создаются в [обучении → «Экспорт модели»](yolo_train.md#экспорт-модели).
+GGUF не выполняется: совместимого runtime этих архитектур пока нет.
+
+Например: `model.onnx` + `model_meta.json` или
+`model.ncnn.param` + `model.ncnn.bin` + `model.ncnn_meta.json`.
 Detect/OBB + Otsu — отдельно включаемый гибрид. Общий результат — бинарная маска;
 SegFormer пока не реализован. Алгоритмы — `utils_new/segmentation/backends/`.
 

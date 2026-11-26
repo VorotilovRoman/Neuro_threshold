@@ -187,7 +187,7 @@ class ScanThread(BackgroundTask):
             from runtime_policy import configure_ultralytics
 
             configure_ultralytics()
-            from ultralytics import YOLO
+            from utils_new.import_export.model_load import load_yolo as YOLO
 
             all_images = []
             for root, dirs, _ in os.walk(self.root_dir):
@@ -399,7 +399,7 @@ class FindImagesWindow(QMainWindow, setup_yolo_find_img_ui):
             from runtime_policy import configure_ultralytics
 
             configure_ultralytics()
-            from ultralytics import YOLO
+            from utils_new.import_export.model_load import load_yolo as YOLO
 
             return dict(YOLO(model_path).names)
 

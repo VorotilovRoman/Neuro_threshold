@@ -98,7 +98,7 @@ class DeepLearningWindow(QMainWindow):
         self.deeplab_settings._browse_btn.clicked.connect(self._browse_deeplab_model)
         self.segformer_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("SegFormer"))
         self.yolo_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("YOLO-seg"))
-        self.custom_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("Custom ONNX"))
+        self.custom_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("ONNX / NCNN"))
 
         # UI изменения
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
@@ -311,7 +311,7 @@ class DeepLearningWindow(QMainWindow):
         if not self.ignore_ui_changes and not getattr(self, '_loading_model', False):
             segmentation_controller.invalidate_prediction(self)
         model_name = self.model_combo.currentText()
-        self.device_combo.setEnabled(model_name != "Custom ONNX")
+        self.device_combo.setEnabled(model_name != "ONNX / NCNN")
         for cont in [self.unet_settings, self.deeplab_settings, self.segformer_settings,
                      self.sam_panel, self.yolo_settings, self.custom_settings]:
             cont.setVisible(False)
@@ -326,7 +326,7 @@ class DeepLearningWindow(QMainWindow):
             self.sam_panel.setVisible(True)
         elif model_name == "YOLO-seg":
             self.yolo_settings.setVisible(True)
-        elif model_name == "Custom ONNX":
+        elif model_name == "ONNX / NCNN":
             self.custom_settings.setVisible(True)
 
         self.segmentor = None
@@ -352,7 +352,7 @@ class DeepLearningWindow(QMainWindow):
             path = self.segformer_settings._model_path.text().strip()
         elif model_name == "YOLO-seg":
             path = self.yolo_settings._model_path.text().strip()
-        elif model_name == "Custom ONNX":
+        elif model_name == "ONNX / NCNN":
             path = self.custom_settings._model_path.text().strip()
         else:
             path = ""
@@ -368,7 +368,7 @@ class DeepLearningWindow(QMainWindow):
                 self.segformer_settings._model_path.setText("")
             elif model_name == "YOLO-seg":
                 self.yolo_settings._model_path.setText("")
-            elif model_name == "Custom ONNX":
+            elif model_name == "ONNX / NCNN":
                 self.custom_settings._model_path.setText("")
             self.log(f"Путь к модели {model_name} не существует, очищен.")
 
@@ -403,7 +403,7 @@ class DeepLearningWindow(QMainWindow):
                 path = self.segformer_settings._model_path.text().strip()
             elif model_name == "YOLO-seg":
                 path = self.yolo_settings._model_path.text().strip()
-            elif model_name == "Custom ONNX":
+            elif model_name == "ONNX / NCNN":
                 path = self.custom_settings._model_path.text().strip()
             else:
                 path = ""

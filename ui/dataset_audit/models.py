@@ -222,7 +222,7 @@ class DatasetModelController:
             from runtime_torch import require_torch
 
             require_torch()
-            from ultralytics import YOLO
+            from utils_new.import_export.model_load import load_yolo as YOLO
 
             m = YOLO(path)
             if self._device.startswith("cuda"):

@@ -682,7 +682,8 @@ class YOLOSegmentor(BaseSegmentor):
         _log(f"[YOLO] Загрузка модели из {model_path}")
         if not model_path or not os.path.exists(model_path):
             raise FileNotFoundError(f"YOLO model not found: {model_path}")
-        self.model = YOLO(model_path)
+        from utils_new.import_export.model_load import load_yolo
+        self.model = load_yolo(model_path)
         model_name = os.path.basename(model_path)
         self.metadata = {
             'model_type': 'YOLO-seg',
@@ -854,16 +855,14 @@ class ONNXSegmentor(BaseSegmentor):
     The sidecar <stem>_meta.json specifies preprocessing and output semantics;
     input_size may supply dynamic spatial dimensions. No output-type guessing.
     """
-    def load(self, model_path):
-        if not ONNX_AVAILABLE:
-            raise ImportError("onnxruntime is not installed")
-        import onnxruntime as ort
-
+    def _load_metadata(self, model_path):
         meta_path = os.path.splitext(model_path)[0] + '_meta.json'
         if not os.path.isfile(meta_path):
-            raise ValueError("Для ONNX нужен файл <имя>_meta.json: input_size, normalize, resize_mode, output_kind (logits/probabilities/labels). Экспорт проекта создаёт метаданные автоматически.")
+            raise ValueError("Для ONNX / NCNN нужен файл <имя>_meta.json: input_size, normalize, resize_mode, output_kind (logits/probabilities/labels). Экспорт проекта создаёт метаданные автоматически.")
         with open(meta_path, encoding='utf-8') as stream:
             self.metadata = json.load(stream)
+        if not isinstance(self.metadata, dict):
+            raise ValueError("Метаданные модели должны быть JSON-объектом.")
         required = {'input_size', 'normalize', 'resize_mode'}
         if not required <= self.metadata.keys():
             raise ValueError(f"В ONNX метаданных отсутствуют: {sorted(required - self.metadata.keys())}")
@@ -872,6 +871,25 @@ class ONNXSegmentor(BaseSegmentor):
             if self.metadata.get('model_type') not in ('U-Net', 'DeepLabV3', 'DeepLabV3+', 'unet', 'unet++'):
                 raise ValueError("Укажите output_kind в ONNX метаданных: logits, probabilities или labels.")
             self.metadata['output_kind'] = 'logits'
+        size = self.metadata['input_size']
+        dimensions = (size, size) if isinstance(size, int) else size
+        if (not isinstance(dimensions, (tuple, list)) or len(dimensions) != 2
+                or any(not isinstance(value, int) or value < 1 for value in dimensions)):
+            raise ValueError("input_size: положительное целое число или [H, W].")
+        if not isinstance(self.metadata['normalize'], bool):
+            raise ValueError("normalize должен быть true или false.")
+        if self.metadata['output_kind'] not in ('logits', 'probabilities', 'labels'):
+            raise ValueError("output_kind: logits, probabilities или labels.")
+
+    def load(self, model_path):
+        from utils_new.import_export.model_load import reject_gguf
+
+        reject_gguf(model_path)
+        if not ONNX_AVAILABLE:
+            raise ImportError("onnxruntime is not installed")
+        import onnxruntime as ort
+
+        self._load_metadata(model_path)
         self.session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
         inputs = self.session.get_inputs()
         if len(inputs) != 1 or len(inputs[0].shape) != 4 or inputs[0].type != 'tensor(float)':
@@ -883,8 +901,14 @@ class ONNXSegmentor(BaseSegmentor):
             raise ValueError("Ожидается один выход семантической сегментации.")
         self.model_path = model_path
 
+    def _input_shape(self):
+        return self.session.get_inputs()[0].shape
+
+    def _run_tensor(self, tensor):
+        return self.session.run(None, {self.session.get_inputs()[0].name: tensor})[0]
+
     def predict(self, image, threshold=None):
-        shape = self.session.get_inputs()[0].shape
+        shape = self._input_shape()
         configured = self.metadata['input_size']
         configured = (configured, configured) if isinstance(configured, int) else configured
         h_in, w_in = [dimension if isinstance(dimension, int) and dimension > 0 else configured[i]
@@ -914,12 +938,53 @@ class ONNXSegmentor(BaseSegmentor):
         if self.metadata['normalize']:
             prepared = (prepared - np.array([.485, .456, .406], np.float32)) / np.array([.229, .224, .225], np.float32)
         tensor = np.ascontiguousarray(prepared.transpose(2, 0, 1)[None])
-        output = self.session.run(None, {self.session.get_inputs()[0].name: tensor})[0]
+        output = self._run_tensor(tensor)
         threshold = self.metadata.get('threshold', .5) if threshold is None else threshold
         mask = decode_output(output, output_kind=self.metadata['output_kind'], threshold=threshold,
                              target_shape=(h_in, w_in))
         mask = mask[top:top + nh, left:left + nw]
         return cv2.resize(mask, (original[1], original[0]), interpolation=cv2.INTER_NEAREST)
+
+
+class NCNNSegmentor(ONNXSegmentor):
+    """Same semantic preprocessing/decoding as ONNX; fixed-size CPU NCNN."""
+    def load(self, model_path):
+        from utils_new.import_export.model_load import NCNNRuntime, ncnn_param
+
+        param = ncnn_param(model_path)
+        self._load_metadata(str(param))
+        size = self.metadata['input_size']
+        dimensions = size if isinstance(size, (tuple, list)) else (size, size)
+        if any(value % 32 for value in dimensions):
+            raise ValueError("NCNN: используйте экспорт с фиксированными H/W, кратными 32.")
+        self.runtime = NCNNRuntime(param)
+        if len(self.runtime.inputs) != 1 or len(self.runtime.outputs) != 1:
+            raise ValueError("Семантический NCNN: нужен один вход и один выход.")
+        self.model_path = str(param)
+
+    def _input_shape(self):
+        size = self.metadata['input_size']
+        return [1, 3, *(size if isinstance(size, (tuple, list)) else (size, size))]
+
+    def _run_tensor(self, tensor):
+        return self.runtime.run(tensor)[0]
+
+
+class PortableSegmentor(BaseSegmentor):
+    def load(self, model_path):
+        from pathlib import Path
+        from utils_new.import_export.model_load import reject_gguf
+
+        reject_gguf(model_path)
+        path = Path(model_path)
+        cls = NCNNSegmentor if path.is_dir() or path.suffix.lower() == '.param' else ONNXSegmentor
+        self.backend = cls(device='cpu')
+        self.backend.load(str(path))
+        self.metadata = self.backend.metadata
+        self.model_path = str(path)
+
+    def predict(self, image, **kwargs):
+        return self.backend.predict(image, **kwargs)
 
 
 # =============================================================================
@@ -933,7 +998,7 @@ def create_segmentor(model_type, **kwargs):
         'SegFormer': None,
         'YOLOv8-seg': YOLOSegmentor,
         'YOLO-seg': YOLOSegmentor,
-        'Custom ONNX': ONNXSegmentor,
+        'ONNX / NCNN': PortableSegmentor,
     }
     if model_type not in segmentors:
         raise ValueError(f"Unknown model type: {model_type}")

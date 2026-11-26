@@ -31,8 +31,9 @@ class EnsembleWorkerDisplayTests(unittest.TestCase):
         model = Mock(return_value=[result])
         fake_ultralytics = SimpleNamespace(YOLO=Mock(return_value=model))
         old_hook = sys.excepthook
+        weights = tempfile.NamedTemporaryFile(suffix='.pt')
         try:
-            worker = YoloInferThread("stub.pt", image, 0.25, 0.45, 640, "cpu", False)
+            worker = YoloInferThread(weights.name, image, 0.25, 0.45, 640, "cpu", False)
             outputs, finished, labels = [], [], []
             worker.class_names_signal.connect(labels.append)
             worker.result_signal.connect(lambda *args: outputs.append(args))
@@ -53,6 +54,7 @@ class EnsembleWorkerDisplayTests(unittest.TestCase):
             )
             result.plot.assert_not_called()
         finally:
+            weights.close()
             sys.excepthook = old_hook
 
 

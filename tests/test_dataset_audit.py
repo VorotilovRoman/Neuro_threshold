@@ -302,6 +302,8 @@ for prefix in ('PyQt5', 'torch', 'ultralytics', 'open_clip', 'transformers', 'ma
         import types
 
         pair = self.pair()
+        weights = self.root / 'mock.pt'
+        weights.touch()
 
         class Tensor:
             def __init__(self, data):
@@ -347,7 +349,7 @@ for prefix in ('PyQt5', 'torch', 'ultralytics', 'open_clip', 'transformers', 'ma
                 patch("runtime_torch.require_torch", return_value=object()),
                 patch("runtime_policy.configure_ultralytics"),
             ):
-                result = LossInspectionJob([pair], "mock.pt", device="cpu").run()
+                result = LossInspectionJob([pair], str(weights), device="cpu").run()
             self.assertIsNone(result["error"])
             self.assertEqual(len(result["all_results"]), 1)
             self.assertEqual(result["all_results"][0]["is_suspicious"], expected)
@@ -392,8 +394,10 @@ for prefix in ('PyQt5', 'torch', 'ultralytics', 'open_clip', 'transformers', 'ma
 
         module.YOLO = Model
         initial = list(logger.handlers)
+        weights = self.root / 'mock.pt'
+        weights.touch()
         for broken, cancelled in [(False, False), (True, False), (False, True)]:
-            job = YoloValidationJob("mock.pt", str(config), device="cpu")
+            job = YoloValidationJob(str(weights), str(config), device="cpu")
             messages = []
             job.log = messages.append
             if cancelled:

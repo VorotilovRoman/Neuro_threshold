@@ -177,7 +177,7 @@ def setup_yolo_ae_vae_ui(parent):
     model_row = QHBoxLayout()
     parent.model_edit = QLineEdit()
     parent.model_edit.setReadOnly(True)
-    parent.model_edit.setPlaceholderText("Путь к .pt / .onnx / .engine YOLO…")
+    parent.model_edit.setPlaceholderText("YOLO: .pt / .onnx / .engine / NCNN .param…")
     parent.btn_load_model = make_source_button("model_yolo")
     model_row.addWidget(parent.model_edit, 1)
     model_row.addWidget(parent.btn_load_model)

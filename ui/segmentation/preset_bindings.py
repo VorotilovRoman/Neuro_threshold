@@ -430,7 +430,7 @@ class DeepLearningPresetManager(MethodPresetManager):
             "U-Net": "unet_model_path",
             "DeepLabV3+": "deeplab_model_path",
             "YOLO-seg": "yolo_model_path",
-            "Custom ONNX": "onnx_model_path",
+            "ONNX / NCNN": "onnx_model_path",
         }
         path = state.get(paths.get(state["model"], ""), "")
         if path and Path(path).is_file():

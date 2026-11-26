@@ -163,7 +163,7 @@ def setup_layout_dataset_ui(parent):
     auto_model_row = QHBoxLayout()
     parent.auto_model_edit = QLineEdit()
     parent.auto_model_edit.setReadOnly(True)
-    parent.auto_model_edit.setPlaceholderText("Путь к .pt / .onnx…")
+    parent.auto_model_edit.setPlaceholderText("YOLO: .pt / .onnx / NCNN .param…")
     parent.btn_load_auto_model = make_source_button("model_yolo")
     auto_model_row.addWidget(parent.auto_model_edit, 1)
     auto_model_row.addWidget(parent.btn_load_auto_model)

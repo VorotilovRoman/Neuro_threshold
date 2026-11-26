@@ -47,7 +47,7 @@ python main.py
 | `training` | U-Net/DeepLab: segmentation-models-pytorch, psutil |
 | `audit` | ImageHash, OpenCLIP, Transformers, UMAP, HDBSCAN |
 | `sahi` | Нарезка датасетов SAHI |
-| `export` | Экспорт ONNX и TIFF: onnx, tifffile |
+| `export` | Экспорт/применение ONNX и NCNN, TIFF: onnx, ncnn, pnnx, psutil, tifffile |
 | `sam` | SAM/SAM2 и CLIP для SAM3 |
 | `grounding-dino` | Grounding DINO через Transformers |
 
@@ -79,14 +79,14 @@ python dependency_health.py --load --extra all
 | [Градиентные методы](docs/gradient.md) | Границы, заполнение маски и автоподбор |
 | [Интерактивные методы](docs/interactive.md) | Сегментация по рамке и меткам объекта/фона |
 | [Традиционные методы ML](docs/traditional_ml.md) | Кластеризация и обучение классификаторов |
-| [Deep Learning](docs/deep_learning.md) | YOLO, U-Net, DeepLab, ONNX и SAM/SAM2/SAM3 |
+| [Deep Learning](docs/deep_learning.md) | YOLO, U-Net, DeepLab, ONNX/NCNN и SAM/SAM2/SAM3 |
 | [Анализ отчётов](docs/reports.md) | Выбор методов по ручной эталонной разметке |
 | [Добавить аннотации](docs/labeler.md) | Ручная разметка, авторазметка YOLO и SAM |
 | [Просмотр аннотаций](docs/test.md) | Просмотр, наложение масок и проверка дублей |
 | [Подготовка датасета](docs/dataset.md) | Отбор, аугментации, split и экспорт |
 | [Анализ датасета](docs/dataset_analysis.md) | Качество, классы, повторы и утечки |
 | [SAHI](docs/sahi.md) | Нарезка изображений вместе с разметкой |
-| [Обучение модели](docs/yolo_train.md) | Обучение YOLO, U-Net, DeepLab и дообучение SAM/SAM2 |
+| [Обучение модели](docs/yolo_train.md) | Обучение YOLO, U-Net, DeepLab, SAM/SAM2; экспорт ONNX/NCNN |
 | [Демонстрация результата](docs/yolo_demo.md) | YOLO, пороговые пресеты и ансамбль |
 | [Сортировка с YOLO](docs/yolo_sort.md) | Поиск и отбор снимков по объектам |
 | [YOLO + AE/VAE](docs/yolo_aeb.md) | Кропы, реконструкция и карта ошибок |
