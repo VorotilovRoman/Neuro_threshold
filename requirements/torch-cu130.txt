@@ -1,5 +1,5 @@
-# Alternative NVIDIA profile; requires a CUDA 13 compatible driver/GPU.
+# Default NVIDIA profile for RTX 5090 and other CUDA 13 compatible GPUs/drivers.
 --extra-index-url https://download.pytorch.org/whl/cu130
--r ../requirements.txt
+-r base.txt
 torch==2.11.0+cu130
 torchvision==0.26.0+cu130

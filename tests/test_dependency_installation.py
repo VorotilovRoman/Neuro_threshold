@@ -158,12 +158,17 @@ class InstallationTests(unittest.TestCase):
             self.assertEqual(install.main(['--extra', 'training', '--dry-run']), 0)
         self.assertIn(str(install.ROOT / 'requirements/torch-cu126.txt'), pip.call_args.args)
 
-    def test_fresh_environment_defaults_to_cpu(self):
-        with patch.object(install, 'installed_torch_profile', return_value=None), \
-                patch.object(install, 'run_pip') as pip, \
-                patch.object(install, 'normalize_opencv'):
-            self.assertEqual(install.main(['--dry-run']), 0)
-        self.assertIn(str(install.ROOT / 'requirements/torch-cpu.txt'), pip.call_args.args)
+    def test_fresh_and_existing_cpu_environments_default_to_cuda(self):
+        for current in (None, 'cpu', 'cu126', 'cu130'):
+            with self.subTest(current=current), \
+                    patch.object(install, 'installed_torch_profile', return_value=current), \
+                    patch.object(install, 'run_pip') as pip, \
+                    patch.object(install, 'normalize_opencv'):
+                self.assertEqual(install.main(['--extra', 'training', '--dry-run']), 0)
+            expected = current if current and current.startswith('cu') else 'cu130'
+            pip.assert_called_once_with(
+                'install', '-r', str(install.ROOT / f'requirements/torch-{expected}.txt'),
+                '-r', str(install.ROOT / 'requirements/optional-training.txt'), dry_run=True)
 
     def test_ambiguous_installed_build_stops_before_changing_packages(self):
         with patch.object(install, 'installed_torch_profile', side_effect=ValueError('Select --torch')), \
@@ -191,6 +196,18 @@ class InstallationTests(unittest.TestCase):
             self.assertEqual(install.main(['--torch', 'cu126']), 1)
         command = verify.call_args.args[0]
         self.assertEqual(command[-4:], ['--load', '--torch-profile', 'cu126', '--cuda-test'])
+
+    def test_default_replaces_cpu_and_requires_cuda_execution_without_fallback(self):
+        with patch.object(install, 'installed_torch_profile', return_value='cpu'), \
+                patch.object(install, 'run_pip') as pip, \
+                patch.object(install, 'check_installation_environment'), \
+                patch.object(install, 'normalize_opencv'), \
+                patch.object(install.sys, 'prefix', '/temporary/venv'), \
+                patch.object(install.subprocess, 'run',
+                             side_effect=subprocess.CalledProcessError(1, 'CUDA unavailable')) as verify:
+            self.assertEqual(install.main([]), 1)
+        pip.assert_called_once_with('install', '-r', str(install.ROOT / 'requirements/torch-cu130.txt'), dry_run=False)
+        self.assertEqual(verify.call_args.args[0][-4:], ['--load', '--torch-profile', 'cu130', '--cuda-test'])
 
     def test_cpu_installation_does_not_require_a_gpu(self):
         with patch.object(install, 'run_pip'), \
@@ -238,8 +255,40 @@ class InstallationTests(unittest.TestCase):
             self.assertIn(f'torch==2.11.0+{backend}', text)
             self.assertIn(f'torchvision==0.26.0+{backend}', text)
             self.assertIn(f'https://download.pytorch.org/whl/{backend}', text)
-            self.assertIn('-r ../requirements.txt', text)
+            self.assertIn('-r base.txt', text)
             self.assertIn('--extra-index-url ', text)
+
+    def test_public_requirements_select_cuda_and_explicit_profiles_remain_independent(self):
+        from packaging.requirements import Requirement
+
+        entries = {'default': install.ROOT / 'requirements.txt'}
+        entries.update({profile: install.ROOT / f'requirements/torch-{profile}.txt'
+                        for profile in install.TORCH_PROFILES})
+        for profile, path in entries.items():
+            with self.subTest(profile=profile):
+                requirements = [Requirement(line) for line in dependency_health.requirement_lines(path)]
+                suffix = 'cu130' if profile == 'default' else profile
+                for name, version in (('torch', '2.11.0'), ('torchvision', '0.26.0')):
+                    specs = [item.specifier for item in requirements if item.name == name]
+                    self.assertTrue(specs)
+                    self.assertTrue(all(spec.contains(version + '+' + suffix) for spec in specs))
+                    for other in set(install.TORCH_PROFILES) - {suffix}:
+                        self.assertFalse(all(spec.contains(version + '+' + other) for spec in specs))
+                self.assertIn('opencv-python-headless', {item.name for item in requirements})
+
+    def test_nested_requirements_checks_includes_but_not_uninstalled_constraints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'requirements.txt').write_text('-r nested.txt\n-c constraints.txt\n')
+            (root / 'nested.txt').write_text('torch==2.11.0+cu130\n')
+            (root / 'constraints.txt').write_text('optional-package==1\n')
+            with patch.object(dependency_health.metadata, 'version', return_value='2.11.0+cpu') as version:
+                errors = dependency_health.direct_requirement_errors(root / 'requirements.txt')
+            self.assertEqual(len(errors), 1)
+            version.assert_called_once_with('torch')
+            (root / 'nested.txt').write_text('-r requirements.txt\n')
+            with self.assertRaisesRegex(ValueError, 'Cyclic'):
+                list(dependency_health.requirement_lines(root / 'requirements.txt'))
 
     def test_inherited_opencv_including_shadowed_global_distribution_is_detected(self):
         with tempfile.TemporaryDirectory() as directory:

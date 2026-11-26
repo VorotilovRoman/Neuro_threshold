@@ -14,6 +14,8 @@ OPENCV_PROVIDERS = (
     'opencv-contrib-python', 'opencv-contrib-python-headless',
 )
 TORCH_PROFILES = ('cpu', 'cu126', 'cu130')
+DEFAULT_TORCH_PROFILE = 'cu130'
+BASE_REQUIREMENTS = Path(__file__).with_name('requirements') / 'base.txt'
 CORE_MODULES = ('torch', 'torchvision', 'numpy', 'cv2', 'ultralytics', 'onnxruntime',
     'albumentations', 'PyQt5.QtCore', 'scipy', 'skimage', 'sklearn', 'xgboost', 'pyamg',
     'shapely', 'joblib', 'networkx', 'pandas', 'tqdm', 'requests', 'yaml', 'PIL',
@@ -90,15 +92,37 @@ def inherited_opencv():
     return inherited
 
 
+def requirement_lines(requirements_file):
+    """Expand local -r includes; constraints/index options are not dependencies."""
+    active, visited = set(), set()
+
+    def visit(path):
+        path = Path(path).resolve()
+        if path in active:
+            raise ValueError(f'Cyclic requirements include: {path}')
+        if path in visited:
+            return
+        active.add(path)
+        for line in path.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if line.startswith(('-r ', '--requirement ')):
+                yield from visit(path.parent / line.split(maxsplit=1)[1].strip('"\''))
+            elif line and not line.startswith(('#', '-')):
+                yield line
+        active.remove(path)
+        visited.add(path)
+
+    yield from visit(requirements_file)
+
+
 def direct_requirement_errors(requirements_file=None):
     """Validate pins, ranges, markers, unpinned and VCS distributions without native imports."""
     from packaging.requirements import Requirement
-    requirements_file = requirements_file or Path(__file__).with_name('requirements.txt')
+    # Explicit CPU/cu126 installations must remain valid. The public entry file
+    # selects the default GPU build; common package validation is profile-neutral.
+    requirements_file = requirements_file or BASE_REQUIREMENTS
     errors = []
-    for line in requirements_file.read_text(encoding='utf-8').splitlines():
-        line = line.strip()
-        if not line or line.startswith(('#', '-')):
-            continue
+    for line in requirement_lines(requirements_file):
         requirement = Requirement(line)
         if requirement.marker and not requirement.marker.evaluate():
             continue
@@ -162,7 +186,7 @@ def check_environment(torch_profile=None, extras=()):
             errors.append(line)
     if result.returncode and not (errors or notes):
         errors.append(result.stderr.strip() or 'pip check failed without diagnostics')
-    return errors, notes
+    return list(dict.fromkeys(errors)), notes
 
 
 def check_torch_device(torch, torchvision, *, profile=None, cuda_test=False):

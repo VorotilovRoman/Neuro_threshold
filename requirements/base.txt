@@ -1,0 +1,34 @@
+-c constraints.txt
+numpy==2.4.3
+opencv-python-headless==4.13.0.92
+shapely==2.1.2
+scipy==1.17.1
+scikit-image==0.26.0
+scikit-learn==1.8.0
+# Classical XGBoost uses CPU; avoid a second CUDA/NCCL stack beside the Torch profile.
+xgboost-cpu==3.4.1; platform_system != "Darwin"
+xgboost==3.4.1; platform_system == "Darwin"
+pyamg==5.4.1
+packaging==26.3
+joblib==1.5.3
+networkx==3.6.1
+pandas==3.0.2
+tqdm==4.67.3
+requests==2.33.1
+PyYAML==6.0.3
+Pillow==12.1.1
+
+# Shared versions; exact CPU/CUDA wheels are selected by torch-*.txt.
+# Never install this internal file alone: use install.py or ../requirements.txt.
+# torch/torchvision are a matched pair; do not upgrade either independently.
+torch==2.11.0
+torchvision==0.26.0
+
+ultralytics==8.4.36
+# ONNX stays on CPU by default; PyTorch/YOLO training uses the CUDA profile above.
+# Do not install onnxruntime and onnxruntime-gpu together.
+onnxruntime==1.25.1
+albumentations==2.0.8
+PyQt5==5.15.11
+matplotlib==3.10.8
+seaborn==0.13.2

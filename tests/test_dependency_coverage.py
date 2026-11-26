@@ -30,14 +30,12 @@ class DependencyCoverageTests(unittest.TestCase):
         declarations = set()
         base = set()
         for path in [ROOT / 'requirements.txt', *sorted((ROOT / 'requirements').glob('optional-*.txt'))]:
-            for line in path.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith(('#', '-')):
-                    requirement = Requirement(line)
-                    if not requirement.marker or requirement.marker.evaluate():
-                        declarations.add(canonicalize_name(requirement.name))
-                        if path == ROOT / 'requirements.txt':
-                            base.add(canonicalize_name(requirement.name))
+            for line in health.requirement_lines(path):
+                requirement = Requirement(line)
+                if not requirement.marker or requirement.marker.evaluate():
+                    declarations.add(canonicalize_name(requirement.name))
+                    if path == ROOT / 'requirements.txt':
+                        base.add(canonicalize_name(requirement.name))
         required_core = {canonicalize_name(ALIASES.get(module.split('.')[0], module.split('.')[0]))
                          for module in health.CORE_MODULES}
         self.assertFalse(required_core - base, f'Core features declared only as extras: {required_core - base}')

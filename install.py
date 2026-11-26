@@ -9,6 +9,7 @@ from pathlib import Path
 
 from dependency_health import (
     OPENCV_PROVIDERS, SELECTED_OPENCV, TORCH_PROFILES,
+    DEFAULT_TORCH_PROFILE, BASE_REQUIREMENTS,
     inherited_opencv, installed_opencv, installed_torch_profile,
     EXTRA_MODULES, installed_xgboost, selected_extras, selected_xgboost,
 )
@@ -65,7 +66,7 @@ def normalize_opencv(dry_run=False, force=False):
         competing = [name for name in OPENCV_PROVIDERS if name != SELECTED_OPENCV]
     if competing:
         run_pip('uninstall', '-y', *competing, dry_run=dry_run)
-    pin = next(line.strip() for line in (ROOT / 'requirements.txt').read_text().splitlines()
+    pin = next(line.strip() for line in BASE_REQUIREMENTS.read_text().splitlines()
                if line.startswith(SELECTED_OPENCV + '=='))
     expected_version = pin.split('==', 1)[1]
     if force or competing or providers.get(SELECTED_OPENCV) != expected_version:
@@ -80,7 +81,7 @@ def normalize_xgboost(dry_run=False):
     competing = [name for name in installed_xgboost() if name != selected]
     if competing:
         run_pip('uninstall', '-y', *competing, dry_run=dry_run)
-        pin = next(line.split(';')[0].strip() for line in (ROOT / 'requirements.txt').read_text().splitlines()
+        pin = next(line.split(';')[0].strip() for line in BASE_REQUIREMENTS.read_text().splitlines()
                    if line.startswith(selected + '=='))
         run_pip('install', '--no-deps', '--force-reinstall', pin, dry_run=dry_run)
 
@@ -88,7 +89,7 @@ def normalize_xgboost(dry_run=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--torch', choices=TORCH_PROFILES,
-                        help='Torch/torchvision profile (default: keep installed build; cpu for a new environment)')
+                        help='Torch/torchvision profile (default: keep CUDA build; otherwise cu130, including installed CPU builds)')
     parser.add_argument('--extra', action='append', choices=(*EXTRAS, 'all'), default=[],
                         help='Optional feature dependencies; may be repeated')
     parser.add_argument('--dry-run', action='store_true', help='Print commands without installing')
@@ -101,7 +102,11 @@ def main(argv=None):
         if not args.dry_run:
             check_installation_environment()
         if not args.repair_opencv:
-            selected_profile = args.torch or installed_torch_profile() or 'cpu'
+            selected_profile = args.torch
+            if selected_profile is None:
+                installed = installed_torch_profile()
+                selected_profile = installed if installed and installed.startswith('cu') else DEFAULT_TORCH_PROFILE
+            print(f'Torch profile: {selected_profile}' + (' (explicit)' if args.torch else ' (CUDA-first default)'), flush=True)
             # One resolution includes the exact local Torch build and all extras.
             # A conflicting extra must fail rather than replace CUDA with CPU.
             requirements = ['-r', str(ROOT / 'requirements' / f'torch-{selected_profile}.txt')]

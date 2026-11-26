@@ -12,13 +12,21 @@ Python 3.12. Выберите нужные вкладки при запуске;
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python install.py --torch cpu
-python dependency_health.py --load
+python install.py
+python dependency_health.py --load --cuda-test
 python main.py
 ```
 
 В Windows вместо `source` выполните `.venv\Scripts\activate`.
-Для NVIDIA GTX 1650 выберите профиль CUDA 12.6:
+По умолчанию устанавливается **CUDA 13.0 (`cu130`)**, в том числе вместо уже
+установленной CPU-сборки. Для RTX 5090 и обучения U-Net/DeepLab:
+
+```powershell
+python install.py --extra training
+python dependency_health.py --load --torch-profile cu130 --cuda-test --extra training
+```
+
+Для NVIDIA GTX 1650 явно выберите профиль CUDA 12.6:
 
 ```powershell
 python install.py --torch cu126 --extra training
@@ -28,14 +36,21 @@ python main.py
 
 | Профиль | PyTorch / torchvision | Назначение |
 | --- | --- | --- |
-| `cpu` | `2.11.0+cpu` / `0.26.0+cpu` | Без NVIDIA GPU |
+| `cpu` | `2.11.0+cpu` / `0.26.0+cpu` | Без NVIDIA GPU, только явный `--torch cpu` |
 | `cu126` | `2.11.0+cu126` / `0.26.0+cu126` | Основной вариант для GTX 1650 |
-| `cu130` | `2.11.0+cu130` / `0.26.0+cu130` | Совместимые GPU и драйвер CUDA 13 |
+| `cu130` | `2.11.0+cu130` / `0.26.0+cu130` | По умолчанию; RTX 5090 и совместимые GPU/драйверы CUDA 13 |
 
 Для готовых wheels нужен драйвер NVIDIA; отдельный CUDA Toolkit не требуется.
-Без `--torch` установщик сохраняет текущий профиль, а в новом окружении выбирает CPU.
-`requirements.txt` содержит общие зависимости; профиль выбирают установщиком или
-`requirements/torch-*.txt`. После ручной установки восстановите OpenCV:
+Без `--torch` установщик сохраняет текущий поддерживаемый **CUDA**-профиль.
+В новом окружении и при установленном CPU-профиле выбирается `cu130`.
+При ошибке установки/проверки CUDA автоматического перехода на CPU нет.
+Для работы без NVIDIA GPU (включая macOS) явно используйте `python install.py --torch cpu`;
+этот флаг нужно повторять при обновлениях и добавлении дополнений.
+
+`pip install -r requirements.txt` также выбирает `cu130`. Для явного профиля доступны
+`requirements/torch-cpu.txt`, `torch-cu126.txt` и `torch-cu130.txt`; все включают
+общий `requirements/base.txt`, который отдельно устанавливать не следует.
+После ручной установки восстановите OpenCV:
 `python install.py --repair-opencv`.
 
 В базу входят XGBoost и `pyamg` для Random Walker `cg_mg`. XGBoost работает на CPU
@@ -53,7 +68,8 @@ python main.py
 
 Флаги можно сочетать; `--extra all` устанавливает все эти дополнения, веса моделей
 скачиваются отдельно. Версии — в [requirements](requirements/). Для обновления базы
-достаточно `python install.py`: установленный CPU/CUDA-профиль сохраняется.
+достаточно `python install.py`: установленный CUDA-профиль сохраняется,
+CPU обновляется командой `python install.py --torch cpu`.
 
 ```bash
 python install.py --extra all
