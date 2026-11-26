@@ -4,7 +4,7 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 from utils_new.import_export.sam_weights import MODELS
 from utils_new.segmentation.backends.sam import MODELS_DIR
@@ -44,6 +44,11 @@ class SamPanel(QWidget):
         self.model.setCurrentIndex(self.model.findData("sam2.1-tiny"))
         form.addRow("Архитектура:", self.model)
         self.weights, self.browse_weights = self._path_row(form, "Веса:", "Локальный .pt / .pth")
+        self.checkpoint_info = QLabel()
+        self.checkpoint_info.setTextFormat(Qt.PlainText)
+        self.checkpoint_info.setWordWrap(True)
+        self.checkpoint_info.setVisible(False)
+        form.addRow(self.checkpoint_info)
         self.tokenizer, self.browse_tokenizer = self._path_row(form, "Токенизатор:", "SAM3: BPE GZIP рядом с весами")
         self.tokenizer_row = form.itemAt(form.rowCount() - 1, QFormLayout.FieldRole).widget()
         self.tokenizer_label = form.labelForField(self.tokenizer_row)

@@ -71,6 +71,30 @@ class SamTrainingTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 SamSample(image, "coco", [ann]).masks(self.config())
 
+    def test_overlapping_coco_parts_are_union_not_xor(self):
+        sample = SamSample(str(self.root / "images/train/image.png"), "coco", [dict(
+            segmentation=[[1, 1, 12, 1, 12, 9, 1, 9], [6, 2, 18, 2, 18, 10, 6, 10]])])
+        masks, _ = sample.masks(self.config())
+        self.assertEqual(len(masks), 1)
+        self.assertTrue(masks[0][5, 8])
+
+    def test_yolo_and_coco_polygon_targets_use_same_pixel_boundaries(self):
+        image = str(self.root / "images/train/image.png")
+        yolo = SamSample(image, "yolo", str(self.root / "labels/train/image.txt"))
+        coco = SamSample(image, "coco", [dict(segmentation=[[2, 2.4, 14, 2.4, 14, 9.6, 2, 9.6]])])
+        np.testing.assert_array_equal(yolo.masks(self.config())[0][0], coco.masks(self.config())[0][0])
+
+    def test_coco_dimensions_missing_files_and_orphan_objects_are_rejected(self):
+        source = self.root / "bad.json"
+        valid = dict(images=[dict(id=1, file_name="images/train/image.png", width=20, height=12)],
+                     annotations=[], categories=[])
+        for image_change, annotations in ((dict(width=21), []), (dict(file_name="missing.png"), []),
+                                            ({}, [dict(image_id=7)])):
+            record = dict(valid["images"][0], **image_change)
+            source.write_text(json.dumps(dict(valid, images=[record], annotations=annotations)))
+            with self.subTest(image_change=image_change), self.assertRaisesRegex(ValueError, "COCO"):
+                discover_samples(source)
+
     def test_index_masks_split_instances_and_preserve_ignore(self):
         labels = np.zeros((12, 20), np.uint8)
         labels[1:4, 1:4] = 2
@@ -83,10 +107,55 @@ class SamTrainingTests(unittest.TestCase):
         self.assertEqual(len(masks), 2)
         self.assertFalse(valid[:, -1].any())
 
+    def test_binary_255_mask_requires_disabling_default_ignore_255(self):
+        target = np.zeros((12, 20), np.uint8)
+        target[3:8, 4:12] = 255
+        path = self.root / "binary.png"
+        write_image(path, target)
+        sample = SamSample(str(self.root / "images/train/image.png"), "unet", str(path))
+        self.assertEqual(sample.masks(self.config())[0], [])
+        masks, valid = sample.masks(self.config(ignore_index=None))
+        self.assertEqual(len(masks), 1)
+        self.assertTrue(valid.all())
+
+    def test_documented_mask_yaml_resolves_exact_image_mask_pairs(self):
+        source = self.root / "masks.yaml"
+        for split in ("train", "val"):
+            folder = self.root / "masks" / split
+            folder.mkdir(parents=True)
+            labels = np.zeros((12, 20), np.uint16)
+            labels[2:9, 4:13] = 1
+            write_image(folder / "image.png", labels)
+        source.write_text(f"path: {self.root}\ntrain: images/train\nval: images/val\n"
+                          "train_masks: masks/train\nval_masks: masks/val\nnum_classes: 2\n"
+                          "class_names: [background, part]\nmask_class_offset: 0\n")
+        train, val = training_samples(self.config(source=str(source)), log=lambda _: None)
+        for group, split in ((train, "train"), (val, "val")):
+            self.assertEqual(group[0].kind, "unet")
+            self.assertEqual(Path(group[0].target), self.root / "masks" / split / "image.png")
+            self.assertEqual(len(group[0].masks(self.config())[0]), 1)
+
     def test_duplicate_image_bytes_rejected_across_splits(self):
         (self.root / "images/val/image.png").write_bytes((self.root / "images/train/image.png").read_bytes())
         with self.assertRaisesRegex(ValueError, "Утечка"):
             training_samples(self.config(), log=lambda _: None)
+
+    def test_conflicting_targets_of_identical_train_images_are_not_silently_dropped(self):
+        (self.root / "images/train/copy.png").write_bytes((self.root / "images/train/image.png").read_bytes())
+        (self.root / "labels/train/copy.txt").write_text("0 0.2 0.1 0.9 0.1 0.9 0.5 0.2 0.5\n")
+        with self.assertRaisesRegex(ValueError, "Противоречащая"):
+            training_samples(self.config(), log=lambda _: None)
+
+    def test_automatic_split_uses_only_images_with_positive_instances(self):
+        self.source.write_text(f"path: {self.root}\ntrain: images/train\nnames: [part]\n")
+        write_image(self.root / "images/train/second.png", np.full((12, 20, 3), 170, np.uint8))
+        (self.root / "labels/train/second.txt").write_text((self.root / "labels/train/image.txt").read_text())
+        for index in range(10):
+            write_image(self.root / f"images/train/bg{index}.png", np.full((12, 20, 3), index, np.uint8))
+            (self.root / f"labels/train/bg{index}.txt").write_text("")
+        train, val = training_samples(self.config(), log=lambda _: None)
+        self.assertEqual((len(train), len(val)), (1, 1))
+        self.assertTrue(all(sample.masks(self.config())[0] for sample in train + val))
 
     def test_explicit_validation_yaml_uses_only_val_not_train_or_test(self):
         self.source.write_text(self.source.read_text() + "test: images/train\n")
@@ -154,6 +223,18 @@ class SamTrainingTests(unittest.TestCase):
         self.assertAlmostEqual(float(loss.detach()), float(other[0]), places=6)
         self.assertEqual((iou, dice), other[1:])
 
+    def test_metrics_select_predicted_score_not_oracle_ground_truth(self):
+        from runtime_torch import require_torch
+        from utils_new.training.sam import mask_loss
+        torch = require_torch()
+        target = torch.tensor([[1., 0.], [0., 0.]])
+        logits = torch.tensor([[[10., -10.], [-10., -10.]],
+                               [[10., 10.], [-10., -10.]],
+                               [[-10., -10.], [-10., -10.]]])
+        _, iou, dice = mask_loss(logits, torch.tensor([0.7, 0.9, 0.1]), target, torch.ones_like(target))
+        self.assertAlmostEqual(iou, 0.5)
+        self.assertAlmostEqual(dice, 2 / 3, places=6)
+
     def engine_patches(self):
         from runtime_torch import require_torch
         torch = require_torch()
@@ -200,6 +281,10 @@ class SamTrainingTests(unittest.TestCase):
             torch.testing.assert_close(a["model"]["weight"], b["model"]["weight"], rtol=0, atol=0)
             self.assertNotEqual(float(a["model"]["weight"]), 0.1)
             self.assertTrue((self.root / "runs/resumed/best.pt").is_file())
+            metrics = json.loads((self.root / "runs/resumed/metrics.json").read_text())
+            self.assertEqual(metrics["contract"]["aggregation"], "mean_per_object")
+            self.assertEqual(metrics["last"]["train_updates"], 1)
+            self.assertEqual(metrics["last"]["val_objects"], 1)
             label = self.root / "labels/train/image.txt"
             label.write_text(label.read_text() + "\n# changed\n")
             with self.assertRaisesRegex(ValueError, "разметка"):
@@ -219,6 +304,24 @@ class SamTrainingTests(unittest.TestCase):
         self.assertFalse((root / "last.resume.pt").exists())
         self.assertFalse(json.loads((root / "interrupted_meta.json").read_text())["complete_epoch"])
 
+    def test_partial_weights_do_not_claim_metrics_of_previous_epoch(self):
+        from utils_new.training.sam import run_training
+        stop = StopRequest()
+        def log(line):
+            if "Эпоха 2 train: 1/1" in line:
+                stop.set()
+        first, second = self.engine_patches()
+        with first, second:
+            self.assertEqual(run_training(dict(self.params, epochs=2), stop=stop, log=log), 130)
+        root = self.root / "runs/sam"
+        partial = json.loads((root / "interrupted_meta.json").read_text())
+        self.assertEqual(partial["epoch"], 2)
+        self.assertEqual(partial["metrics"], {})
+        self.assertEqual(partial["epochs_completed"], 1)
+        self.assertEqual(partial["last_completed_metrics"]["epoch"], 1)
+        full = json.loads((root / "last_meta.json").read_text())
+        self.assertEqual(full["epoch"], full["metrics"]["epoch"])
+
     def test_reviewed_import_survives_closed_dialog_and_resume(self):
         import shutil
         from utils_new.import_export.dataset_sources import defaults, preview, write_manifest
@@ -233,6 +336,35 @@ class SamTrainingTests(unittest.TestCase):
             self.assertNotEqual(cfg["source"], source)
             shutil.rmtree(imported)
             cfg.update(resume=str(run / "last.resume.pt"), epochs=2, name="continued")
+            self.assertEqual(run_training(cfg, log=lambda _: None), 0)
+
+    def test_reviewed_coco_manifest_records_persistent_annotation_source(self):
+        import shutil
+        from utils_new.import_export.dataset_sources import defaults, preview, write_manifest
+        from utils_new.training.sam import run_training
+        source = self.root / "coco.json"
+        images, annotations = [], []
+        target = np.zeros((12, 20), np.uint8)
+        target[2:8, 3:14] = 1
+        for index, split in enumerate(("train", "val")):
+            images.append(dict(id=index, file_name=f"images/{split}/image.png", width=20, height=12))
+            annotations.append(dict(id=index, image_id=index, category_id=1, segmentation=encode_rle(target)))
+        source.write_text(json.dumps(dict(images=images, annotations=annotations, categories=[dict(id=1, name="part")])))
+        imported = self.root / "coco-import"
+        approved = write_manifest(preview(defaults([source], "coco"), "json"), imported)[0]
+        first, second = self.engine_patches()
+        with first, second:
+            run_training(dict(self.params, source=approved, name="coco"), log=lambda _: None)
+            run = self.root / "runs/coco"
+            cfg = json.loads((run / "params.json").read_text())
+            records = json.loads((run / "dataset.json").read_text())
+            shutil.rmtree(imported)
+            for record in records["train"] + records["val"]:
+                self.assertEqual(record["kind"], "coco")
+                self.assertEqual(record["annotation_file"], cfg["source"])
+                self.assertTrue(Path(record["annotation_file"]).is_file())
+                self.assertEqual(len(record["annotation_ids"]), 1)
+            cfg.update(resume=str(run / "last.resume.pt"), epochs=2, name="coco_resume")
             self.assertEqual(run_training(cfg, log=lambda _: None), 0)
 
 

@@ -5,11 +5,13 @@ from runtime_torch import prepare_windows_torch
 prepare_windows_torch()
 
 from pathlib import Path
+from math import isfinite
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
 from ui import dataset_source as source_dialogs
 from ui.segmentation.jobs import BackgroundTask
 from utils_new.import_export.sam_weights import MODELS
+from utils_new.import_export.training import read_model_meta
 from utils_new.segmentation.backends.sam import MODELS_DIR, SamPrompt, find_sam3_tokenizer, load_sam_backend
 
 
@@ -124,6 +126,36 @@ class SamController:
         self.invalidate(cancel_load=True)
         self.panel.capabilities()
         self.host.model_changed()
+        self.update_checkpoint_info()
+
+    def update_checkpoint_info(self):
+        panel = self.panel
+        try:
+            meta = read_model_meta(panel.weights.text().strip()) if panel.weights.text().strip() else {}
+            text = ""
+            if meta.get("kind") == "sam":
+                key = meta.get("model_key")
+                name = MODELS[key].name if key in MODELS else str(key)
+                text = f"Дообученная {name}. "
+                if meta.get("complete_epoch"):
+                    text += f"Эпоха {meta.get('epoch')}. "
+                    metrics = meta.get("metrics") or {}
+                    if isinstance(metrics, dict):
+                        for field, label in (("val_iou", "IoU"), ("val_dice", "Dice")):
+                            value = metrics.get(field)
+                            if type(value) in (int, float) and isfinite(value):
+                                text += f"val {label}: {value:.4f}. "
+                    text += "Оценка по подсказкам, не точность поиска объектов. "
+                else:
+                    text += "Неполная эпоха; валидационные метрики этих весов отсутствуют. "
+                text += f"Рабочая сторона при обучении: {meta.get('max_side', '—')} px."
+                if key != panel.model.currentData():
+                    text += " Выберите соответствующую архитектуру перед загрузкой."
+            panel.checkpoint_info.setText(text)
+            panel.checkpoint_info.setVisible(bool(text))
+        except (OSError, ValueError, TypeError) as error:
+            panel.checkpoint_info.setText(f"Не удалось прочитать метаданные весов: {error}")
+            panel.checkpoint_info.setVisible(True)
 
     def settings_key(self):
         panel = self.panel
@@ -136,10 +168,17 @@ class SamController:
     def browse_weights(self):
         path, _ = source_dialogs.get_open_file(self.owner, "model_torch", directory=str(MODELS_DIR))
         if path:
-            for key, model in MODELS.items():
-                if Path(path).name.casefold() == Path(model.assets[0].path).name.casefold():
-                    self.panel.model.setCurrentIndex(self.panel.model.findData(key))
-                    break
+            try:
+                meta = read_model_meta(path)
+            except (OSError, ValueError, TypeError) as error:
+                QMessageBox.warning(self.owner, "Метаданные SAM", str(error))
+                return
+            key = meta.get("model_key") if meta.get("kind") == "sam" else None
+            if key not in MODELS:
+                key = next((key for key, model in MODELS.items()
+                            if Path(path).name.casefold() == Path(model.assets[0].path).name.casefold()), None)
+            if key in MODELS:
+                self.panel.model.setCurrentIndex(self.panel.model.findData(key))
             self.panel.weights.setText(path)
             if self.panel.model.currentData() == "sam3":
                 bpe = find_sam3_tokenizer(path)
@@ -230,6 +269,7 @@ class SamController:
                 self.loaded_key = key
                 self.update_load_state()
                 self.panel.status.setText(f"Модель загружена: {key[0]} ({backend.device}). Укажите подсказки.")
+                self.update_checkpoint_info()
                 self.owner.log(f"[SAM] Локальные веса: {key[1]}; архитектура: {key[0]}; устройство: {backend.device}")
                 if key[4] == "grounded":
                     detector_device = getattr(getattr(backend, "detector", None), "device", key[6])

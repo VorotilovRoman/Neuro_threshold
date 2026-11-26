@@ -259,6 +259,28 @@ class SamLabelerTests(unittest.TestCase):
             self.assertEqual(self.panel.model.currentData(), "sam3")
             self.assertEqual(self.panel.tokenizer.text(), str(bpe))
 
+    def test_browse_custom_finetuned_weights_uses_metadata_not_filename(self):
+        from utils_new.import_export.training import save_model_meta
+        with TemporaryDirectory() as directory:
+            weights = Path(directory) / "my_best.pt"
+            weights.write_bytes(b"local weights")
+            save_model_meta(dict(kind="sam", model_key="sam-vit-b", epoch=3,
+                complete_epoch=True, max_side=512, metrics=dict(val_iou=0.625, val_dice=0.75)), weights)
+            self.panel.model.setCurrentIndex(self.panel.model.findData("sam3"))
+            with patch("ui.sam.controller.source_dialogs.get_open_file", return_value=(str(weights), "")), \
+                    patch("ui.sam.downloads.QMessageBox.question") as ask:
+                self.controller.browse_weights()
+                self.assertFalse(ask.called)
+            self.assertEqual(self.panel.model.currentData(), "sam-vit-b")
+            self.assertIn("0.6250", self.panel.checkpoint_info.text())
+            self.assertIn("512", self.panel.checkpoint_info.text())
+            self.assertFalse(self.panel.load.property("modelLoaded"))
+            save_model_meta(dict(kind="sam", model_key="sam-vit-b", epoch=4,
+                complete_epoch=False, max_side=512, metrics=dict(val_iou=0.99)), weights)
+            self.controller.update_checkpoint_info()
+            self.assertNotIn("0.9900", self.panel.checkpoint_info.text())
+            self.assertIn("Неполная эпоха", self.panel.checkpoint_info.text())
+
     def test_grounding_dino_text_mode_loads_and_previews_without_automatic_annotation_changes(self):
         from utils_new.segmentation.backends.sam import SamResult
         from unittest.mock import Mock

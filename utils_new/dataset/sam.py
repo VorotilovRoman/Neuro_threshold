@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from utils_new.annotations import ImageSize
+from utils_new.annotations import Annotation, ImageSize
 from utils_new.annotations.masks import annotation_binary_mask
 from utils_new.images.processing import ImageStats
 from utils_new.import_export.coco import decode_rle
@@ -31,6 +31,14 @@ class SamSample:
     kind: str
     target: object
     split: str = "train"
+    source: str = ""
+
+    def source_record(self):
+        record = dict(image=self.image, kind=self.kind,
+                      annotation_file=self.source if self.kind == "coco" else str(self.target))
+        if self.kind == "coco":
+            record["annotation_ids"] = [ann.get("id") for ann in self.target]
+        return record
 
     def masks(self, cfg):
         width, height = image_size_from_file(self.image)
@@ -65,13 +73,15 @@ class SamSample:
                     mask = decode_rle(segmentation, expected_shape=(height, width)).astype(bool)
                 elif isinstance(segmentation, list) and segmentation:
                     mask = np.zeros((height, width), np.uint8)
-                    polygons = []
                     for polygon in segmentation:
                         points = np.asarray(polygon, dtype=np.float64)
                         if points.ndim != 1 or len(points) < 6 or len(points) % 2 or not np.isfinite(points).all():
                             raise ValueError(f"Некорректный полигон COCO: {self.image}")
-                        polygons.append(np.rint(points.reshape(-1, 2)).astype(np.int32))
-                    cv2.fillPoly(mask, polygons, 1)
+                        # COCO components form a union. Passing all polygons to fillPoly
+                        # together applies an even/odd rule and can erase overlaps.
+                        component = annotation_binary_mask(
+                            Annotation("segment", 0, points.reshape(-1, 2)), ImageSize(width, height))
+                        mask |= component
                     mask = mask.astype(bool)
                 else:
                     raise ValueError(f"У объекта COCO нет маски; BBox недостаточно: {self.image}")
@@ -97,14 +107,29 @@ def discover_samples(source, stop=None, log=print):
     kind = "coco" if path.suffix.lower() == ".json" else "yolo"
     selection = metadata(path)
     if kind == "coco":
+        original = json.loads(path.read_text(encoding="utf-8-sig"))
+        records = original.get("images", [])
+        ids = [record["id"] for record in records]
+        if len(ids) != len(set(ids)):
+            raise ValueError("COCO: повторяющиеся image ID.")
+        known = set(ids)
+        if any(ann.get("image_id") not in known for ann in original.get("annotations", [])):
+            raise ValueError("COCO: аннотация ссылается на отсутствующий image ID.")
         spec = defaults([path], kind)
         # Reviewed JSON has absolute, approved image paths; preserve its RLE/polygons directly.
         plan = preview(spec, "json", cancel=stop)
         payload = plan["coco"][0]["payload"]
+        if len(payload["images"]) != len(records):
+            raise ValueError("COCO: часть снимков не найдена. Уточните пути в окне импорта.")
+        for record in payload["images"]:
+            check_stop(stop)
+            size = image_size_from_file(record["file_name"])
+            if (record.get("width"), record.get("height")) != size:
+                raise ValueError(f"COCO: width/height не совпадают со снимком: {record['file_name']}")
         by_id = defaultdict(list)
         for ann in payload.get("annotations", []):
             by_id[ann["image_id"]].append(ann)
-        return [SamSample(str(Path(im["file_name"]).resolve()), "coco", by_id[im["id"]])
+        return [SamSample(str(Path(im["file_name"]).resolve()), "coco", by_id[im["id"]], source=str(path.resolve()))
                 for im in payload["images"] if im.get("annotation_status") != "unlabelled"]
     spec = defaults([path], kind)
     kind = spec["kind"]
@@ -142,31 +167,23 @@ def training_samples(cfg, stop=None, log=print):
             raise ValueError("В отдельном источнике валидации нет размеченных train/val снимков; test не используется.")
     if not train:
         raise ValueError("Нет обучающих снимков (split train).")
-    if not val:
-        # Split by image content so copies cannot leak across train/validation.
-        groups = defaultdict(list)
-        for sample in train:
-            check_stop(stop)
-            groups[digest_file(sample.image)].append(sample)
-        keys = sorted(groups)
-        np.random.default_rng(cfg["seed"]).shuffle(keys)
-        count = max(1, round(len(keys) * cfg["validation_fraction"]))
-        if len(keys) < 2:
-            raise ValueError("Для отдельной валидации нужны минимум два разных снимка.")
-        val = [s for key in keys[:count] for s in groups[key]]
-        train = [s for key in keys[count:] for s in groups[key]]
-        log(f"[SAM] Нет val: отдельные {len(val)} снимков выделены по seed={cfg['seed']}; test не используется.")
-    digests = []
+    automatic = not val
+    digests, identities = [], {}
     for name, group in (("train", train), ("val", val)):
-        seen, files, objects, empty = set(), [], 0, 0
+        seen, files, objects, empty = {}, [], 0, 0
         for index, sample in enumerate(group):
             check_stop(stop)
             digest = digest_file(sample.image)
+            masks, valid = sample.masks(cfg)
+            signature = (valid.shape, hashlib.sha256(np.packbits(valid).tobytes()).digest(),
+                         tuple(sorted(hashlib.sha256(np.packbits(mask).tobytes()).digest() for mask in masks)))
             if digest in seen:
+                if signature != seen[digest]:
+                    raise ValueError(f"Противоречащая разметка копий одного снимка: {sample.image}. Объедините/исправьте маски явно.")
                 log(f"[SAM] Повтор снимка в {name} — пропуск: {sample.image}")
                 continue
-            seen.add(digest)
-            masks, _ = sample.masks(cfg)
+            seen[digest] = signature
+            identities[sample.image] = digest
             if not masks:
                 empty += 1
                 continue  # No positive instance to generate a valid training prompt.
@@ -174,22 +191,31 @@ def training_samples(cfg, stop=None, log=print):
             files.append(sample)
             if index % 32 == 0 or index + 1 == len(group):
                 log(f"[SAM] Проверка {name}: {index + 1}/{len(group)}; объектов: {objects}")
-        if not files:
+        if not files and not (name == "val" and automatic):
             raise ValueError(f"Нет объектов с масками в {name}.")
         if name == "train":
             train = files
         else:
             val = files
-        digests.append(seen)
+        digests.append(set(seen))
         log(f"[SAM] {name}: {len(files)} снимков, {objects} объектов; пустых снимков исключено: {empty}.")
     if digests[0] & digests[1]:
         raise ValueError("Утечка данных: одинаковые снимки найдены в train и val (проверены SHA-256).")
+    if automatic:
+        # Split eligible objects, not background-only images that cannot train SAM.
+        ordered = sorted(train, key=lambda sample: identities[sample.image])
+        np.random.default_rng(cfg["seed"]).shuffle(ordered)
+        if len(ordered) < 2:
+            raise ValueError("Для отдельной валидации нужны минимум два разных снимка с объектами.")
+        count = max(1, round(len(ordered) * cfg["validation_fraction"]))
+        val, train = ordered[:count], ordered[count:]
+        log(f"[SAM] Нет val: {len(val)} из {len(ordered)} снимков с объектами выделены по seed={cfg['seed']}; test не используется.")
     return train, val
 
 
 def dataset_signature(groups, stop=None):
     """Resume must not silently continue with edited images or edited masks."""
-    digest = hashlib.sha256()
+    digest = hashlib.sha256(b"sam-instance-union-v2")
     for name, samples in groups.items():
         digest.update(name.encode())
         for sample in samples:

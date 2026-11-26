@@ -153,13 +153,13 @@ def run_training(params, *, stop=None, log=print):
         previous = resume["config"]
         for key in ("model_key", "train_prompt_encoder", "prompt_type", "accum_steps", "lr",
                     "weight_decay", "positive_points", "negative_points", "max_objects", "seed",
-                    "box_jitter", "max_side", "background_id", "ignore_index", "validation_fraction"):
+                    "box_jitter", "max_side", "background_id", "ignore_index", "validation_fraction", "grad_clip", "use_amp"):
             if cfg[key] != previous[key]:
                 raise ValueError(f"Resume: изменён параметр {key}; для нового режима загрузите last.pt как начальные веса.")
         if resume["images"] != {"train": [s.image for s in train], "val": [s.image for s in val]}:
             raise ValueError("Resume: изменилось разделение train/val.")
         if resume["dataset_signature"] != signature:
-            raise ValueError("Resume: изменились снимки или разметка. Начните новый запуск из last.pt.")
+            raise ValueError("Resume: изменились снимки, разметка или версия подготовки масок. Начните новый запуск из last.pt.")
     model = load_prompt_model(cfg["model_key"], cfg["resume"] or cfg["model_path"], device, training=True)
     trainer = PromptTrainer(model, cfg["model_key"], cfg)
     parameters = [p for p in model.parameters() if p.requires_grad]
@@ -169,7 +169,10 @@ def run_training(params, *, stop=None, log=print):
     history, start, best, best_trainable = [], 0, -1.0, {}
     if resume:
         optimizer.load_state_dict(resume["optimizer"])
-        scaler.load_state_dict(resume["scaler"])
+        if amp and resume["scaler"]:
+            scaler.load_state_dict(resume["scaler"])
+        elif amp:
+            log("[SAM] Продолжение CPU → CUDA: используется новый масштаб AMP.")
         history, start, best = resume["history"], resume["epoch"], resume["best_iou"]
         best_trainable = resume["best_trainable"]
         rng.bit_generator.state = resume["rng"]
@@ -185,8 +188,10 @@ def run_training(params, *, stop=None, log=print):
         index += 1
     root.mkdir(parents=True)
     log(f"RESULT_DIR:{root}")
+    relocated_sources = {}
     for key in ("source", "val_source"):
         if cfg[key] and metadata(cfg[key]):
+            original = cfg[key]
             if Path(cfg[key]).suffix.lower() == ".json":
                 from shutil import copyfile
                 target = root / f"{key}.json"
@@ -194,24 +199,40 @@ def run_training(params, *, stop=None, log=print):
                 cfg[key] = str(target)
             else:
                 cfg[key] = persist_source(cfg[key], root / key)
+            relocated_sources[original] = cfg[key]
     write_json_atomic(root / "params.json", cfg)
-    write_json_atomic(root / "dataset.json", {name: [s.image for s in group] for name, group in (("train", train), ("val", val))})
+    records = {}
+    for name, group in (("train", train), ("val", val)):
+        records[name] = []
+        for sample in group:
+            record = sample.source_record()
+            record["annotation_file"] = relocated_sources.get(record["annotation_file"], record["annotation_file"])
+            records[name].append(record)
+    write_json_atomic(root / "dataset.json", dict(version=2, **records))
     log(f"[SAM] {cfg['model_key']} / {device}; batch=1, накопление={cfg['accum_steps']}; "
         f"обучаемых параметров: {sum(p.numel() for p in parameters):,}. Кодировщик снимков заморожен.")
     log("[SAM] Начинаем пробный шаг; OOM не уменьшает batch ниже 1 — выберите tiny, меньший max_side или CPU.")
     if not amp and cfg["use_amp"]:
         log("[SAM] AMP отключён на CPU.")
+    metric_contract = dict(aggregation="mean_per_object", mask_selection="highest_predicted_iou",
+        logit_threshold=0.0, score_filter=None, max_side=cfg["max_side"],
+        validation_prompts="box_and_points" if cfg["prompt_type"] == "mixed" else cfg["prompt_type"],
+        validation_box_jitter=0.0, loss="best_of_3_BCE+soft_Dice+0.1*IoU_MSE",
+        train_metrics="online_sampled_objects", validation_metrics="all_objects",
+        background_id=cfg["background_id"], ignore_index=cfg["ignore_index"])
 
     def save(name, epoch, *, complete, full=False, best_weights=False):
         state = {key: value.detach().cpu() for key, value in model.state_dict().items()}
         if best_weights:
             state.update(best_trainable)
         metrics = (max(history, key=lambda row: row["val_iou"]) if best_weights
-                   else history[-1] if history else {})
+                   else history[-1] if complete and history else {})
         meta = dict(kind="sam", model_key=cfg["model_key"], epoch=epoch,
                     complete_epoch=complete, max_side=cfg["max_side"],
                     prompt_type=cfg["prompt_type"], metrics=metrics,
-                    dataset_signature=signature, config=cfg)
+                    epochs_completed=history[-1]["epoch"] if history else 0,
+                    last_completed_metrics=history[-1] if history else {},
+                    metric_contract=metric_contract, dataset_signature=signature, config=cfg)
         payload = {"model": state, "model_key": cfg["model_key"]} if not cfg["model_key"].startswith("sam-vit-") else state
         if full:
             payload = dict(format="neuro-sam-resume-v1", model=state, model_key=cfg["model_key"],
@@ -226,13 +247,23 @@ def run_training(params, *, stop=None, log=print):
             torch.save(payload, temporary)
         save_model_meta(meta, root / name)
 
+    def save_history():
+        save_training_history(root, history)
+        write_json_atomic(root / "metrics.json", dict(contract=metric_contract,
+            best_checkpoint="best.pt" if history else None,
+            best=max(history, key=lambda row: row["val_iou"]) if history else {},
+            last=history[-1] if history else {}))
+
     if resume:
         best_epoch = max(history, key=lambda row: row["val_iou"])["epoch"]
         save("best.pt", best_epoch, complete=True, best_weights=True)
+        save("last.pt", start, complete=True)
+        save("last.resume.pt", start, complete=True, full=True)
+        save_history()
 
     def phase(samples, training, epoch):
         trainer.mode(training)
-        sums, count = np.zeros(3, np.float64), 0
+        sums, count, updates, skipped = np.zeros(3, np.float64), 0, 0, 0
         order = rng.permutation(len(samples)) if training else range(len(samples))
         optimizer.zero_grad(set_to_none=True)
         pending = 0
@@ -269,7 +300,10 @@ def run_training(params, *, stop=None, log=print):
                             parameter.grad.div_(pending)
                     norm = torch.nn.utils.clip_grad_norm_(parameters, cfg["grad_clip"], error_if_nonfinite=not amp)
                     if amp and not torch.isfinite(norm):
+                        skipped += 1
                         log("[SAM] Переполнение AMP: шаг пропущен, масштаб градиентов будет уменьшен.")
+                    else:
+                        updates += 1
                     scaler.step(optimizer)
                     scaler.update()
                     optimizer.zero_grad(set_to_none=True)
@@ -278,16 +312,20 @@ def run_training(params, *, stop=None, log=print):
             fraction = (position + 1) / len(samples) / 2 + (0 if training else 0.5)
             percentage = int((epoch - 1 + fraction) * 100 / cfg["epochs"])
             log(f"PROGRESS:{percentage}:{epoch}:{cfg['epochs']}")
-        return (sums / count).tolist()
+        return dict(zip(("loss", "iou", "dice"), (sums / count).tolist()),
+                    images=len(samples), objects=count, updates=updates, amp_skipped=skipped)
 
     epoch = start
     try:
         for epoch in range(start + 1, cfg["epochs"] + 1):
             check_stop(stop)
-            train_loss, train_iou, train_dice = phase(train, True, epoch)
-            val_loss, val_iou, val_dice = phase(val, False, epoch)
-            row = dict(epoch=epoch, train_loss=train_loss, train_iou=train_iou,
-                       train_dice=train_dice, val_loss=val_loss, val_iou=val_iou, val_dice=val_dice)
+            train_stats = phase(train, True, epoch)
+            if not train_stats["updates"]:
+                raise RuntimeError("Не выполнено ни одного шага оптимизатора. Отключите AMP или уменьшите learning rate; эпоха не засчитана.")
+            val_stats = phase(val, False, epoch)
+            val_iou = val_stats["iou"]
+            row = dict(epoch=epoch, **{"train_" + key: value for key, value in train_stats.items()},
+                       **{"val_" + key: value for key, value in val_stats.items() if key not in ("updates", "amp_skipped")})
             history.append(row)
             if val_iou > best:
                 best = val_iou
@@ -296,12 +334,12 @@ def run_training(params, *, stop=None, log=print):
                 save("best.pt", epoch, complete=True, best_weights=True)
             save("last.pt", epoch, complete=True)
             save("last.resume.pt", epoch, complete=True, full=True)
-            save_training_history(root, history)
+            save_history()
             log(f"[SAM] {row}")
             log(f"PROGRESS:{int(epoch * 100 / cfg['epochs'])}:{epoch}:{cfg['epochs']}")
     except CancelledError:
         save("interrupted.pt", epoch, complete=False)
-        save_training_history(root, history)
+        save_history()
         log("[SAM] Остановлено. interrupted.pt — частичные веса; last.resume.pt — последняя полная эпоха.")
         return CANCELLED
     except torch.OutOfMemoryError as error:
