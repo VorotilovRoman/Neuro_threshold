@@ -51,6 +51,8 @@ class SamController:
             getattr(widget, signal).connect(self.invalidate)
         self.view.prompts_changed.connect(self.invalidate)
         host.bind(self)
+        from ui.sam.downloads import SamDownloads
+        self.downloads = SamDownloads(self)
 
     def identity(self):
         return self.host.identity()
@@ -117,11 +119,11 @@ class SamController:
     def browse_weights(self):
         path, _ = source_dialogs.get_open_file(self.owner, "model_torch", directory=str(MODELS_DIR))
         if path:
-            self.panel.weights.setText(path)
             for key, model in MODELS.items():
                 if Path(path).name.casefold() == Path(model.assets[0].path).name.casefold():
                     self.panel.model.setCurrentIndex(self.panel.model.findData(key))
                     break
+            self.panel.weights.setText(path)
             if self.panel.model.currentData() == "sam3":
                 bpe = find_sam3_tokenizer(path)
                 self.panel.tokenizer.setText(str(bpe) if bpe else "")
@@ -146,16 +148,18 @@ class SamController:
         self.view.prompts_changed.emit()
         self.view.viewport().update()
 
-    def _start(self, compute, accept, status, *, loading=False):
+    def _start(self, compute, accept, status, *, loading=False, job=None):
         if self.closed or self.job is not None or not self.host.can_start():
             return
         self.stop_tool()
-        job = self.job = BackgroundTask(compute)
+        downloading = job is not None and compute is None
+        job = self.job = job or BackgroundTask(compute)
         self.loading = loading
         self.panel.controls.setEnabled(False)
         self.host.busy_changed(True)
         self.panel.progress.setRange(0, 0)
         self.panel.progress.setVisible(True)
+        self.panel.cancel.setText("Отменить скачивание" if downloading else "Отменить вычисление")
         self.panel.cancel.setEnabled(True)
         self.panel.cancel.setVisible(True)
         self.panel.status.setText(status)
@@ -185,7 +189,8 @@ class SamController:
             self.panel.cancel.setEnabled(False)
             self.panel.cancel.setVisible(False)
             if job.cancelled:
-                self.panel.status.setText("Вычисление отменено; результат не применён.")
+                self.panel.status.setText("Операция отменена; результат не применён." +
+                                          (" Готовые файлы сохранены." if downloading else ""))
             job.compute = None  # Release the worker closure's model/image references.
             job.deleteLater()
 
@@ -296,7 +301,7 @@ class SamController:
 
     def cancel(self):
         self.invalidate(cancel_load=True)
-        self.panel.status.setText("Отмена… Текущая операция модели завершится в фоне.")
+        self.panel.status.setText("Отмена… Ожидание завершения текущей операции.")
 
     def close(self):
         self.closed = True

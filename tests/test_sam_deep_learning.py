@@ -83,6 +83,24 @@ class SamDeepLearningTests(unittest.TestCase):
         self.owner.original_view.prompts_changed.emit()
         return backend
 
+    def test_shared_download_button_populates_dl_paths_without_running_inference(self):
+        from PyQt5.QtWidgets import QMessageBox
+        from test_sam_weights import Opener, Response, WEIGHTS
+
+        root = Path(self.directory.name) / 'segment_anything'
+        with patch('ui.sam.downloads.DEFAULT_OUTPUT', root), \
+                patch('ui.sam.downloads.QMessageBox.question', return_value=QMessageBox.Yes), \
+                patch('utils_new.import_export.sam_weights.build_opener', return_value=Opener(Response(WEIGHTS))):
+            self.panel.model.setCurrentIndex(self.panel.model.findData('sam-vit-b'))
+            self.panel.download.click()
+            self.assertFalse(self.owner.model_combo.isEnabled())
+            self.until(lambda: self.controller.job is None)
+            self.assertEqual(self.panel.weights.text(), str(root / 'sam/sam_vit_b_01ec64.pth'))
+            self.assertTrue(self.owner.model_combo.isEnabled())
+            self.assertTrue(self.panel.controls.isEnabled())
+            self.assertIsNone(self.owner.prediction_mask)
+            self.assertIsNone(self.controller.backend)
+
     def apply(self):
         self.fake_backend()
         self.panel.class_id.setValue(7)

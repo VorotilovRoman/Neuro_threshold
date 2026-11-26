@@ -4,6 +4,7 @@ from runtime_torch import prepare_windows_torch
 
 prepare_windows_torch()
 
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 from utils_new.import_export.sam_weights import MODELS
 from utils_new.segmentation.backends.sam import MODELS_DIR
@@ -24,6 +25,8 @@ class AutoLabelStack(QStackedWidget):
 
 
 class SamPanel(QWidget):
+    settings_restored = pyqtSignal()
+
     preset_fields = ('model', 'weights', 'tokenizer', 'device', 'mode', 'dino_directory',
                      'dino_device', 'dino_box_score', 'dino_text_score', 'dino_nms',
                      'dino_max_objects', 'text', 'class_id', 'kind', 'score', 'area')
@@ -47,7 +50,12 @@ class SamPanel(QWidget):
         self.device.addItems(["auto", "cpu", "cuda:0"])
         form.addRow("Устройство:", self.device)
         self.load = QPushButton("Загрузить SAM")
-        form.addRow(self.load)
+        self.download = QPushButton("Скачать файлы…")
+        self.download.setToolTip("Найти локальные веса выбранной архитектуры и предложить скачать отсутствующие файлы.")
+        model_actions = QHBoxLayout()
+        model_actions.addWidget(self.load)
+        model_actions.addWidget(self.download)
+        form.addRow(model_actions)
         self.mode = QComboBox()
         self.mode.addItem("Точки и рамка", "points")
         self.mode.addItem("Текст и рамка (SAM3)", "text")
@@ -224,3 +232,4 @@ class SamPanel(QWidget):
             for name, value in values.items():
                 set_control_value(getattr(self, name), value)
         self.capabilities()
+        self.settings_restored.emit()

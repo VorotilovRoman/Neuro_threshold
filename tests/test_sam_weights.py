@@ -1,6 +1,7 @@
 """Offline regression checks for checkpoint integrity, retry and authentication."""
 
 from contextlib import redirect_stdout, redirect_stderr
+from concurrent.futures import CancelledError
 from http.client import IncompleteRead
 import io
 import gzip
@@ -10,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from threading import Event
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -49,6 +51,93 @@ class Opener:
 
 
 class SAMDownloadTests(unittest.TestCase):
+    def test_plan_is_local_and_reuses_uppercase_weights_without_copying(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            root = Path(directory)
+            weights = root / "SAM3.pt"
+            weights.write_bytes(WEIGHTS)
+            output = root / "segment_anything"
+            plan = downloader.plan_model_download("sam3", output)
+            self.assertEqual(plan.files[0][1], weights)
+            self.assertEqual([asset.kind for asset, _ in plan.missing], ["tokenizer"])
+            self.assertFalse(output.exists())
+            opener = Opener(Response(TOKENIZER))
+            progress = []
+            result = downloader.download_model(plan, opener=opener,
+                                               token=lambda: self.fail("Local weights must not ask for a token"),
+                                               progress=lambda *args: progress.append(args))
+            self.assertEqual(len(opener.requests), 1)
+            self.assertEqual(result["sam3/sam3.pt"], str(weights))
+            self.assertEqual((root / "bpe_simple_vocab_16e6.txt.gz").read_bytes(), TOKENIZER)
+            self.assertTrue(any(args[1] == "Скачивание" for args in progress))
+
+    def test_download_plan_reuses_custom_weights_and_downloads_only_missing_config(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            root = Path(directory)
+            weights = root / "external" / "custom.pt"
+            weights.parent.mkdir()
+            weights.write_bytes(WEIGHTS)
+            plan = downloader.plan_model_download("sam2.1-small", root / "models", weights_file=weights)
+            config = weights.parent / "configs/sam2.1/sam2.1_hiera_s.yaml"
+            self.assertEqual(plan.files[1][1], config)
+            opener = Opener(Response(b"model:\n  _target_: sam2.modeling.sam2_base.SAM2Base\n"))
+            downloader.download_model(plan, opener=opener)
+            self.assertTrue(config.is_file())
+            self.assertEqual(weights.read_bytes(), WEIGHTS)
+            self.assertEqual(len(opener.requests), 1)
+            downloader.download_model(plan, opener=Opener())
+            self.assertFalse(plan.missing)
+
+    def test_plan_finds_existing_nested_tokenizer_next_to_separate_weights(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            weights = root / "external" / "SAM3.pt"
+            weights.parent.mkdir()
+            weights.write_bytes(WEIGHTS)
+            bpe = weights.parent / "sam3" / "bpe_simple_vocab_16e6.txt.gz"
+            bpe.parent.mkdir()
+            bpe.write_bytes(TOKENIZER)
+            plan = downloader.plan_model_download("sam3", root / "models" / "segment_anything",
+                                                 weights_file=weights)
+            self.assertEqual(plan.files[1][1], bpe)
+            self.assertFalse(plan.missing)
+
+    def test_cancel_during_read_does_not_publish_partial_file(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            cancel = Event()
+
+            class CancellingResponse(Response):
+                def read(self, size):
+                    chunk = super().read(size)
+                    cancel.set()
+                    return chunk
+
+            output = Path(directory)
+            asset = downloader.MODELS["sam-vit-b"].assets[0]
+            with self.assertRaises(CancelledError):
+                downloader.download_asset(asset, output, {}, opener=Opener(CancellingResponse(WEIGHTS)),
+                                          cancel=cancel)
+            self.assertFalse((output / asset.path).exists())
+            self.assertFalse(list(output.rglob("*.part")))
+            with self.assertRaises(CancelledError):
+                downloader.sha256_file(output / "nonexistent", cancel)
+
+    def test_gui_bundle_sanitizes_auth_errors_and_retries_temporary_errors(self):
+        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            plan = downloader.plan_model_download("sam3", Path(directory))
+            failure = HTTPError("https://cdn.example/SIGNED_SECRET", 403, "hf_SECRET", {}, io.BytesIO(b"private"))
+            with self.assertRaises(ValueError) as caught:
+                downloader.download_model(plan, opener=Opener(failure), token="hf_SECRET")
+            self.assertIn("https://huggingface.co/facebook/sam3", str(caught.exception))
+            self.assertNotIn("SECRET", str(caught.exception))
+            self.assertFalse(list(Path(directory).rglob("*.part")))
+            plan = downloader.plan_model_download("sam-vit-b", Path(directory))
+            failure = HTTPError("https://example.org/secret", 503, "Unavailable", {}, io.BytesIO())
+            opener = Opener(failure, Response(WEIGHTS))
+            with patch.object(downloader.time, "sleep"):
+                downloader.download_model(plan, opener=opener)
+            self.assertEqual(len(opener.requests), 2)
+
     def test_aliases_and_matching_sam2_assets(self):
         self.assertEqual(downloader.select_models(["sam", "sam-vit-b", "sam2", "sam3"]),
                          ["sam-vit-b", "sam2.1-tiny", "sam3"])

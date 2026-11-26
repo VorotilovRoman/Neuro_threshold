@@ -85,6 +85,167 @@ class SamLabelerTests(unittest.TestCase):
         self.assertIs(self.owner.auto_stack.currentWidget(), self.owner.auto_group)
         self.assertEqual(self.owner.auto_conf_spin.value(), 0.25)
 
+    def test_selecting_missing_architecture_offers_download_but_presets_do_not(self):
+        from PyQt5.QtWidgets import QMessageBox
+
+        with TemporaryDirectory() as directory, \
+                patch("ui.sam.downloads.DEFAULT_OUTPUT", Path(directory)), \
+                patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.No) as ask, \
+                patch("utils_new.import_export.sam_weights.build_opener") as opener:
+            self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-l"))
+            self.assertFalse(ask.called)
+            settings = self.panel.get_settings()
+            settings.update(model="SAM ViT-H", weights="not-downloaded.pth")
+            self.panel.set_settings(settings)
+            self.assertFalse(ask.called)
+            self.panel.model.activated.emit(self.panel.model.currentIndex())
+            ask.assert_called_once()
+            self.assertIn("sam_vit_h_4b8939.pth", ask.call_args.args[2])
+            self.assertFalse(opener.called)
+            self.assertIsNone(self.controller.job)
+
+    def test_selecting_architecture_finds_local_weights_instead_of_using_previous_model(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "segment_anything"
+            output.mkdir()
+            previous = root / "sam_vit_b_01ec64.pth"
+            selected = output / "sam_vit_l_0b3195.pth"
+            previous.write_bytes(b"old")
+            selected.write_bytes(b"new")
+            self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-b"))
+            self.panel.weights.setText(str(previous))
+            with patch("ui.sam.downloads.DEFAULT_OUTPUT", output), \
+                    patch("ui.sam.downloads.QMessageBox.question") as ask, \
+                    patch("utils_new.import_export.sam_weights.build_opener") as opener:
+                self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-l"))
+                self.panel.model.activated.emit(self.panel.model.currentIndex())
+                self.assertEqual(self.panel.weights.text(), str(selected))
+                self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-b"))
+                self.panel.model.activated.emit(self.panel.model.currentIndex())
+                self.assertEqual(self.panel.weights.text(), str(previous))
+                self.assertFalse(ask.called)
+                self.assertFalse(opener.called)
+
+    def test_download_runs_in_background_sets_paths_and_does_not_load_backend(self):
+        from PyQt5.QtWidgets import QMessageBox
+        from test_sam_weights import Opener, Response, WEIGHTS
+
+        with TemporaryDirectory() as directory, \
+                patch("ui.sam.downloads.DEFAULT_OUTPUT", Path(directory)), \
+                patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.Yes), \
+                patch("utils_new.import_export.sam_weights.build_opener", return_value=Opener(Response(WEIGHTS))), \
+                patch("ui.sam.controller.load_sam_backend") as loader:
+            self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-b"))
+            self.panel.model.activated.emit(self.panel.model.currentIndex())
+            self.assertIsNotNone(self.controller.job)
+            self.assertFalse(self.panel.controls.isEnabled())
+            self.assertTrue(self.panel.cancel.isEnabled())
+            self.wait_until(lambda: self.controller.job is None)
+            target = Path(directory) / "sam/sam_vit_b_01ec64.pth"
+            self.assertEqual(target.read_bytes(), WEIGHTS)
+            self.assertEqual(self.panel.weights.text(), str(target))
+            self.assertTrue(self.panel.controls.isEnabled())
+            self.assertTrue(self.panel.progress.isHidden())
+            self.assertIsNone(self.controller.backend)
+            self.assertFalse(loader.called)
+            self.assertIn("Файлы готовы", self.panel.status.text())
+
+    def test_custom_weights_from_preset_stay_associated_with_their_architecture(self):
+        from PyQt5.QtWidgets import QMessageBox
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            custom = root / "custom-name.pth"
+            custom.write_bytes(b"checkpoint")
+            settings = self.panel.get_settings()
+            settings.update(model="SAM ViT-H", weights=str(custom))
+            self.panel.set_settings(settings)
+            with patch("ui.sam.downloads.DEFAULT_OUTPUT", root / "segment_anything"), \
+                    patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.No) as ask:
+                self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-b"))
+                self.panel.model.activated.emit(self.panel.model.currentIndex())
+                self.assertEqual(self.panel.weights.text(), "")
+                self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-h"))
+                self.panel.model.activated.emit(self.panel.model.currentIndex())
+                self.assertEqual(self.panel.weights.text(), str(custom))
+                ask.assert_called_once()
+
+    def test_download_failure_restores_controls_and_sam3_token_is_not_saved(self):
+        from PyQt5.QtWidgets import QLineEdit, QMessageBox
+        from test_sam_weights import Opener
+        from urllib.error import HTTPError
+        import io
+
+        with TemporaryDirectory() as directory, \
+                patch("ui.sam.downloads.DEFAULT_OUTPUT", Path(directory)), \
+                patch.dict(os.environ, {"HF_TOKEN": ""}), \
+                patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.Yes), \
+                patch("ui.sam.downloads.QInputDialog.getText", return_value=("hf_SECRET", True)) as ask_token, \
+                patch("ui.sam.controller.QMessageBox.warning") as warning, \
+                patch("utils_new.import_export.sam_weights.build_opener", return_value=Opener(
+                    HTTPError("https://cdn.example/SIGNED_SECRET", 403, "hf_SECRET", {}, io.BytesIO()))):
+            self.panel.model.setCurrentIndex(self.panel.model.findData("sam3"))
+            self.panel.download.click()
+            self.wait_until(lambda: self.controller.job is None)
+            self.assertEqual(ask_token.call_args.args[-1], QLineEdit.Password)
+            warning.assert_called_once()
+            self.assertIn("HTTP 403", self.panel.status.text())
+            self.assertNotIn("SECRET", self.panel.status.text())
+            self.assertTrue(self.panel.controls.isEnabled())
+            self.assertTrue(self.panel.cancel.isHidden())
+            self.assertFalse(list(Path(directory).rglob("*.part")))
+            self.assertFalse((Path(directory) / "download_manifest.json").exists())
+
+    def test_download_cancel_keeps_controls_alive_and_discards_partial_file(self):
+        from PyQt5.QtWidgets import QMessageBox
+        from test_sam_weights import Opener, Response, WEIGHTS
+
+        entered, release = Event(), Event()
+
+        class SlowResponse(Response):
+            def read(self, size):
+                entered.set()
+                release.wait(3)
+                return super().read(size)
+
+        with TemporaryDirectory() as directory, \
+                patch("ui.sam.downloads.DEFAULT_OUTPUT", Path(directory)), \
+                patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.Yes), \
+                patch("utils_new.import_export.sam_weights.build_opener", return_value=Opener(SlowResponse(WEIGHTS))):
+            self.panel.model.setCurrentIndex(self.panel.model.findData("sam-vit-b"))
+            self.panel.download.click()
+            self.wait_until(entered.is_set)
+            self.panel.cancel.click()
+            release.set()
+            self.wait_until(lambda: self.controller.job is None)
+            self.assertFalse(list(Path(directory).rglob("*.part")))
+            self.assertFalse((Path(directory) / "sam/sam_vit_b_01ec64.pth").exists())
+            self.assertTrue(self.panel.controls.isEnabled())
+            self.assertIn("отменена", self.panel.status.text())
+
+    def test_sam3_with_existing_weights_downloads_tokenizer_without_asking_for_token(self):
+        from PyQt5.QtWidgets import QMessageBox
+        from test_sam_weights import Opener, Response, TOKENIZER, WEIGHTS
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            weights = root / "SAM3.pt"
+            weights.write_bytes(WEIGHTS)
+            self.panel.model.setCurrentIndex(self.panel.model.findData("sam3"))
+            self.panel.weights.setText(str(weights))
+            opener = Opener(Response(TOKENIZER))
+            with patch("ui.sam.downloads.DEFAULT_OUTPUT", root / "segment_anything"), \
+                    patch("ui.sam.downloads.QMessageBox.question", return_value=QMessageBox.Yes), \
+                    patch("ui.sam.downloads.QInputDialog.getText") as ask_token, \
+                    patch("utils_new.import_export.sam_weights.build_opener", return_value=opener):
+                self.panel.download.click()
+                self.wait_until(lambda: self.controller.job is None)
+                self.assertFalse(ask_token.called)
+            self.assertEqual(len(opener.requests), 1)
+            self.assertEqual(self.panel.weights.text(), str(weights))
+            self.assertEqual(self.panel.tokenizer.text(), str(root / "bpe_simple_vocab_16e6.txt.gz"))
+
     def test_browse_separately_downloaded_uppercase_sam3_detects_model_and_bpe(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

@@ -4,6 +4,7 @@ Run ``python -m utils_new.import_export.sam_weights --help`` from the project ro
 """
 
 import argparse
+from concurrent.futures import CancelledError
 from dataclasses import dataclass, replace
 import getpass
 import gzip
@@ -14,6 +15,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from threading import Lock
 import time
 import zipfile
 from urllib.error import HTTPError, URLError
@@ -124,11 +126,19 @@ def select_models(names):
     return selected
 
 
-def sha256_file(path):
+def check_cancelled(cancel):
+    if cancel is not None and cancel.is_set():
+        raise CancelledError()
+
+
+def sha256_file(path, cancel=None):
+    check_cancelled(cancel)
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(CHUNK_SIZE), b""):
+            check_cancelled(cancel)
             digest.update(chunk)
+    check_cancelled(cancel)
     return digest.hexdigest()
 
 
@@ -146,8 +156,9 @@ def write_manifest(path, manifest):
             temporary.unlink(missing_ok=True)
 
 
-def validate_asset_file(path, asset):
+def validate_asset_file(path, asset, cancel=None):
     """Check containers without loading Torch or executing checkpoint pickle."""
+    check_cancelled(cancel)
     with path.open("rb") as stream:
         prefix = stream.read(1024)
     if asset.kind == "safetensors":
@@ -196,7 +207,7 @@ def validate_asset_file(path, asset):
             raise ValueError("Файл токенизатора не является GZIP")
         with gzip.open(path, "rb") as stream:
             while stream.read(CHUNK_SIZE):
-                pass  # Verify the GZIP footer/CRC too, without retaining the vocabulary.
+                check_cancelled(cancel)  # Verify the GZIP footer/CRC too.
     elif asset.kind == "config" and not (b"_target_:" in prefix and b"sam2." in prefix):
         raise ValueError("Получен неизвестный формат конфигурации SAM2")
 
@@ -226,22 +237,27 @@ def existing_asset_path(asset, output, receipt, explicit=None):
     return canonical
 
 
-def download_asset(asset, output, manifest, *, opener, token=None, force=False, timeout=30, existing_path=None):
+def download_asset(asset, output, manifest, *, opener, token=None, force=False, timeout=30,
+                   existing_path=None, destination=None, cancel=None, progress=None):
     """Publish only a complete download; return its size and SHA-256 receipt."""
+    check_cancelled(cancel)
     receipt = manifest.get(asset.path)
-    target = output / asset.path if force else existing_asset_path(asset, output, receipt, existing_path)
+    target = Path(destination) if destination is not None else (
+        output / asset.path if force else existing_asset_path(asset, output, receipt, existing_path))
     if target.exists() and not force:
+        if progress:
+            progress(asset.path, "Проверка локального файла", 0, None)
         print(f"Проверка: {target}", flush=True)
         if not target.is_file():
             raise ValueError(f"Ожидается файл: {target}")
         if isinstance(receipt, dict) and receipt.get("url") == asset.url:
-            if (target.stat().st_size != receipt.get("size") or sha256_file(target) != receipt.get("sha256")):
+            if (target.stat().st_size != receipt.get("size") or sha256_file(target, cancel) != receipt.get("sha256")):
                 raise ValueError(f"{target}: файл повреждён или изменён. Для скачивания укажите --force.")
             print("  Уже скачан, SHA-256 совпадает.", flush=True)
             return dict(receipt, local_path=str(target.resolve()))
-        validate_asset_file(target, asset)
+        validate_asset_file(target, asset, cancel)
         print("  Используется готовый локальный файл; повторное скачивание не требуется.", flush=True)
-        return {"url": asset.url, "size": target.stat().st_size, "sha256": sha256_file(target),
+        return {"url": asset.url, "size": target.stat().st_size, "sha256": sha256_file(target, cancel),
                 "local_path": str(target.resolve()), "origin": "existing-local"}
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -255,6 +271,7 @@ def download_asset(asset, output, manifest, *, opener, token=None, force=False, 
     temporary = None
     print(f"Скачивание: {asset.path}", flush=True)
     try:
+        check_cancelled(cancel)
         with opener.open(Request(asset.url, headers=headers), timeout=timeout) as response:
             if response.status != 200:
                 raise ValueError(f"Ожидался полный файл (HTTP 200), получен HTTP {response.status}")
@@ -263,21 +280,33 @@ def download_asset(asset, output, manifest, *, opener, token=None, force=False, 
             digest = hashlib.sha256()
             size = 0
             last_update = time.monotonic()
+            if progress:
+                progress(asset.path, "Скачивание", 0, total)
             with tempfile.NamedTemporaryFile(dir=target.parent, prefix=f".{target.name}-",
                                              suffix=".part", delete=False) as stream:
                 temporary = Path(stream.name)
-                while chunk := response.read(CHUNK_SIZE):
+                while True:
+                    check_cancelled(cancel)
+                    chunk = response.read(CHUNK_SIZE)
+                    check_cancelled(cancel)
+                    if not chunk:
+                        break
                     stream.write(chunk)
                     digest.update(chunk)
                     size += len(chunk)
                     now = time.monotonic()
                     if now - last_update >= 1:
+                        if progress:
+                            progress(asset.path, "Скачивание", size, total)
                         percent = f" / {total / CHUNK_SIZE:.1f} MiB ({100 * size / total:.1f}%)" if total else ""
                         print(f"  {size / CHUNK_SIZE:.1f} MiB{percent}", flush=True)
                         last_update = now
             if size == 0 or (total is not None and size != total):
                 raise ValueError(f"Неполный файл: получено {size} байт, ожидалось {total}")
-            validate_asset_file(temporary, asset)
+            if progress:
+                progress(asset.path, "Проверка скачанного файла", size, total)
+            validate_asset_file(temporary, asset, cancel)
+            check_cancelled(cancel)
             os.replace(temporary, target)
         print(f"  Сохранено: {target} ({size / CHUNK_SIZE:.1f} MiB)", flush=True)
         return {"url": asset.url, "size": size, "sha256": digest.hexdigest(),
@@ -294,6 +323,110 @@ def _http_error_message(error, asset):
                 "Примите условия, дождитесь доступа и задайте HF_TOKEN с правом чтения "
                 "этого репозитория либо используйте --ask-token.")
     return f"HTTP {error.code}; источник: {urlsplit(asset.url).hostname}"
+
+
+@dataclass(frozen=True)
+class ModelDownloadPlan:
+    """Resolved destinations; creating a plan performs no network or weight reads."""
+
+    model_key: str
+    output: Path
+    files: tuple
+
+    @property
+    def missing(self):
+        return tuple((asset, path) for asset, path in self.files if not path.is_file())
+
+
+def read_manifest(output):
+    path = output / MANIFEST_NAME
+    manifest = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not isinstance(manifest, dict):
+        raise ValueError(f"Некорректный манифест: {path}")
+    return manifest
+
+
+def plan_model_download(model_key, output=DEFAULT_OUTPUT, *, weights_file=None, tokenizer_file=None):
+    """Reuse known local files, including separately downloaded/capitalized weights.
+
+    Auxiliary files follow the selected weights; no recursive directory scans or
+    hashing take place here, so the GUI can display this plan immediately.
+    """
+    output = Path(output).expanduser().resolve()
+    model = MODELS[model_key]
+    manifest = read_manifest(output)
+    weights_asset = model.assets[0]
+    weights = existing_asset_path(weights_asset, output, manifest.get(weights_asset.path),
+                                  Path(weights_file).expanduser().resolve() if weights_file else None)
+    if not weights.is_file() and weights_file is None:
+        candidate = existing_asset_path(weights_asset, output.parent, {})
+        if candidate.is_file():
+            weights = candidate
+    files = [(weights_asset, weights)]
+    for asset in model.assets[1:]:
+        relative = Path(asset.path).relative_to(Path(weights_asset.path).parent).as_posix()
+        adjacent = existing_asset_path(replace(asset, path=relative), weights.parent, {})
+        known = existing_asset_path(asset, output, manifest.get(asset.path))
+        if asset.kind == "tokenizer" and tokenizer_file:
+            path = Path(tokenizer_file).expanduser().resolve()
+            if not path.is_file():
+                raise ValueError(f"Не найден токенизатор: {path}")
+        else:
+            candidates = (adjacent, existing_asset_path(asset, weights.parent, {}), known,
+                          existing_asset_path(asset, output.parent, {}))
+            path = next((candidate for candidate in candidates if candidate.is_file()), adjacent)
+        files.append((asset, path))
+    return ModelDownloadPlan(model_key, output, tuple(files))
+
+
+# The annotation and deep-learning tabs may request the same model concurrently.
+# Serialize bundles in this process so the second request reuses the first one's
+# files and manifest instead of starting another multi-gigabyte transfer.
+_model_download_lock = Lock()
+
+
+def download_model(plan, *, cancel=None, progress=None, token=None, opener=None, retries=2):
+    """Download/verify a GUI plan using the same atomic downloader as the CLI."""
+    while not _model_download_lock.acquire(timeout=0.1):
+        check_cancelled(cancel)
+    try:
+        check_cancelled(cancel)
+        plan.output.mkdir(parents=True, exist_ok=True)
+        manifest = read_manifest(plan.output)
+        opener = opener or build_opener(SafeRedirectHandler())
+        result = {}
+        for asset, destination in plan.files:
+            for attempt in range(retries + 1):
+                try:
+                    receipt = download_asset(asset, plan.output, manifest, opener=opener,
+                                             destination=destination, token=token,
+                                             cancel=cancel, progress=progress)
+                except HTTPError as error:
+                    message = _http_error_message(error, asset).replace(
+                        "либо используйте --ask-token", "либо повторите скачивание и введите токен в окне")
+                    retry = error.code in (408, 429, 500, 502, 503, 504)
+                    error.close()
+                except (URLError, TimeoutError, ConnectionError, IncompleteRead):
+                    message = "Сетевой сбой или тайм-аут; проверьте подключение и повторите скачивание."
+                    retry = True
+                else:
+                    manifest[asset.path] = receipt
+                    write_manifest(plan.output / MANIFEST_NAME, manifest)
+                    result[asset.path] = receipt["local_path"]
+                    break
+                check_cancelled(cancel)
+                if not retry or attempt == retries:
+                    raise ValueError(message) from None
+                if progress:
+                    progress(asset.path, f"Повтор подключения {attempt + 1}/{retries}", 0, None)
+                if cancel is not None:
+                    cancel.wait(min(attempt + 1, 5))
+                else:
+                    time.sleep(min(attempt + 1, 5))
+                check_cancelled(cancel)
+        return result
+    finally:
+        _model_download_lock.release()
 
 
 def main(argv=None):
