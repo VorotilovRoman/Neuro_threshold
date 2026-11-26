@@ -11,12 +11,12 @@ from PyQt5.QtWidgets import (
 from ui.DL_predict_settings import (
     CustomONNXInferenceSettings,
     DeepLabV3InferenceSettings,
-    SAMInferenceSettings,
     SegFormerInferenceSettings,
     UNetInferenceSettings,
     YOLOInferenceSettings,
 )
 from ui.morphology_ui import MorphologyWidget
+from ui.sam.panel import SamPanel
 
 # deep_learning_methods_ui.py
 from ui.segmentation.panels import ResultPanel, begin_layout, finish_layout
@@ -31,7 +31,7 @@ def setup_deep_learning_methods_ui(parent):
     parent.model_combo = QComboBox()
     models = ["YOLO-seg", "U-Net", "DeepLabV3+", "SegFormer", "SAM", "Custom ONNX"]
     parent.model_combo.addItems(models)
-    for pending in ("SAM", "SegFormer"):
+    for pending in ("SegFormer",):
         item = parent.model_combo.model().item(parent.model_combo.findText(pending))
         item.setEnabled(False)
         item.setToolTip("Пока не реализован: требуется адаптер модели и её входных подсказок.")
@@ -56,11 +56,9 @@ def setup_deep_learning_methods_ui(parent):
     parent.segformer_settings._variant.setEnabled(False)
     controls_layout.addWidget(parent.segformer_settings)
 
-    parent.sam_settings = SAMInferenceSettings()
-    parent.sam_settings.setVisible(False)
-    parent.sam_settings._model_type.setEnabled(False)
-    parent.sam_settings._prompt.setEnabled(False)
-    controls_layout.addWidget(parent.sam_settings)
+    parent.sam_panel = SamPanel()
+    parent.sam_panel.hide()
+    controls_layout.addWidget(parent.sam_panel)
 
     parent.yolo_settings = YOLOInferenceSettings()
     parent.yolo_settings.setVisible(False)
@@ -73,7 +71,7 @@ def setup_deep_learning_methods_ui(parent):
     controls_layout.addWidget(parent.custom_settings)
 
     # Общий выбор устройства
-    device_container = QWidget()
+    device_container = parent.device_container = QWidget()
     device_layout = QHBoxLayout(device_container)
     device_layout.addWidget(QLabel("Device:"))
     parent.device_combo = QComboBox()

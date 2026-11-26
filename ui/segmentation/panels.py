@@ -125,11 +125,15 @@ def begin_layout(owner, kind):
     for index, (name, title) in enumerate(STAGES[kind]):
         group = QGroupBox(title)
         group_layout = QVBoxLayout(group)
-        view = (
-            SegmentationInputView()
-            if kind == "interactive" and name == "original_view"
-            else DatasetReviewGraphicsView()
-        )
+        if kind == 'deep_learning' and name == 'original_view':
+            from ui.sam.view import SamPromptView
+            view = SamPromptView()
+        else:
+            view = (
+                SegmentationInputView()
+                if kind == "interactive" and name == "original_view"
+                else DatasetReviewGraphicsView()
+            )
         view.setMinimumSize(280, 220)
         view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         if name == "annotated_view":

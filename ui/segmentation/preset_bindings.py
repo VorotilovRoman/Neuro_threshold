@@ -403,9 +403,28 @@ class DeepLearningPresetManager(MethodPresetManager):
         deeplab_threshold="deeplab_settings._threshold",
     )
 
+    def _capture_extra(self, state):
+        state['sam'] = self.main.sam_panel.get_settings()
+
+    def _validate(self, state):
+        super()._validate(state)
+        if 'sam' in state:
+            self.main.sam_panel.validate_settings(state['sam'])
+        elif state.get('model') == 'SAM':
+            raise ValueError('В пресете SAM отсутствуют параметры общего блока моделей')
+
     def _after_apply(self, state):
         main = self.main
+        if 'sam' in state:
+            main.sam_panel.set_settings(state['sam'])
         main.on_model_changed(main.model_combo.currentIndex())
+        if state['model'] == 'SAM':
+            main.draw_combo.setCurrentIndex(main.draw_combo.findData(state['annotation_mode']))
+            main.sam_controller.model_changed()
+            main.sam_host.sync_kind()
+            # Loading large local weights always remains an explicit action.
+            main.schedule_update()
+            return
         paths = {
             "U-Net": "unet_model_path",
             "DeepLabV3+": "deeplab_model_path",

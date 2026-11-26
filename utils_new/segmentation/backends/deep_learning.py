@@ -846,24 +846,6 @@ class YOLOSegmentor(BaseSegmentor):
 
 
 # =============================================================================
-# SAM (заглушка)
-# =============================================================================
-class SAMSegmentor(BaseSegmentor):
-    """Segment Anything Model (заглушка)."""
-    def load(self, model_type='vit_h', model_path=None):
-        self.metadata = {
-            'model_type': 'SAM',
-            'model_type_detail': model_type,
-            'model_path': model_path,
-        }
-        _log("[SAM] Загрузка не реализована, выбрасываем исключение")
-        raise NotImplementedError("SAM loading not implemented in this stub")
-
-    def predict(self, image, prompt_type='everything'):
-        raise NotImplementedError("SAM prediction not implemented")
-
-
-# =============================================================================
 # ONNX
 # =============================================================================
 class ONNXSegmentor(BaseSegmentor):
@@ -949,7 +931,6 @@ def create_segmentor(model_type, **kwargs):
         'DeepLabV3+': DeepLabV3Segmentor,
         'DeepLabV3': DeepLabV3Segmentor,      # <--- добавить
         'SegFormer': None,
-        'SAM': SAMSegmentor,
         'YOLOv8-seg': YOLOSegmentor,
         'YOLO-seg': YOLOSegmentor,
         'Custom ONNX': ONNXSegmentor,

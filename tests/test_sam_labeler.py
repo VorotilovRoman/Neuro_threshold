@@ -93,7 +93,7 @@ class SamLabelerTests(unittest.TestCase):
             bpe = root / "sam3" / "bpe_simple_vocab_16e6.txt.gz"
             bpe.parent.mkdir()
             bpe.write_bytes(b"vocabulary")
-            with patch("ui.sam_auto_label.source_dialogs.get_open_file", return_value=(str(weights), "")):
+            with patch("ui.sam.controller.source_dialogs.get_open_file", return_value=(str(weights), "")):
                 self.controller.browse_weights()
             self.assertEqual(self.panel.model.currentData(), "sam3")
             self.assertEqual(self.panel.tokenizer.text(), str(bpe))
@@ -112,7 +112,7 @@ class SamLabelerTests(unittest.TestCase):
         self.assertFalse(self.panel.grounding_group.isHidden())
         self.panel.weights.setText("sam2.pt")
         self.panel.dino_directory.setText("local detector")
-        with patch("ui.sam_auto_label.GroundedSAM2.load", return_value=backend) as loader:
+        with patch("utils_new.segmentation.backends.grounding_dino.GroundedSAM2.load", return_value=backend) as loader:
             self.controller.load()
             self.wait_until(lambda: self.controller.job is None)
         self.assertEqual(loader.call_args.args, ("sam2.1-tiny", "sam2.pt", "local detector"))
@@ -246,7 +246,7 @@ class SamLabelerTests(unittest.TestCase):
         backend = SimpleNamespace(model_key="sam3", device="cpu")
         self.panel.model.setCurrentIndex(self.panel.model.findData("sam3"))
         self.panel.weights.setText("local sam3.pt")
-        with patch("ui.sam_auto_label.LocalSAM.load", return_value=backend) as loader:
+        with patch("utils_new.segmentation.backends.sam.LocalSAM.load", return_value=backend) as loader:
             self.controller.load()
             self.wait_until(lambda: self.controller.job is None)
         self.assertIs(self.controller.backend, backend)
@@ -266,7 +266,7 @@ class SamLabelerTests(unittest.TestCase):
             release.wait(3)
             return backend
 
-        with patch("ui.sam_auto_label.LocalSAM.load", side_effect=load):
+        with patch("utils_new.segmentation.backends.sam.LocalSAM.load", side_effect=load):
             self.controller.load()
             try:
                 self.wait_until(entered.is_set)

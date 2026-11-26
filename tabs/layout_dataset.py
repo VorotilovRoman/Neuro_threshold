@@ -24,7 +24,8 @@ from PyQt5.QtWidgets import QAction, QApplication, QColorDialog, QDialog, QDialo
 from ui import dataset_source as source_dialogs
 from ui.image_view import numpy_to_qpixmap, set_fill_color_button_preview
 from ui.settings_service import settings
-from ui.sam_auto_label import SamAutoLabelController
+from ui.sam.controller import SamController
+from ui.sam.hosts import LabelerSamHost
 from ui_tabs.layout_dataset_ui import setup_layout_dataset_ui
 
 # V20: shared dataset services; legacy utility imports are not required.
@@ -213,7 +214,7 @@ class Labeler(QMainWindow):
         self.toggle_hist_btn.clicked.connect(self.toggle_histogram)
 
         # Начальное состояние
-        self.sam_controller = SamAutoLabelController(self)
+        self.sam_controller = SamController(LabelerSamHost(self))
         self.update_navigation_state()
         self.log_widget.setVisible(False)
 

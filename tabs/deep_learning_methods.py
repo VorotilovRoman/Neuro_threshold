@@ -29,6 +29,8 @@ from ui.segmentation import navigation as segmentation_navigation
 from ui.segmentation import presentation as segmentation_presentation
 from ui.segmentation import results as segmentation_results
 from ui.segmentation.preset_bindings import DeepLearningPresetManager
+from ui.sam.controller import SamController
+from ui.sam.hosts import DeepLearningSamHost
 from ui_tabs.deep_learning_methods_ui import setup_deep_learning_methods_ui
 from utils_new.segmentation.postprocessing import extract_objects
 
@@ -71,8 +73,8 @@ class DeepLearningWindow(QMainWindow):
         self.ignore_ui_changes = False
 
         setup_deep_learning_methods_ui(self)
-
-
+        self.sam_host = DeepLearningSamHost(self)
+        self.sam_controller = SamController(self.sam_host)
 
         # Устройство по умолчанию
         auto_device = "Auto (best available)"
@@ -95,7 +97,6 @@ class DeepLearningWindow(QMainWindow):
         self.unet_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("U-Net"))
         self.deeplab_settings._browse_btn.clicked.connect(self._browse_deeplab_model)
         self.segformer_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("SegFormer"))
-        self.sam_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("SAM"))
         self.yolo_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("YOLO-seg"))
         self.custom_settings._browse_btn.clicked.connect(lambda: self.load_model_from_widget("Custom ONNX"))
 
@@ -305,12 +306,14 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- Выбор модели ----------
     def on_model_changed(self, idx):
+        self.sam_controller.provider_changed()
+        self.sam_host.reset_result()
         if not self.ignore_ui_changes and not getattr(self, '_loading_model', False):
             segmentation_controller.invalidate_prediction(self)
         model_name = self.model_combo.currentText()
         self.device_combo.setEnabled(model_name != "Custom ONNX")
         for cont in [self.unet_settings, self.deeplab_settings, self.segformer_settings,
-                     self.sam_settings, self.yolo_settings, self.custom_settings]:
+                     self.sam_panel, self.yolo_settings, self.custom_settings]:
             cont.setVisible(False)
 
         if model_name == "U-Net":
@@ -320,7 +323,7 @@ class DeepLearningWindow(QMainWindow):
         elif model_name == "SegFormer":
             self.segformer_settings.setVisible(True)
         elif model_name == "SAM":
-            self.sam_settings.setVisible(True)
+            self.sam_panel.setVisible(True)
         elif model_name == "YOLO-seg":
             self.yolo_settings.setVisible(True)
         elif model_name == "Custom ONNX":
@@ -331,14 +334,22 @@ class DeepLearningWindow(QMainWindow):
         self.prediction_mask = None
         self._update_segment_button_color()
 
+        self.device_container.setVisible(model_name != 'SAM')
+        self.segment_button.setVisible(model_name != 'SAM')
+        self.progress_bar.setVisible(model_name != 'SAM')
+        if model_name == 'SAM':
+            if self.draw_combo.currentData() == 'none':
+                self.draw_combo.setCurrentIndex(self.draw_combo.findData('segment'))
+            self.sam_host.sync_kind()
+            self.display_current_image()
+            return
+
         if model_name == "U-Net":
             path = self.unet_settings._model_path.text().strip()
         elif model_name in ("DeepLabV3+", "DeepLabV3"):
             path = self.deeplab_settings._model_path.text().strip()
         elif model_name == "SegFormer":
             path = self.segformer_settings._model_path.text().strip()
-        elif model_name == "SAM":
-            path = self.sam_settings._model_path.text().strip()
         elif model_name == "YOLO-seg":
             path = self.yolo_settings._model_path.text().strip()
         elif model_name == "Custom ONNX":
@@ -355,8 +366,6 @@ class DeepLearningWindow(QMainWindow):
                 self.deeplab_settings._model_path.setText("")
             elif model_name == "SegFormer":
                 self.segformer_settings._model_path.setText("")
-            elif model_name == "SAM":
-                self.sam_settings._model_path.setText("")
             elif model_name == "YOLO-seg":
                 self.yolo_settings._model_path.setText("")
             elif model_name == "Custom ONNX":
@@ -392,8 +401,6 @@ class DeepLearningWindow(QMainWindow):
                 path = self.deeplab_settings._model_path.text().strip()
             elif model_name == "SegFormer":
                 path = self.segformer_settings._model_path.text().strip()
-            elif model_name == "SAM":
-                path = self.sam_settings._model_path.text().strip()
             elif model_name == "YOLO-seg":
                 path = self.yolo_settings._model_path.text().strip()
             elif model_name == "Custom ONNX":
@@ -426,12 +433,21 @@ class DeepLearningWindow(QMainWindow):
 
     def _compute_mask(self, frame):
         from utils_new.segmentation.result import ResultStatus
+        if self.sam_host.active:
+            return self.prediction_mask, {'dl_view': self.prediction_mask}
         if self.segmentor is not None and self.prediction_mask is None and self.result_state.status not in (ResultStatus.ERROR, ResultStatus.RUNNING):
             self.run_segmentation()
         return self.prediction_mask, {'dl_view': self.prediction_mask}
 
     def display_current_image(self):
+        self.sam_controller.frame_changed()
         segmentation_presentation.display(self)
+
+    def _postprocess_mask(self, raw, frame):
+        return self.sam_host.postprocess(raw, frame)
+
+    def _result_objects(self):
+        return self.sam_host.objects()
 
 
     # ---------- Работа со списком объектов ----------
@@ -481,6 +497,7 @@ class DeepLearningWindow(QMainWindow):
 
     def clear_images(self):
         segmentation_input.clear_session(self, none_fields=('prediction_mask',))
+        self.sam_controller.frame_changed()
 
     def schedule_update(self):
         segmentation_controller.schedule(self)
@@ -504,6 +521,7 @@ class DeepLearningWindow(QMainWindow):
 
     # ---------- Завершение работы ----------
     def closeEvent(self, event):
+        self.sam_controller.close()
         segmentation_controller.close(self)
         super().closeEvent(event)
 

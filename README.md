@@ -154,6 +154,10 @@ TXT-разметка: BBox, OBB или Segment. У четырёхточечно�
 Редактор и просмотрщик используют общий список объектов в `ui/annotation_review.py`
 и палитру из настроек.
 
+Обе вкладки — редактор аннотаций и Deep Learning — используют общий блок SAM
+из `ui/sam/` и загрузчики `utils_new/segmentation/backends/`. Состояние моделей,
+подсказок и результатов независимо для каждой вкладки.
+
 ```bash
 python -m unittest discover -s tests -v
 NEURO_RUN_GUI_TESTS=1 python -m unittest discover -s tests -v

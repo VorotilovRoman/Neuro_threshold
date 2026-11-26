@@ -112,7 +112,6 @@ _EXPORTS = {
     'Qt': ('PyQt5.QtCore', 'Qt'),
     'RandomForestRegressor': ('sklearn.ensemble', 'RandomForestRegressor'),
     'ResolutionAnalyzer': ('utils_new.dataset_audit.analysis', 'ResolutionAnalyzer'),
-    'SAMInferenceSettings': ('ui.DL_predict_settings', 'SAMInferenceSettings'),
     'SAMTrainWidget': ('ui.DL_train_settings_new_model', 'SAMTrainWidget'),
     'SegFormerInferenceSettings': ('ui.DL_predict_settings', 'SegFormerInferenceSettings'),
     'SegFormerTrainWidget': ('ui.DL_train_settings_new_model', 'SegFormerTrainWidget'),

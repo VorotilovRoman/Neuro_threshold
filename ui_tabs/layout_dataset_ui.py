@@ -25,7 +25,8 @@ from PyQt5.QtWidgets import (
 
 from ui.dataset_source import make_source_button
 from ui.image_navigation import ImageNavigationWidget
-from ui.sam_auto_label import AutoLabelStack, SamPanel, SamPromptView
+from ui.sam.panel import AutoLabelStack, SamPanel
+from ui.sam.view import SamPromptView
 from ui.log_widget import LogWidget
 
 

@@ -896,47 +896,6 @@ class SegFormerInferenceSettings(BaseInferenceSettings):
         return {"model_path": self._model_path.text()}
 
 
-class SAMInferenceSettings(BaseInferenceSettings):
-    model_path_changed = pyqtSignal(str)
-    model_type_changed = pyqtSignal(str)
-    prompt_changed = pyqtSignal(str)
-
-    def __init__(self, parent=None):
-        super().__init__("Параметры SAM", parent)
-
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        path_layout = QHBoxLayout()
-        self._model_path = QLineEdit()
-        self._model_path.setPlaceholderText("Выберите файл .pth")
-        self._browse_btn = source_dialogs.make_source_button("model_torch", self)
-        path_layout.addWidget(self._model_path)
-        path_layout.addWidget(self._browse_btn)
-        layout.addLayout(path_layout)
-
-        self._model_type = QComboBox()
-        self._model_type.addItems(["vit_h", "vit_l", "vit_b"])
-        layout.addLayout(self._row("Тип модели", self._model_type))
-
-        self._prompt = QComboBox()
-        self._prompt.addItems(["box", "points", "everything"])
-        layout.addLayout(self._row("Тип промпта", self._prompt))
-
-        self._model_path.textChanged.connect(self.model_path_changed.emit)
-        self._browse_btn.clicked.connect(self._browse_file)
-        self._model_type.currentTextChanged.connect(self.model_type_changed.emit)
-        self._prompt.currentTextChanged.connect(self.prompt_changed.emit)
-
-    def _browse_file(self):
-        path, _ = source_dialogs.get_open_file(self, "model_torch")
-        if path:
-            self._model_path.setText(path)
-
-    def get_params(self):
-        return {"model_path": self._model_path.text()}
-
-
 class CustomONNXInferenceSettings(BaseInferenceSettings):
     model_path_changed = pyqtSignal(str)
 

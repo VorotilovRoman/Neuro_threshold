@@ -92,6 +92,12 @@ def run_interactive(owner):
 
 @gui_action
 def run_dl(owner):
+    sam = getattr(owner, 'sam_controller', None)
+    if owner.model_combo.currentText() == 'SAM':
+        sam.run()
+        return
+    if sam is not None and sam.job is not None:
+        return
     frame = frame_for(owner)
     if (
         frame is None
@@ -103,7 +109,7 @@ def run_dl(owner):
     parameters = {}
     overrides = {}
     if not errors.require(
-        owner, name not in ("SegFormer", "SAM"), f"Модель {name} ещё не реализована."
+        owner, name != "SegFormer", f"Модель {name} ещё не реализована."
     ):
         return
     if name == "YOLO-seg":
@@ -288,6 +294,12 @@ def find_k(owner):
 
 @gui_action
 def load_dl(owner, name):
+    sam = getattr(owner, 'sam_controller', None)
+    if name == 'SAM':
+        sam.load()
+        return
+    if sam is not None and sam.job is not None:
+        return
     if owner.jobs.busy:
         return
     widgets = {
@@ -296,12 +308,11 @@ def load_dl(owner, name):
         "DeepLabV3": owner.deeplab_settings,
         "YOLO-seg": owner.yolo_settings,
         "Custom ONNX": owner.custom_settings,
-        "SAM": owner.sam_settings,
         "SegFormer": owner.segformer_settings,
     }
     if not errors.require(
         owner,
-        name in widgets and name not in ("SAM", "SegFormer"),
+        name in widgets and name != "SegFormer",
         "Выбранная модель ещё не реализована.",
     ):
         return

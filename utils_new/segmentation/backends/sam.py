@@ -2,6 +2,7 @@
 
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
+from dataclasses import replace
 import importlib
 from pathlib import Path
 
@@ -72,16 +73,35 @@ class SamResult:
     phrases: tuple = ()
     detected_count: int | None = None
 
-    def annotations(self, *, class_id=0, kind="segment", min_area=10):
+    @classmethod
+    def from_binary_mask(cls, mask):
+        """Geometry-only result, e.g. the complement of a combined instance mask."""
+        return cls((np.asarray(mask) > 0)[None], np.ones(1))
+
+    def combined_mask(self):
+        return self.masks.any(axis=0).astype(np.uint8) * 255
+
+    def postprocessed(self, steps, shape="Rectangle"):
+        from utils_new.images.morphology import apply_morphology
+        masks = [apply_morphology(mask.astype(np.uint8) * 255, steps, shape=shape) > 0 for mask in self.masks]
+        return replace(self, masks=np.stack(masks) if masks else np.empty(self.masks.shape, bool))
+
+    def annotations(self, *, class_id=0, kind="segment", min_area=10, use_hull=False):
         """One model instance per mask; explicitly discard holes for YOLO polygons."""
         if not isinstance(class_id, int) or class_id < 0:
             raise ValueError("ID класса должен быть неотрицательным целым числом")
+        if kind == "none":
+            return []
         size = ImageSize(self.masks.shape[2], self.masks.shape[1])
         result = []
         for mask in self.masks:
             components = mask_to_annotations(mask.astype(np.uint8), kind=kind,
                                              min_area=min_area, holes="drop")
-            result.extend(Annotation(a.kind, class_id, a.points_px) for a in components)
+            for ann in components:
+                points = ann.points_px
+                if use_hull and kind == "segment":
+                    points = cv2.convexHull(points.astype(np.float32)).reshape(-1, 2)
+                result.append(Annotation(ann.kind, class_id, points))
         return to_legacy_many(result, size)
 
 
@@ -94,6 +114,20 @@ def _numpy(value):
 def _cancelled(cancel):
     if cancel is not None and cancel.is_set():
         raise CancelledError()
+
+
+def load_sam_backend(model_key, weights, *, device="auto", tokenizer=None, prompt_mode="points",
+                     detector_directory="", detector_device="cpu", cancel=None):
+    """Single factory for both UI hosts; no model decisions live in the widgets."""
+    _cancelled(cancel)
+    if prompt_mode == "grounded":
+        from utils_new.segmentation.backends.grounding_dino import GroundedSAM2
+        result = GroundedSAM2.load(model_key, weights, detector_directory, device=device,
+                                   detector_device=detector_device, cancel=cancel)
+    else:
+        result = LocalSAM.load(model_key, weights, device=device, tokenizer=tokenizer, prompt_mode=prompt_mode)
+    _cancelled(cancel)
+    return result
 
 
 class LocalSAM:

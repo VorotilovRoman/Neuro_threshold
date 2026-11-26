@@ -79,12 +79,10 @@ def geometry_changed(owner, *_):
     owner.hull_checkbox.setVisible(supports_hull(mode))
     if owner.result_state.status != ResultStatus.READY or owner.final_mask is None:
         return
-    owner.current_objects_full = extract_objects(
-        owner.current_base_image,
-        owner.final_mask,
-        mode,
-        owner.hull_checkbox.isChecked(),
-    )[1]
+    hook = getattr(owner, '_result_objects', None)
+    objects = hook() if hook is not None else None
+    owner.current_objects_full = objects if objects is not None else extract_objects(
+        owner.current_base_image, owner.final_mask, mode, owner.hull_checkbox.isChecked())[1]
     owner.update_object_list()
 
 
@@ -100,7 +98,8 @@ def postprocess(owner, frame):
             state.error,
         )
         return
-    processed = apply_morphology(
+    hook = getattr(owner, '_postprocess_mask', None)
+    processed = hook(raw, frame) if hook is not None else apply_morphology(
         raw,
         owner.morphology_widget.get_steps(),
         shape=owner.morphology_widget.kernel_shape(),
