@@ -27,7 +27,7 @@ def worker_arguments(kind, *, params_file=None, stop_file=None):
     result = ["-u", "-m", WORKERS[kind]]
     if params_file:
         result += [
-            "--config" if kind == "autoencoder" else "--params_file",
+            "--params_file",
             str(params_file),
         ]
     if stop_file:

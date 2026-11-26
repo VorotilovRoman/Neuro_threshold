@@ -36,7 +36,7 @@ ULTRALYTICS_AVAILABLE = find_spec("ultralytics") is not None
 class YoloTrainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Обучение моделей сегментации")
+        self.setWindowTitle("Обучение и экспорт моделей")
         self.setMinimumWidth(1000)
         self.setMinimumHeight(600)
 
@@ -49,6 +49,7 @@ class YoloTrainWindow(QMainWindow):
         self.deeplab_process = None
         self.segformer_process = None
         self.sam_process = None
+        self.autoencoder_process = None
 
         # Сохраняем параметры последнего запуска YOLO для анализа best.pt
         self.last_yolo_params = None
@@ -734,6 +735,41 @@ class YoloTrainWindow(QMainWindow):
     def on_stop_sam(self):
         self._request_training_stop("sam")
 
+    def _run_autoencoder_training(self, params):
+        from utils_new.configuration.autoencoder import training_request
+
+        if self.autoencoder_process and self.autoencoder_process.state() != QProcess.NotRunning:
+            self.log('Обучение AE/VAE уже запущено.')
+            return
+        try:
+            params = training_request(params)
+        except ValueError as error:
+            QMessageBox.warning(self, 'Параметры AE/VAE', str(error))
+            return
+        self.log('=== Обучение AE/VAE ===\n' + json.dumps(params, indent=2, ensure_ascii=False))
+        process = self.autoencoder_process = QProcess(self)
+        process.setWorkingDirectory(get_project_root())
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(lambda: self._read_training_output('autoencoder'))
+        process.finished.connect(lambda code, status: self._semantic_finished('autoencoder', code, status))
+        process.errorOccurred.connect(lambda error: self._autoencoder_process_error(process, error))
+        self.autoencoder_train_widget.set_result_directory('')
+        self._training_run_dirs.pop('autoencoder', None)
+        self.autoencoder_train_widget.set_running(True)
+        self.autoencoder_train_widget.progress_bar.setRange(0, 0)
+        self.autoencoder_train_widget.progress_bar.setFormat('Загрузка тренера AE/VAE…')
+        self._start_worker('autoencoder', process, params)
+
+    def _autoencoder_process_error(self, process, error):
+        if error == QProcess.FailedToStart and self.autoencoder_process is process:
+            self.log('Не удалось запустить AE/VAE: ' + process.errorString())
+            self.autoencoder_train_widget.set_running(False)
+            self._cleanup_worker('autoencoder')
+            self.autoencoder_process = None
+
+    def on_stop_autoencoder(self):
+        self._request_training_stop('autoencoder')
+
     def _training_parts(self, kind):
         return (
             ("train_process", "yolo_train_widget", "YOLO")
@@ -741,7 +777,7 @@ class YoloTrainWindow(QMainWindow):
             else (
                 kind + "_process",
                 kind + "_train_widget",
-                {"unet": "U-Net", "sam": "SAM"}.get(kind, "DeepLab"),
+                {"unet": "U-Net", "sam": "SAM", 'autoencoder':'AE/VAE'}.get(kind, "DeepLab"),
             )
         )
 
@@ -781,6 +817,11 @@ class YoloTrainWindow(QMainWindow):
                     bar.setFormat(f"{label}: {percentage}% ({epoch}/{total})")
                 except (ValueError, TypeError):
                     self.log(line)
+            elif line.startswith('STAGE:'):
+                bar = getattr(self, widget_name).progress_bar
+                bar.setRange(0, 0)
+                bar.setFormat(line.partition(':')[2])
+                self.log(line.partition(':')[2])
             else:
                 if line.startswith("RESULT_DIR:"):
                     folder = line.partition(":")[2]
@@ -792,6 +833,7 @@ class YoloTrainWindow(QMainWindow):
         self._read_training_output(kind, final=True)
         attr, widget_name, label = self._training_parts(kind)
         widget = getattr(self, widget_name)
+        widget.progress_bar.setRange(0, 100)
         widget.set_running(False)
         stopped = kind in self._training_stop_requested or exit_code == 130
         if stopped:
@@ -850,7 +892,8 @@ class YoloTrainWindow(QMainWindow):
     def shutdown_training(self):
         self._closing_training = True
         busy = self.model_export_widget.shutdown()
-        for kind in ("yolo", "unet", "deeplab", "sam"):
+        self.autoencoder_train_widget.close_jobs()
+        for kind in ("yolo", "unet", "deeplab", "sam", 'autoencoder'):
             attr, _, _ = self._training_parts(kind)
             process = getattr(self, attr, None)
             if process is not None and process.state() != QProcess.NotRunning:

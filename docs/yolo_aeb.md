@@ -25,7 +25,8 @@
 Для применения нужны те же кроп, масштаб, фон и предметная область, что при обучении.
 Без AE/VAE остаются доступны YOLO, объекты и кропы.
 
-Обучение AE/VAE запускается отдельно от вкладки обучения YOLO:
+Обучение доступно в **«Обучение модели → Обучение VAE/AE»** после экспорта моделей:
+[форма, структура YAML и результаты](yolo_train.md#обучение-vaeae). CLI использует тот же тренер:
 
 ```bash
 python -m utils_new.training.autoencoder --profile unet_v2_edge_gan --data "normal_images" --output "runs/ae_run" --device auto
@@ -34,23 +35,27 @@ python -m utils_new.training.autoencoder --profile unet_v2_edge_gan --data "norm
 Профили: `conv_bn_baseline`, `conv_bn`, `conv_gn`, `unet`, `unet_v2_edge_gan`.
 Вместо `--profile` можно указать `--config settings/autoencoders/unet.json`.
 Размеры и функции потерь задаются в JSON; `--epochs` и `--batch-size` переопределяют их.
-Данные — нормальные снимки без дефектов; одинаковые файлы не разделяются между train и val.
+Данные — папка нормальных снимков без дефектов или YOLO/MASKS YAML без требования
+к меткам. Можно явно задать train/val/calibration/test; одинаковое содержимое
+между split запрещено. TXT и маски не участвуют в обучении.
 Результаты и кеш исключаются из входной папки. Для содержательного порога нужна
 достаточная независимая val-выборка; одна-две фотографии дают ненадёжную оценку перцентиля.
 
-Результат: `best.pt` с калибровкой, `last.pt` для возобновления, `args.json`,
-`split.json`, `calibration.json`, история CSV/JSON и примеры реконструкции.
-`Ctrl+C` сохраняет `interrupted.pt`; незавершённая эпоха не заменяет `last.pt`.
+Результат: `weights/best.pt` с калибровкой, `weights/last.pt` для возобновления,
+`*_meta.json`, параметры, состав split, метрики, история и примеры реконструкции.
+`Ctrl+C` сохраняет `weights/interrupted.pt`; незавершённая эпоха не заменяет `last.pt`.
 Возобновление с последней полной эпохи:
 
 ```bash
-python -m utils_new.training.autoencoder --data "normal_images" --output "runs/ae_run" --resume "runs/ae_run/last.pt" --device auto
+python -m utils_new.training.autoencoder --data "normal_images" --output "runs/ae_run" --resume "runs/ae_run/weights/last.pt" --device auto
 ```
 
 При resume проверяются параметры и содержимое датасета, восстанавливаются
 оптимизаторы, scheduler, GAN и генераторы случайных чисел. Используйте то же
 окружение и устройство; воспроизводимость CUDA зависит также от операций и драйвера.
 `--no-plots` отключает графики, `--edge-cache` задаёт папку кеша рёбер.
+Для нового обучения из готовых весов укажите `--initial-weights "runs/ae_run/weights/best.pt"`
+и новую папку результатов; конфигурация модели должна соответствовать этим весам.
 Общие модели, подготовка данных и обучение находятся в `utils_new/autoencoders/`;
 чтение и запись checkpoint — в `utils_new/import_export/autoencoder.py`.
 

@@ -1136,6 +1136,9 @@ class YoloInspectWindow(QMainWindow):
                 )
 
             self.log(f"[AE/VAE] {path}")
+            metadata = getattr(loaded, 'metadata', None) or {}
+            if metadata.get('epoch'):
+                self.log(f"[AE/VAE] Эпоха checkpoint: {metadata['epoch']}; val loss: {metadata.get('val_loss')}; статус: {metadata.get('status', 'не указан')}")
             self.log(
                 f"[AE/VAE] arch={arch}, type={cfg['model_type']}, {latent_info}, "
                 f"size=({cfg['img_h']},{cfg['img_w']}), "

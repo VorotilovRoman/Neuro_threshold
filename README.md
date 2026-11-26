@@ -86,7 +86,7 @@ python dependency_health.py --load --extra all
 | [Подготовка датасета](docs/dataset.md) | Отбор, аугментации, split и экспорт |
 | [Анализ датасета](docs/dataset_analysis.md) | Качество, классы, повторы и утечки |
 | [SAHI](docs/sahi.md) | Нарезка изображений вместе с разметкой |
-| [Обучение модели](docs/yolo_train.md) | Обучение YOLO, U-Net, DeepLab, SAM/SAM2; экспорт ONNX/NCNN |
+| [Обучение модели](docs/yolo_train.md) | YOLO, U-Net, DeepLab, SAM/SAM2, AE/VAE; экспорт ONNX/NCNN |
 | [Демонстрация результата](docs/yolo_demo.md) | YOLO, пороговые пресеты и ансамбль |
 | [Сортировка с YOLO](docs/yolo_sort.md) | Поиск и отбор снимков по объектам |
 | [YOLO + AE/VAE](docs/yolo_aeb.md) | Кропы, реконструкция и карта ошибок |

@@ -303,6 +303,8 @@ class AutoencoderContracts(unittest.TestCase):
             model = build_ae_model_from_cfg(cfg.model)
             save_checkpoint(path, model, cfg.model)
             original = path.read_bytes()
+            meta_path = path.with_name('best_meta.json')
+            original_meta = meta_path.read_bytes()
             with patch(
                 "utils_new.import_export.atomic.os.replace",
                 side_effect=OSError("disk full"),
@@ -310,7 +312,8 @@ class AutoencoderContracts(unittest.TestCase):
                 with self.assertRaises(OSError):
                     save_checkpoint(path, model, cfg.model)
             self.assertEqual(path.read_bytes(), original)
-            self.assertEqual(list(Path(directory).iterdir()), [path])
+            self.assertEqual(set(Path(directory).iterdir()), {path, meta_path})
+            self.assertEqual(meta_path.read_bytes(), original_meta)
             legacy = Path(directory) / "legacy.pt"
             config = dict(cfg.model)
             config.pop("preprocessing_version")
@@ -396,7 +399,7 @@ class AutoencoderContracts(unittest.TestCase):
                     progress=progress,
                     plots=False,
                 )
-            last = root / "resumed/last.pt"
+            last = root / "resumed/weights/last.pt"
             self.assertEqual(read_checkpoint(last)["epoch"], 1)
             resumed = run_training(
                 cfg, data, root / "resumed", resume=last, plots=False

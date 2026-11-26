@@ -10,6 +10,7 @@ from ui.DL_train_settings_new_model import (
 from ui.sam.training import SAMTrainWidget
 from ui.log_widget import LogWidget
 from ui.model_export import ModelExportWidget
+from ui.autoencoder_training import AutoencoderTrainWidget
 
 
 def setup_deep_learning_training_ui(parent):
@@ -91,6 +92,10 @@ def setup_deep_learning_training_ui(parent):
     parent.model_export_widget = ModelExportWidget(parent)
     parent.model_export_widget.log_message.connect(parent.log_text.append)
     parent.tab_widget.addTab(wrap_in_scroll(parent.model_export_widget), "Экспорт модели")
+    parent.autoencoder_train_widget = AutoencoderTrainWidget(parent)
+    parent.autoencoder_train_widget.run_training.connect(parent._run_autoencoder_training)
+    parent.autoencoder_train_widget.stop_training.connect(parent.on_stop_autoencoder)
+    parent.tab_widget.addTab(wrap_in_scroll(parent.autoencoder_train_widget), 'Обучение VAE/AE')
 
     splitter.addWidget(right_widget)
     splitter.setStretchFactor(0, 1)

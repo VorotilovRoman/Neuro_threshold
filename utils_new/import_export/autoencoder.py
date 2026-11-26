@@ -95,6 +95,9 @@ def save_checkpoint(
     calibration=None,
     training_state=None,
     val_loss=None,
+    training_config=None,
+    data_info=None,
+    status='checkpoint',
 ):
     import torch
 
@@ -107,11 +110,18 @@ def save_checkpoint(
         epoch=int(epoch),
         calibration=calibration,
         val_loss=val_loss,
+        training_config=training_config,
+        data_info=data_info,
+        status=status,
     )
     if training_state is not None:
         payload["training_state"] = training_state
     with atomic_path(path) as temporary:
         torch.save(payload, temporary)
+    from utils_new.import_export.training import json_values
+
+    write_json_atomic(Path(path).with_name(Path(path).stem + '_meta.json'), json_values({
+        key: value for key, value in payload.items() if key not in ('model', 'training_state')}))
 
 
 def read_checkpoint(path):
@@ -139,6 +149,13 @@ def read_checkpoint(path):
     config = normalize_model_config(config, arch=arch)
     if schema == SCHEMA_VERSION:
         calibration = validate_calibration(checkpoint.get("calibration"), config)
+        sidecar = Path(path).with_name(Path(path).stem + '_meta.json')
+        if sidecar.exists():
+            from utils_new.import_export.json_objects import read_json_object
+
+            external = read_json_object(sidecar)
+            if inference_contract(normalize_model_config(external.get('config', {}))) != inference_contract(config):
+                raise ValueError('JSON не соответствует встроенным метаданным AE/VAE.')
     else:
         # Earlier scripts calibrated a scalar per image (MSE or L1). It cannot
         # be compared to individual pixels in the current MAE error map.
@@ -155,6 +172,7 @@ class LoadedAutoencoder:
     arch: str
     calibration: dict | None
     legacy: bool
+    metadata: dict | None = None
 
 
 def load_autoencoder(path, device="cpu"):
@@ -166,7 +184,8 @@ def load_autoencoder(path, device="cpu"):
     model.load_state_dict(checkpoint["model"], strict=True)
     model.to(device).eval()
     return LoadedAutoencoder(
-        model, config, config["arch"], checkpoint["calibration"], checkpoint["legacy"]
+        model, config, config["arch"], checkpoint["calibration"], checkpoint["legacy"],
+        {key:value for key,value in checkpoint.items() if key not in ('model','training_state')},
     )
 
 

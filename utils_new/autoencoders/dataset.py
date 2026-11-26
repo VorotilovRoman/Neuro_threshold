@@ -31,22 +31,24 @@ def collect_training_images(root, *, exclude=()):
     return files
 
 
-def dataset_manifest(paths):
+def dataset_manifest(paths, cancel=None):
     """Content identity detects changed data even when size/mtime were preserved."""
     result = []
     for path in paths:
+        _check_cancel(cancel)
         digest = hashlib.sha256()
         with Path(path).open("rb") as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
+                _check_cancel(cancel)
                 digest.update(block)
         result.append(dict(path=str(Path(path).resolve()), sha256=digest.hexdigest()))
     return result
 
 
-def split_images(paths, fraction, seed):
+def split_images(paths, fraction, seed, *, records=None):
     """Identical files remain in one split, preventing exact duplicate leakage."""
     groups = {}
-    for item in dataset_manifest(paths):
+    for item in records if records is not None else dataset_manifest(paths):
         groups.setdefault(item["sha256"], []).append(item["path"])
     if len(groups) < 2:
         raise ValueError("Для независимого val нужны хотя бы два различающихся снимка.")
@@ -59,6 +61,32 @@ def split_images(paths, fraction, seed):
     return train, val
 
 
+def _check_cancel(cancel):
+    if cancel is not None and cancel.is_set():
+        from concurrent.futures import CancelledError
+
+        raise CancelledError()
+
+
+def training_sources(source, fraction, seed, *, exclude=(), cancel=None):
+    from utils_new.import_export.yolo_yaml import load_image_splits
+
+    data = load_image_splits(source, exclude=exclude, cancel=cancel)
+    splits = data['splits']
+    records = {name: dataset_manifest(paths, cancel) for name, paths in splits.items()}
+    if data['auto_split']:
+        splits['train'], splits['val'] = split_images(splits['train'], fraction, seed, records=records['train'])
+        lookup = {item['path']: item for item in records['train']}
+        for name in ('train', 'val'):
+            records[name] = [lookup[path] for path in splits[name]]
+    seen = {}
+    for name, values in records.items():
+        for item in values:
+            previous = seen.get(item['sha256'])
+            if previous and previous[0] != name:
+                raise ValueError(f'Одинаковое содержимое снимков в {previous[0]}/{name}: {previous[1]} / {item["path"]}')
+            seen[item['sha256']] = (name, item['path'])
+    return dict(data, manifest=records)
 
 
 class AutoencoderDataset(Dataset):

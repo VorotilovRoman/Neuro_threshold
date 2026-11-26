@@ -11,9 +11,7 @@ from torch.utils.data import DataLoader
 
 from utils_new.autoencoders.dataset import (
     AutoencoderDataset,
-    collect_training_images,
-    dataset_manifest,
-    split_images,
+    training_sources,
 )
 from utils_new.training.optimization import seed_worker
 from utils_new.autoencoders.losses import (
@@ -233,6 +231,31 @@ def calibrate(model, loader, config, device, *, cancel=None):
     )
 
 
+@torch.inference_mode()
+def anomaly_metrics(model, loader, calibration, device, *, cancel=None):
+    """Holdout diagnostics under the declared normal-only data assumption."""
+    model.eval()
+    scores, rejected, pixels, pixel_rejected = [], 0, 0, 0
+    for item in loader:
+        checkpoint(cancel)
+        inputs, target, valid = _batch(item, device)
+        reconstruction = model(inputs)[0]
+        if reconstruction.shape != target.shape or not torch.isfinite(reconstruction).all():
+            raise ValueError('Некорректная реконструкция AE на test.')
+        errors = (reconstruction-target).abs().mean(1)
+        for error, region in zip(errors, valid[:, 0] > 0):
+            values = error[region]
+            score = float(values.mean())
+            scores.append(score)
+            rejected += score > calibration['image_threshold']
+            pixels += values.numel()
+            pixel_rejected += int((values > calibration['pixel_threshold']).sum())
+    return dict(metric='mae', images=len(scores), mean_image_mae=float(np.mean(scores)),
+                fraction_images_above_threshold=rejected/len(scores),
+                fraction_pixels_above_threshold=pixel_rejected/pixels,
+                assumption='all test images are normal', used_for_selection=False, used_for_calibration=False)
+
+
 def run_training(
     config,
     data_dir,
@@ -244,16 +267,29 @@ def run_training(
     cancel=None,
     progress=lambda value: None,
     plots=True,
+    initial_weights=None,
 ):
     """Each last.pt is a complete epoch. Interrupted partial epochs never replace it."""
     output = Path(output_dir).resolve()
+    if resume and initial_weights:
+        raise ValueError('Нельзя одновременно выбрать resume и начальные веса.')
     if not resume and output.exists() and any(output.iterdir()):
         raise ValueError(
             "Папка результатов не пуста. Выберите новую папку или --resume."
         )
-    paths = collect_training_images(
-        data_dir, exclude=[output] + ([edge_cache] if edge_cache else [])
-    )
+    if resume and output.exists() and any(output.iterdir()):
+        resume_root = Path(resume).resolve().parent
+        if resume_root.name == 'weights':
+            resume_root = resume_root.parent
+        if resume_root != output:
+            raise ValueError('Для продолжения в другой папке выберите пустую папку результатов.')
+    progress(dict(event='stage', stage='Проверка источников и содержимого снимков'))
+    data = training_sources(data_dir, config.val_split, config.seed,
+                            exclude=[output] + ([edge_cache] if edge_cache else []), cancel=cancel)
+    splits = data['splits']
+    train_paths, val_paths = splits['train'], splits['val']
+    calibration_paths, test_paths = splits['calibration'], splits['test']
+    manifest = data['manifest']['train'] + data['manifest']['val']
     restored = read_checkpoint(resume) if resume else None
     if restored:
         state = restored.get("training_state")
@@ -275,26 +311,33 @@ def run_training(
             "torch_version"
         ) != str(torch.__version__):
             raise ValueError("Resume требует то же устройство и версию PyTorch.")
-        train_paths, val_paths = state["train_paths"], state["val_paths"]
         if (
-            set(paths) != set(train_paths + val_paths)
-            or dataset_manifest(train_paths + val_paths) != state["manifest"]
+            train_paths != state['train_paths'] or val_paths != state['val_paths']
+            or manifest != state['manifest']
+            or calibration_paths != state.get('calibration_paths', [])
+            or test_paths != state.get('test_paths', [])
+            or ('split_manifest' in state and data['manifest'] != state['split_manifest'])
         ):
             raise ValueError("Датасет изменился после checkpoint; resume остановлен.")
-    else:
-        train_paths, val_paths = split_images(paths, config.val_split, config.seed)
     output.mkdir(parents=True, exist_ok=True)
-    manifest = dataset_manifest(train_paths + val_paths)
+    progress(dict(event='run_directory', output=str(output)))
+    weights = output / 'weights'
+    weights.mkdir(exist_ok=True)
+    data_info = dict(source=data['source'], kind=data['kind'], auto_split=data['auto_split'],
+                     counts={name: len(paths) for name, paths in splits.items()},
+                     calibration_split='calibration' if calibration_paths else 'val',
+                     annotation_policy='ignored; all selected images assumed normal')
     write_json_atomic(
         output / "args.json",
         dict(
             config=config.to_dict(),
             data=str(Path(data_dir).resolve()),
             device=str(device),
+            initial_weights=str(initial_weights) if initial_weights else None,
         ),
     )
     write_json_atomic(
-        output / "split.json", dict(train=train_paths, val=val_paths, manifest=manifest)
+        output / "split.json", dict(**splits, manifest=data['manifest'], source=data['source'])
     )
     random.seed(config.seed)
     np.random.seed(config.seed)
@@ -323,7 +366,21 @@ def run_training(
     val_loader = DataLoader(
         val_dataset, shuffle=False, generator=val_generator, **arguments
     )
+    calibration_loader = (DataLoader(AutoencoderDataset(calibration_paths, config, edge_cache=cache),
+                                     shuffle=False, generator=val_generator, **arguments)
+                          if calibration_paths else val_loader)
+    test_loader = (DataLoader(AutoencoderDataset(test_paths, config, edge_cache=cache),
+                             shuffle=False, generator=val_generator, **arguments) if test_paths else None)
     model = build_ae_model_from_cfg(config.model).to(torch_device)
+    if initial_weights:
+        initial = read_checkpoint(initial_weights)
+        for key in ('arch', 'model_type', 'in_channels', 'model_in_channels', 'out_channels'):
+            if initial['config'][key] != config.model[key]:
+                raise ValueError(f'Начальные веса не соответствуют выбранной модели: {key}.')
+        try:
+            model.load_state_dict(initial['model'], strict=True)
+        except RuntimeError as error:
+            raise ValueError(f'Размеры/архитектура начальных весов несовместимы: {error}') from error
     criterion = ReconstructionLoss(config).to(torch_device)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
@@ -374,6 +431,7 @@ def run_training(
             val=len(val_paths),
             device=str(device),
             start_epoch=start,
+            calibration=len(calibration_paths), test=len(test_paths), output=str(output),
         )
     )
     try:
@@ -417,11 +475,12 @@ def run_training(
                 best_epoch = epoch
                 stale = 0
                 save_checkpoint(
-                    output / "best.pt",
+                    weights / "best.pt",
                     model,
                     config.model,
                     epoch=epoch,
                     val_loss=best_loss,
+                    training_config=config.to_dict(), data_info=data_info, status='best_validation',
                 )
             else:
                 stale += 1
@@ -444,15 +503,17 @@ def run_training(
                 train_paths=train_paths,
                 val_paths=val_paths,
                 manifest=manifest,
+                calibration_paths=calibration_paths, test_paths=test_paths, split_manifest=data['manifest'],
                 rng=capture_rng(train_generator, val_generator, device=torch_device),
             )
             save_checkpoint(
-                output / "last.pt",
+                weights / "last.pt",
                 model,
                 config.model,
                 epoch=epoch,
                 val_loss=val_loss,
                 training_state=state,
+                training_config=config.to_dict(), data_info=data_info, status='complete_epoch',
             )
             save_history(output, history, plot=False)
             progress(dict(event="epoch", **history[-1]))
@@ -460,16 +521,26 @@ def run_training(
         if best_state is None:
             raise ValueError("Не получено ни одной корректной эпохи.")
         model.load_state_dict(best_state, strict=True)
-        calibration = calibrate(model, val_loader, config, torch_device, cancel=cancel)
+        progress(dict(event='stage', stage=f'Калибровка лучших весов: {data_info["calibration_split"]}'))
+        calibration = calibrate(model, calibration_loader, config, torch_device, cancel=cancel)
+        calibration['source_split'] = data_info['calibration_split']
+        calibration['independent_of_selection'] = bool(calibration_paths)
         save_checkpoint(
-            output / "best.pt",
+            weights / "best.pt",
             model,
             config.model,
             epoch=best_epoch,
             val_loss=best_loss,
             calibration=calibration,
+            training_config=config.to_dict(), data_info=data_info, status='completed',
         )
         write_json_atomic(output / "calibration.json", calibration)
+        write_json_atomic(output / 'metrics.json', dict(best_epoch=best_epoch, best_val_loss=best_loss,
+                          epochs_completed=history[-1]['epoch'], calibration=calibration, data=data_info))
+        if test_loader is not None:
+            progress(dict(event='stage', stage='Оценка отложенного test (не участвует в выборе весов и порогов)'))
+            write_json_atomic(output / 'test_metrics.json', anomaly_metrics(model, test_loader, calibration,
+                                                                          torch_device, cancel=cancel))
         save_history(output, history, plot=plots)
         if plots:
             save_reconstruction_examples(
@@ -478,25 +549,26 @@ def run_training(
         progress(
             dict(
                 event="completed",
-                checkpoint=str(output / "best.pt"),
+                checkpoint=str(weights / "best.pt"),
                 calibration=calibration,
             )
         )
         return dict(
-            checkpoint=str(output / "best.pt"), history=history, calibration=calibration
+            checkpoint=str(weights / "best.pt"), history=history, calibration=calibration
         )
     except CancelledError:
         save_checkpoint(
-            output / "interrupted.pt",
+            weights / "interrupted.pt",
             model,
             config.model,
             epoch=history[-1]["epoch"] if history else 0,
+            training_config=config.to_dict(), data_info=data_info, status='interrupted_partial_epoch',
         )
         progress(
             dict(
                 event="cancelled",
-                resume=str(output / "last.pt")
-                if (output / "last.pt").exists()
+                resume=str(weights / "last.pt")
+                if (weights / "last.pt").exists()
                 else None,
             )
         )

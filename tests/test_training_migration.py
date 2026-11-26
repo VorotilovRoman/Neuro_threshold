@@ -468,6 +468,7 @@ class TrainingContracts(unittest.TestCase):
             TemporaryDirectory() as directory,
             patch("utils_new.autoencoders.training.run_training") as trainer,
         ):
+            trainer.return_value = {"calibration": {"metric": "mae"}}
             self.assertEqual(
                 main(
                     [

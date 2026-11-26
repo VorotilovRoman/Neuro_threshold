@@ -5,6 +5,7 @@ from math import isfinite
 
 PREPROCESSING_VERSIONS = ("ae-pil-v1", "legacy-opencv-v1")
 ARCHITECTURES = ("conv", "conv_gn", "unet", "unet_v2")
+AE_PROFILES = ('conv_bn_baseline', 'conv_bn', 'conv_gn', 'unet', 'unet_v2_edge_gan')
 
 
 def _integer(value, name, low=1):
@@ -237,3 +238,37 @@ class TrainConfig:
 
     def to_dict(self):
         return asdict(self)
+
+
+def training_request(values):
+    """GUI/worker envelope; the same TrainConfig remains usable from the CLI."""
+    from pathlib import Path
+
+    allowed = {'config', 'source', 'project_path', 'name', 'device', 'resume', 'initial_weights', 'plots'}
+    if not isinstance(values, dict) or set(values) - allowed:
+        raise ValueError('Неизвестные параметры запуска AE/VAE.')
+    config = TrainConfig.from_dict(values.get('config', {})).to_dict()
+    source = Path(values.get('source') or '').expanduser().resolve()
+    if not values.get('source') or not source.exists():
+        raise ValueError('Выберите папку нормальных снимков или YAML.')
+    if not source.is_dir() and source.suffix.lower() not in ('.yaml', '.yml'):
+        raise ValueError('Для AE/VAE поддерживается папка или YOLO/MASKS YAML.')
+    name = values.get('name') or 'ae'
+    if name in ('.', '..') or '/' in name or '\\' in name:
+        raise ValueError('Название запуска должно быть именем одной подпапки.')
+    device = values.get('device', 'auto')
+    if device not in ('auto', 'cpu', 'cuda:0'):
+        raise ValueError('Выберите auto, cpu или cuda:0.')
+    result = dict(config=config, source=str(source), name=name, device=device,
+                  project_path=str(Path(values.get('project_path') or 'runs/autoencoder').expanduser().resolve()),
+                  plots=values.get('plots', True))
+    if type(result['plots']) is not bool:
+        raise ValueError('plots должен быть bool.')
+    for key in ('resume', 'initial_weights'):
+        path = values.get(key) or ''
+        if path and not Path(path).is_file():
+            raise ValueError(f'{key}: файл не найден: {path}')
+        result[key] = str(Path(path).resolve()) if path else ''
+    if result['resume'] and result['initial_weights']:
+        raise ValueError('Выберите либо продолжение last.pt, либо начальные веса нового запуска.')
+    return result

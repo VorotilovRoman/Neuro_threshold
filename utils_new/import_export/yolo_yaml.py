@@ -7,6 +7,83 @@ import yaml
 from utils_new.import_export.images import collect_image_paths, IMAGE_EXTENSIONS
 
 
+def load_image_splits(source, *, exclude=(), cancel=None):
+    """Image-only view of a folder/YOLO/MASKS YAML. Never inspect annotations.
+
+    Existing path/TXT-list resolution and approved image paths stay authoritative.
+    Optional calibration/test splits are kept apart from training.
+    """
+    from concurrent.futures import CancelledError
+    from pathlib import Path
+
+    def check():
+        if cancel is not None and cancel.is_set():
+            raise CancelledError()
+
+    if not str(source).strip():
+        raise ValueError('Выберите источник снимков.')
+    path = Path(source).expanduser().resolve()
+    excluded = [Path(value).resolve() for value in exclude]
+    if path.is_dir() and (path / 'data.yaml').is_file():
+        path /= 'data.yaml'
+    splits = {name: [] for name in ('train', 'val', 'calibration', 'test')}
+    if path.is_dir():
+        root, kind = path, 'folder'
+        rows = [dict(split='train', images=[str(path)])]
+    elif path.is_file() and path.suffix.lower() in ('.yaml', '.yml'):
+        cfg = yaml.safe_load(path.read_text(encoding='utf-8-sig'))
+        if not isinstance(cfg, dict):
+            raise ValueError('YAML должен содержать словарь.')
+        approved = cfg.get('_dataset_sources')
+        root = (Path(approved['root']) if approved else
+                Path(_resolve_relative_to_yaml(cfg.get('path') or '.', str(path))))
+        root, kind = root.resolve(), 'yaml'
+        rows = list(approved['rows']) if approved else []
+        if not approved:
+            for split in ('train', 'val', 'test'):
+                aliases = ('val', 'valid', 'validation') if split == 'val' else (split,)
+                key = next((key for key in aliases if key in cfg or key+'_images' in cfg), split)
+                raw = cfg.get(key+'_images', cfg.get(key))
+                if raw:
+                    rows.append(dict(split=split, images=raw))
+        raw = cfg.get('calibration_images', cfg.get('calibration', cfg.get('calib')))
+        if raw:
+            rows.append(dict(split='calibration', images=raw))
+    else:
+        raise ValueError(f'Выберите папку снимков или YOLO/MASKS YAML: {path}')
+    assigned = {}
+    for row in rows:
+        check()
+        split = row['split']
+        if split not in splits or not row.get('images'):
+            continue
+        if row.get('voc_images'):
+            raise ValueError('Для AE задайте train_images/val_images с путями снимков вместо VOC-списка ID.')
+        sources = resolve_split_sources(row['images'], root, strict=True)
+        images = []
+        for item in sources:
+            check()
+            for image in collect_image_paths(item, recursive=True):
+                check()
+                image = str(Path(image).resolve())
+                if any(Path(image).is_relative_to(folder) for folder in excluded):
+                    continue
+                if Path(image).name.lower() in ('loss.png', 'recon_examples.png'):
+                    continue
+                if image in assigned and assigned[image] != split:
+                    raise ValueError(f'Снимок находится в разных split: {assigned[image]}/{split}: {image}')
+                assigned[image] = split
+                images.append(image)
+        images = list(dict.fromkeys(images))
+        if not images:
+            raise ValueError(f'Нет снимков в явно заданном split {split}.')
+        splits[split].extend(image for image in images if image not in splits[split])
+    if not splits['train']:
+        raise ValueError('Обучающая выборка снимков пуста.')
+    return dict(source=str(path), root=str(root), kind=kind, splits=splits,
+                auto_split=not bool(splits['val']))
+
+
 def _resolve_relative_to_yaml(raw_path, yaml_path):
     """Абсолютный путь: если raw_path абсолютный — берём как есть,
     иначе — относительно директории YAML."""
