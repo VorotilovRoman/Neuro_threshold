@@ -277,6 +277,7 @@ class DatasetImportJob:
             pairs, cache = [], {}
             dtype = self.options.get("dataset_type", 2)
             aux = self.options.get("annotations")
+            images_root = Path(self.paths[0]) if len(self.paths) == 1 and Path(self.paths[0]).is_dir() else None
             mask_index = (
                 index_mask_files(aux)
                 if dtype == 1 and aux and Path(aux).is_dir()
@@ -287,9 +288,15 @@ class DatasetImportJob:
                     return {"cancelled": True}
                 target = None
                 if dtype == 0 and aux:
-                    matches = sidecar_matches(aux, Path(image).name, cache)
+                    relative = Path(image).relative_to(images_root) if images_root is not None else Path(image).name
+                    matches = sidecar_matches(aux, relative, cache)
+                    if not matches and images_root is not None:
+                        matches = sidecar_matches(aux, Path(images_root.name) / relative, cache)
+                    if not matches:
+                        matches = sidecar_matches(aux, relative, cache, basename_fallback=True)
                     if len(matches) > 1:
-                        raise ValueError(f"Несколько меток для {image}")
+                        candidates = '; '.join(str(path) for path in matches[:5])
+                        raise ValueError(f"Несколько меток для {image}: {candidates}. Укажите папку нужного split.")
                     target = str(matches[0]) if matches else None
                 elif dtype == 1:
                     target = mask_index.get(Path(image).stem.casefold())
@@ -297,7 +304,12 @@ class DatasetImportJob:
                 pairs.append((image, target))
                 if index % 32 == 0:
                     self.progress(index + 1, len(files))
-            catalog = DatasetCatalog(pairs, dtype, self.paths[0])
+            catalog = DatasetCatalog(pairs, dtype, self.paths[0], input_format=self.options.get('input_format', 'auto'))
+            if aux and dtype in (0, 1):
+                matched = sum(path is not None for _, path in pairs)
+                self.log(f"Источник разметки: {aux}; снимков: {len(pairs)}, с разметкой: {matched}, без разметки: {len(pairs) - matched}.")
+                if pairs and not matched:
+                    self.log('Не найдено совпадающих файлов разметки. Проверьте имена и подпапки; снимки без разметки сохранены в списке.')
         elif self.kind == "yolo":
             catalog = load_yolo_catalog(self.paths[0], log_cb=self._report)
         elif self.kind in ("unet", "unet_editor"):

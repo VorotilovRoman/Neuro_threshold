@@ -210,11 +210,23 @@ def index_sidecars(folder, extensions=('.txt',), *, recursive=True, cancel=None)
     return result
 
 
-def sidecar_matches(folder, relative, cache, *, recursive=True):
+def sidecar_matches(folder, relative, cache, *, recursive=True, basename_fallback=False):
     import unicodedata
     folder = Path(folder)
     key = (str(folder), recursive)
     if key not in cache:
         cache[key] = index_sidecars(folder, recursive=recursive)
     stem = Path(relative).with_suffix('').as_posix()
-    return cache[key].get(unicodedata.normalize('NFC', stem).casefold(), [])
+    normalized = unicodedata.normalize('NFC', stem).casefold()
+    matches = cache[key].get(normalized, [])
+    if matches or not basename_fallback:
+        return matches
+    # Build this second index once. Prefer relative paths, then accept only an
+    # unambiguous basename across nested label folders (the caller checks ties).
+    basename_key = ('basenames', *key)
+    if basename_key not in cache:
+        names = {}
+        for name, paths in cache[key].items():
+            names.setdefault(name.rsplit('/', 1)[-1], []).extend(paths)
+        cache[basename_key] = names
+    return cache[basename_key].get(normalized.rsplit('/', 1)[-1], [])

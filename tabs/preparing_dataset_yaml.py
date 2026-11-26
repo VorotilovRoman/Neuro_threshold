@@ -213,7 +213,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.color_stats_label.setText(text)
         for name in ("btn_convert_gray", "btn_convert_rgb", "btn_convert_8bit_png"):
             if hasattr(self, name):
-                getattr(self, name).setEnabled(enabled)
+                getattr(self, name).setEnabled(enabled and self._dataset_ready())
 
     def _make_list_item(self, text, tag=None, error_msg=""):
         """Override: другой tooltip для invalid-пар."""
@@ -341,7 +341,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
     # Массовая конвертация
     # ==================================================================
     def convert_all_images(self, target="gray"):
-        if not self.pairs:
+        if not self.pairs or not self._dataset_ready():
             return
         to_convert = select_pairs_for_conversion(self.pairs, self.validator, target)
         if not to_convert:
@@ -386,11 +386,10 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.log(f"Конвертация завершена: перезаписано {converted}, ошибок {errors}")
 
         self.validator.clear_cache()
-        self._recompute_color_stats()
-        self._rebuild_file_list_display(pairs=self.pairs)
+        self._start_pair_inspection()
 
     def convert_to_8bit_png(self):
-        if not self.pairs:
+        if not self.pairs or not self._dataset_ready():
             return
         all_convert, need_convert = select_pairs_for_8bit_png(
             self.pairs, self.validator
@@ -444,20 +443,10 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.log(f"8-битный PNG: перезаписано {converted}, ошибок {errors}")
 
         if path_map:
-            new_pairs = []
-            for pair in self.pairs:
-                img_path = pair[0]
-                if img_path in path_map:
-                    new_pairs.append(
-                        (path_map[img_path], pair[1] if len(pair) > 1 else None)
-                    )
-                else:
-                    new_pairs.append(pair)
-            self.pairs = new_pairs
+            self.pairs = [(path_map.get(str(pair[0]), pair[0]), *pair[1:]) for pair in self.pairs]
 
         self.validator.clear_cache()
-        self._recompute_color_stats()
-        self._rebuild_file_list_display(pairs=self.pairs)
+        self._start_pair_inspection()
 
     # ==================================================================
     # Множители / Split

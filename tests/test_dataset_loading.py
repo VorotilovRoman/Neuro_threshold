@@ -17,6 +17,43 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_folder_labels_follow_relative_subfolders_and_explicit_split(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            images, labels = root / 'images', root / 'labels'
+            for split in ('train', 'val'):
+                (images / split).mkdir(parents=True)
+                (labels / split).mkdir(parents=True)
+                (images / split / 'frame.with.dots.PNG').touch()
+                (labels / split / 'frame.with.dots.TXT').write_text('0 .5 .5 .5 .5\n')
+            for split in ('train', 'val'):
+                result = DatasetImportJob('folder', [str(images / split)], dict(dataset_type=0, annotations=str(labels))).run()
+                self.assertEqual(len(result['catalog'].pairs), 1)
+                image, label = result['catalog'].pairs[0]
+                self.assertIsNotNone(label)
+                self.assertEqual(Path(image).parent.name, Path(label).parent.name)
+            train = DatasetImportJob('folder', [str(images / 'train')], dict(dataset_type=0, annotations=str(labels))).run()
+            self.assertEqual(Path(train['catalog'].pairs[0][1]).parent.name, 'train')
+
+    def test_nested_label_fallback_rejects_ambiguous_names(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            images, labels = root / 'pictures', root / 'labels'
+            images.mkdir()
+            (images / 'one.png').touch()
+            for name in ('first', 'second'):
+                (labels / name).mkdir(parents=True)
+                (labels / name / 'one.txt').touch()
+            with self.assertRaisesRegex(ValueError, 'Несколько меток'):
+                DatasetImportJob('folder', [str(images)], dict(dataset_type=0, annotations=str(labels))).run()
+            (labels / 'second' / 'one.txt').unlink()
+            logs = []
+            job = DatasetImportJob('folder', [str(images)], dict(dataset_type=0, annotations=str(labels)))
+            job.log = logs.append
+            result = job.run()
+            self.assertTrue(result['catalog'].pairs[0][1].endswith('first/one.txt'))
+            self.assertTrue(any('с разметкой: 1' in line for line in logs))
+
     def test_folder_discovery_reads_names_only_and_keeps_images_without_labels(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -121,6 +158,87 @@ with TemporaryDirectory() as temporary,patch.object(pairs,'build_pair_display',s
  retry.click();wait_dataset(owner);assert owner._dataset_ready()
  assert owner._pair_display_cache[tuple(pair)]['is_valid']
 owner.close();timer.stop()
+""")
+
+    def test_preparation_folder_then_txt_updates_rows_and_classes(self):
+        self.gui("""
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+from PyQt5.QtCore import Qt
+owner=DatasetPreparationWindow();owner.show()
+with TemporaryDirectory() as temporary:
+ root=Path(temporary);images=root/'images';labels=root/'labels'
+ (images/'train').mkdir(parents=True);(labels/'train').mkdir(parents=True)
+ write_image(images/'train'/'part.with.dots.png',np.zeros((24,40,3),np.uint8))
+ (labels/'train'/'part.with.dots.TXT').write_text('3 .5 .5 .5 .5\\n')
+ with patch('ui.dataset_loader.source_dialogs.get_directory',return_value=str(images/'train')):
+  owner.btn_folder.click();wait_dataset(owner)
+ assert owner.file_list.count()==1 and '[Без разметки]' in owner.file_list.item(0).text()
+ owner.input_format_combo.setCurrentIndex(owner.input_format_combo.findData('detect'));wait_dataset(owner)
+ with patch('ui.dataset_loader.source_dialogs.get_directory',return_value=str(labels)):
+  owner.btn_labels.click();wait_dataset(owner)
+ assert '[detect]' in owner.file_list.item(0).text(),owner.file_list.item(0).text()
+ assert owner.file_list.item(0).data(Qt.UserRole+1)[1].endswith('train/part.with.dots.TXT')
+ assert owner.original_ids==[3],owner.original_ids
+ assert owner.input_format=='detect'
+ assert owner._dataset_ready()
+ assert 'с разметкой: 1' in owner.log_text.toPlainText()
+owner.close()
+""")
+
+    def test_preparation_color_conversion_refreshes_inspection_and_display(self):
+        self.gui("""
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtCore import Qt
+from utils_new.import_export.images import _read_with_fallback
+import cv2
+owner=DatasetPreparationWindow();owner.show()
+with TemporaryDirectory() as temporary:
+ root=Path(temporary);image=root/'color.png'
+ pixels=np.zeros((24,40,3),np.uint8);pixels[:,:,1]=220;write_image(image,pixels)
+ owner.images_folder=str(root);owner.scan_pairs();wait_dataset(owner)
+ assert owner.file_list.item(0).data(Qt.UserRole+3)=='color'
+ previous=owner._inspection_revision
+ with patch.object(QMessageBox,'question',return_value=QMessageBox.Yes):
+  owner.btn_convert_gray.click()
+ assert not owner._dataset_ready() and not owner.btn_convert_rgb.isEnabled()
+ wait_dataset(owner)
+ assert owner._inspection_revision>previous
+ assert _read_with_fallback(str(image),cv2.IMREAD_UNCHANGED).ndim==2
+ assert owner.file_list.item(0).data(Qt.UserRole+3)=='gray_real',owner.file_list.item(0).text()
+ assert owner.color_type_stats.get('gray_real')==1
+ with patch.object(QMessageBox,'question',return_value=QMessageBox.Yes):
+  owner.btn_convert_rgb.click();wait_dataset(owner)
+ assert _read_with_fallback(str(image),cv2.IMREAD_UNCHANGED).shape[2]==3
+ assert owner.file_list.item(0).data(Qt.UserRole+3)=='gray_visual'
+ assert owner._dataset_ready()
+owner.close()
+""")
+
+    def test_preparation_png_conversion_refreshes_paths_bit_depth_and_labels(self):
+        self.gui("""
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtCore import Qt
+owner=DatasetPreparationWindow();owner.show()
+with TemporaryDirectory() as temporary:
+ for extension in ('tiff','png'):
+  root=Path(temporary)/extension;root.mkdir();image=root/('image.'+extension);label=root/'image.txt'
+  write_image(image,np.full((24,40),32000,np.uint16));label.write_text('2 .5 .5 .5 .5\\n')
+  owner.images_folder=str(root);owner.labels_folder=str(root);owner.scan_pairs();wait_dataset(owner)
+  assert owner.file_list.item(0).data(Qt.UserRole+4)=='uint16'
+  def choose(dialog):
+   next(button for button in dialog.buttons() if button.text().startswith('Только')).click()
+  with patch.object(QMessageBox,'exec_',choose):
+   owner.btn_convert_8bit_png.click();wait_dataset(owner)
+  pair=owner.file_list.item(0).data(Qt.UserRole+1)
+  assert pair[0]==str(root/'image.png'),pair
+  assert pair[1]==str(label) and label.is_file()
+  assert image.exists()==(extension=='png')
+  assert owner.file_list.item(0).data(Qt.UserRole+4)=='uint8_png'
+  assert '[detect]' in owner.file_list.item(0).text()
+  assert owner.original_ids==[2] and owner._dataset_ready()
+owner.close()
 """)
 
     def test_stale_delivery_and_close_are_safe_even_if_io_ignores_cancel(self):

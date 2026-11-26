@@ -335,6 +335,7 @@ class DatasetLoaderMixin:
         elif self.images_folder:
             self._start_dataset_import('folder', [self.images_folder], options=dict(
                 dataset_type=self.dataset_type,
+                input_format=self.input_format,
                 annotations=self.labels_folder if self.dataset_type == 0 else self.masks_folder))
 
     def _validate_all_pairs(self):
