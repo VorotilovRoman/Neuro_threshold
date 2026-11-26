@@ -39,7 +39,7 @@ def build_source(parent):
     # ВЕРХНЯЯ ПАНЕЛЬ
     # ============================================================
     parent.dataset_source = DatasetSourceWidget(
-        ("folder", "labels", "yolo_yaml", "coco", "add_coco", "unet_yaml"),
+        ("folder", "labels", "yolo_yaml", "add_yolo_yaml", "coco", "add_coco", "unet_yaml"),
         types=(0, 1, 2),
         formats=True,
         profile="dataset_analysis",
@@ -49,6 +49,7 @@ def build_source(parent):
     parent.btn_load_yaml = parent.dataset_source.button("yolo_yaml")
     parent.btn_load_coco = parent.dataset_source.button("coco")
     parent.btn_add_coco = parent.dataset_source.button("add_coco")
+    parent.btn_add_yaml = parent.dataset_source.button("add_yolo_yaml")
     parent.dataset_type_combo = parent.dataset_source.type_combo
     parent.input_format_combo = parent.dataset_source.format_combo
     main_layout.addWidget(parent.dataset_source)

@@ -56,6 +56,13 @@ ACTIONS = {
         False,
         "Проверить пути снимков, используемые COCO JSON и количество файлов перед импортом; текущий набор заменяется.",
     ),
+    "add_yolo_yaml": (
+        "+ YOLO YAML…",
+        "Выберите YOLO YAML для добавления",
+        "YAML (*.yaml *.yml)",
+        False,
+        "Добавить YOLO YAML к текущему набору: объединить классы по имени, пропустить повторные снимки и дополнить отсутствующую разметку. Исходные TXT не изменяются.",
+    ),
     "add_coco": (
         "+ COCO…",
         "Выберите COCO JSON для добавления",
@@ -167,6 +174,7 @@ ORDER = (
     "labels",
     "masks",
     "yolo_yaml",
+    "add_yolo_yaml",
     "coco",
     "add_coco",
     "unet_yaml",
@@ -250,7 +258,7 @@ def get_open_file(owner, key, *, multiple=False, directory="", confirm=True):
     first = selected[0] if multiple and selected else selected if not multiple else ""
     if first:
         settings.setValue(key, str(Path(first).parent))
-        if confirm and key in ('yolo_yaml', 'unet_yaml', 'coco', 'add_coco'):
+        if confirm and key in ('yolo_yaml', 'add_yolo_yaml', 'unet_yaml', 'coco', 'add_coco'):
             try:
                 approved = confirm_dataset_import(owner, selected if multiple else [selected],
                     'coco' if key in ('coco', 'add_coco') else ('unet' if key == 'unet_yaml' else 'yolo'))

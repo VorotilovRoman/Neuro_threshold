@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLineEdit,
+    QLabel,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -58,7 +59,10 @@ class ImageNavigationWidget(QWidget):
         self._page_spin.setRange(1, 1)
         self._page_spin.setFixedWidth(86)
         self._page_spin.setAlignment(Qt.AlignCenter)
-        self._page_spin.setSuffix(" / 0")
+        self._page_spin.setKeyboardTracking(False)
+        self._page_spin.setToolTip('Номер текущего снимка. Введите число для перехода.')
+        self._total_label = QLabel('/ 0')
+        self._total_label.setToolTip('Всего снимков в загруженном наборе')
         self.resize_limit = resize_limit or (
             640 if profile == "traditional_ml" else 1024
         )
@@ -70,6 +74,7 @@ class ImageNavigationWidget(QWidget):
         for widget in (
             self._prev_btn,
             self._page_spin,
+            self._total_label,
             self._next_btn,
             self._resize_cb,
         ):
@@ -86,14 +91,14 @@ class ImageNavigationWidget(QWidget):
     def _on_page_changed(self, value):
         """При изменении номера страницы (с 1) испускаем сигнал goto_page."""
         if (
-            value != self._current + 1
+            self._total > 0 and value != self._current + 1
         ):  # предотвращаем рекурсию при программной установке
             self.goto_page.emit(value)
 
     def set_navigation_enabled(self, enabled):
         self._prev_btn.setEnabled(enabled)
         self._next_btn.setEnabled(enabled)
-        self._page_spin.setEnabled(enabled)
+        self._page_spin.setEnabled(enabled and self._total > 0)
 
     def set_prev_enabled(self, enabled):
         self._prev_btn.setEnabled(enabled)
@@ -112,12 +117,15 @@ class ImageNavigationWidget(QWidget):
         Устанавливает текущий отображаемый индекс и общее количество изображений.
         idx – индекс с 0 (внутреннее представление).
         """
+        total = max(0, int(total))
+        idx = max(0, min(int(idx), total - 1))
         self._current = idx
         self._total = total
         self._page_spin.blockSignals(True)
-        self._page_spin.setRange(1, max(1, total))
-        self._page_spin.setValue(idx + 1)
-        self._page_spin.setSuffix(f" / {total}" if total > 0 else " / ?")
+        self._page_spin.setRange(1 if total else 0, total)
+        self._page_spin.setValue(idx + 1 if total else 0)
+        self._total_label.setText(f'/ {total}')
+        self._page_spin.setEnabled(total > 0)
         self._page_spin.blockSignals(False)
 
         # Обновляем состояние кнопок (обычно это делает родитель, но можно и здесь)

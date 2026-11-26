@@ -20,4 +20,5 @@ def connect_source(parent):
     parent.btn_load_yaml.clicked.connect(parent.load_from_yaml)
     parent.btn_load_coco.clicked.connect(parent.load_from_coco)
     parent.btn_add_coco.clicked.connect(parent.add_from_coco)
+    parent.btn_add_yaml.clicked.connect(parent.add_from_yaml)
     parent.btn_load_unet.clicked.connect(parent.load_from_unet_yaml)

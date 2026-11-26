@@ -62,6 +62,58 @@ class SourceContracts(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("NEURO_RUN_GUI_TESTS") == "1", "opt-in Qt tests")
 class SourceGuiTests(unittest.TestCase):
+    def test_add_yolo_is_available_on_preparation_analysis_and_sahi(self):
+        self.gui("""
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+import numpy as np,yaml,sys
+from PyQt5.QtWidgets import QApplication
+from utils_new.import_export.images import write_image
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+from tabs.dataset_analysis import DatasetAnalysisWindow
+from tabs.slice_dataset_sahi import SahiSlicerWindow
+sys.path.insert(0,str(Path.cwd()/'tests'))
+from dataset_test_support import wait_dataset
+app=QApplication([])
+with TemporaryDirectory() as temporary:
+ root=Path(temporary);a=root/'a.png';b=root/'b.png'
+ for path in (a,b):write_image(path,np.zeros((24,40,3),np.uint8));path.with_suffix('.txt').write_text('0 .5 .5 .5 .5\\n')
+ source=root/'data.yaml';source.write_text(yaml.safe_dump(dict(path=str(root),train=[str(b)],names=['same'])))
+ for window_type in (DatasetPreparationWindow,DatasetAnalysisWindow,SahiSlicerWindow):
+  owner=window_type();owner.show()
+  owner._apply_loaded_pairs([(str(a),str(a.with_suffix('.txt')))],0,'auto',class_names_from_yaml={0:'same'})
+  wait_dataset(owner)
+  with patch('ui.dataset_loader.source_dialogs.get_open_file',return_value=(str(source),'')):
+   owner.btn_add_yaml.click();wait_dataset(owner)
+  assert len(owner.pairs)==2,(window_type,owner.log_text.toPlainText())
+  assert owner.original_ids==[0],owner.original_ids
+  owner.close();app.processEvents()
+""")
+
+    def test_navigation_edits_only_current_number_and_commits_on_enter(self):
+        self.gui("""
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import Qt
+from PyQt5.QtTest import QTest,QSignalSpy
+from ui.image_navigation import ImageNavigationWidget
+app=QApplication([])
+widget=ImageNavigationWidget();widget.show();app.processEvents()
+spy=QSignalSpy(widget.goto_page)
+widget.set_current_index(2,200)
+assert widget._page_spin.text()=='3' and widget._page_spin.suffix()==''
+assert widget._total_label.text()=='/ 200' and len(spy)==0
+editor=widget._page_spin.lineEdit();editor.setFocus();editor.selectAll()
+QTest.keyClicks(editor,'17');assert len(spy)==0
+QTest.keyClick(editor,Qt.Key_Return);assert list(spy)==[[17]],list(spy)
+widget.set_current_index(16,200);assert len(spy)==1
+widget.set_current_index(0,0)
+assert widget._page_spin.text()=='0' and not widget._page_spin.isEnabled()
+assert widget._total_label.text()=='/ 0'
+widget.set_current_index(999999,1234567)
+assert widget._page_spin.text()=='1000000' and widget._total_label.text()=='/ 1234567'
+""")
+
     def gui(self, code):
         code = ("from unittest.mock import patch as _source_patch\n"
                 "_source_patch('ui.dataset_source.confirm_dataset_import', side_effect=lambda owner, paths, kind: paths).start()\n" + code)

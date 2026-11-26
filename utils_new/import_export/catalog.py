@@ -312,6 +312,52 @@ class DatasetImportJob:
                     self.log('Не найдено совпадающих файлов разметки. Проверьте имена и подпапки; снимки без разметки сохранены в списке.')
         elif self.kind == "yolo":
             catalog = load_yolo_catalog(self.paths[0], log_cb=self._report)
+            if 'existing_names' in self.options:
+                # Rewrite only class tokens: preserve BBox/OBB/Segment coordinates
+                # and their precision without decoding image pixels or guessing
+                # the geometry format. Source TXT files are never modified.
+                names = dict(self.options['existing_names'])
+                next_id = max(names.values(), default=-1) + 1
+                mapping = {}
+                def global_id(source_id):
+                    nonlocal next_id
+                    if source_id not in mapping:
+                        name = resolve_class_name(catalog.class_names, source_id) or str(source_id)
+                        if name not in names:
+                            names[name] = next_id
+                            next_id += 1
+                        mapping[source_id] = names[name]
+                    return mapping[source_id]
+                for source_id in sorted(catalog.class_names):
+                    global_id(int(source_id))
+                resource = TemporaryDirectory(prefix='neuro-merged-yolo-')
+                merged_pairs = []
+                for index, (image, label) in enumerate(catalog.pairs):
+                    if self.cancelled:
+                        return {'cancelled': True}
+                    if label is None:
+                        merged_pairs.append((image, None))
+                        continue
+                    lines = []
+                    for line_number, line in enumerate(Path(label).read_text(encoding='utf-8-sig').splitlines(), 1):
+                        if not line.strip() or line.lstrip().startswith('#'):
+                            lines.append(line)
+                            continue
+                        parts = line.split(maxsplit=1)
+                        try:
+                            source_id = int(parts[0])
+                            if source_id < 0:
+                                raise ValueError()
+                        except ValueError:
+                            raise CatalogSourceError(f'{label}, строка {line_number}: некорректный ID класса') from None
+                        lines.append(str(global_id(source_id)) + (' ' + parts[1] if len(parts) > 1 else ''))
+                    target = Path(resource.name) / f'{index:08d}.txt'
+                    target.write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
+                    merged_pairs.append((image, str(target)))
+                    self.progress(index + 1, len(catalog.pairs))
+                catalog = DatasetCatalog(merged_pairs, 0, catalog.root, {cid: name for name, cid in names.items()},
+                                         catalog.input_format, catalog.metadata)
+                self.log(f'YOLO YAML: классы объединены по именам; классов в наборе — {len(names)}. Исходные TXT сохранены.')
         elif self.kind in ("unet", "unet_editor"):
             catalog = load_unet_catalog(self.paths[0], log_cb=self._report)
             if self.kind == "unet_editor":

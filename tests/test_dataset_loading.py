@@ -17,6 +17,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_appended_yolo_remaps_class_tokens_without_modifying_sources(self):
+        import yaml
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            images, labels = root / 'images/train', root / 'labels/train'
+            images.mkdir(parents=True)
+            labels.mkdir(parents=True)
+            for name in ('one', 'background', 'unknown'):
+                write_image(images / (name + '.png'), np.zeros((20, 40, 3), np.uint8))
+            original = '0 .5000000001 .5 .2 .3\n1 .1 .1 .8 .1 .8 .8\n'
+            (labels / 'one.txt').write_text(original)
+            (labels / 'background.txt').write_text('')
+            source = root / 'data.yaml'
+            source.write_text(yaml.safe_dump(dict(path=str(root), train='images/train', names=['person', 'bike'])))
+            result = DatasetImportJob('yolo', [str(source)], dict(existing_names={'car': 7, 'person': 2})).run()
+            catalog = result['catalog']
+            self.assertEqual(catalog.class_names, {7: 'car', 2: 'person', 8: 'bike'})
+            pairs = {Path(image).stem: label for image, label in catalog.pairs}
+            self.assertEqual(Path(pairs['one']).read_text(), original.replace('0 ', '2 ', 1).replace('\n1 ', '\n8 ', 1))
+            self.assertEqual(Path(pairs['background']).read_text(), '')
+            self.assertIsNone(pairs['unknown'])
+            self.assertEqual((labels / 'one.txt').read_text(), original)
+            self.assertIsNotNone(result['resource'])
+            result['resource'].cleanup()
+
     def test_summary_separates_images_files_objects_background_and_errors(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -222,6 +247,45 @@ with TemporaryDirectory() as temporary:
  assert owner.input_format=='detect'
  assert owner._dataset_ready()
  assert 'с разметкой: 1' in owner.log_text.toPlainText()
+owner.close()
+""")
+
+    def test_add_yolo_button_merges_classes_enriches_labels_and_skips_duplicates(self):
+        self.gui("""
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+import yaml
+owner=DatasetPreparationWindow();owner.show()
+with TemporaryDirectory() as temporary:
+ root=Path(temporary)
+ first=fixture(root,'old');Path(first[1]).write_text('5 .5 .5 .5 .5\\n')
+ unknown=fixture(root,'unknown');Path(unknown[1]).unlink()
+ owner.images_folder=str(root)
+ owner._apply_loaded_pairs([first,(unknown[0],None)],0,'auto',class_names_from_yaml={5:'person'});wait_dataset(owner)
+ owner.class_table.cellWidget(0,4).setChecked(False)
+ incoming=root/'incoming';incoming.mkdir();new=fixture(incoming,'new')
+ Path(new[1]).write_text('0 .5 .5 .5 .5\\n1 .5 .5 .2 .2\\n')
+ Path(unknown[1]).write_text('0 .5 .5 .3 .3\\n')
+ data=incoming/'data.yaml'
+ data.write_text(yaml.safe_dump(dict(path=str(incoming),train=[new[0],unknown[0]],names=['car','person'])))
+ before=Path(new[1]).read_bytes()
+ with patch('ui.dataset_loader.source_dialogs.get_open_file',return_value=(str(data),'')):
+  owner.btn_add_yaml.click();wait_dataset(owner)
+ assert len(owner.pairs)==3,owner.pairs
+ assert owner.original_ids==[5,6],owner.original_ids
+ assert owner._source_yaml_path is None
+ by_image=dict(owner.pairs)
+ assert by_image[unknown[0]] is not None
+ assert Path(by_image[new[0]]).read_text().startswith('6 ')
+ assert '\\n5 ' in Path(by_image[new[0]]).read_text()
+ assert not owner.class_table.cellWidget(0,4).isChecked()
+ assert Path(first[1]).read_text().startswith('5 ')
+ assert Path(new[1]).read_bytes()==before
+ with patch('ui.dataset_loader.source_dialogs.get_open_file',return_value=(str(data),'')):
+  owner.btn_add_yaml.click();wait_dataset(owner)
+ assert len(owner.pairs)==3
+ assert owner._dataset_ready()
+ assert 'дополнена разметка: 1' in owner.log_text.toPlainText()
+ assert 'повторов пропущено: 2' in owner.log_text.toPlainText()
 owner.close()
 """)
 

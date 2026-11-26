@@ -81,7 +81,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     # ВЕРХНЯЯ ПАНЕЛЬ
     # ============================================================
     parent.dataset_source = DatasetSourceWidget(
-        ("folder", "labels", "yolo_yaml", "coco", "add_coco", "unet_yaml"),
+        ("folder", "labels", "yolo_yaml", "add_yolo_yaml", "coco", "add_coco", "unet_yaml"),
         types=(0, 1, 2),
         formats=True,
         profile="dataset",
@@ -91,6 +91,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.btn_load_yaml = parent.dataset_source.button("yolo_yaml")
     parent.btn_load_coco = parent.dataset_source.button("coco")
     parent.btn_add_coco = parent.dataset_source.button("add_coco")
+    parent.btn_add_yaml = parent.dataset_source.button("add_yolo_yaml")
     parent.dataset_type_combo = parent.dataset_source.type_combo
     parent.input_format_combo = parent.dataset_source.format_combo
     main_layout.addWidget(parent.dataset_source)
@@ -559,6 +560,7 @@ def setup_preparing_dataset_yaml_ui(parent):
     parent.btn_load_yaml.clicked.connect(parent.load_from_yaml)
     parent.btn_load_coco.clicked.connect(parent.load_from_coco)
     parent.btn_add_coco.clicked.connect(parent.add_from_coco)
+    parent.btn_add_yaml.clicked.connect(parent.add_from_yaml)
     parent.btn_load_unet.clicked.connect(parent.load_from_unet_yaml)
     parent.btn_output.clicked.connect(parent.select_output_folder)
 

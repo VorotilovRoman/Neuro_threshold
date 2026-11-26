@@ -173,6 +173,22 @@ class DatasetLoaderMixin:
     def _load_yolo_yaml_from_path(self, file_path):
         self._start_dataset_import('yolo', [file_path])
 
+    def add_from_yaml(self):
+        if self.pairs:
+            if not self._dataset_ready():
+                QMessageBox.warning(self, 'Добавление YOLO YAML', 'Дождитесь завершения проверки текущего набора.')
+                return
+            if self.dataset_type == 1:
+                QMessageBox.warning(self, 'Добавление YOLO YAML',
+                                    'К набору с индексными масками нельзя добавить TXT без преобразования разметки. Загрузите YOLO YAML отдельно.')
+                return
+        path, _ = source_dialogs.get_open_file(self, 'add_yolo_yaml')
+        if path:
+            if is_unet_yaml(path):
+                QMessageBox.warning(self, 'Добавление YOLO YAML', 'Выбран YAML с индексными масками. Здесь нужен YOLO YAML с TXT-разметкой.')
+                return
+            self._start_dataset_import('yolo', [path], replace=not bool(self.pairs))
+
     # ---------------- COCO ----------------
     def load_from_coco(self):
         self._handle_load_coco(replace=True)
@@ -232,25 +248,55 @@ class DatasetLoaderMixin:
 
     def _start_dataset_import(self, kind, paths, replace=True, options=None):
         from utils_new.import_export.catalog import DatasetImportJob
+        if not replace and self.pairs and (not self._dataset_ready() or self.dataset_type == 1):
+            QMessageBox.warning(self, 'Добавление датасета',
+                                'Дождитесь проверки текущего набора. Добавление TXT/COCO к набору индексных масок не поддерживается.')
+            return
         tasks = self._dataset_task_manager()
         tasks.invalidate()
         self._loading_source = True
         self._after_loading_state_changed()
         options = dict(options or {})
         base_pairs = [] if replace else list(self.pairs)
-        if kind == 'coco' and not replace:
-            options['existing_names'] = {self.class_table.item(row, 2).text(): int(self.class_table.item(row, 0).text())
+        base_root = self.images_folder
+        base_format = self.input_format
+        class_selection = {self.class_table.item(row, 2).text(): self.class_table.cellWidget(row, 4).isChecked()
+                           for row in range(self.class_table.rowCount())} if not replace else {}
+        if kind in ('coco', 'yolo') and not replace:
+            options['existing_names'] = {self.class_table.item(row, 2).text(): int(self.class_table.item(row, 1).text())
                                         for row in range(self.class_table.rowCount())}
+            if len(options['existing_names']) != self.class_table.rowCount():
+                self._loading_source = False
+                self._after_loading_state_changed()
+                self.log('Добавление отменено: в текущем наборе повторяются имена классов. Задайте уникальные имена.')
+                return
         def loaded(result):
             catalog = result['catalog']
             if not catalog.pairs:
                 self.log('В выбранном источнике не найдено снимков; текущий набор сохранён.')
                 return
             self._loading_source = False
+            merged = list(catalog.pairs)
+            if base_pairs:
+                merged = list(base_pairs)
+                positions = {os.path.normcase(os.path.realpath(pair[0])): index for index, pair in enumerate(merged)}
+                added = enriched = duplicates = 0
+                for pair in catalog.pairs:
+                    key = os.path.normcase(os.path.realpath(pair[0]))
+                    if key not in positions:
+                        positions[key] = len(merged)
+                        merged.append(pair)
+                        added += 1
+                    elif merged[positions[key]][1] is None and pair[1] is not None:
+                        merged[positions[key]] = pair
+                        enriched += 1
+                    else:
+                        duplicates += 1
+                self.log(f'Добавлено снимков: {added}; дополнена разметка: {enriched}; повторов пропущено: {duplicates}.')
             self._yaml_mode = kind not in ('folder', 'images')
             self._yaml_root = catalog.root
-            self._yaml_path = paths[0] if self._yaml_mode else None
-            self.images_folder = catalog.root
+            self._yaml_path = paths[0] if self._yaml_mode and replace else None
+            self.images_folder = base_root if base_pairs else catalog.root
             if kind == 'folder':
                 pass
             elif kind == 'unet':
@@ -258,10 +304,14 @@ class DatasetLoaderMixin:
                 self.mask_pixel_offset_in = 0
             else:
                 self.labels_folder, self.masks_folder = catalog.root, None
-            self._apply_loaded_pairs(base_pairs + catalog.pairs, catalog.dataset_type, catalog.input_format,
+            self._apply_loaded_pairs(merged, catalog.dataset_type, base_format if base_pairs else catalog.input_format,
                 class_names_from_yaml=catalog.class_names,
                 source_label=source_dialogs.display_dataset_source(paths[0]) if self._yaml_mode else catalog.root,
-                source_yaml=paths[0] if self._yaml_mode else None)
+                source_yaml=paths[0] if self._yaml_mode and replace else None)
+            for row in range(self.class_table.rowCount()):
+                name = self.class_table.item(row, 2).text()
+                if name in class_selection:
+                    self.class_table.cellWidget(row, 4).setChecked(class_selection[name])
         tasks.start('load', DatasetImportJob, kind, paths, options,
                     label='Загрузка списка файлов / разметки…', finished=loaded)
 
