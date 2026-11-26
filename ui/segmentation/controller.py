@@ -59,7 +59,7 @@ def schedule(owner, stage="prediction"):
 def invalidate_prediction(owner):
     owner._pending_apply = False
     owner.jobs.invalidate()
-    for name in ("mask", "prediction_mask"):
+    for name in ("mask", "prediction_mask", "model_prediction", "processed_prediction"):
         if hasattr(owner, name):
             setattr(owner, name, None)
     owner._raw_signature = None

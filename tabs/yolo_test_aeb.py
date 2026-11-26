@@ -563,6 +563,8 @@ class YoloInspectWindow(QMainWindow):
             from utils_new.import_export.model_load import load_yolo as YOLO
 
             self.model = YOLO(path)
+            from ui.DL_predict_settings import apply_yolo_export_metadata
+            apply_yolo_export_metadata(self.model.neuro_metadata, self.conf_spin, self.iou_spin, self.imgsz_spin)
             self.model_edit.setText(path)
             self.log(f"[YOLO] {path}")
             self.log(f"[YOLO классы] {dict(self.model.names)}")

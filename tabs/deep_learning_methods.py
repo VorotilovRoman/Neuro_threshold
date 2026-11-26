@@ -144,13 +144,15 @@ class DeepLearningWindow(QMainWindow):
         if 'encoder' in metadata:
             encoder = metadata['encoder']
             idx = self.unet_settings._encoder.findText(encoder)
-            if idx >= 0:
-                self.unet_settings._encoder.setCurrentIndex(idx)
+            if idx < 0:
+                self.unet_settings._encoder.addItem(encoder)
+            self.unet_settings._encoder.setCurrentText(encoder)
         if 'input_size' in metadata:
             input_size = str(metadata['input_size'])
             idx = self.unet_settings._input_size.findText(input_size)
-            if idx >= 0:
-                self.unet_settings._input_size.setCurrentIndex(idx)
+            if idx < 0:
+                self.unet_settings._input_size.addItem(input_size)
+            self.unet_settings._input_size.setCurrentText(input_size)
 
         # Override-поля — через публичное API виджета
         diag = self.unet_settings.apply_metadata(metadata)
@@ -444,9 +446,18 @@ class DeepLearningWindow(QMainWindow):
         segmentation_presentation.display(self)
 
     def _postprocess_mask(self, raw, frame):
+        prediction = getattr(self, 'model_prediction', None)
+        if not self.sam_host.active and prediction is not None and getattr(self, '_prediction_frame_key', None) == frame.key:
+            self.processed_prediction = prediction.postprocessed(
+                self.morphology_widget.get_steps(), self.morphology_widget.kernel_shape())
+            return self.processed_prediction.combined_mask()
         return self.sam_host.postprocess(raw, frame)
 
     def _result_objects(self):
+        if not self.sam_host.active and not self.invert_checkbox.isChecked():
+            prediction = getattr(self, 'processed_prediction', None)
+            if prediction is not None and getattr(self, '_prediction_frame_key', None) == self._current_frame.key:
+                return prediction.annotations(self.original_image, self.draw_combo.currentData(), self.hull_checkbox.isChecked())
         return self.sam_host.objects()
 
 

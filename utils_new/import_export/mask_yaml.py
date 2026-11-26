@@ -315,4 +315,5 @@ def load_training_sources(source, default_num_classes=2):
         num_classes=nc,
         root=str(root),
         class_names=cfg.get("class_names", []),
+        mask_class_offset=_offset,
     )

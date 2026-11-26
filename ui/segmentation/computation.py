@@ -40,6 +40,18 @@ def accept_mask(owner, attribute, mask, shape):
     owner.display_current_image()
 
 
+def accept_dl(owner, prediction, frame):
+    from utils_new.segmentation.result import ModelPrediction
+
+    owner.model_prediction = prediction if isinstance(prediction, ModelPrediction) else None
+    owner.processed_prediction = None
+    owner._prediction_frame_key = frame.key
+    mask = prediction.combined_mask() if owner.model_prediction is not None else prediction
+    if owner.model_prediction is not None and prediction.mask_kind == 'rasterized_geometry':
+        owner.log('[MODEL] Показан растр BBox/OBB, а не пиксельная сегментация. Segment из бокса — геометрический контур рамки.')
+    accept_mask(owner, 'prediction_mask', mask, frame.image.shape)
+
+
 @gui_action
 def run_interactive(owner):
     frame = frame_for(owner)
@@ -137,7 +149,7 @@ def run_dl(owner):
         lambda cancel: operations.predict_dl(
             model, image, parameters, overrides, cancel
         ),
-        lambda value: accept_mask(owner, "prediction_mask", value, image.shape),
+        lambda value: accept_dl(owner, value, frame),
     )
 
 
@@ -330,6 +342,8 @@ def load_dl(owner, name):
         owner.ignore_ui_changes = True
         try:
             metadata = getattr(model, "metadata", None)
+            if metadata and name == 'YOLO-seg':
+                owner.yolo_settings.apply_metadata(metadata)
             if metadata and name == "ONNX / NCNN":
                 owner.custom_settings._threshold.setValue(
                     metadata.get("threshold", 0.5)

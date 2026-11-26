@@ -181,7 +181,8 @@ def predict_dl(model, image, parameters, overrides, cancel):
     metadata = getattr(model, "metadata", None)
     if metadata is not None:
         metadata.update(overrides)
-    mask = model.predict(image, **parameters)
+    predict = getattr(model, 'predict_result', model.predict)
+    mask = predict(image, **parameters)
     checkpoint(cancel)
     return mask
 

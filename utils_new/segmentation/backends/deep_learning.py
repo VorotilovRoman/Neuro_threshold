@@ -43,6 +43,11 @@ class BaseSegmentor:
     def predict(self, image, **kwargs):
         raise NotImplementedError
 
+    def predict_result(self, image, **kwargs):
+        from utils_new.segmentation.result import ModelPrediction
+
+        return ModelPrediction.semantic(self.predict(image, **kwargs), self.metadata)
+
 
 class TorchSegmentor(BaseSegmentor):
     """Базовый класс для PyTorch моделей."""
@@ -180,7 +185,7 @@ class TorchSegmentor(BaseSegmentor):
 class UNetSegmentor(TorchSegmentor):
     """
     Сегментатор U-Net с использованием библиотеки segmentation_models_pytorch.
-    При загрузке требует файл *_meta.json рядом с весами.
+    Новые checkpoints содержат метаданные; raw state_dict требует *_meta.json.
 
     Поддерживает:
         num_classes = 1  → бинарная через sigmoid + threshold
@@ -216,34 +221,17 @@ class UNetSegmentor(TorchSegmentor):
         if not weights_path or not os.path.exists(weights_path):
             raise FileNotFoundError(f"Файл модели U-Net не найден: {weights_path}")
 
-        # Поиск метафайла
-        meta_path = os.path.splitext(weights_path)[0] + '_meta.json'
-        if not os.path.exists(meta_path):
-            raise ValueError(
-                f"Файл метаданных не найден: {meta_path}\n"
-                "Для загрузки модели U-Net необходим файл *_meta.json в той же папке.\n"
-                "Формат файла:\n"
-                "{\n"
-                '  "encoder": "resnet50",                    # имя энкодера\n'
-                '  "input_size": 512,                        # размер входа\n'
-                '  "num_classes": 2,                         # число классов, включая фон\n'
-                '  "decoder_channels": [256,128,64,32,16],   # опционально\n'
-                '  "normalize": false,                       # ImageNet-нормализация\n'
-                '  "resize_mode": "hard",                    # hard | keep_aspect_pad | random_crop\n'
-                '  "inference_resize_mode": "keep_aspect_pad"  # только если обучение шло с random_crop\n'
-                "}\n"
-                "Убедитесь, что метафайл создан при обучении модели."
-            )
+        from utils_new.import_export.training import read_semantic_checkpoint
 
-        with open(meta_path, 'r', encoding='utf-8') as f:
-            meta = json.load(f)
-
+        state_dict, meta = read_semantic_checkpoint(weights_path)
         # --- Архитектурные параметры ---
         encoder_name = meta.get('encoder')
         input_size_val = meta.get('input_size')
         num_classes = meta.get('num_classes', 1)
         decoder_channels = meta.get('decoder_channels', (256, 128, 64, 32, 16))
         architecture = meta.get('architecture', 'unet').lower()
+        if architecture not in ('unet', 'unet++', 'unetplusplus'):
+            raise ValueError(f'Неизвестная архитектура U-Net: {architecture}')
 
         if not encoder_name or not input_size_val:
             raise ValueError(
@@ -271,7 +259,6 @@ class UNetSegmentor(TorchSegmentor):
             )
 
         # --- Веса ---
-        state_dict = torch.load(weights_path, map_location='cpu')
 
         cleaned = {k: v for k, v in state_dict.items()
                    if not k.endswith('num_batches_tracked')}
@@ -292,6 +279,7 @@ class UNetSegmentor(TorchSegmentor):
         # «параметр известен из обучения» vs «параметр неизвестен,
         # пользователь должен выбрать сам».
         self.metadata = {
+            **meta,
             'model_type': 'U-Net++' if architecture in ('unet++', 'unetplusplus') else 'U-Net',
             'architecture': architecture,
             'encoder': encoder_name,
@@ -400,8 +388,7 @@ class DeepLabV3Segmentor(TorchSegmentor):
     Поддерживает:
         num_classes = 1  → sigmoid + threshold
         num_classes = 2  → softmax[:, 1] + threshold
-                           (или sigmoid+threshold, если output_activation='sigmoid')
-        num_classes > 2  → softmax + argmax (класс масштабируется в 0..255)
+        num_classes > 2  → argmax, целые ID классов сохраняются без масштабирования
 
     Препроцессинг:
         normalize             — ImageNet-нормализация (bool)
@@ -436,30 +423,9 @@ class DeepLabV3Segmentor(TorchSegmentor):
         if not weights_path or not os.path.exists(weights_path):
             raise FileNotFoundError(f"Файл модели DeepLab не найден: {weights_path}")
 
-        # ---------- Поиск и чтение метафайла ----------
-        meta_path = os.path.splitext(weights_path)[0] + '_meta.json'
-        if not os.path.exists(meta_path):
-            raise ValueError(
-                f"Файл метаданных не найден: {meta_path}\n"
-                "Для загрузки DeepLabV3/V3+ необходим *_meta.json в той же папке.\n"
-                "Формат файла:\n"
-                "{\n"
-                '  "architecture": "deeplabv3plus",          # или "deeplabv3"\n'
-                '  "backbone": "resnet50",\n'
-                '  "output_stride": 16,                      # 8 | 16 | 32\n'
-                '  "atrous_rates": [6, 12, 18],              # опционально\n'
-                '  "input_size": 513,                        # 513 (OS=16) | 1025 (OS=8)\n'
-                '  "num_classes": 21,\n'
-                '  "output_activation": "argmax",           # argmax | softmax | sigmoid\n'
-                '  "normalize": true,\n'
-                '  "resize_mode": "hard"\n'
-                "}\n"
-                "Убедитесь, что метафайл создан при обучении модели."
-            )
+        from utils_new.import_export.training import read_semantic_checkpoint
 
-        with open(meta_path, 'r', encoding='utf-8') as f:
-            meta = json.load(f)
-
+        state_dict, meta = read_semantic_checkpoint(weights_path)
         # ---------- Архитектурные параметры ----------
         architecture = str(meta.get('architecture', 'deeplabv3plus')).lower()
         if architecture in ('deeplabv3plus', 'deeplabv3+'):
@@ -467,9 +433,7 @@ class DeepLabV3Segmentor(TorchSegmentor):
         elif architecture == 'deeplabv3':
             architecture = 'deeplabv3'
         else:
-            _log(f"[DeepLab] Неизвестная архитектура '{architecture}', "
-                 f"использую deeplabv3plus")
-            architecture = 'deeplabv3plus'
+            raise ValueError(f"Неизвестная архитектура DeepLab: {architecture}")
 
         # Backbone: приоритет — meta, затем аргумент, затем дефолт
         backbone_name = meta.get('backbone') or backbone or 'resnet50'
@@ -531,7 +495,6 @@ class DeepLabV3Segmentor(TorchSegmentor):
             )
 
         # ---------- Загрузка весов ----------
-        state_dict = torch.load(weights_path, map_location='cpu')
         cleaned = {k: v for k, v in state_dict.items()
                    if not k.endswith('num_batches_tracked')}
         missing, unexpected = self.model.load_state_dict(cleaned, strict=False)
@@ -545,6 +508,7 @@ class DeepLabV3Segmentor(TorchSegmentor):
 
         # ---------- Формируем metadata ----------
         self.metadata = {
+            **meta,
             'model_type': 'DeepLabV3+' if architecture == 'deeplabv3plus' else 'DeepLabV3',
             'architecture': architecture,
             'backbone': backbone_name,
@@ -592,7 +556,6 @@ class DeepLabV3Segmentor(TorchSegmentor):
         Логика по num_classes:
             1 → sigmoid + threshold
             2 → softmax[:, 1] + threshold
-                (или sigmoid[:, 1] + threshold при output_activation='sigmoid')
            >2 → argmax, индексы классов сохраняются
 
         Параметр threshold игнорируется для num_classes > 2.
@@ -692,6 +655,7 @@ class YOLOSegmentor(BaseSegmentor):
             'device': self.device,
             'task': getattr(self.model, 'task', 'unknown'),
         }
+        self.metadata.update(getattr(self.model, 'neuro_metadata', {}))
         _log(f"[YOLO] Модель загружена, task={self.metadata['task']}, "
              f"устройство по умолчанию: {self.device}")
 
@@ -711,24 +675,64 @@ class YOLOSegmentor(BaseSegmentor):
         )
         return roi_mask
 
+    def _infer(self, image, conf=0.25, iou=0.45, imgsz=640, save=False):
+        device_arg = None if self.device == 'auto' else self.device
+        return self.model.predict(image, conf=conf, iou=iou, imgsz=imgsz, save=save,
+                                  verbose=False, retina_masks=True, device=device_arg)[0]
+
+    def predict_result(self, image, conf=0.25, iou=0.45, imgsz=640, save=False, allow_box_otsu=False):
+        from utils_new.annotations.adapters import from_ultralytics_result
+        from utils_new.annotations.masks import annotation_binary_mask
+        from utils_new.annotations.model import ImageSize
+        from utils_new.segmentation.result import InferenceObject, ModelPrediction
+
+        if self.metadata.get('task') == 'classify':
+            raise ValueError('Классификатор YOLO не предсказывает маски или геометрию объектов.')
+        result = self._infer(image, conf, iou, imgsz, save)
+        size = ImageSize(image.shape[1], image.shape[0])
+        annotations = from_ultralytics_result(result, size)
+        masks = getattr(result, 'masks', None)
+        if masks is not None and len(masks):
+            values = masks.data.cpu().numpy() if hasattr(masks.data, 'cpu') else np.asarray(masks.data)
+            if values.shape[1:] != image.shape[:2]:
+                import torch
+                from ultralytics.utils.ops import scale_masks
+
+                values = scale_masks(torch.as_tensor(values)[None], image.shape[:2])[0].numpy()
+            boxes = result.boxes
+            classes = boxes.cls.cpu().numpy() if hasattr(boxes.cls, 'cpu') else np.asarray(boxes.cls)
+            if values.ndim != 3 or len(classes) != len(values) or not np.isfinite(values).all():
+                raise ValueError('YOLO: число масок/классов не совпадает или маски содержат NaN/Inf.')
+            entries = tuple(InferenceObject(int(class_id), (mask > .5).astype(np.uint8) * 255)
+                            for class_id, mask in zip(classes, values))
+            return ModelPrediction(image.shape[:2], entries)
+        entries = []
+        for annotation in annotations:
+            mask = annotation_binary_mask(annotation, size) * 255
+            native = annotation
+            if allow_box_otsu:
+                ys, xs = np.nonzero(mask)
+                if not len(xs):
+                    continue
+                x0, y0, x1, y1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+                crop = self._otsu_inside_roi(image, x0, y0, x1, y1)
+                if crop is None:
+                    continue
+                filtered = np.zeros_like(mask)
+                filtered[y0:y1, x0:x1] = crop
+                mask &= filtered
+                native = None
+            entries.append(InferenceObject(annotation.class_id, mask, native))
+        return ModelPrediction(image.shape[:2], tuple(entries),
+                               mask_kind='otsu_hybrid' if allow_box_otsu else 'rasterized_geometry')
+
     def predict(self, image, conf=0.25, iou=0.45, imgsz=640, save=False, allow_box_otsu=False):
         start_time = time.time()
         original_h, original_w = image.shape[:2]
         _log(f"[YOLO predict] Начало, изображение ({original_h}, {original_w}), "
              f"conf={conf}, iou={iou}, imgsz={imgsz}, save={save}")
 
-        device_arg = None if self.device == 'auto' else self.device
-        results = self.model.predict(
-            image,
-            conf=conf,
-            iou=iou,
-            imgsz=imgsz,
-            save=save,
-            verbose=False,
-            retina_masks=True,  # masks in original coordinates, without letterbox padding
-            device=device_arg,
-        )
-        r = results[0]
+        r = self._infer(image, conf, iou, imgsz, save)
         combined_mask = np.zeros((original_h, original_w), dtype=np.uint8)
 
         # ============== 1. SEGMENTATION ==============
@@ -855,12 +859,21 @@ class ONNXSegmentor(BaseSegmentor):
     The sidecar <stem>_meta.json specifies preprocessing and output semantics;
     input_size may supply dynamic spatial dimensions. No output-type guessing.
     """
-    def _load_metadata(self, model_path):
+    def _load_metadata(self, model_path, embedded=None):
         meta_path = os.path.splitext(model_path)[0] + '_meta.json'
-        if not os.path.isfile(meta_path):
+        if not os.path.isfile(meta_path) and not embedded:
             raise ValueError("Для ONNX / NCNN нужен файл <имя>_meta.json: input_size, normalize, resize_mode, output_kind (logits/probabilities/labels). Экспорт проекта создаёт метаданные автоматически.")
-        with open(meta_path, encoding='utf-8') as stream:
-            self.metadata = json.load(stream)
+        sidecar = {}
+        if os.path.isfile(meta_path):
+            with open(meta_path, encoding='utf-8') as stream:
+                sidecar = json.load(stream)
+        if not isinstance(sidecar, dict) or embedded is not None and not isinstance(embedded, dict):
+            raise ValueError('Метаданные модели должны быть JSON-объектом.')
+        embedded = embedded or {}
+        for key in ('normalize', 'resize_mode', 'input_size', 'num_classes', 'output_kind', 'annotation_class_offset'):
+            if key in embedded and key in sidecar and embedded[key] != sidecar[key]:
+                raise ValueError(f'JSON не соответствует встроенным метаданным ONNX: {key}')
+        self.metadata = dict(embedded, **sidecar)
         if not isinstance(self.metadata, dict):
             raise ValueError("Метаданные модели должны быть JSON-объектом.")
         required = {'input_size', 'normalize', 'resize_mode'}
@@ -889,8 +902,9 @@ class ONNXSegmentor(BaseSegmentor):
             raise ImportError("onnxruntime is not installed")
         import onnxruntime as ort
 
-        self._load_metadata(model_path)
         self.session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+        encoded = self.session.get_modelmeta().custom_metadata_map.get('neuro_semantic')
+        self._load_metadata(model_path, json.loads(encoded) if encoded else None)
         inputs = self.session.get_inputs()
         if len(inputs) != 1 or len(inputs[0].shape) != 4 or inputs[0].type != 'tensor(float)':
             raise ValueError("Поддерживается один вход NCHW float32; для другой модели нужен отдельный адаптер.")
@@ -899,6 +913,12 @@ class ONNXSegmentor(BaseSegmentor):
             raise ValueError("ONNX: нужен batch=1 (или динамический) и 3 канала RGB.")
         if len(self.session.get_outputs()) != 1:
             raise ValueError("Ожидается один выход семантической сегментации.")
+        output_shape = self.session.get_outputs()[0].shape
+        if self.metadata['output_kind'] != 'labels' and len(output_shape) == 4 and isinstance(output_shape[1], int):
+            channels = output_shape[1]
+            if 'num_classes' in self.metadata and self.metadata['num_classes'] != channels:
+                raise ValueError('ONNX: num_classes в метаданных отличается от числа каналов выхода.')
+            self.metadata['num_classes'] = channels
         self.model_path = model_path
 
     def _input_shape(self):

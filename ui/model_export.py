@@ -5,7 +5,7 @@ import sys
 import tempfile
 
 from PyQt5.QtCore import QProcess, QProcessEnvironment, QTimer, pyqtSignal
-from PyQt5.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                             QProgressBar, QPushButton, QSpinBox, QTextBrowser, QVBoxLayout, QWidget)
 
 from path_setup import get_project_root
@@ -41,7 +41,7 @@ class ModelExportWidget(QWidget):
         form.addRow("Архитектура SAM:", self.sam_key)
         self.sam_label = form.labelForField(self.sam_key)
         self.path = QLineEdit()
-        self.path.setPlaceholderText("Локальные веса; U-Net/DeepLab: рядом *_meta.json")
+        self.path.setPlaceholderText("Локальные веса; raw U-Net/DeepLab требуют *_meta.json")
         self.browse = QPushButton("Веса…")
         self.load = QPushButton("Загрузить модель")
         row = QHBoxLayout()
@@ -55,6 +55,34 @@ class ModelExportWidget(QWidget):
         self.size.setValue(640)
         self.size.setToolTip("Квадратный вход, batch=1. Для YOLO и NCNN размер должен быть кратен 32. NCNN фиксирует этот размер.")
         form.addRow("Вход, px (YOLO/NCNN: кратно 32):", self.size)
+        row = QHBoxLayout()
+        self.opset = QComboBox()
+        self.opset.addItems(['13', '16', '18'])
+        self.opset.setCurrentText('18')
+        self.dynamic = QCheckBox('Динамические H/W')
+        self.nms = QCheckBox('Встроить NMS (YOLO)')
+        self.nms.setToolTip('Только ONNX. Conf, IoU и max_det фиксируются в графе. Для гибкой настройки оставьте NMS в runtime.')
+        row.addWidget(QLabel('opset:'))
+        row.addWidget(self.opset)
+        row.addWidget(self.dynamic)
+        row.addWidget(self.nms)
+        form.addRow('ONNX:', row)
+        row = QHBoxLayout()
+        self.conf, self.iou, self.threshold = (QDoubleSpinBox() for _ in range(3))
+        for widget, value in ((self.conf, .25), (self.iou, .45), (self.threshold, .5)):
+            widget.setRange(0, 1)
+            widget.setDecimals(3)
+            widget.setSingleStep(.05)
+            widget.setValue(value)
+        self.max_det = QSpinBox()
+        self.max_det.setRange(1, 3000)
+        self.max_det.setValue(300)
+        for caption, widget in (('Conf', self.conf), ('IoU', self.iou), ('max_det', self.max_det)):
+            row.addWidget(QLabel(caption))
+            row.addWidget(widget)
+        form.addRow('Встроенный NMS:', row)
+        self.threshold.setToolTip('Порог бинарной семантической маски сохраняется в JSON; логиты сети не меняются. Для >2 классов применяется argmax.')
+        form.addRow('Порог маски (U-Net/DeepLab):', self.threshold)
         row = QHBoxLayout()
         self.output = QLineEdit(str(Path(get_project_root()) / "models" / "exports"))
         self.output_browse = sources.make_source_button("model_export_dir", self)
@@ -89,6 +117,7 @@ class ModelExportWidget(QWidget):
         self.load.clicked.connect(self.inspect)
         self.output_browse.clicked.connect(self.choose_output)
         self.size.valueChanged.connect(self._controls)
+        self.nms.toggled.connect(self._controls)
         self.invalidate()
 
     def invalidate(self, *_):
@@ -97,13 +126,22 @@ class ModelExportWidget(QWidget):
         self.info.setPlainText("Выберите и загрузите модель для просмотра параметров и доступных форматов.")
         self.sam_key.setVisible(self.kind.currentText() == "SAM")
         self.sam_label.setVisible(self.kind.currentText() == "SAM")
+        if self.kind.currentText() != getattr(self, '_last_kind', None):
+            self._last_kind = self.kind.currentText()
+            self.dynamic.setChecked(self._last_kind != 'YOLO')
+            if self._last_kind != 'YOLO':
+                self.nms.setChecked(False)
         self._controls()
 
     def _controls(self):
         busy = self.process is not None
         for widget in (self.kind, self.sam_key, self.path, self.browse, self.load,
-                       self.size, self.output, self.output_browse):
+                       self.size, self.output, self.output_browse, self.opset, self.dynamic):
             widget.setEnabled(not busy)
+        self.nms.setEnabled(not busy and self.kind.currentText() == 'YOLO')
+        for widget in (self.conf, self.iou, self.max_det):
+            widget.setEnabled(not busy and self.kind.currentText() == 'YOLO' and self.nms.isChecked())
+        self.threshold.setEnabled(not busy and self.kind.currentText() in ('U-Net', 'DeepLabV3+'))
         self.stop.setEnabled(busy)
         for format, button in self.buttons.items():
             reason = self.loaded["capabilities"][format] if self.loaded else "Сначала загрузите исходную модель."
@@ -111,6 +149,8 @@ class ModelExportWidget(QWidget):
                 reason = GGUF_UNSUPPORTED
             elif self.loaded and (format == 'NCNN' or self.kind.currentText() == 'YOLO') and self.size.value() % 32:
                 reason = 'Укажите размер входа, кратный 32 (например 512).'
+            elif format == 'NCNN' and self.nms.isChecked():
+                reason = 'NCNN выполняет NMS в runtime. Снимите флажок встроенного NMS.'
             button.setEnabled(not busy and self.loaded is not None and not reason)
             button.setToolTip(reason or "Экспорт и проверка совпадения выходов на CPU.")
 
@@ -149,7 +189,10 @@ class ModelExportWidget(QWidget):
             self.status.setText(str(error))
             return
         self._start(dict(self._request(), operation="export", format=format,
-                         output_dir=str(output.resolve()), size=self.size.value()))
+                         output_dir=str(output.resolve()), size=self.size.value(),
+                         options=dict(opset=int(self.opset.currentText()), dynamic=self.dynamic.isChecked(),
+                                      nms=self.nms.isChecked(), conf=self.conf.value(), iou=self.iou.value(),
+                                      max_det=self.max_det.value(), threshold=self.threshold.value())))
 
     def _start(self, request):
         if self.process is not None:
@@ -224,7 +267,10 @@ class ModelExportWidget(QWidget):
                 captions = dict(model_type='Модель', task='Задача', model_key='Архитектура SAM',
                                 architecture='Архитектура', encoder='Энкодер', backbone='Backbone',
                                 input_size='Размер входа', num_classes='Классов (с фоном)',
-                                normalize='Нормализация ImageNet', resize_mode='Масштабирование', names='Классы')
+                                normalize='Нормализация ImageNet', resize_mode='Масштабирование', names='Классы',
+                                class_names='Имена pixel ID', epoch='Эпоха checkpoint',
+                                validation_metrics='Метрики валидации', metrics='Метрики SAM',
+                                export_parameters='Параметры экспорта')
                 for key, caption in captions.items():
                     if key in metadata:
                         value = metadata[key]
@@ -241,6 +287,7 @@ class ModelExportWidget(QWidget):
                 size = self.loaded['metadata'].get('input_size')
                 if isinstance(size, int):
                     self.size.setValue(size)
+                self.threshold.setValue(self.loaded['metadata'].get('threshold', .5))
                 self.load.setStyleSheet('background-color: #b7e4c7; color: #163b24;')
                 self.status.setText("Модель загружена и проверена на CPU. Доступные форматы указаны ниже.")
             else:

@@ -15,12 +15,12 @@ from utils_new.dataset.segmentation import ImageMaskDataset
 from utils_new.import_export.mask_yaml import load_training_sources
 from utils_new.import_export.training import (
     read_model_meta,
+    read_semantic_checkpoint,
     read_weights,
     save_weights,
     save_model_meta,
     save_training_history,
     save_training_reports,
-    export_semantic_onnx,
 )
 from utils_new.import_export.json_objects import write_json_atomic
 from utils_new.segmentation.model_metrics import (
@@ -298,7 +298,7 @@ def run_training(params, kind, *, stop=None, log=print):
     cfg = semantic_config(params, kind)
     stop = stop or StopRequest()
     stop_check(stop)
-    model_meta = read_model_meta(cfg["model_path"]) if cfg["model_path"] else {}
+    model_meta = read_semantic_checkpoint(cfg['model_path'], require_metadata=False)[1] if cfg['model_path'] else {}
     for key in (
         "architecture",
         "encoder",
@@ -470,6 +470,8 @@ def run_training(params, kind, *, stop=None, log=print):
         device_used=str(device),
         output_activation="sigmoid" if cfg["num_classes"] == 1 else "softmax",
         preprocessing_version="semantic-opencv-v1",
+        class_names=data.get('class_names', []),
+        annotation_class_offset=data.get('mask_class_offset', 1),
         image_resize_interpolation="linear",
         output_kind="logits",
     )
@@ -633,14 +635,7 @@ def run_training(params, kind, *, stop=None, log=print):
                 )
             except Exception as error:
                 log(f"[REPORT][WARNING] Веса сохранены; отчёт не построен: {error}")
-        if cfg["export_onnx"]:
-            stop_check(stop)
-            export_semantic_onnx(
-                model,
-                dict(selected_meta, source_weights=selected.name),
-                weights / "model.onnx",
-                log=log,
-            )
+        log("[MODEL] Для экспорта весов используйте вкладку «Экспорт модели».")
         log("SUCCESS")
         return 0
     except CancelledError:

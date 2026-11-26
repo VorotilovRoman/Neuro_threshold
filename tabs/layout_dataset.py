@@ -959,6 +959,8 @@ class Labeler(QMainWindow):
             return
         try:
             self.auto_model = YOLO(path)
+            from ui.DL_predict_settings import apply_yolo_export_metadata
+            apply_yolo_export_metadata(self.auto_model.neuro_metadata, self.auto_conf_spin, self.auto_iou_spin, self.auto_imgsz_spin)
             self.auto_model_edit.setText(path)
 
             task = getattr(self.auto_model, "task", "unknown")

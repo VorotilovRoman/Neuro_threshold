@@ -14,6 +14,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from utils_new.training import yolo as worker
+from utils_new.import_export import dataset_sources  # Load native image modules before sys.modules mocking.
 from utils_new.configuration.training import is_standard_yolo_model, build_train_args
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,13 +37,13 @@ class YoloWorkerTests(unittest.TestCase):
             "imgsz": 1280,
             "epochs": 4,
             "device": "auto",
-            "export_onnx": False,
             "plots": False,
         }
         self.models = []
         self.error_stage = None
         self.failure = RuntimeError("CUDA out of memory: original failure")
         self.stop = False
+        self.distinct_epochs = False
         self.task = "detect"
         self.module = ModuleType("ultralytics")
         self.module.__version__ = "worker-test"
@@ -91,6 +92,14 @@ class YoloWorkerTests(unittest.TestCase):
                 (self.run_dir / "weights").mkdir(parents=True)
                 for name in ("best.pt", "last.pt"):
                     (self.run_dir / "weights" / name).write_bytes(b"checkpoint")
+                self.trainer.fitness = self.trainer.best_fitness = .9
+                self.trainer.metrics = dict(score=.9)
+                self.callbacks['on_model_save'](self.trainer)
+                if owner.distinct_epochs:
+                    self.trainer.epoch = 1
+                    self.trainer.fitness = .4
+                    self.trainer.metrics = dict(score=.4)
+                    self.callbacks['on_model_save'](self.trainer)
                 # Real train() can return metrics without a useful save_dir.
                 return SimpleNamespace()
 
@@ -230,24 +239,34 @@ class YoloWorkerTests(unittest.TestCase):
         self.assertEqual(self.models[-1].calls["train"]["workers"], 0)
         self.assertEqual(self.models[-1].calls["train"]["data"], str(self.data))
 
-    def test_export_failure_is_optional_and_original_traceback_is_available(self):
+    def test_training_does_not_export_even_with_old_parameter(self):
         self.error_stage = "export"
         status, output = self.run_worker(dict(self.params, export_onnx=True))
         self.assertEqual(status, 0, output)
-        self.assertIn("[EXPORT][WARNING]", output)
-        self.assertIn("export test failure", output)
+        self.assertNotIn('export', self.models[-1].calls)
+        self.assertIn('Экспорт модели', output)
         self.assertNotIn("UnboundLocalError", output)
         self.assertIn("SUCCESS", output)
 
-    def test_export_uses_cpu_and_real_task(self):
+    def test_best_and_last_sidecars_keep_their_own_epoch_metrics(self):
+        self.distinct_epochs = True
+        status, output = self.run_worker()
+        self.assertEqual(status, 0, output)
+        directory = self.models[-1].run_dir / 'weights'
+        best = json.loads((directory/'best_meta.json').read_text())
+        last = json.loads((directory/'last_meta.json').read_text())
+        self.assertEqual((best['epoch'], last['epoch']), (1, 2))
+        self.assertEqual((best['epoch_metrics']['score'],last['epoch_metrics']['score']), (.9, .4))
+        self.assertIn('validation_metrics', best)
+        self.assertNotIn('validation_metrics', last)
+
+    def test_obb_task_metadata_survives_without_export(self):
         self.task = "obb"
         status, output = self.run_worker(dict(self.params, export_onnx=True))
         self.assertEqual(status, 0, output)
         model = self.models[-1]
-        self.assertEqual(model.calls["export"]["device"], "cpu")
-        self.assertEqual(model.calls["export"]["batch"], 1)
-        self.assertFalse(model.calls["export"]["simplify"])
-        path = model.run_dir / "weights" / "best_onnx_meta.json"
+        self.assertNotIn('export', model.calls)
+        path = model.run_dir / "weights" / "best_meta.json"
         self.assertEqual(json.loads(path.read_text())["task"], "obb")
 
     def test_invalid_parameters_fail_before_loading_model(self):

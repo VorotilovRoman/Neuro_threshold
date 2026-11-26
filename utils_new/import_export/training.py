@@ -39,15 +39,19 @@ def save_weights(path, model_or_state, metadata):
     )
     state = {key: value.detach().cpu().clone() for key, value in state.items()}
     with atomic_path(path) as temporary:
-        torch.save(state, temporary)
+        torch.save(dict(format='neuro-semantic-v1', state_dict=state, metadata=json_values(metadata)), temporary)
     save_model_meta(metadata, path)
 
 
-def read_weights(path):
+def read_weights(path, *, with_metadata=False):
     import torch
 
     state = torch.load(path, map_location="cpu", weights_only=True)
+    metadata = {}
     if isinstance(state, dict) and "state_dict" in state:
+        metadata = state.get('metadata', {})
+        if not isinstance(metadata, dict):
+            raise ValueError('Встроенные метаданные checkpoint должны быть JSON-объектом.')
         state = state["state_dict"]
     if (
         not isinstance(state, dict)
@@ -55,7 +59,30 @@ def read_weights(path):
         or not all(isinstance(value, torch.Tensor) for value in state.values())
     ):
         raise ValueError(f"Ожидается state_dict сегментации: {path}")
-    return state
+    return (state, metadata) if with_metadata else state
+
+
+def read_semantic_checkpoint(path, *, require_metadata=True):
+    """New checkpoints are self-contained; raw state_dict requires its sidecar."""
+    state, embedded = read_weights(path, with_metadata=True)
+    sidecar = read_model_meta(path)
+    critical = ('architecture', 'encoder', 'backbone', 'num_classes', 'decoder_channels',
+                'output_stride', 'atrous_rates', 'input_size', 'normalize', 'resize_mode',
+                'inference_resize_mode', 'mask_class_offset', 'annotation_class_offset')
+    conflicts = [key for key in critical if key in sidecar and key in embedded and sidecar[key] != embedded[key]]
+    if conflicts:
+        raise ValueError(f'JSON не соответствует встроенным метаданным весов: {conflicts}')
+    metadata = dict(embedded, **sidecar)
+    if not metadata and require_metadata:
+        raise ValueError('У raw state_dict нет архитектуры и предобработки. Нужен *_meta.json от обучения. Новые checkpoints проекта содержат метаданные внутри весов.')
+    if 'normalize' in metadata and type(metadata['normalize']) is not bool:
+        raise ValueError('normalize в метаданных должен быть true или false.')
+    for key in ('input_size', 'num_classes'):
+        if key in metadata and (type(metadata[key]) is not int or metadata[key] < 1):
+            raise ValueError(f'{key}: положительное целое число.')
+    if metadata.get('resize_mode', 'hard') not in ('hard', 'keep_aspect_pad', 'random_crop'):
+        raise ValueError('Неизвестный resize_mode в метаданных.')
+    return state, metadata
 
 
 def read_model_meta(path):
@@ -150,28 +177,3 @@ def save_training_reports(
                 axes[row, column].imshow(array, cmap="tab20" if column else None)
                 axes[row, column].axis("off")
         save(fig, name)
-
-
-def export_semantic_onnx(model, metadata, output, *, log=print):
-    """Export on CPU and publish only after graph and runtime validation."""
-    from utils_new.import_export.model_export import export_semantic
-
-    try:
-        with atomic_path(output, suffix=".onnx") as temporary:
-            sidecar = temporary.with_name(temporary.stem + "_meta.json")
-            try:
-                export_semantic(model, metadata, metadata['input_size'], temporary, 'ONNX')
-            finally:
-                sidecar.unlink(missing_ok=True)
-        save_model_meta(
-            dict(metadata, format="ONNX", output_kind="logits", onnx_opset=18), output
-        )
-        log(f"[EXPORT][OK] {output}")
-        return True
-    except Exception as error:
-        import traceback
-
-        log(
-            f"[EXPORT][WARNING] Веса сохранены, ONNX не экспортирован: {error}\n{traceback.format_exc()}"
-        )
-        return False

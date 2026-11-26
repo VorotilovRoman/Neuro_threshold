@@ -78,13 +78,13 @@ def semantic_config(params, kind):
         seed=42,
         patience=5 if kind == "unet" else 15,
         grad_clip=5.0,
-        export_onnx=True,
         plots=True,
         pr_pixels=200000,
         output_activation="argmax",
     )
     cfg = deepcopy(defaults)
     cfg.update(deepcopy(params))
+    cfg.pop('export_onnx', None)
     cfg["kind"] = kind
     aliases = {"unet++": "unetplusplus", "deeplabv3+": "deeplabv3plus"}
     cfg["architecture"] = aliases.get(
@@ -144,7 +144,6 @@ def semantic_config(params, kind):
         "use_ema",
         "use_layerwise_lr",
         "multi_scale_infer",
-        "export_onnx",
         "plots",
     ):
         if type(cfg[key]) is not bool:
@@ -261,7 +260,7 @@ def build_train_args(params):
         value = args[name]
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
             raise ValueError(f"{name} должен быть конечным неотрицательным числом.")
-    for name in ("amp", "plots", "pretrained", "disable_aug", "export_onnx"):
+    for name in ("amp", "plots", "pretrained", "disable_aug"):
         if name in params and type(params[name]) is not bool:
             raise ValueError(f"{name} должен быть bool.")
     for name in ("close_mosaic", "workers"):

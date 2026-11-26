@@ -16,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 
 from utils_new.configuration.training import build_train_args
-from utils_new.import_export.model_export import export_onnx
 from utils_new.import_export.training import save_model_meta
 
 stop_requested = False
@@ -99,6 +98,27 @@ def main(argv=None):
         model = YOLO(params["model"])
         task = getattr(model, "task", "unknown")
         log(f"Модель загружена: {params['model']}; task={task}")
+        checkpoint_records = {}
+
+        def on_model_save(trainer):
+            record = dict(epoch=int(trainer.epoch) + 1,
+                          epoch_complete=not stop_requested,
+                          epoch_metrics=dict(getattr(trainer, 'metrics', {}) or {}))
+            checkpoint_records['last.pt'] = record
+            names = ['last.pt']
+            if getattr(trainer, 'best_fitness', None) == getattr(trainer, 'fitness', None):
+                checkpoint_records['best.pt'] = record
+                names.append('best.pt')
+            for name in names:
+                path = Path(trainer.save_dir) / 'weights' / name
+                if path.is_file():
+                    network = getattr(trainer, 'model', model)
+                    network = getattr(network, 'module', network)
+                    save_model_meta(dict(record, task=task, model_type=f'YOLO-{task}',
+                                         names=getattr(network, 'names', {}), checkpoint=str(path),
+                                         status='completed_epoch' if not stop_requested else 'stopped',
+                                         requested_train_args=train_args,
+                                         ultralytics_version=ultralytics.__version__), path)
 
         def capture_trainer(trainer):
             global trainer_ref, stop_requested
@@ -135,6 +155,7 @@ def main(argv=None):
         model.add_callback("on_train_start", on_train_start)
         model.add_callback("on_train_epoch_end", on_epoch_end)
         model.add_callback("on_train_batch_end", capture_trainer)
+        model.add_callback("on_model_save", on_model_save)
         phase = "подготовка обучения / AutoBatch"
         log("=== Начало обучения ===")
         log(json.dumps(train_args, indent=2, ensure_ascii=False))
@@ -153,6 +174,9 @@ def main(argv=None):
                 "classify": "YOLO-cls",
             }.get(task, "YOLO"),
             "task": task,
+            "names": getattr(model, 'names', {}),
+            "ultralytics_version": ultralytics.__version__,
+            "preprocessing_version": "ultralytics-letterbox",
             "model_source": params["model"],
             "data_yaml": train_args["data"],
             "epochs": train_args["epochs"],
@@ -202,10 +226,12 @@ def main(argv=None):
                 shutil.copy2(checkpoints[0], backup)
                 log(f"Лучшая модель скопирована в {backup}")
             for path in checkpoints:
-                save_model_meta(dict(metadata, checkpoint=str(path)), path)
+                save_model_meta(dict(metadata, checkpoint=str(path), **checkpoint_records.get(path.name, {})), path)
+            if stop_requested and checkpoints and checkpoints[0].name == 'best.pt':
+                save_model_meta(dict(metadata, checkpoint=str(backup), **checkpoint_records.get('best.pt', {})), backup)
         if stop_requested:
             log(
-                "CANCELLED: обучение остановлено; дополнительная валидация и экспорт пропущены."
+                "CANCELLED: обучение остановлено; дополнительная валидация пропущена."
             )
             return CANCELLED
         phase = "валидация"
@@ -242,13 +268,11 @@ def main(argv=None):
                     for key in ("mAP50", "mAP50-95", "precision", "recall")
                 }
             )
-            save_model_meta(dict(metadata, checkpoint=str(validated)), validated)
+            save_model_meta(dict(metadata, checkpoint=str(validated), **checkpoint_records.get(validated.name, {})), validated)
         if stop_requested:
-            log("CANCELLED: экспорт пропущен.")
+            log("CANCELLED: валидация прервана.")
             return CANCELLED
-        if params.get("export_onnx", True):
-            phase = "экспорт ONNX"
-            export_onnx(model, metadata, effective["imgsz"], run_dir, log=log)
+        log("[MODEL] Для экспорта весов используйте вкладку «Экспорт модели».")
         log("SUCCESS")
         return 0
     except KeyboardInterrupt:

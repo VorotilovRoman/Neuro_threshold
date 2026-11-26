@@ -16,6 +16,27 @@ from PyQt5.QtWidgets import (
 from ui import dataset_source as source_dialogs
 
 
+def apply_yolo_export_metadata(metadata, conf, iou, imgsz=None):
+    if not isinstance(metadata, dict):
+        return
+    recipe = metadata.get('export_parameters', {})
+    if not isinstance(recipe, dict) or not recipe.get('nms'):
+        return
+    for widget, value in ((conf, recipe['conf']), (iou, recipe['iou'])):
+        blocked = widget.blockSignals(True)
+        try:
+            widget.setMinimum(0)
+            widget.setDecimals(max(widget.decimals(), 6))
+            widget.setValue(value)
+        finally:
+            widget.blockSignals(blocked)
+    size = metadata.get('imgsz')
+    if imgsz is not None and isinstance(size, int):
+        blocked = imgsz.blockSignals(True)
+        imgsz.setValue(size)
+        imgsz.blockSignals(blocked)
+
+
 class BaseInferenceSettings(QGroupBox):
     def __init__(self, title, parent=None):
         super().__init__(title, parent)
@@ -116,6 +137,14 @@ class YOLOInferenceSettings(BaseInferenceSettings):
         path, _ = source_dialogs.get_open_file(self, "model_yolo")
         if path:
             self._model_path.setText(path)
+            from utils_new.import_export.training import read_model_meta
+            try:
+                self.apply_metadata(read_model_meta(path))
+            except (OSError, ValueError):
+                pass  # The model loader reports malformed metadata with context.
+
+    def apply_metadata(self, metadata):
+        apply_yolo_export_metadata(metadata, self._conf, self._iou, self._imgsz)
 
     def get_params(self):
         return {
@@ -682,8 +711,9 @@ class DeepLabV3InferenceSettings(BaseInferenceSettings):
         # --- Backbone ---
         if "backbone" in metadata:
             idx = self._backbone.findText(str(metadata["backbone"]))
-            if idx >= 0:
-                self._backbone.setCurrentIndex(idx)
+            if idx < 0:
+                self._backbone.addItem(str(metadata['backbone']))
+            self._backbone.setCurrentText(str(metadata['backbone']))
             self._backbone.setEnabled(False)
         else:
             self._backbone.setEnabled(True)
@@ -922,7 +952,7 @@ class CustomONNXInferenceSettings(BaseInferenceSettings):
         )
         layout.addWidget(self._threshold)
         hint = QLabel(
-            "ONNX / NCNN: требуется <имя>_meta.json с input_size, normalize, resize_mode, output_kind. Семантическая модель RGB float32 с одним выходом, CPU. NCNN: выберите .param рядом с .bin. GGUF требует отдельного backend и пока не поддерживается. Для YOLO используйте раздел YOLO."
+            "Метаданные семантической модели: встроенные в ONNX проекта либо <имя>_meta.json (input_size, normalize, resize_mode, output_kind). RGB float32, один выход, CPU. NCNN: .param рядом с .bin и JSON. Для YOLO используйте раздел YOLO. GGUF пока не поддерживается."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)

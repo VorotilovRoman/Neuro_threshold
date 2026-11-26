@@ -31,7 +31,7 @@ import traceback
 from utils_new.import_export.model_load import GGUF_UNSUPPORTED
 
 
-def load_export_model(kind, path, *, model_key="sam2.1-hiera-tiny"):
+def load_export_model(kind, path, *, model_key="sam2.1-tiny"):
     """Reuse inference loaders, on CPU; never guess a semantic architecture."""
     from runtime_torch import require_torch
 
@@ -43,13 +43,14 @@ def load_export_model(kind, path, *, model_key="sam2.1-hiera-tiny"):
     reject_gguf(path)
     if kind == "YOLO":
         model = load_yolo(path)
-        metadata = dict(task=model.task, names=model.names, model_type="YOLO")
+        metadata = dict(getattr(model, 'neuro_metadata', {}), task=model.task, names=model.names, model_type="YOLO")
         return model, metadata
     if kind == "SAM":
         from utils_new.segmentation.backends.sam import load_sam_backend
+        from utils_new.import_export.training import read_model_meta
 
         model = load_sam_backend(model_key, str(path), device="cpu")
-        return model, dict(model_type="SAM", model_key=model_key)
+        return model, dict(read_model_meta(path), model_type="SAM", model_key=model_key)
     model = create_segmentor(kind, device="cpu")
     model.load(**({"weights_path": str(path)} if kind in ("U-Net", "DeepLabV3+")
                   else {"model_path": str(path)}))
@@ -69,7 +70,7 @@ def export_capabilities(kind, path):
     return reasons
 
 
-def inspect_model(kind, path, *, model_key="sam2.1-hiera-tiny"):
+def inspect_model(kind, path, *, model_key="sam2.1-tiny"):
     model, metadata = load_export_model(kind, path, model_key=model_key)
     network = getattr(model, "model", None)
     parameters = sum(value.numel() for value in network.parameters()) if hasattr(network, "parameters") else None
@@ -83,7 +84,34 @@ def _semantic_metadata(metadata, size):
     return dict(metadata, input_size=size, output_kind="logits")
 
 
-def export_semantic(model, metadata, size, target, format):
+def validate_export_options(kind, format, options=None):
+    import math
+
+    values = dict(opset=18, dynamic=kind != 'YOLO', nms=False,
+                  conf=.25, iou=.45, max_det=300, threshold=.5)
+    if options is not None:
+        if not isinstance(options, dict) or set(options) - values.keys():
+            raise ValueError('Неизвестные параметры экспорта.')
+        values.update(options)
+    if type(values['opset']) is not int or values['opset'] not in (13, 16, 18):
+        raise ValueError('ONNX opset: 13, 16 или 18.')
+    for key in ('dynamic', 'nms'):
+        if type(values[key]) is not bool:
+            raise ValueError(f'{key}: требуется bool.')
+    for key in ('conf', 'iou', 'threshold'):
+        value = values[key]
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError(f'{key}: конечное число от 0 до 1.')
+    if type(values['max_det']) is not int or not 1 <= values['max_det'] <= 3000:
+        raise ValueError('max_det: целое число от 1 до 3000.')
+    if values['nms'] and (kind != 'YOLO' or format != 'ONNX'):
+        raise ValueError('Встроенный NMS доступен только для YOLO/ONNX. В NCNN NMS выполняется runtime.')
+    if format == 'NCNN':
+        values['dynamic'] = False
+    return values
+
+
+def export_semantic(model, metadata, size, target, format, *, options=None):
     """Strict semantic export; validate raw logits before publishing any artifact."""
     if format == "NCNN" and size % 32:
         raise ValueError("Для NCNN укажите размер входа, кратный 32 (например 512).")
@@ -91,8 +119,9 @@ def export_semantic(model, metadata, size, target, format):
     from runtime_torch import require_torch
 
     torch = require_torch()
+    options = validate_export_options('semantic', format, options)
     model = stride_padded_model(model.to("cpu").eval())
-    metadata = _semantic_metadata(metadata, size)
+    metadata = dict(_semantic_metadata(metadata, size), threshold=options['threshold'], export_parameters=options)
     # Nonzero deterministic inputs detect broken constants/channel ordering too.
     example = torch.from_numpy(np.random.default_rng(723).random((1, 3, size, size), dtype=np.float32))
     with torch.inference_mode():
@@ -101,10 +130,16 @@ def export_semantic(model, metadata, size, target, format):
         import onnx
         import onnxruntime as ort
 
-        torch.onnx.export(model, example, str(target), opset_version=18, dynamo=False,
+        torch.onnx.export(model, example, str(target), opset_version=options['opset'], dynamo=False,
                           input_names=["input"], output_names=["output"],
                           dynamic_axes={"input": {2: "height", 3: "width"},
-                                        "output": {2: "height", 3: "width"}})
+                                        "output": {2: "height", 3: "width"}} if options['dynamic'] else None)
+        import json
+        from utils_new.import_export.training import json_values
+
+        graph = onnx.load(str(target), load_external_data=False)
+        onnx.helper.set_model_props(graph, {'neuro_semantic': json.dumps(json_values(metadata))})
+        onnx.save(graph, str(target))
         onnx.checker.check_model(onnx.load(str(target)))
         session = ort.InferenceSession(str(target), providers=["CPUExecutionProvider"])
         actual = session.run(None, {"input": example.numpy()})[0]
@@ -144,7 +179,7 @@ def export_semantic(model, metadata, size, target, format):
     return target
 
 
-def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-hiera-tiny", work_dir=None):
+def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-tiny", work_dir=None, options=None):
     """Export into a fresh bundle: source files and existing exports stay intact."""
     import tempfile
     import uuid
@@ -154,6 +189,7 @@ def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-
     reason = export_capabilities(kind, path)[format]
     if reason:
         raise ValueError(reason)
+    options = validate_export_options(kind, format, options)
     if not isinstance(size, int) or not 32 <= size <= 4096:
         raise ValueError("Размер входа: целое число от 32 до 4096.")
     if kind == "YOLO" and size % 32:
@@ -170,6 +206,10 @@ def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-
     if not destination.is_dir():
         raise ValueError("Выберите папку результатов.")
     model, metadata = load_export_model(kind, path, model_key=model_key)
+    if options['nms'] and metadata.get('task') == 'classify':
+        raise ValueError('Классификатору YOLO NMS не применяется.')
+    metadata = dict(metadata, export_parameters=options, source_weights=str(Path(path).resolve()),
+                    export_date=datetime.now().isoformat())
     with tempfile.TemporaryDirectory(prefix=".export-", dir=work_dir or destination) as temporary:
         stage = Path(temporary)
         if kind == "YOLO":
@@ -182,27 +222,45 @@ def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-
             model.model.pt_path = str(source)
             kwargs = dict(format=format.lower(), imgsz=size, batch=1, device="cpu", half=False)
             if format == "ONNX":
-                kwargs.update(simplify=False, opset=18)
+                kwargs.update(simplify=False, opset=options['opset'], dynamic=options['dynamic'],
+                              nms=options['nms'], conf=options['conf'], iou=options['iou'], max_det=options['max_det'])
             captured = []
-            model.add_callback("on_export_end", lambda exporter: captured.append(exporter.model))
+            model.add_callback("on_export_end", lambda exporter: captured.append((exporter.model, exporter.args)))
             exported = Path(model.export(**kwargs))
             if not captured:
                 raise RuntimeError("Ultralytics не вернул исходную сеть для проверки экспорта.")
-            _validate_yolo_export(captured[0], exported, size, format)
+            reference, arguments = captured[0]
+            if options['nms']:
+                options['max_det'] = int(arguments.max_det)
+            if format == 'ONNX':
+                import json
+                import onnx
+
+                graph = onnx.load(str(exported), load_external_data=False)
+                properties = {item.key: item.value for item in graph.metadata_props}
+                properties['neuro_export'] = json.dumps(options)
+                onnx.helper.set_model_props(graph, properties)
+                onnx.save(graph, str(exported))
+            if options['nms']:
+                from ultralytics.engine.exporter import NMSModel
+
+                reference = NMSModel(reference, arguments)
+            _validate_yolo_export(reference, exported, size, format)
+            from utils_new.import_export.training import save_model_meta
+
             if format == "ONNX":
                 # Keep ONNX external-data files together with their graph.
                 bundle = source_dir
                 source.unlink()
-                from utils_new.import_export.json_objects import write_json_atomic
-
-                write_json_atomic(bundle / "model_onnx_meta.json", dict(metadata, imgsz=size, format=format))
+                save_model_meta(dict(metadata, imgsz=size, format=format), bundle / 'model.onnx')
             else:
                 bundle = exported
+                save_model_meta(dict(metadata, imgsz=size, format=format), bundle / 'model.ncnn.param')
         else:
             bundle = stage / "bundle"
             bundle.mkdir()
             target = bundle / ("model.onnx" if format == "ONNX" else "model_ncnn_model")
-            export_semantic(model.model, metadata, size, target, format)
+            export_semantic(model.model, metadata, size, target, format, options=options)
             if format == "NCNN":
                 bundle = target
         suffix = "_ncnn_model" if format == "NCNN" else "_onnx"
@@ -281,48 +339,6 @@ def main(argv=None):
         traceback.print_exc()
         write_json_atomic(args.result, dict(ok=False, error=str(error)))
         return 1
-
-
-def export_onnx(model, metadata, imgsz, run_dir=None, *, log=print):
-    """Optional export. Its failure must not hide successful training/validation."""
-    try:
-        import onnx
-    except ImportError:
-        log("[EXPORT][SKIPPED] ONNX не установлен; веса и метрики обучения сохранены.")
-        return
-    try:
-        # Ultralytics simplification requests onnxruntime-gpu whenever CUDA exists,
-        # even for CPU export. Keep a single ORT provider and an explicit exporter.
-        result = model.export(format="onnx", imgsz=imgsz, device="cpu", batch=1, simplify=False)
-        path = Path(result) if result else None
-        if path is None or not path.is_file():
-            raise RuntimeError("Экспорт не создал ONNX-файл.")
-        graph = onnx.load(str(path))
-        onnx.checker.check_model(graph)
-        info = {
-            "format": "ONNX",
-            "source_weights": metadata.get("validation_weights"),
-            "onnx_opset": graph.opset_import[0].version if graph.opset_import else None,
-            "model_type": metadata["model_type"],
-            "task": metadata["task"],
-            "imgsz": imgsz,
-            "export_date": datetime.now().isoformat(),
-            "description": "Выходы Ultralytics YOLO; требуется соответствующий task-декодер. Это не semantic NCHW-адаптер ONNX / NCNN.",
-        }
-        from utils_new.import_export.json_objects import write_json_atomic
-
-        write_json_atomic(path.with_name(path.stem + "_onnx_meta.json"), info)
-        if run_dir and path.parent.resolve() != (run_dir / "weights").resolve():
-            destination = run_dir / "weights" / path.name
-            shutil.copy2(path, destination)
-            shutil.copy2(
-                path.with_name(path.stem + "_onnx_meta.json"),
-                destination.with_name(destination.stem + "_onnx_meta.json"),
-            )
-        log(f"[EXPORT][OK] ONNX проверен и сохранён: {path}")
-    except Exception as error:  # noqa: BLE001 - optional export boundary
-        log(f"[EXPORT][WARNING] Обучение завершено, но ONNX не экспортирован: {error}")
-        log(traceback.format_exc())
 
 
 if __name__ == "__main__":

@@ -79,6 +79,8 @@ def load_yolo(path, **kwargs):
     configure_ultralytics()
     reject_gguf(path)
     candidate = Path(path).expanduser()
+    graph_metadata = {}
+    meta_target = candidate
     if not candidate.exists():
         raise FileNotFoundError(f"Локальная модель YOLO не найдена: {candidate}")
     if candidate.suffix.lower() == ".onnx" and candidate.is_file():
@@ -86,6 +88,7 @@ def load_yolo(path, **kwargs):
 
         session = ort.InferenceSession(str(candidate), providers=['CPUExecutionProvider'])
         metadata = session.get_modelmeta().custom_metadata_map
+        graph_metadata = metadata
         task = metadata.get('task')
         if task not in ('detect', 'segment', 'obb', 'pose', 'classify'):
             raise ValueError("YOLO ONNX: отсутствует task в метаданных Ultralytics. Семантическую модель загружайте в ONNX / NCNN.")
@@ -95,6 +98,7 @@ def load_yolo(path, **kwargs):
         import yaml
 
         param = ncnn_param(candidate)
+        meta_target = param
         folder = param.parent
         if not folder.name.endswith("_ncnn_model"):
             raise ValueError("Для YOLO имя папки NCNN должно заканчиваться на _ncnn_model.")
@@ -102,10 +106,72 @@ def load_yolo(path, **kwargs):
         if not meta_file.is_file():
             raise ValueError("YOLO NCNN: отсутствует metadata.yaml с task, names и imgsz.")
         metadata = yaml.safe_load(meta_file.read_text(encoding="utf-8"))
+        graph_metadata = metadata if isinstance(metadata, dict) else {}
         if not isinstance(metadata, dict) or metadata.get("task") not in ("detect", "segment", "obb", "pose", "classify"):
             raise ValueError("YOLO NCNN: неверный task в metadata.yaml.")
         kwargs.setdefault("task", metadata["task"])
         path = str(folder)
     from ultralytics import YOLO
+    from utils_new.import_export.training import read_model_meta
 
-    return YOLO(str(path), **kwargs)
+    model = YOLO(str(path), **kwargs)
+    sidecar = read_model_meta(meta_target)
+    task = getattr(model, 'task', None)
+    if sidecar.get('task') and sidecar['task'] != task:
+        raise ValueError('Тип задачи в метаданных не соответствует загруженной модели YOLO.')
+    recipe = sidecar.get('export_parameters', {})
+    if not isinstance(recipe, dict):
+        raise ValueError('export_parameters должен быть JSON-объектом.')
+    if graph_metadata.get('neuro_export'):
+        import json
+
+        embedded = json.loads(graph_metadata['neuro_export'])
+        if recipe and recipe != embedded:
+            raise ValueError('Параметры экспорта в JSON не соответствуют ONNX. Используйте метаданные этой модели.')
+        recipe = embedded
+    model.neuro_metadata = {**graph_metadata, **sidecar, 'export_parameters': recipe}
+    if 'imgsz' in model.neuro_metadata:
+        import ast
+
+        value = model.neuro_metadata['imgsz']
+        value = ast.literal_eval(value) if isinstance(value, str) else value
+        if isinstance(value, (list, tuple)) and len(value) == 2 and value[0] == value[1]:
+            value = value[0]
+        model.neuro_metadata['imgsz'] = value
+    if candidate.suffix.lower() == '.onnx' and recipe.get('nms'):
+        from utils_new.import_export.model_export import validate_export_options
+
+        recipe = validate_export_options('YOLO', 'ONNX', recipe)
+        return _EmbeddedNMSModel(model, recipe)
+    return model
+
+
+class _EmbeddedNMSModel:
+    """Do not pretend runtime options can undo filtering compiled into a graph."""
+    def __init__(self, model, parameters):
+        self._native, self._parameters = model, parameters
+
+    def __getattr__(self, name):
+        return getattr(self._native, name)
+
+    def __call__(self, source=None, stream=False, **kwargs):
+        return self.predict(source, stream=stream, **kwargs)
+
+    def predict(self, source=None, stream=False, **kwargs):
+        return self._native.predict(source, stream=stream, **self._inference_options(kwargs))
+
+    def val(self, **kwargs):
+        return self._native.val(**self._inference_options(kwargs))
+
+    def _inference_options(self, kwargs):
+        import math
+
+        for name in ('conf', 'iou', 'max_det'):
+            kwargs.setdefault(name, self._parameters[name])
+        if kwargs['conf'] < self._parameters['conf']:
+            raise ValueError(f"NMS встроен в ONNX: conf нельзя уменьшить ниже {self._parameters['conf']}. Экспортируйте модель повторно без NMS или с меньшим conf.")
+        if not math.isclose(kwargs['iou'], self._parameters['iou'], abs_tol=1e-8):
+            raise ValueError(f"NMS встроен в ONNX: IoU фиксирован = {self._parameters['iou']}.")
+        if kwargs['max_det'] > self._parameters['max_det']:
+            raise ValueError(f"NMS встроен в ONNX: max_det не может превышать {self._parameters['max_det']}.")
+        return kwargs
