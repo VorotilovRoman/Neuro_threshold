@@ -26,7 +26,7 @@ from utils_new.import_export.dataset_output import make_index_mask, write_classe
 from utils_new.import_export.images import read_image, read_index_mask, write_image
 from utils_new.import_export.yolo_labels import read_yolo_labels, write_yolo_labels
 from utils_new.images.mask_diagnostics import mask_statistics
-from utils_new.dataset.preparation import allocate_split_counts
+from utils_new.dataset.preparation import allocate_split_counts, has_generation_annotation
 
 INPUT_LABELS = 0
 INPUT_MASKS = 1
@@ -75,7 +75,7 @@ class DatasetGeneratorCoreNew:
                  out_yolo_obb_format='corners', out_masks=False,
                  out_masks_offset=1, out_unet_yaml=False,
                  out_coco=False, mask_pixel_offset_in=1, min_ann_area_px=0,
-                 *, random_seed=None, split_by_source=True,
+                 *, random_seed=None, split_by_source=True, include_unlabelled=False,
                  obb_policy='promote_to_segment', hole_policy='error',
                  mixed_output_policy='normalize_segment', strict_complete=False,
                  existing_output_policy='error', yolo_channels=3,
@@ -104,6 +104,7 @@ class DatasetGeneratorCoreNew:
         self.total_orig_classes = total_orig_classes
         self.resize_mode = resize_mode
         self.include_empty_annotations = bool(include_empty_annotations)
+        self.include_unlabelled = bool(include_unlabelled)
         self.delete_source_after_success = bool(delete_source_after_success)
         self.input_format = input_format or FORMAT_HINT_AUTO
         self.out_yolo_txt = bool(out_yolo_txt)
@@ -182,7 +183,7 @@ class DatasetGeneratorCoreNew:
         if self.out_masks_offset > 65535:
             raise ValueError('PNG cannot encode mask class indices > 65535')
         if self.input_type == INPUT_MASKS and not self.mask_class_remap \
-                and not self.include_empty_annotations:
+                and not self.include_empty_annotations and not self.include_unlabelled:
             raise ValueError('Mask source requires orig_pixel -> class mapping, '
                              'unless only empty masks are requested')
         if not self.pairs:
@@ -908,10 +909,16 @@ class DatasetGeneratorCoreNew:
         try:
             self._validate_config()
             self._check_cancelled()
+            pairs = [pair for pair in self.pairs if self.input_type == INPUT_IMAGES or self.include_unlabelled
+                     or has_generation_annotation(pair, self.input_type)]
+            if len(pairs) != len(self.pairs):
+                self.log(f'[selection] excluded unlabelled images: {len(self.pairs) - len(pairs)}')
+            if not pairs:
+                raise ValueError('Нет снимков для экспорта: снимки без разметки исключены настройкой.')
             destination = Path(self.output_folder)
             destination.mkdir(parents=True, exist_ok=True)
             self._existing_export(destination)
-            total = len(self.pairs)*(self.aug_multiplier if self.has_augmentations else 1)
+            total = len(pairs)*(self.aug_multiplier if self.has_augmentations else 1)
             self.log('[DatasetGenerator_new] start, canonical pixel geometry V14')
             if self.has_augmentations and self.aug_multiplier == 1:
                 self.log('[augmentation] 1x: each source replaced by one augmented output, no extra copies')
@@ -924,7 +931,7 @@ class DatasetGeneratorCoreNew:
                 stage = Path(tmp)
                 records = []
                 successful_sources = 0
-                for pair in self.pairs:
+                for pair in pairs:
                     self._check_cancelled()
                     before_count = len(records)
                     try:
@@ -936,9 +943,9 @@ class DatasetGeneratorCoreNew:
                         self.log(f'[skip] {pair[0]}: {type(exc).__name__}: {exc}')
                     if len(records) > before_count:
                         successful_sources += 1
-                self._skipped = len(self.pairs) - successful_sources
+                self._skipped = len(pairs) - successful_sources
                 missing = max(0, total - len(records))
-                self.log(f'[completeness] sources={len(self.pairs)}, '
+                self.log(f'[completeness] sources={len(pairs)}, '
                          f'successful={successful_sources}, skipped={self._skipped}; '
                          f'variants_expected={total}, variants_created={len(records)}, '
                          f'variants_missing={missing}')
@@ -957,7 +964,11 @@ class DatasetGeneratorCoreNew:
                     'yolo_obb_format': self.out_yolo_obb_format,
                     'yolo_channels': self.yolo_channels,
                     'yolo_kinds': sorted({a.kind for rec in records for a in (rec.annotations or [])}),
-                    'sources_total': len(self.pairs),
+                    'sources_input': len(self.pairs),
+                    'sources_total': len(pairs),
+                    'sources_excluded_unlabelled': len(self.pairs) - len(pairs),
+                    'include_empty_annotations': self.include_empty_annotations,
+                    'include_unlabelled': self.include_unlabelled,
                     'sources_successful': successful_sources,
                     'sources_skipped': self._skipped,
                     'variants_expected': total,

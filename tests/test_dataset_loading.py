@@ -282,6 +282,47 @@ with TemporaryDirectory() as temporary:
 owner.close()
 """)
 
+    def test_preparation_excludes_unlabelled_by_default_and_counts_selected_sources(self):
+        self.gui("""
+from tabs.preparing_dataset_yaml import DatasetPreparationWindow
+from PyQt5.QtWidgets import QMessageBox
+import json
+owner=DatasetPreparationWindow();owner.show()
+with TemporaryDirectory() as temporary:
+ root=Path(temporary)
+ first=fixture(root,'object');empty=fixture(root,'empty');Path(empty[1]).write_text('')
+ unknown=fixture(root,'unknown');Path(unknown[1]).unlink();unknown=(unknown[0],None)
+ owner._apply_loaded_pairs([first,empty,unknown],0,'auto',class_names_from_yaml={0:'object'});wait_dataset(owner)
+ assert not owner.include_unlabelled_images.isChecked()
+ owner.train_slider.setValue(100);owner.val_slider.setValue(0);owner.test_slider.setValue(0)
+ owner.resize_keep.setChecked(True)
+ for include_empty in (False,True):
+  for include_unlabelled in (False,True):
+   owner.include_empty_annotations.setChecked(include_empty)
+   owner.include_unlabelled_images.setChecked(include_unlabelled)
+   expected={'object'}|({'empty'} if include_empty else set())|({'unknown'} if include_unlabelled else set())
+   assert owner.train_count_label.text()==str(len(expected)),owner.train_count_label.text()
+   owner.output_folder=str(root/('out_'+str(include_empty)+'_'+str(include_unlabelled)))
+   owner.update_generate_button_state();assert owner.generate_btn.isEnabled()
+   with patch.object(QMessageBox,'information'),patch.object(QMessageBox,'critical') as error,patch.object(QMessageBox,'warning') as warning:
+    owner.on_generate()
+    assert owner.generator_thread is not None
+    assert owner.generator_thread.engine.include_unlabelled==include_unlabelled
+    assert owner.generator_thread.wait(15000);app.processEvents()
+    error.assert_not_called();warning.assert_not_called()
+   actual={path.stem for path in (Path(owner.output_folder)/'images/train').iterdir()}
+   assert actual==expected,(actual,expected)
+ owner._apply_loaded_pairs([unknown],0,'auto');wait_dataset(owner)
+ owner.include_empty_annotations.setChecked(False);owner.include_unlabelled_images.setChecked(False)
+ assert owner.train_count_label.text()=='0' and not owner.generate_btn.isEnabled()
+ owner.include_unlabelled_images.setChecked(True)
+ assert owner.train_count_label.text()=='1' and owner.generate_btn.isEnabled()
+ owner._apply_loaded_pairs([unknown],2,'auto');wait_dataset(owner)
+ owner.include_unlabelled_images.setChecked(False)
+ assert owner.train_count_label.text()=='1' and not owner.include_unlabelled_images.isEnabled()
+owner.close()
+""")
+
     def test_preparation_png_conversion_refreshes_paths_bit_depth_and_labels(self):
         self.gui("""
 from tabs.preparing_dataset_yaml import DatasetPreparationWindow

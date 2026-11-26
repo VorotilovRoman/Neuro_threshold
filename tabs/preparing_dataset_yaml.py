@@ -21,7 +21,7 @@ from PyQt5.QtWidgets import QApplication, QFileDialog, QListWidgetItem, QMainWin
 
 from ui_tabs.preparing_dataset_yaml_ui import setup_preparing_dataset_yaml_ui
 from ui.dataset_loader import DatasetLoaderMixin
-from utils_new.dataset.preparation import allocate_split_counts, mask_classes_from_rows, normalize_generation_pairs
+from utils_new.dataset.preparation import allocate_split_counts, mask_classes_from_rows, normalize_generation_pairs, select_generation_pairs
 from utils_new.images.processing import ImageStats
 from utils_new.dataset.validation import PairValidator
 from utils_new.import_export.image_conversion import convert_pairs_color, convert_pairs_to_8bit_png, select_pairs_for_8bit_png, select_pairs_for_conversion
@@ -109,6 +109,8 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.include_empty_annotations.stateChanged.connect(
             self._on_include_empty_toggled
         )
+        self.include_empty_annotations.toggled.connect(self._on_generation_selection_changed)
+        self.include_unlabelled_images.toggled.connect(self._on_generation_selection_changed)
 
         self.file_list.itemDoubleClicked.connect(self._on_file_list_double_clicked)
 
@@ -569,12 +571,17 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.update_split_counts()
 
     def update_split_counts(self):
-        total_pairs = len(self.pairs)
+        if self.pairs and not self._dataset_ready():
+            for label in (self.train_count_label, self.val_count_label, self.test_count_label):
+                label.setText('—')
+            self.total_count_with_multiplier.setText('Прогноз: ожидается проверка снимков')
+            return
+        total_pairs = len(self._generation_selection()[0])
         if total_pairs == 0:
             self.train_count_label.setText("0")
             self.val_count_label.setText("0")
             self.test_count_label.setText("0")
-            self.total_count_with_multiplier.setText("Итоговое кол-во снимков: 0")
+            self.total_count_with_multiplier.setText("Прогноз: 0 снимков")
             return
         train_pct = self.train_slider.value() / 100.0
         val_pct = self.val_slider.value() / 100.0
@@ -591,8 +598,17 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         self.val_count_label.setText(str(val_count))
         self.test_count_label.setText(str(test_count))
         self.total_count_with_multiplier.setText(
-            f"Итоговое кол-во снимков: {total_generated}"
+            f"Прогноз: {total_generated} снимков"
         )
+
+    def _generation_selection(self):
+        return select_generation_pairs(self.pairs, getattr(self, '_pair_display_cache', {}), self.dataset_type,
+                                       include_empty=self.include_empty_annotations.isChecked(),
+                                       include_unlabelled=self.include_unlabelled_images.isChecked())
+
+    def _on_generation_selection_changed(self, *_):
+        self.update_split_counts()
+        self.update_generate_button_state()
 
     # ==================================================================
     # Выходная папка
@@ -620,7 +636,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             QMessageBox.warning(self, "Ошибка", "Папка не выбрана или не существует.")
 
     def update_generate_button_state(self):
-        has_pairs = len(self.pairs) > 0
+        has_pairs = bool(self._generation_selection()[0])
         has_output = bool(self.output_folder)
         any_out = (
             self.out_yolo_txt.isChecked()
@@ -772,7 +788,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
                 QMessageBox.critical(self, "Классы маски", str(exc))
                 return
             included_orig_ids = set(mask_class_remap)
-            if not mask_class_remap and not self.include_empty_annotations.isChecked():
+            if not mask_class_remap and not self.include_empty_annotations.isChecked() and not self.include_unlabelled_images.isChecked():
                 QMessageBox.warning(
                     self,
                     "Классы маски",
@@ -785,17 +801,11 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         delete_source_after_success = self.delete_source_after_success.isChecked()
         min_ann_area_px = int(self.min_ann_area_spin.value())
 
-        pairs_for_generation = []
-        skipped_invalid = 0
-        for pair in self.pairs:
-            if self._pair_display_cache.get(tuple(pair), {}).get("is_valid", False):
-                pairs_for_generation.append(pair)
-            else:
-                skipped_invalid += 1
+        pairs_for_generation, skipped = self._generation_selection()
 
         if not pairs_for_generation:
             QMessageBox.critical(
-                self, "Ошибка", "Все пары некорректны. Генерация невозможна."
+                self, "Нет снимков для экспорта", "Нет снимков, соответствующих настройкам. Проверьте включение пустой разметки и снимков без пары."
             )
             return
 
@@ -821,8 +831,10 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
         if has_augmentations:
             self.log(f"Augmentation multiplier: {aug_multiplier}x")
         self.log(f"Classes: {num_classes}")
-        if skipped_invalid:
-            self.log(f"Пропущено некорректных пар: {skipped_invalid}")
+        self.log(f"Отобрано снимков: {len(pairs_for_generation)} из {len(self.pairs)}. "
+                 f"Исключено: с ошибками — {skipped['invalid']}, без пары — {skipped['unlabelled']}, пустая разметка — {skipped['empty']}.")
+        self.log(f"Отбор: пустая разметка — {include_empty_annotations}; "
+                 f"снимки без пары — {self.include_unlabelled_images.isChecked()}.")
         self.log(
             f"Min annotation area: {min_ann_area_px} px² "
             f"({'off' if min_ann_area_px <= 0 else 'on'})"
@@ -869,6 +881,7 @@ class DatasetPreparationWindow(DatasetLoaderMixin, QMainWindow):
             total_orig_classes=len(self.original_ids),
             resize_mode=resize_mode,
             include_empty_annotations=include_empty_annotations,
+            include_unlabelled=self.include_unlabelled_images.isChecked(),
             delete_source_after_success=delete_source_after_success,
             input_format=input_format,
             out_yolo_txt=out_yolo_txt,

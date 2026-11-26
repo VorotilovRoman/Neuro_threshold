@@ -55,6 +55,32 @@ def normalize_generation_pairs(pairs, input_type):
     return result
 
 
+def has_generation_annotation(pair, input_type):
+    """Path presence for both UI pairs and normalized generator triples."""
+    if input_type == 2:
+        return False
+    if input_type == 1 and len(pair) > 2 and pair[2]:
+        return True
+    return bool(len(pair) > 1 and pair[1])
+
+
+def select_generation_pairs(pairs, inspection, input_type, *, include_empty=False, include_unlabelled=False):
+    """Select from cached validation metadata, without filesystem or pixel reads."""
+    selected = []
+    skipped = dict(invalid=0, unlabelled=0, empty=0)
+    for pair in pairs:
+        info = inspection.get(tuple(pair), {})
+        if not info.get('is_valid', False):
+            skipped['invalid'] += 1
+        elif input_type != 2 and not has_generation_annotation(pair, input_type) and not include_unlabelled:
+            skipped['unlabelled'] += 1
+        elif input_type != 2 and info.get('tag') == 'empty' and not include_empty:
+            skipped['empty'] += 1
+        else:
+            selected.append(pair)
+    return selected, skipped
+
+
 def allocate_split_counts(total, fractions):
     """Largest-remainder allocation; zero-share splits never receive samples."""
     import math

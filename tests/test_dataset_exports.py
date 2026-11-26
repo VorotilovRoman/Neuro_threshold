@@ -92,6 +92,44 @@ def snapshot(root):
 
 
 class DatasetExportContracts(unittest.TestCase):
+    def test_empty_and_unlabelled_export_settings_are_independent(self):
+        for input_type in (0, 1):
+            for include_empty in (False, True):
+                for include_unlabelled in (False, True):
+                    with self.subTest(input_type=input_type, empty=include_empty, unlabelled=include_unlabelled), TemporaryDirectory() as temporary:
+                        root = Path(temporary)
+                        a, b, c = [image(root, name) for name in ('object', 'empty', 'unknown')]
+                        if input_type == 0:
+                            pairs = [(str(a), str(label(root, 'object')), None),
+                                     (str(b), str(label(root, 'empty', '')), None), (str(c), None, None)]
+                            extra = {}
+                        else:
+                            foreground, background = root / 'object_mask.png', root / 'empty_mask.png'
+                            pixels = np.zeros((24, 40), np.uint8)
+                            pixels[5:15, 10:20] = 1
+                            write_image(foreground, pixels)
+                            write_image(background, np.zeros_like(pixels))
+                            pairs = [(str(a), None, str(foreground)), (str(b), None, str(background)), (str(c), None, None)]
+                            extra = dict(mask_class_remap={1: 0})
+                        if include_unlabelled:
+                            extra['include_unlabelled'] = True
+                        engine = generator(root, pairs, input_type=input_type, include_empty_annotations=include_empty,
+                                           strict_complete=include_empty, **extra)
+                        self.assertEqual(engine.include_unlabelled, include_unlabelled)
+                        ok, message = engine.execute()
+                        self.assertTrue(ok, message)
+                        expected = {'object'} | ({'empty'} if include_empty else set()) | ({'unknown'} if include_unlabelled else set())
+                        output = root / 'out'
+                        self.assertEqual({p.stem for p in (output / 'images/train').iterdir()}, expected)
+                        records = json.loads((output / 'annotations_train.json').read_text())['images']
+                        self.assertEqual({Path(row['file_name']).stem for row in records}, expected)
+                        self.assertEqual({Path(row[0]).stem for row in load_unet_yaml(output / 'masks_data.yaml')['pairs']}, expected)
+                        self.assertEqual({Path(row[0]).stem for row in load_yolo_yaml(output / 'data.yaml')[0]}, expected)
+                        if include_unlabelled:
+                            self.assertFalse((output / 'labels/train/unknown.txt').exists())
+                            self.assertFalse((output / 'masks/train/unknown.png').exists())
+                            self.assertEqual(next(row['annotation_status'] for row in records if Path(row['file_name']).stem == 'unknown'), 'unlabelled')
+
     def test_missing_and_explicit_empty_annotations_survive_every_format(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -101,7 +139,7 @@ class DatasetExportContracts(unittest.TestCase):
                 (str(b), str(label(root, "empty", "")), None),
                 (str(c), None, None),
             ]
-            ok, message = generator(root, pairs).execute()
+            ok, message = generator(root, pairs, include_unlabelled=True).execute()
             self.assertTrue(ok, message)
             output = root / "out"
             self.assertEqual(len(list((output / "images/train").iterdir())), 3)
@@ -717,6 +755,7 @@ class SahiExportContracts(unittest.TestCase):
         app = QApplication.instance() or QApplication([])
         window = DatasetPreparationWindow()
         try:
+            self.assertFalse(window.include_unlabelled_images.isChecked())
             self.assertEqual(window.existing_output_policy.currentData(), "error")
             self.assertTrue(window.group_augmentations_by_source.isChecked())
             for slider, value in (
@@ -739,7 +778,7 @@ class SahiExportContracts(unittest.TestCase):
             )
             window.pairs = [("one", None)]
             window.update_split_counts()
-            self.assertEqual(window.test_count_label.text(), "0")
+            self.assertEqual(window.test_count_label.text(), "—")
         finally:
             window.close()
             app.processEvents()

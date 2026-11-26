@@ -188,7 +188,10 @@ def setup_preparing_dataset_yaml_ui(parent):
     heading.setObjectName("workspaceTitle")
     header_row.addWidget(heading)
     header_row.addStretch()
-    parent.total_count_with_multiplier = QLabel("Итоговое количество: 0")
+    parent.total_count_with_multiplier = QLabel("Прогноз: 0 снимков")
+    parent.total_count_with_multiplier.setToolTip(
+        'Учитывает ошибки проверки, пустую разметку и снимки без пары. '
+        'Отбор классов, минимальная площадь и аугментации могут уменьшить итоговое число.')
     parent.total_count_with_multiplier.setObjectName("countChip")
     header_row.addWidget(parent.total_count_with_multiplier)
     right_layout.addLayout(header_row)
@@ -237,6 +240,13 @@ def setup_preparing_dataset_yaml_ui(parent):
         "Применяется к пустым YOLO TXT и маскам только с фоном."
     )
     group_layout.addWidget(parent.include_empty_annotations)
+    parent.include_unlabelled_images = QCheckBox('Включать в датасет снимки без пары (без TXT/маски)')
+    parent.include_unlabelled_images.setChecked(False)
+    parent.include_unlabelled_images.setToolTip(
+        'Отдельно от пустой разметки. Если файл TXT/маски отсутствует, снимок по умолчанию '
+        'пропускается. При включении сохраняется без фиктивной разметки. '
+        'В режиме «Без разметки» экспортируются все корректные снимки независимо от этой настройки.')
+    group_layout.addWidget(parent.include_unlabelled_images)
     form = QFormLayout()
     parent.min_ann_area_spin = QSpinBox()
     parent.min_ann_area_spin.setRange(0, 1_000_000)
@@ -592,6 +602,8 @@ def setup_preparing_dataset_yaml_ui(parent):
 
         # --- Output group ---
         is_images_only = input_type == 2
+        parent.include_empty_annotations.setEnabled(not is_images_only)
+        parent.include_unlabelled_images.setEnabled(not is_images_only)
 
         parent.out_yolo_txt.setEnabled(not is_images_only)
         parent.out_masks.setEnabled(not is_images_only)
