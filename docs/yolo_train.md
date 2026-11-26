@@ -2,6 +2,8 @@
 
 [README](../README.md) · [Применение](deep_learning.md)
 
+![Настройки обучения YOLO до запуска процесса](image/yolo_train.png)
+
 YOLO принимает корень датасета/YOLO YAML; U-Net и DeepLab — корень или YAML
 с индексными масками. DeepLab также поддерживает VOC. Требуется extra training
 для U-Net/DeepLab. SAM и SegFormer — заготовки, обучение через них не работает.
@@ -23,7 +25,6 @@ DeepLab импортирует TXT-пресет «ключ: значение», 
 Общие компоненты находятся в `utils_new/training/`, датасет снимок/маска —
 в `utils_new/dataset/segmentation.py`, конфигурация — в `utils_new/configuration/training.py`,
 сохранение весов и отчётов — в `utils_new/import_export/training.py`.
-Старая папка `utils_training` удалена; второй U-Net-воркер объединён с основным.
 
 Запуск без интерфейса использует те же параметры JSON:
 

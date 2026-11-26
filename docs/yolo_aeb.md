@@ -2,6 +2,8 @@
 
 [README](../README.md)
 
+![Снимок и панели YOLO и AE/VAE до загрузки моделей](image/yolo_aeb.png)
+
 Вход: снимки/папка, отдельные веса YOLO и checkpoint AE/VAE.
 
 1. Загрузите YOLO, выберите объект и параметры кропа/доворота.
@@ -51,3 +53,6 @@ python -m utils_new.training.autoencoder --data "normal_images" --output "runs/a
 `--no-plots` отключает графики, `--edge-cache` задаёт папку кеша рёбер.
 Общие модели, подготовка данных и обучение находятся в `utils_new/autoencoders/`;
 чтение и запись checkpoint — в `utils_new/import_export/autoencoder.py`.
+
+Снимки читаются через ограниченный кеш. Инференс, подготовка кропов и отмена
+не должны применить результат к другому снимку после навигации.
