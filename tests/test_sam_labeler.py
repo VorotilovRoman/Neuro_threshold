@@ -425,6 +425,48 @@ class SamLabelerTests(unittest.TestCase):
         self.assertEqual(len(self.owner.current_annotations), 1)
         predict.assert_called_once()
 
+    def test_loaded_button_tracks_weights_device_mode_and_failed_reload(self):
+        backend = SimpleNamespace(model_key='sam2.1-tiny', device='cpu')
+        self.panel.weights.setText('local.pt')
+        self.assertFalse(self.panel.load.property('modelLoaded'))
+        with patch('ui.sam.controller.load_sam_backend', return_value=backend):
+            self.controller.load()
+            self.wait_until(lambda: self.controller.job is None)
+        self.assertTrue(self.panel.load.property('modelLoaded'))
+        self.assertIn('#2e7d32', self.panel.load.styleSheet())
+        region = self.panel.prompt_tools.region
+        region.setCurrentIndex(region.findData(60))
+        self.panel.score.setValue(.6)
+        self.panel.text.setText('changed prompt')
+        self.assertTrue(self.panel.load.property('modelLoaded'))
+        self.panel.weights.setText('different.pt')
+        self.assertFalse(self.panel.load.property('modelLoaded'))
+        self.panel.weights.setText('local.pt')
+        self.assertTrue(self.panel.load.property('modelLoaded'))
+        self.panel.device.setCurrentText('cpu')
+        self.assertFalse(self.panel.load.property('modelLoaded'))
+        self.panel.device.setCurrentText('auto')
+        self.assertTrue(self.panel.load.property('modelLoaded'))
+        self.panel.mode.setCurrentIndex(self.panel.mode.findData('grounded'))
+        self.assertFalse(self.panel.load.property('modelLoaded'))
+        with patch('ui.sam.controller.load_sam_backend', side_effect=ValueError('test failure')), \
+                patch('ui.sam.controller.QMessageBox.warning'):
+            self.controller.load()
+            self.wait_until(lambda: self.controller.job is None)
+        self.assertFalse(self.panel.load.property('modelLoaded'))
+        self.assertEqual(self.panel.load.styleSheet(), '')
+
+    def test_selected_center_region_is_passed_to_sam(self):
+        from unittest.mock import Mock
+        from utils_new.segmentation.backends.sam import SamResult
+        predict = Mock(return_value=SamResult(np.zeros((0, 60, 100), bool), np.zeros(0)))
+        self.fake_backend(predict)
+        region = self.panel.prompt_tools.region
+        region.setCurrentIndex(region.findData(70))
+        self.controller.run()
+        self.wait_until(lambda: self.controller.job is None)
+        np.testing.assert_allclose(predict.call_args.args[1].box, (15, 9, 85, 51))
+
     def test_load_is_background_and_mode_change_requires_reload(self):
         backend = SimpleNamespace(model_key="sam3", device="cpu")
         self.panel.model.setCurrentIndex(self.panel.model.findData("sam3"))

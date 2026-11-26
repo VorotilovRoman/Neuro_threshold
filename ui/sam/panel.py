@@ -51,6 +51,7 @@ class SamPanel(QWidget):
         self.device.addItems(["auto", "cpu", "cuda:0"])
         form.addRow("Устройство:", self.device)
         self.load = QPushButton("Загрузить SAM")
+        self.set_model_loaded(False)
         self.download = QPushButton("Скачать файлы…")
         self.download.setToolTip("Найти локальные веса выбранной архитектуры и предложить скачать отсутствующие файлы.")
         model_actions = QHBoxLayout()
@@ -201,6 +202,17 @@ class SamPanel(QWidget):
         self.hint.setText("Grounding DINO находит рамки по тексту, SAM2 строит маски. Рамка ограничивает область поиска."
                           if grounded else "SAM3: текст описывает объекты, рамка задаёт визуальную подсказку."
                           if native_text else "Точки: ЛКМ — объект, ПКМ — фон. Рамка: протяните ЛКМ.")
+
+    def set_model_loaded(self, loaded):
+        loaded = bool(loaded)
+        if self.load.property('modelLoaded') == loaded:
+            return
+        self.load.setProperty('modelLoaded', loaded)
+        self.load.setStyleSheet(
+            'QPushButton { background-color: #2e7d32; color: white; } '
+            'QPushButton:disabled { background-color: #a5d6a7; color: #1b5e20; }' if loaded else '')
+        self.load.setToolTip('Модель загружена с текущими параметрами.' if loaded else
+                             'Загрузить модель с выбранными весами, устройством и режимом подсказок.')
 
     def get_settings(self):
         from ui.segmentation.preset_bindings import control_value

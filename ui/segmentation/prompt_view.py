@@ -24,7 +24,7 @@ class PromptInputView(SmartGraphicsViewNew):
         self.prompt_points, self.prompt_labels, self.prompt_strokes = [], [], []
         self.prompt_box = self._prompt_start = None
         self.prompt_preview = []
-        self.full_image = True
+        self.region_percent = 100
         self.brush_radius = 0
         self.stroke_serial = 0
         self._stroke = self._stroke_button = None
@@ -32,7 +32,7 @@ class PromptInputView(SmartGraphicsViewNew):
 
     def set_prompt_tool(self, tool):
         if self._prompt_start is not None and self._box_before is not None:
-            self.prompt_box, self.full_image = self._box_before
+            self.prompt_box, self.region_percent = self._box_before
         self._box_before = None
         self.prompt_tool = tool
         self._prompt_start = self._stroke = self._stroke_button = None
@@ -49,21 +49,35 @@ class PromptInputView(SmartGraphicsViewNew):
         self.prompt_box = self._prompt_start = None
         self._stroke = self._stroke_button = None
         self._box_before = None
-        self.full_image = True
+        # Percentage choices scale with the next frame; a hand-drawn box does not.
+        if self.region_percent is None:
+            self.region_percent = 100
         self.prompts_changed.emit()
         self.viewport().update()
 
     def effective_box(self):
         if self.img_width <= 0 or self.img_height <= 0:
             return None
-        return (0, 0, self.img_width, self.img_height) if self.full_image else self.prompt_box
+        if self.region_percent is None:
+            return self.prompt_box
+        margin_x = self.img_width * (100 - self.region_percent) / 200
+        margin_y = self.img_height * (100 - self.region_percent) / 200
+        return margin_x, margin_y, self.img_width - margin_x, self.img_height - margin_y
+
+    def set_region_percent(self, percent):
+        if percent not in (None, 50, 60, 70, 80, 90, 100):
+            raise ValueError('Неизвестный размер центральной области')
+        self.set_prompt_tool(None)
+        self.region_percent = percent
+        self.prompts_changed.emit()
+        self.viewport().update()
 
     def set_prompt_box(self, box):
         x1, y1, x2, y2 = box
         self.prompt_box = (max(0, min(x1, self.img_width)), max(0, min(y1, self.img_height)),
                            max(0, min(x2, self.img_width)), max(0, min(y2, self.img_height)))
         self._prompt_start = self._box_before = None
-        self.full_image = False
+        self.region_percent = None
         self.prompts_changed.emit()
         self.viewport().update()
 
@@ -122,7 +136,7 @@ class PromptInputView(SmartGraphicsViewNew):
         if self.prompt_tool == 'box' and event.button() == Qt.LeftButton:
             self._prompt_start = self._point(event, box=True)
             if self._prompt_start is not None:
-                self._box_before = (self.prompt_box, self.full_image)
+                self._box_before = (self.prompt_box, self.region_percent)
                 self.prompt_box = (*self._prompt_start, *self._prompt_start)
             event.accept()
             return
@@ -158,12 +172,12 @@ class PromptInputView(SmartGraphicsViewNew):
             self._prompt_start = None
             previous, self._box_before = self._box_before, None
             if self.prompt_box is not None and self.prompt_box[2] > self.prompt_box[0] and self.prompt_box[3] > self.prompt_box[1]:
-                self.full_image = False
+                self.region_percent = None
                 self.box_drawn.emit(self.prompt_box)
                 self.prompts_changed.emit()
             else:
                 if previous is not None:
-                    self.prompt_box, self.full_image = previous
+                    self.prompt_box, self.region_percent = previous
             self.viewport().update()
             event.accept()
             return

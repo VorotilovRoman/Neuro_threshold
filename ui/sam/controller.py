@@ -53,6 +53,12 @@ class SamController:
         host.bind(self)
         from ui.sam.downloads import SamDownloads
         self.downloads = SamDownloads(self)
+        panel.settings_restored.connect(self.model_changed)
+        self.update_load_state()
+
+    def update_load_state(self):
+        self.panel.set_model_loaded(not self.closed and self.backend is not None and
+                                    self.settings_key() == getattr(self, 'loaded_key', None))
 
     def identity(self):
         return self.host.identity()
@@ -66,6 +72,7 @@ class SamController:
         self.panel.accept.setEnabled(False)
         if self.job is not None and (cancel_load or not self.loading):
             self.job.cancel()
+        self.update_load_state()
 
     def frame_changed(self):
         if self.identity() != self.frame:
@@ -163,6 +170,7 @@ class SamController:
         downloading = job is not None and compute is None
         job = self.job = job or BackgroundTask(compute)
         self.loading = loading
+        self.update_load_state()
         self.panel.controls.setEnabled(False)
         self.host.busy_changed(True)
         self.panel.progress.setRange(0, 0)
@@ -193,6 +201,7 @@ class SamController:
             self.panel.controls.setEnabled(True)
             self.host.busy_changed(False)
             self.panel.capabilities()
+            self.update_load_state()
             self.panel.progress.setVisible(False)
             self.panel.cancel.setEnabled(False)
             self.panel.cancel.setVisible(False)
@@ -213,11 +222,13 @@ class SamController:
         self.invalidate()
         key = self.settings_key()
         self.backend = None
+        self.update_load_state()
 
         def accept(backend):
             if key == self.settings_key():
                 self.backend = backend
                 self.loaded_key = key
+                self.update_load_state()
                 self.panel.status.setText(f"Модель загружена: {key[0]} ({backend.device}). Укажите подсказки.")
                 self.owner.log(f"[SAM] Локальные веса: {key[1]}; архитектура: {key[0]}; устройство: {backend.device}")
                 if key[4] == "grounded":
@@ -243,7 +254,7 @@ class SamController:
             return
         image = self.host.image()
         panel = self.panel
-        box = None if panel.mode.currentData() == 'text' and self.view.full_image else self.view.effective_box()
+        box = None if panel.mode.currentData() == 'text' and self.view.region_percent == 100 else self.view.effective_box()
         prompt = SamPrompt(tuple(self.view.prompt_points), tuple(self.view.prompt_labels), box,
                            panel.text.text() if panel.mode.currentData() in ("text", "grounded") else "")
         if panel.mode.currentData() in ("text", "grounded") and not prompt.text.strip():
@@ -318,3 +329,4 @@ class SamController:
         if self.job is not None:
             self.job.close()
         self.backend = None
+        self.update_load_state()

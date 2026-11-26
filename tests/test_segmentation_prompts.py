@@ -111,7 +111,7 @@ class InteractivePromptTests(unittest.TestCase):
         self.assertTrue(any(label == 0 for label in self.view.prompt_labels))
         self.owner.reset_mask()
         self.assertEqual(self.view.prompt_strokes, [])
-        self.assertTrue(self.owner.prompt_tools.full_image.isChecked())
+        self.assertEqual(self.owner.prompt_tools.region.currentData(), 100)
 
     def test_full_frame_can_run_grabcut_without_drawing_a_box(self):
         self.assertIsNone(self.owner.rect)
@@ -123,6 +123,29 @@ class InteractivePromptTests(unittest.TestCase):
         self.assertEqual(self.owner.mask[30, 50], 255)
         self.assertEqual(self.owner.mask[0, 0], 0)
 
+    def test_center_percentages_scale_with_frame_and_preserve_seed_marks(self):
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtTest import QTest
+        self.owner.activate_fg_tool()
+        QTest.mouseClick(self.view.viewport(), Qt.LeftButton, pos=self.point(40, 30))
+        original_seeds = self.owner.fg_scribbles.copy()
+        region = self.owner.prompt_tools.region
+        for percent in (50, 60, 70, 80, 100, 90):
+            region.setCurrentIndex(region.findData(percent))
+            box = self.view.effective_box()
+            np.testing.assert_allclose(box, ((100 - percent) / 2, (100 - percent) * .3,
+                                            (100 + percent) / 2, (100 + percent) * .3))
+            self.assertIsNone(self.view.prompt_tool)
+            np.testing.assert_array_equal(self.owner.fg_scribbles, original_seeds)
+        self.view.set_image_data(200, 80)
+        self.view.clear_prompts()
+        self.assertEqual(region.currentData(), 90)
+        np.testing.assert_allclose(self.view.effective_box(), (10, 4, 190, 76))
+        self.view.set_prompt_box((20, 10, 80, 60))
+        self.assertIsNone(region.currentData())
+        self.view.clear_prompts()
+        self.assertEqual(region.currentData(), 100)
+
     def test_box_gesture_follows_zoom_and_escape_keeps_roi(self):
         from PyQt5.QtCore import Qt
         from PyQt5.QtTest import QTest
@@ -130,12 +153,12 @@ class InteractivePromptTests(unittest.TestCase):
         self.owner.activate_rect_tool()
         self.drag(20, 10, 80, 50)
         np.testing.assert_allclose(self.owner.effective_roi(), (20, 10, 80, 50), atol=1)
-        self.assertFalse(self.owner.prompt_tools.full_image.isChecked())
+        self.assertIsNone(self.owner.prompt_tools.region.currentData())
         self.owner.activate_fg_tool()
         QTest.keyClick(self.view, Qt.Key_Escape)
         self.assertIsNone(self.view.prompt_tool)
         self.assertTrue(self.owner.pan_zoom_btn.isChecked())
-        self.owner.prompt_tools.full_image.setChecked(True)
+        self.owner.prompt_tools.region.setCurrentIndex(self.owner.prompt_tools.region.findData(100))
         self.assertEqual(self.owner.effective_roi(), (0, 0, 100, 60))
 
     def test_result_merge_is_geometry_only_and_active_object_supplies_roi(self):
@@ -153,7 +176,7 @@ class InteractivePromptTests(unittest.TestCase):
         results.focus_row(self.owner, 0)
         self.owner.prompt_tools.selected_box.click()
         np.testing.assert_allclose(self.owner.effective_roi(), (10, 10, 85, 50), atol=1)
-        self.assertFalse(self.owner.prompt_tools.full_image.isChecked())
+        self.assertIsNone(self.owner.prompt_tools.region.currentData())
         state = self.owner.preset_manager.get_current_settings()
         self.assertTrue(state['merge_objects'])
 

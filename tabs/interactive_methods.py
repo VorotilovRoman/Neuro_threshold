@@ -172,7 +172,7 @@ class InteractiveMethodsWindow(QMainWindow):
 
     def _sync_prompt_box(self):
         box = self.image_view.prompt_box
-        self.rect = tuple(map(int, box)) if box is not None and not self.image_view.full_image else None
+        self.rect = tuple(map(int, box)) if box is not None and self.image_view.region_percent is None else None
         if not getattr(self, '_resetting_input', False):
             self.on_segmentation_parameters_changed()
         self.update_input_ui()
@@ -180,7 +180,7 @@ class InteractiveMethodsWindow(QMainWindow):
     def on_rect_drawn(self, rect):
         # Also used by callers supplying an ROI directly in working pixels.
         box = tuple(map(int, rect))
-        if self.image_view.prompt_box != box or self.image_view.full_image:
+        if self.image_view.prompt_box != box or self.image_view.region_percent is not None:
             self.image_view.set_prompt_box(box)
         self.rect = box
         self.activate_pan_zoom()

@@ -68,7 +68,7 @@ def setup_interactive_ui(parent):
     input_layout = QVBoxLayout()
 
     parent.prompt_tools = PromptTools()
-    parent.prompt_tools.full_image.setToolTip(
+    parent.prompt_tools.region.setToolTip(parent.prompt_tools.region.toolTip() + '\n' +
         'Рамка по умолчанию — весь снимок. GrabCut, SuperCut, OneCut и Chan–Vese '
         'используют край как начальный фон. Если объект касается края, уточните рамку '
         'или используйте метод с метками объекта и фона.')

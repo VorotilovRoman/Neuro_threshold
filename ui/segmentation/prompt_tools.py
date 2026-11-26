@@ -1,7 +1,7 @@
 """Compact prompt controls shared by SAM and classical interactive segmentation."""
 
 from PyQt5.QtCore import QSignalBlocker, pyqtSignal
-from PyQt5.QtWidgets import QCheckBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 
 class PromptTools(QWidget):
@@ -21,12 +21,16 @@ class PromptTools(QWidget):
         for button in (self.positive, self.negative):
             button.setToolTip('Клик — точка; зажатая кнопка — непрерывный штрих. ПКМ рисует фон. Escape возвращает навигацию.')
         row = QHBoxLayout()
-        self.full_image = QCheckBox('Весь снимок')
-        self.full_image.setChecked(True)
-        self.full_image.setToolTip('Использовать весь снимок как рамку. Рисование рамки или выбор объекта отключают этот режим.')
+        self.region = QComboBox()
+        self.region.addItem('Весь снимок (100%)', 100)
+        for percent in (50, 60, 70, 80, 90):
+            self.region.addItem(f'Центр снимка ({percent}%)', percent)
+        self.region.addItem('Своя рамка', None)
+        self.region.setToolTip('Процент задаёт ширину и высоту центральной рамки относительно снимка. '
+                               '50% — половина ширины и половина высоты. Можно нарисовать свою рамку или взять её из объекта.')
         self.selected_box, self.clear = QPushButton('Бокс из объекта'), QPushButton('Очистить')
         self.selected_box.setToolTip('Взять рамку активного объекта из списка или с изображения.')
-        for widget in (self.full_image, self.selected_box, self.clear):
+        for widget in (self.region, self.selected_box, self.clear):
             row.addWidget(widget)
         layout.addLayout(row)
         self.merge = QCheckBox('Объединять все объекты')
@@ -35,19 +39,17 @@ class PromptTools(QWidget):
         layout.addWidget(self.merge)
 
     def bind_view(self, view):
-        def full_changed(checked):
-            view.full_image = checked
-            view.prompts_changed.emit()
-            view.viewport().update()
+        def region_changed(_):
+            view.set_region_percent(self.region.currentData())
 
         def sync():
-            blocker = QSignalBlocker(self.full_image)
-            self.full_image.setChecked(view.full_image)
+            blocker = QSignalBlocker(self.region)
+            self.region.setCurrentIndex(self.region.findData(view.region_percent))
             del blocker
             for name in ('positive', 'negative', 'box'):
                 getattr(self, name).setChecked(view.prompt_tool == name)
 
-        self.full_image.toggled.connect(full_changed)
+        self.region.currentIndexChanged.connect(region_changed)
         view.prompts_changed.connect(sync)
         view.tool_changed.connect(sync)
         sync()
