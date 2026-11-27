@@ -7,6 +7,9 @@ from PyQt5.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel, QLayout
 
 # Stable action keys; one caption/filter/meaning across every consumer.
 ACTIONS = {
+    'classification_dataset': ('Датасет CLS…', 'Папка классификации', '', True, 'Корень train/val/test с папками классов либо неразделённые папки классов. Исходные снимки не перемещаются.'),
+    'task_project': ('Проект / Pose…', 'Проект разметки, Pose YAML или COCO Keypoints', 'Разметка (*.json *.yaml *.yml)', False, 'Классификация — JSON проекта; Pose — YAML со схемой или COCO Keypoints.'),
+
     'training_preset': (
         'Пресет обучения…', 'Загрузить полный пресет обучения', 'JSON (*.json)', False,
         'Все страницы параметров и дополнительные настройки воркера; семейство модели должно совпадать.',
@@ -187,7 +190,7 @@ ACTIONS = {
     ),
 }
 ORDER = (
-    'ae_images_yaml', 'ae_training_config', 'training_preset',
+    'ae_images_yaml', 'ae_training_config', 'training_preset', 'task_project', 'classification_dataset',
     "images",
     "folder",
     "dataset_root",
@@ -232,8 +235,8 @@ TAB_DESCRIPTIONS = {
     "traditional_ml": "Классический ML: обучение на загруженных снимках по соседним YOLO TXT либо явным псевдометкам Otsu; кластеризация без меток; импорт модели.",
     "deep_learning": "Применение моделей сегментации к снимкам и папкам. Загрузите совместимые веса; обучение находится в отдельной вкладке.",
     "reports": "Сравнение пороговых/градиентных отчётов с правильной ручной разметкой: YOLO YAML или папка TXT; рейтинг методов и пресеты.",
-    "labeler": "Создание и исправление BBox/OBB/Segment: снимки, TXT, YOLO YAML, COCO и масочный YAML. Авторазметка YOLO, SAM/SAM2/SAM3 по точкам и рамке, текстовый SAM3 или Grounding DINO + SAM2.",
-    "test": "Просмотр и исправление аннотаций: снимки, TXT, YOLO YAML, COCO, индексные маски и их наложение; поиск перекрывающихся объектов.",
+    "labeler": "Создание и исправление BBox/OBB/Segment, произвольных Pose-схем и классов снимков: снимки, TXT, YOLO YAML, COCO и масочный YAML. Авторазметка YOLO, SAM/SAM2/SAM3 по точкам и рамке, текстовый SAM3 или Grounding DINO + SAM2.",
+    "test": "Просмотр и исправление BBox/OBB/Segment, Pose и Classification: снимки, TXT, YOLO YAML, COCO, индексные маски и их наложение; поиск перекрывающихся объектов.",
     "dataset": "Подготовка и экспорт датасета: снимки + TXT, индексные маски или снимки без разметки; YOLO YAML, COCO и YAML с масками.",
     "dataset_analysis": "Проверка качества, разметки, повторов и split: TXT/индексные маски/снимки без разметки; общий отчёт и экспорт.",
     "sahi": "Тайловая нарезка датасета из снимков с TXT, YOLO YAML или COCO. Индексные маски как вход здесь не поддерживаются.",

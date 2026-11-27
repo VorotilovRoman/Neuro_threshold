@@ -232,7 +232,7 @@ def find_mask_for_image(img_path, base_path=None):
     return None
 
 
-def load_yolo_yaml(yaml_path, log_cb=None):
+def load_yolo_yaml(yaml_path, log_cb=None, *, allow_pose=False):
     """
     Парсит YOLO data.yaml.
 
@@ -249,6 +249,9 @@ def load_yolo_yaml(yaml_path, log_cb=None):
         cfg = yaml.safe_load(f) or {}
     if not isinstance(cfg, dict):
         raise ValueError("YAML не содержит словаря")
+
+    if cfg.get('kpt_shape') and not allow_pose:
+        raise ValueError('Это Pose-датасет. Откройте режим Pose на вкладке добавления или просмотра аннотаций; геометрический импорт не должен отбрасывать точки.')
 
     root_raw = cfg.get("path", "")
     if root_raw:

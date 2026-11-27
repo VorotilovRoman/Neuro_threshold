@@ -48,6 +48,7 @@ class BaseTrainWidget(QWidget):
         hint_widget.setWordWrap(True)
         # hint_widget.setStyleSheet("background-color: #f0f0f0; padding: 8px; border-radius: 4px; font-family: monospace;")
         self.form_layout.addRow(hint_widget)
+        return hint_widget
 
     def organize_training_stages(self, extra=None):
         """Move intact form rows by widget identity, retaining all signal bindings.
@@ -60,7 +61,7 @@ class BaseTrainWidget(QWidget):
             ('data','Данные',('dataset_source','ignore_index','background_id')),
             ('model','Модель',('model_from_preset','model_from_file','preset_widget','file_widget',
                               'model','weights','resume','imgsz','input_size','num_classes','architecture',
-                              'encoder','variant','decoder_segmentation_channels','pretrained_checkbox','dropout','normalize_checkbox','resize_mode_combo','atrous_rates','max_side')),
+                              'encoder','variant','yolo_task','decoder_segmentation_channels','pretrained_checkbox','dropout','normalize_checkbox','resize_mode_combo','atrous_rates','max_side')),
             ('training','Обучение',('device_combo','epochs','batch','lr','lr0','lrf','optimizer','scheduler',
                                    'preset_path','two_phase_check','freeze_epochs','freeze_bn_second_phase',
                                    'accum_steps','train_prompt_encoder','use_amp','max_objects','seed')),
@@ -268,7 +269,8 @@ class YOLOTrainWidget(BaseTrainWidget):
             "│   └── val/<br>"
             "└── data.yaml"
         )
-        self.add_dataset_structure_hint(hint)
+        self._object_dataset_hint = hint
+        self.dataset_hint = self.add_dataset_structure_hint(hint)
 
         # Выбор датасета: папка или YAML
         self.dataset_source = source_dialogs.DatasetSourceWidget(
@@ -366,8 +368,8 @@ class YOLOTrainWidget(BaseTrainWidget):
         self.preset_layout.addRow("Версия YOLO:", self.yolo_version)
 
         self.yolo_task = QComboBox()
-        self.yolo_task.addItems(["Detection", "Segmentation", "OBB"])
-        self.preset_layout.addRow("Тип модели:", self.yolo_task)
+        self.yolo_task.addItems(["Detection", "Segmentation", "OBB", "Pose", "Classification"])
+        self.form_layout.addRow("Задача YOLO:", self.yolo_task)
 
         self.yolo_size = QComboBox()
         self.yolo_size.addItems(["n", "s", "m", "l", "x"])
@@ -390,10 +392,22 @@ class YOLOTrainWidget(BaseTrainWidget):
             suffix = ".pt"
         elif task == "Segmentation":
             suffix = "-seg.pt"
-        else:  # OBB
-            suffix = "-obb.pt"
+        else:
+            suffix = {'OBB':'-obb.pt','Pose':'-pose.pt','Classification':'-cls.pt'}[task]
         model = f"{prefix}{size}{suffix}"
         self.preview_model_name.setText(model)
+        classification = task == 'Classification'
+        self.dataset_hint.setText(
+            '<b>Classification:</b><br>dataset/train/имя_класса/*.png<br>'
+            'dataset/val/имя_класса/*.png<br>Выберите корень dataset, YAML не нужен.'
+            if classification else
+            '<b>Pose:</b><br>images/train, images/val + labels/train, labels/val.<br>'
+            'Выберите YAML с names, kpt_shape: [N,3] и flip_idx. Без flip_idx задайте fliplr=0.'
+            if task == 'Pose' else self._object_dataset_hint
+        )
+        self.dataset_yaml.setEnabled(not classification)
+        self.browse_yaml_btn.setEnabled(not classification)
+        self.dataset_folder.setToolTip('Корень train/val с подпапками классов' if classification else 'Корень YOLO с data.yaml')
 
     def _add_yolo_specific(self):
         self.imgsz = QSpinBox()
@@ -451,8 +465,8 @@ class YOLOTrainWidget(BaseTrainWidget):
                 suffix = ".pt"
             elif task == "Segmentation":
                 suffix = "-seg.pt"
-            else:  # OBB
-                suffix = "-obb.pt"
+            else:
+                suffix = {'OBB':'-obb.pt','Pose':'-pose.pt','Classification':'-cls.pt'}[task]
             model_path = f"{prefix}{size}{suffix}"
         else:
             model_path = self.custom_model_path.text().strip()
@@ -460,10 +474,11 @@ class YOLOTrainWidget(BaseTrainWidget):
                 QMessageBox.warning(self, "Ошибка", "Не указан путь к модели YOLO")
                 return None
 
-        data_path = source_dialogs.dataset_path(self.dataset_yaml)
+        classification = self.yolo_task.currentText() == 'Classification'
+        data_path = '' if classification else source_dialogs.dataset_path(self.dataset_yaml)
         if not data_path:
             data_path = self.dataset_folder.text().strip()
-            if data_path:
+            if data_path and not classification:
                 data_path = os.path.join(data_path, "data.yaml")
 
         if not data_path:
@@ -480,6 +495,7 @@ class YOLOTrainWidget(BaseTrainWidget):
 
         return self.complete_training_params({
             "model": model_path,
+            **({'task':{'Pose':'pose','Classification':'classify'}[self.yolo_task.currentText()]} if self.yolo_task.currentText() in ('Pose','Classification') else {}),
             "data": data_path,
             "project": self.project_path.text().strip() or None,
             "name": self.experiment_name.text().strip() or None,

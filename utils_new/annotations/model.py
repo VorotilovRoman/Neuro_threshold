@@ -109,3 +109,51 @@ class AnnotationSample:
         return AnnotationSample(self.image.copy(), list(self.annotations),
                                 self.mask.copy() if self.mask is not None else None,
                                 self.mask_encoding)
+
+
+@dataclass(frozen=True)
+class PoseSchema:
+    """Dataset-level ordered landmarks; arbitrary object topology, not COCO-only."""
+    names: tuple[str, ...]
+    edges: tuple[tuple[int, int], ...] = ()
+    flip_idx: tuple[int, ...] | None = None
+    dims: int = 3
+
+    def __post_init__(self):
+        names = tuple(self.names)
+        edges = tuple(tuple(edge) for edge in self.edges)
+        if not names or any(not isinstance(n,str) or not n.strip() for n in names) or len(set(names)) != len(names):
+            raise ValueError('Нужны непустые уникальные имена точек.')
+        if self.dims not in (2,3):raise ValueError('kpt_shape: размерность 2 или 3.')
+        n=len(names)
+        for edge in edges:
+            if len(edge)!=2 or any(type(i) is not int or not 0<=i<n for i in edge) or edge[0]==edge[1]:
+                raise ValueError('Связи должны соединять разные точки схемы.')
+        flip=None if self.flip_idx is None else tuple(self.flip_idx)
+        if flip is not None and (any(type(i) is not int for i in flip) or sorted(flip)!=list(range(n)) or any(flip[flip[i]]!=i for i in range(n))):
+            raise ValueError('flip_idx должен задавать взаимные пары / неизменные точки.')
+        object.__setattr__(self,'names',names);object.__setattr__(self,'edges',edges);object.__setattr__(self,'flip_idx',flip)
+
+
+@dataclass(frozen=True, eq=False)
+class PoseAnnotation:
+    bbox: Annotation
+    keypoints: np.ndarray
+
+    def __post_init__(self):
+        if self.bbox.kind!='detect':raise ValueError('Pose требует осевую рамку BBox.')
+        values=np.array(self.keypoints,dtype=np.float64,copy=True)
+        if values.ndim!=2 or values.shape[1]!=3 or not len(values) or not np.isfinite(values).all() or not np.isin(values[:,2],[0,1,2]).all():
+            raise ValueError('Pose: нужны конечные Nx3 (x,y,visibility=0/1/2).')
+        values.setflags(write=False);object.__setattr__(self,'keypoints',values)
+
+
+@dataclass(frozen=True)
+class ImageClassification:
+    class_id: int | None = None
+    reviewed: bool = False
+
+    def __post_init__(self):
+        if self.class_id is not None and (type(self.class_id) is not int or self.class_id<0):
+            raise ValueError('Класс снимка должен быть ID >=0 или None (не размечен).')
+        if type(self.reviewed) is not bool:raise ValueError('reviewed: требуется bool.')

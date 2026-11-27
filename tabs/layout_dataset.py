@@ -219,6 +219,8 @@ class Labeler(QMainWindow):
         self.log_widget.setVisible(False)
 
         settings.settings_changed.connect(self.on_global_settings_changed)
+        from ui.task_annotations import AnnotationTaskModes
+        self.task_modes=AnnotationTaskModes(self,True)
 
     # ----------------------------------------------------------------------
     #  Логирование
@@ -473,6 +475,9 @@ class Labeler(QMainWindow):
         self.update_navigation_state()
 
     def closeEvent(self, event):
+        if hasattr(self,'task_modes'):
+            if not self.task_modes.can_close():event.ignore();return
+            self.task_modes.close_jobs()
         self.sam_controller.close()
         self.overlap_review.close_review()
         if self._lazy_cache is not None:
@@ -522,6 +527,7 @@ class Labeler(QMainWindow):
     def load_yaml(self):
         file_path, _ = source_dialogs.get_open_file(self, 'yolo_yaml')
         if file_path:
+            if self.task_modes.route_source(file_path):return
             from ui.dataset_loading import load_editor_dataset
             load_editor_dataset(self, 'yolo', [file_path], overlay=False)
 
@@ -551,6 +557,7 @@ class Labeler(QMainWindow):
 
     def _load_coco_into_labeler(self, json_paths):
         if json_paths:
+            if len(json_paths)==1 and self.task_modes.route_source(json_paths[0]):return
             from ui.dataset_loading import load_editor_dataset
             load_editor_dataset(self, 'coco', json_paths, overlay=False)
 
@@ -1608,6 +1615,10 @@ class Labeler(QMainWindow):
     #  Смена класса выделенного объекта (Ctrl+0..9)
     # ----------------------------------------------------------------------
     def _set_class_of_selected(self, new_class):
+        if hasattr(self,'task_modes') and self.task_modes.stack.currentIndex():
+            pane=self.task_modes.stack.currentWidget();index=pane.class_combo.findData(new_class)
+            if index>=0:pane.class_combo.setCurrentIndex(index);pane.assign_class()
+            return
         """Устанавливает класс new_class выбранному объекту.
         Приоритет — выделение в object_list, затем — во view."""
         if not self.current_annotations:
@@ -2096,6 +2107,10 @@ class Labeler(QMainWindow):
     #  Обработка клавиш
     # ----------------------------------------------------------------------
     def keyPressEvent(self, event):
+        if self.task_modes.stack.currentIndex():
+            if event.modifiers()==Qt.ControlModifier and Qt.Key_0<=event.key()<=Qt.Key_9:
+                self._set_class_of_selected(event.key()-Qt.Key_0);event.accept();return
+            return super().keyPressEvent(event)
         # Delete — удалить выделенный объект (в списке или во view).
         if event.key() == Qt.Key_Delete and event.modifiers() == Qt.NoModifier:
             idx = self.object_list.currentRow()

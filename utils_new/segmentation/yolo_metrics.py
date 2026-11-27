@@ -13,7 +13,7 @@ def validation_metrics(result):
         if math.isfinite(scalar):
             metrics[key] = scalar
     primary = None
-    for name, attribute in (("box", "box"), ("mask", "seg")):
+    for name, attribute in (("box", "box"), ("mask", "seg"), ("pose", "pose")):
         summary = getattr(result, attribute, None)
         if summary is None:
             continue

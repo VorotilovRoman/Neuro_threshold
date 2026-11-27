@@ -244,6 +244,8 @@ class ViewingDataset(QMainWindow):
         self.log_widget.setVisible(False)
         self.toggle_log_btn.setChecked(False)
         self.toggle_log_btn.setText("Показать лог")
+        from ui.task_annotations import AnnotationTaskModes
+        self.task_modes=AnnotationTaskModes(self,False)
 
     # ------------------------------------------------------------------
     # Логирование / сигналы
@@ -450,6 +452,9 @@ class ViewingDataset(QMainWindow):
         self.btn_convert_all_to_obb.setEnabled(has_images)
 
     def closeEvent(self, event):
+        if hasattr(self,'task_modes'):
+            if not self.task_modes.can_close():event.ignore();return
+            self.task_modes.close_jobs()
         self.overlap_review.close_review()
         if self._lazy_cache is not None:
             try:
@@ -1330,6 +1335,10 @@ class ViewingDataset(QMainWindow):
     #  Смена класса выделенного объекта (Ctrl+0..9)
     # ------------------------------------------------------------------
     def _set_class_of_selected(self, new_class):
+        if hasattr(self,'task_modes') and self.task_modes.stack.currentIndex():
+            pane=self.task_modes.stack.currentWidget();index=pane.class_combo.findData(new_class)
+            if index>=0:pane.class_combo.setCurrentIndex(index);pane.assign_class()
+            return
         """Устанавливает класс new_class выбранному объекту.
         Приоритет — выделение в coord_list, затем — self.selected_index."""
         if not self.current_annotations:
@@ -1512,6 +1521,7 @@ class ViewingDataset(QMainWindow):
     def load_yaml(self):
         file_path, _ = source_dialogs.get_open_file(self, 'yolo_yaml')
         if file_path:
+            if self.task_modes.route_source(file_path):return
             from ui.dataset_loading import load_editor_dataset
             load_editor_dataset(self, 'yolo', [file_path], overlay=True)
 
@@ -1530,6 +1540,7 @@ class ViewingDataset(QMainWindow):
 
     def _load_coco_into_viewer(self, json_paths):
         if json_paths:
+            if len(json_paths)==1 and self.task_modes.route_source(json_paths[0]):return
             from ui.dataset_loading import load_editor_dataset
             load_editor_dataset(self, 'coco', json_paths, overlay=True)
 

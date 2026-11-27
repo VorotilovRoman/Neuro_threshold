@@ -93,6 +93,9 @@ def load_coco(json_path, log_cb=None, *, preserve_category_ids=False, infer_obb=
     with open(json_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
 
+    if any(category.get('keypoints') for category in payload.get('categories', [])):
+        raise ValueError('COCO содержит Pose keypoints. Используйте режим Pose в редакторе/просмотрщике, чтобы сохранить ключевые точки.')
+
     root = Path(json_path).parent
 
     categories = {}

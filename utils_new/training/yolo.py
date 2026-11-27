@@ -69,6 +69,12 @@ def main(argv=None):
     started = datetime.now().isoformat()
     try:
         log("WORKER STARTED")
+        # Pose schema validation reaches the annotation/image utilities. On
+        # Windows initialize Torch DLLs before those utilities can load OpenCV.
+        # Keep this after argparse so --help remains lightweight.
+        from runtime_torch import prepare_windows_torch
+
+        prepare_windows_torch()
         params = (
             json.loads(Path(args.params_file).read_text(encoding="utf-8-sig"))
             if args.params_file
@@ -98,6 +104,14 @@ def main(argv=None):
         model = YOLO(params["model"])
         task = getattr(model, "task", "unknown")
         log(f"Модель загружена: {params['model']}; task={task}")
+        requested_task=params.get('task')
+        if requested_task and task!=requested_task:raise ValueError(f'Задача весов {task} не соответствует выбранной {requested_task}.')
+        pose_schema=None
+        if task=='pose':
+            from dataclasses import asdict
+            import yaml
+            from utils_new.import_export.task_datasets import schema_from_yaml
+            pose_schema=asdict(schema_from_yaml(yaml.safe_load(Path(params['data']).read_text(encoding='utf-8-sig'))))
         checkpoint_records = {}
 
         def on_model_save(trainer):
@@ -114,7 +128,7 @@ def main(argv=None):
                 if path.is_file():
                     network = getattr(trainer, 'model', model)
                     network = getattr(network, 'module', network)
-                    save_model_meta(dict(record, task=task, model_type=f'YOLO-{task}',
+                    save_model_meta(dict(record, task=task, model_type=f'YOLO-{task}', pose_schema=pose_schema,
                                          names=getattr(network, 'names', {}), checkpoint=str(path),
                                          status='completed_epoch' if not stop_requested else 'stopped',
                                          requested_train_args=train_args,
@@ -131,6 +145,9 @@ def main(argv=None):
         def on_train_start(trainer):
             nonlocal phase
             capture_trainer(trainer)
+            if pose_schema:
+                for network in (getattr(trainer,'model',None),getattr(getattr(trainer,'ema',None),'ema',None)):
+                    if network is not None:setattr(getattr(network,'module',network),'neuro_pose_schema',pose_schema)
             if source_metadata(params['data']):
                 from utils_new.import_export.dataset_sources import persist_source
                 from ultralytics.utils import YAML
@@ -176,9 +193,11 @@ def main(argv=None):
             "task": task,
             "names": getattr(model, 'names', {}),
             "ultralytics_version": ultralytics.__version__,
-            "preprocessing_version": "ultralytics-letterbox",
+            "pose_schema": pose_schema,
+            "preprocessing_version": "ultralytics-classify" if task=='classify' else "ultralytics-letterbox",
             "model_source": params["model"],
-            "data_yaml": train_args["data"],
+            "data_yaml": train_args["data"] if task!='classify' else None,
+            "dataset_root": train_args["data"] if task=='classify' else None,
             "epochs": train_args["epochs"],
             "epochs_completed": getattr(trainer, "epoch", -1) + 1,
             "batch_requested": train_args["batch"],

@@ -177,6 +177,13 @@ def load_yolo(path, **kwargs):
             raise ValueError('Параметры экспорта в JSON не соответствуют ONNX. Используйте метаданные этой модели.')
         recipe = embedded
     model.neuro_metadata = {**graph_metadata, **sidecar, 'export_parameters': recipe}
+    native_schema=getattr(getattr(model,'model',None),'neuro_pose_schema',None)
+    if native_schema:
+        from utils_new.annotations.model import PoseSchema
+        declared=model.neuro_metadata.get('pose_schema')
+        if declared and PoseSchema(**declared)!=PoseSchema(**native_schema):
+            raise ValueError('Схема Pose в JSON не соответствует сохранённой внутри весов.')
+        model.neuro_metadata['pose_schema']=native_schema
     if 'imgsz' in model.neuro_metadata:
         import ast
 

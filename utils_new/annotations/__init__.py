@@ -110,3 +110,7 @@ __all__ = [
     "render_annotations",
     "overlay_class_mask",
 ]
+
+from .model import PoseSchema, PoseAnnotation, ImageClassification
+
+__all__ += ["PoseSchema", "PoseAnnotation", "ImageClassification"]

@@ -26,7 +26,8 @@ app=QApplication([]);errors=[]
 QMessageBox.warning=lambda *a,**k:errors.append(str(a[2])) or QMessageBox.Ok
 with TemporaryDirectory() as directory:
  root=Path(directory);source=root/'data.yaml'
- source.write_text('path: .\ntrain: images/train\nval: images/val\nnames: [object]\n')
+ source.write_text('path: .\ntrain: images/train\nval: images/val\nnames: [object]\nkpt_shape: [3, 3]\nflip_idx: [0, 1, 2]\n')
+ (root/'train/part').mkdir(parents=True);(root/'val/part').mkdir(parents=True)
  weights=root/'local.pt';weights.write_bytes(b'UI only')
  count=0
  for cls in (YOLOTrainWidget,UNetTrainWidget,DeepLabV3TrainWidget,SAMTrainWidget,SegFormerTrainWidget):
@@ -91,7 +92,7 @@ with TemporaryDirectory() as directory:
   widget.set_running(True);assert not bar.isEnabled()
   widget.set_running(False);assert bar.isEnabled()
   widget.close()
- assert count==21,count
+ assert count==23,count
  assert not errors,errors
 '''
         result = subprocess.run([sys.executable, '-c', code], cwd=ROOT,

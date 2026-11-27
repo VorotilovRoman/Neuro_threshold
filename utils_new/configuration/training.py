@@ -252,10 +252,25 @@ def build_train_args(params):
         if not isinstance(params.get(name), str) or not params[name].strip():
             raise ValueError(f"Не указан строковый параметр '{name}'.")
     data = Path(params["data"])
-    if data.is_dir():
-        data /= "data.yaml"
-    if not data.is_file():
-        raise ValueError(f"Файл датасета не найден: {data}")
+    task = params.get('task') or ('classify' if str(params['model']).endswith('-cls.pt') else
+                                'pose' if str(params['model']).endswith('-pose.pt') else None)
+    if task is not None and task not in ('detect','segment','obb','pose','classify'):
+        raise ValueError('Неизвестная задача YOLO.')
+    if task == 'classify':
+        if not data.is_dir() or not (data/'train').is_dir() or not (data/'val').is_dir():
+            raise ValueError('Classification требует корень с train/ и val/, внутри — папки классов.')
+        classes = sorted(p.name for p in (data/'train').iterdir() if p.is_dir())
+        if not classes or sorted(p.name for p in (data/'val').iterdir() if p.is_dir()) != classes:
+            raise ValueError('Classification: папки классов train/val должны совпадать.')
+    else:
+        if data.is_dir():data /= "data.yaml"
+        if not data.is_file():raise ValueError(f"Файл датасета не найден: {data}")
+    if task == 'pose':
+        import yaml
+        from utils_new.import_export.task_datasets import schema_from_yaml
+        schema = schema_from_yaml(yaml.safe_load(data.read_text(encoding='utf-8-sig')))
+        if schema.flip_idx is None and not params.get('disable_aug',False) and params.get('fliplr',.5)>0:
+            raise ValueError('Pose: задайте flip_idx в YAML либо fliplr=0 в дополнительных параметрах.')
     if not Path(params["model"]).is_file() and not is_standard_yolo_model(
         params["model"]
     ):
@@ -313,6 +328,7 @@ def build_train_args(params):
             args[name] = params[name]
     extra={name:params[name] for name in YOLO_EXTRA_ARGUMENTS if name in params}
     args.update(validate_yolo_options(extra))
+    if params.get('task') is not None:args['task']=task
     if params.get("device") not in (None, "", "auto"):
         args["device"] = params["device"]
     if params.get("disable_aug", False):
