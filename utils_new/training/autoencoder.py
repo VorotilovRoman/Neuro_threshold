@@ -17,7 +17,7 @@ import traceback
 def main(argv=None):
     from utils_new.configuration.autoencoder import AE_PROFILES
     parser = argparse.ArgumentParser(
-        description="Обучение AE/VAE и калибровка порогов снимка и пикселей."
+        description="Обучение AE/VAE/MAE/FCMAE; необязательная калибровка порогов аномалий."
     )
     source = parser.add_mutually_exclusive_group()
     source.add_argument('--params_file', type=Path, help='Параметры запуска из вкладки AE/VAE')
@@ -28,7 +28,7 @@ def main(argv=None):
         help="Профиль из settings/autoencoders",
     )
     parser.add_argument(
-        "--data", type=Path, help="Папка нормальных снимков или YOLO/MASKS YAML (метки не нужны)"
+        "--data", type=Path, help="Папка снимков или YOLO/MASKS YAML (метки не нужны)"
     )
     parser.add_argument(
         "--output", type=Path, help="Новая папка результатов"

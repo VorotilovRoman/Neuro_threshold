@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel, QLayout
 ACTIONS = {
     'ae_images_yaml': (
         'YOLO / MASKS YAML…', 'Выберите YAML со снимками для AE/VAE', 'YAML (*.yaml *.yml)', False,
-        'Только снимки train/val/calibration/test. TXT и маски не читаются; все снимки должны быть нормальными.',
+        'Только снимки train/val/calibration/test. TXT и маски объектов не читаются; нормальные снимки нужны при включённой калибровке.',
     ),
     'ae_training_config': (
         'Параметры AE/VAE…', 'Конфигурация обучения AE/VAE', 'JSON (*.json)', False,
@@ -233,7 +233,7 @@ TAB_DESCRIPTIONS = {
     "dataset": "Подготовка и экспорт датасета: снимки + TXT, индексные маски или снимки без разметки; YOLO YAML, COCO и YAML с масками.",
     "dataset_analysis": "Проверка качества, разметки, повторов и split: TXT/индексные маски/снимки без разметки; общий отчёт и экспорт.",
     "sahi": "Тайловая нарезка датасета из снимков с TXT, YOLO YAML или COCO. Индексные маски как вход здесь не поддерживаются.",
-    "yolo_train": "Обучение YOLO, U-Net, DeepLab, AE/VAE и дообучение SAM/SAM2; экспорт моделей ONNX/NCNN. AE/VAE используют только нормальные снимки папки/YAML, SAM требует маски объектов. Обучение SAM3 и SegFormer пока не подключено.",
+    "yolo_train": "Обучение YOLO, U-Net, DeepLab, AE/VAE и дообучение SAM/SAM2; экспорт моделей ONNX/NCNN. AE/VAE/MAE/FCMAE используют снимки папки/YAML; калибровка аномалий требует нормальных данных, SAM требует маски объектов. Обучение SAM3 и SegFormer пока не подключено.",
     "yolo_demo": "Сравнение YOLO и пороговых пресетов и объединение BBox по классам через NMS/WBF; снимки и папки.",
     "yolo_sort": "Рекурсивный поиск снимков по классу YOLO и геометрии объекта; список, миниатюры и перенос только изображений.",
     "yolo_aeb": "YOLO и AE/VAE: снимки/папки, выбор объекта, кропы, преобразования и карта ошибки реконструкции по checkpoint.",

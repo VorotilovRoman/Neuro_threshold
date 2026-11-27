@@ -1115,7 +1115,9 @@ class YoloInspectWindow(QMainWindow):
 
             # Собираем сводку по модели для лога.
             n_params = sum(p.numel() for p in model.parameters())
-            if arch in ("unet", "unet_v2", "residual", "convnext_v2"):
+            if arch in ('mae','fcmae'):
+                latent_info = f"patch={cfg['patch_size']}, mask_ratio={cfg['mask_ratio']}, blind reconstruction, eval_seed={cfg['mask_eval_seed']}"
+            elif arch in ("unet", "unet_v2", "residual", "convnext_v2"):
                 latent_info = f"latent_channels={cfg['latent_channels']}"
                 if "img_h" in cfg and "img_w" in cfg:
                     lh = int(cfg["img_h"]) // 8

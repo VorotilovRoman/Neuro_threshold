@@ -4,9 +4,9 @@ from dataclasses import asdict, dataclass, field, fields
 from math import isfinite
 
 PREPROCESSING_VERSIONS = ("ae-pil-v1", "legacy-opencv-v1")
-ARCHITECTURES = ("conv", "conv_gn", "unet", "unet_v2", "residual", "convnext_v2")
+ARCHITECTURES = ("conv", "conv_gn", "unet", "unet_v2", "residual", "convnext_v2", 'mae', 'fcmae')
 AE_PROFILES = ('conv_bn_baseline', 'conv_bn', 'conv_gn', 'unet', 'unet_v2_edge_gan',
-               'residual_ae', 'residual_vae', 'convnext_v2_ae', 'convnext_v2_vae')
+               'residual_ae', 'residual_vae', 'convnext_v2_ae', 'convnext_v2_vae', 'mae_vit_compact', 'fcmae_convnextv2')
 
 
 def _integer(value, name, low=1):
@@ -41,7 +41,24 @@ def normalize_model_config(values, *, arch=None):
         cfg.setdefault('skip_mode', 'full')
         if cfg['skip_mode'] not in ('full', 'none'):
             raise ValueError('skip_mode: full или none.')
-    stride = 16 if cfg["arch"] in ("conv", "conv_gn") else 8
+    masked = cfg['arch'] in ('mae','fcmae')
+    if masked:
+        if cfg['model_type'] != 'ae':raise ValueError('MAE/FCMAE используют model_type=ae, без VAE KL.')
+        for key,value in dict(patch_size=16 if cfg['arch']=='mae' else 32,mask_ratio=.75 if cfg['arch']=='mae' else .6,
+                              mask_eval_seed=723,encoder_dim=192,encoder_depth=4,encoder_heads=6,
+                              decoder_dim=128,decoder_depth=2,decoder_heads=4,blocks_per_stage=2).items():
+            cfg.setdefault(key,value)
+        for key in ('patch_size','encoder_dim','encoder_depth','encoder_heads','decoder_dim','decoder_depth','decoder_heads','blocks_per_stage'):
+            _integer(cfg[key],key)
+        _integer(cfg['mask_eval_seed'],'mask_eval_seed',0)
+        _number(cfg['mask_ratio'],'mask_ratio',0,1)
+        if not 0 < cfg['mask_ratio'] < 1:raise ValueError('mask_ratio должен быть между 0 и 1.')
+        if cfg['arch']=='fcmae' and cfg['patch_size']!=32:raise ValueError('FCMAE: patch_size=32 (stride encoder).')
+        if cfg['arch']=='mae':
+            for prefix in ('encoder','decoder'):
+                if cfg[prefix+'_dim']%cfg[prefix+'_heads'] or cfg[prefix+'_dim']%4:
+                    raise ValueError('MAE: embedding dim кратен heads и 4 для 2D sin/cos позиций.')
+    stride = cfg['patch_size'] if masked else 16 if cfg["arch"] in ("conv", "conv_gn") else 8
     for key in ("img_h", "img_w"):
         if _integer(cfg.get(key), key, stride) % stride:
             raise ValueError(f"{key} должен быть кратным {stride}.")
@@ -68,6 +85,12 @@ def normalize_model_config(values, *, arch=None):
     )
     for key, value in defaults.items():
         cfg.setdefault(key, value)
+    if masked:
+        if cfg['arch']=='fcmae' and (type(cfg['base']) is not int or cfg['base']<2):
+            raise ValueError('FCMAE: base >= 2 для LayerNorm stem.')
+        if (cfg['img_h']//stride)*(cfg['img_w']//stride)<2:
+            raise ValueError('MAE/FCMAE: нужны минимум два patches, скрытые и видимые.')
+        cfg['latent_channels'] = cfg['encoder_dim'] if cfg['arch']=='mae' else cfg['base']*8
     if cfg["preprocessing_version"] not in PREPROCESSING_VERSIONS:
         raise ValueError("Неизвестная версия предобработки AE.")
     for key in ("keep_aspect", "use_edge_channel", "vae_use_mean"):
@@ -116,6 +139,7 @@ def normalize_model_config(values, *, arch=None):
     cfg["bottleneck_dilations"] = tuple(
         _integer(d, "dilation") for d in cfg["bottleneck_dilations"]
     )
+    if cfg['arch']=='mae':cfg.pop('blocks_per_stage',None)
     return cfg
 
 
@@ -158,6 +182,7 @@ class TrainConfig:
     image_percentile: float = 99.0
     pixel_percentile: float = 99.5
     calibration_pixels: int = 1000000
+    calibrate_thresholds: bool = True
 
     @classmethod
     def from_dict(cls, values):
@@ -224,6 +249,7 @@ class TrainConfig:
             "use_ssim",
             "edge_weighted_l1",
             "use_gan",
+            'calibrate_thresholds',
         ):
             if type(getattr(config, key)) is not bool:
                 raise ValueError(f"{key} должен быть bool.")
@@ -234,6 +260,9 @@ class TrainConfig:
             raise ValueError("Неизвестная функция потерь или нормировка KL.")
         if config.edge_weighted_l1 and config.loss_kind != "l1":
             raise ValueError("edge_weighted_l1 применяется только к L1.")
+        if config.model['arch'] in ('mae','fcmae') and (config.loss_kind!='mse' or config.l1_weight!=1
+                or config.use_ssim or config.grad_loss_w or config.edge_weighted_l1 or config.use_gan or config.beta_vae_target):
+            raise ValueError('MAE/FCMAE: только masked MSE, вес=1, без SSIM/gradient/edge-loss/GAN/KL.')
         if config.use_gan and min(config.model["img_h"], config.model["img_w"]) < 32:
             raise ValueError("PatchGAN требует минимум 32×32.")
         if (

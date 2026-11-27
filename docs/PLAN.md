@@ -16,8 +16,9 @@
 - [ ] Отдельные экспорт/инференс-адаптеры SAM encoder/decoder с подсказками и AE/VAE;
   GGUF — после выбора runtime, умеющего выполнять нужную архитектуру.
 - [ ] Сравнить residual/ConvNeXt V2-based AE/VAE и U-Net без skip-связей на отдельном
-  размеченном наборе дефектов по image/pixel AUROC и PRO. Реализовать MAE/FCMAE с
-  masked-only loss и RAE с локальным pretrained DINOv3/SigLIP, корректными feature
+  размеченном наборе дефектов по image/pixel AUROC и PRO. Сравнить также реализованные
+  MAE/FCMAE; подключить перенос их backbones в supervised-сегментацию по GT-маскам.
+  Реализовать RAE с локальным pretrained DINOv3/SigLIP, корректными feature
   normalization и калибровкой; обычные reconstructors с ними не отождествлять.
 - [ ] Отдельно подключить дообучение SAM3 с текстовыми запросами после выбора
   обучающего backend и формата соответствий «текст — маски объектов».

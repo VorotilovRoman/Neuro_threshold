@@ -110,7 +110,8 @@ def train_epoch(
         # BatchNorm cannot estimate statistics for a single deepest spatial value.
         from utils_new.training.optimization import singleton_batchnorm
         with singleton_batchnorm(model, len(inputs)):
-            reconstruction, extra = model(inputs)
+            reconstruction, extra = (model.forward_masked(inputs,valid=valid)
+                                     if cfg.model['arch'] in ('mae','fcmae') else model(inputs))
         loss, recon, kl = training_objective(
             reconstruction, target, valid, extra, criterion, beta
         )
@@ -157,7 +158,8 @@ def evaluate(model, loader, criterion, device, *, cancel=None):
     for item in loader:
         checkpoint(cancel)
         inputs, target, valid = _batch(item, device)
-        reconstruction, extra = model(inputs)
+        reconstruction, extra = (model.forward_masked(inputs,mask=model.validation_mask(inputs,valid),valid=valid)
+                                 if criterion.config.model['arch'] in ('mae','fcmae') else model(inputs))
         # A fixed validation objective makes epochs with different KL warmup comparable.
         loss, _, _ = training_objective(
             reconstruction,
@@ -250,13 +252,14 @@ def anomaly_metrics(model, loader, calibration, device, *, cancel=None):
             values = error[region]
             score = float(values.mean())
             scores.append(score)
-            rejected += score > calibration['image_threshold']
+            rejected += bool(calibration and score > calibration['image_threshold'])
             pixels += values.numel()
-            pixel_rejected += int((values > calibration['pixel_threshold']).sum())
-    return dict(metric='mae', images=len(scores), mean_image_mae=float(np.mean(scores)),
-                fraction_images_above_threshold=rejected/len(scores),
-                fraction_pixels_above_threshold=pixel_rejected/pixels,
-                assumption='all test images are normal', used_for_selection=False, used_for_calibration=False)
+            if calibration:pixel_rejected += int((values > calibration['pixel_threshold']).sum())
+    result = dict(metric='mae', images=len(scores), mean_image_mae=float(np.mean(scores)),
+                  assumption='all test images are normal' if calibration else 'normality not assumed',
+                  used_for_selection=False,used_for_calibration=False,thresholds_applied=bool(calibration))
+    if calibration:result.update(fraction_images_above_threshold=rejected/len(scores),fraction_pixels_above_threshold=pixel_rejected/pixels)
+    return result
 
 
 def run_training(
@@ -329,7 +332,10 @@ def run_training(
     data_info = dict(source=data['source'], kind=data['kind'], auto_split=data['auto_split'],
                      counts={name: len(paths) for name, paths in splits.items()},
                      calibration_split='calibration' if calibration_paths else 'val',
-                     annotation_policy='ignored; all selected images assumed normal')
+                     annotation_policy='ignored; all selected images assumed normal' if config.calibrate_thresholds
+                     else 'ignored; normality not assumed; no anomaly calibration')
+    data_info.update(calibration_enabled=config.calibrate_thresholds,
+                     validation_objective='masked_pixel_mse' if config.model['arch'] in ('mae','fcmae') else 'reconstruction_plus_beta_kl')
     write_json_atomic(
         output / "args.json",
         dict(
@@ -381,7 +387,13 @@ def run_training(
             if initial['config'][key] != config.model[key]:
                 raise ValueError(f'Начальные веса не соответствуют выбранной модели: {key}.')
         try:
-            model.load_state_dict(initial['model'], strict=True)
+            initial_state = dict(initial['model'])
+            if config.model['arch']=='mae':
+                # Fixed sin/cos tables are regenerated for a new image grid.
+                # Patch embeddings / decoder weights still load strictly.
+                for key in ('encoder_position','decoder_position'):
+                    initial_state[key] = model.state_dict()[key]
+            model.load_state_dict(initial_state, strict=True)
         except RuntimeError as error:
             raise ValueError(f'Размеры/архитектура начальных весов несовместимы: {error}') from error
     criterion = ReconstructionLoss(config).to(torch_device)
@@ -524,10 +536,13 @@ def run_training(
         if best_state is None:
             raise ValueError("Не получено ни одной корректной эпохи.")
         model.load_state_dict(best_state, strict=True)
-        progress(dict(event='stage', stage=f'Калибровка лучших весов: {data_info["calibration_split"]}'))
-        calibration = calibrate(model, calibration_loader, config, torch_device, cancel=cancel)
-        calibration['source_split'] = data_info['calibration_split']
-        calibration['independent_of_selection'] = bool(calibration_paths)
+        progress(dict(event='stage',stage=(f'Калибровка лучших весов: {data_info["calibration_split"]}'
+                                          if config.calibrate_thresholds else 'Сохранение лучших весов без порогов аномалий')))
+        calibration = None
+        if config.calibrate_thresholds:
+            calibration = calibrate(model, calibration_loader, config, torch_device, cancel=cancel)
+            calibration['source_split'] = data_info['calibration_split']
+            calibration['independent_of_selection'] = bool(calibration_paths)
         save_checkpoint(
             weights / "best.pt",
             model,
@@ -537,7 +552,7 @@ def run_training(
             calibration=calibration,
             training_config=config.to_dict(), data_info=data_info, status='completed',
         )
-        write_json_atomic(output / "calibration.json", calibration)
+        if calibration:write_json_atomic(output / "calibration.json", calibration)
         write_json_atomic(output / 'metrics.json', dict(best_epoch=best_epoch, best_val_loss=best_loss,
                           epochs_completed=history[-1]['epoch'], calibration=calibration, data=data_info))
         if test_loader is not None:
@@ -549,6 +564,9 @@ def run_training(
             save_reconstruction_examples(
                 output / "recon_examples.png", model, val_dataset, torch_device
             )
+            if config.model['arch'] in ('mae','fcmae'):
+                from utils_new.import_export.autoencoder import save_masked_examples
+                save_masked_examples(output/'masked_examples.png',model,val_dataset,torch_device)
         progress(
             dict(
                 event="completed",

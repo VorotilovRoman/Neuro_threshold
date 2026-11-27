@@ -97,6 +97,13 @@ class ReconstructionLoss(nn.Module):
 
 
 def training_objective(reconstruction, target, valid, extra, criterion, beta):
+    if criterion.config.model['arch'] in ('mae','fcmae'):
+        if not isinstance(extra,dict) or 'masked_pixels' not in extra:
+            raise ValueError('MAE/FCMAE не вернул маску скрытых пикселей.')
+        selected = valid*extra['masked_pixels']
+        if not selected.any():raise ValueError('Нет скрытых полезных пикселей для masked loss.')
+        loss = masked_mean((reconstruction-target).square(),selected)
+        return loss,loss,loss.new_zeros(())
     recon = criterion(reconstruction, target, valid)
     kl = recon.new_zeros(())
     cfg = criterion.config

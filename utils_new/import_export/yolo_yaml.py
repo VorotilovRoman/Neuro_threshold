@@ -24,8 +24,11 @@ def load_image_splits(source, *, exclude=(), cancel=None):
         raise ValueError('Выберите источник снимков.')
     path = Path(source).expanduser().resolve()
     excluded = [Path(value).resolve() for value in exclude]
-    if path.is_dir() and (path / 'data.yaml').is_file():
-        path /= 'data.yaml'
+    if path.is_dir():
+        for name in ('data.yaml','masks_data.yaml'):
+            if (path/name).is_file():
+                path /= name
+                break
     splits = {name: [] for name in ('train', 'val', 'calibration', 'test')}
     if path.is_dir():
         root, kind = path, 'folder'
@@ -68,7 +71,7 @@ def load_image_splits(source, *, exclude=(), cancel=None):
                 image = str(Path(image).resolve())
                 if any(Path(image).is_relative_to(folder) for folder in excluded):
                     continue
-                if Path(image).name.lower() in ('loss.png', 'recon_examples.png'):
+                if Path(image).name.lower() in ('loss.png', 'recon_examples.png', 'masked_examples.png'):
                     continue
                 if image in assigned and assigned[image] != split:
                     raise ValueError(f'Снимок находится в разных split: {assigned[image]}/{split}: {image}')
@@ -76,6 +79,7 @@ def load_image_splits(source, *, exclude=(), cancel=None):
                 images.append(image)
         images = list(dict.fromkeys(images))
         if not images:
+            if split=='test':continue  # Exported datasets may have an existing empty test directory.
             raise ValueError(f'Нет снимков в явно заданном split {split}.')
         splits[split].extend(image for image in images if image not in splits[split])
     if not splits['train']:

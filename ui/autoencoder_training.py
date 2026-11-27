@@ -35,7 +35,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         self.pages = QTabWidget()
         layout.addWidget(self.pages)
         forms = {}
-        for key, label in (('data', 'Данные'), ('model', 'Модель'), ('training', 'Обучение'),
+        for key, label in (('data', 'Данные'), ('model', 'Модель'), ('masked','MAE/FCMAE'), ('training', 'Обучение'),
                            ('augmentation', 'Аугментации'), ('loss', 'Потери'), ('calibration', 'Калибровка')):
             page = QWidget()
             forms[key] = QFormLayout(page)
@@ -54,7 +54,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         self.check_source = QPushButton('Проверить источники снимков')
         forms['data'].addRow(self.check_source)
         self.source_info = self._hint(forms['data'],
-            'Все выбранные снимки считаются нормальными. TXT/маски не читаются. '
+            'Маски объектов/TXT не нужны и не читаются. Для калибровки нужны только нормальные снимки. '
             'YAML: train, val, необязательные calibration и test. Без val выделяется доля train по seed.')
         self.initial_weights = self._path(forms['data'], 'Начальные веса:', lambda: self._choose_checkpoint(False))
         self.resume = self._path(forms['data'], 'Продолжить last.pt:', lambda: self._choose_checkpoint(True))
@@ -73,19 +73,28 @@ class AutoencoderTrainWidget(BaseTrainWidget):
             ('model_type', 'Режим', ['ae','vae']), ('in_channels', 'Снимок', [('Grayscale',1),('RGB',3)]),
             ('img_h','Высота H, px',(8,4096)), ('img_w','Ширина W, px',(8,4096)),
             ('latent_dim','Латентный вектор (Conv)',(1,8192)),
-            ('latent_channels','Латентные каналы (spatial)',(1,1024)),
+            ('latent_channels','Латентные каналы (spatial)',(1,8192)),
             ('base','Ширина base (V2 / spatial)',(1,256)),
             ('blocks_per_stage','Блоков на stage (spatial)',(1,16)),
             ('skip_mode','U-Net skip-связи',[('Включены (реконструкция)', 'full'), ('Отключены (через z)', 'none')]), ('norm_type','Нормализация residual/V2/GAN',['gn','bn']),
             ('bottleneck_dilations','Dilations V2, через запятую','text'),
+            ('patch_size','Patch, px (MAE/FCMAE)',(2,64)),
+            ('mask_ratio','Доля скрытых patches',(0.01,.99)),
+            ('mask_eval_seed','Seed маски инференса',(0,2147483647)),
+            ('encoder_dim','MAE encoder dim',(4,1024)), ('encoder_depth','MAE encoder depth',(1,24)),
+            ('encoder_heads','MAE encoder heads',(1,32)),
+            ('decoder_dim','Masked decoder dim',(4,1024)), ('decoder_depth','Masked decoder depth',(1,16)),
+            ('decoder_heads','MAE decoder heads',(1,32)),
             ('keep_aspect','Сохранять пропорции',bool), ('pad_value','Padding 0–255',(0,255)),
             ('use_edge_channel','Дополнительный канал границ (V2 / spatial)',bool),
             ('edge_kernel','Оператор границ',['scharr','sobel']), ('median_kernel','Медианный фильтр, px',(1,31)),
             ('edge_lo','Нижний порог границ',(0.,10.)), ('edge_hi','Верхний порог границ',(0.,10.)),
             ('logvar_min','Нижняя граница logvar',(-80.,80.)), ('logvar_max','Верхняя граница logvar',(-80.,80.))]
         for key,label,spec in model_spec:
-            self.model_controls[key] = self._field(forms['model'], label, spec)
+            self.model_controls[key] = self._field(forms['masked' if key in ('patch_size','mask_ratio','mask_eval_seed','encoder_dim','encoder_depth','encoder_heads','decoder_dim','decoder_depth','decoder_heads') else 'model'], label, spec)
         self.io_info = self._hint(forms['model'], '')
+        self.masked_info = self._hint(forms['masked'], '')
+        self._hint(forms['masked'],'MAE: ViT encoder видит только открытые patches. FCMAE: ConvNeXt V2 с масками активных позиций, плотные вычисления. MSE только на скрытых пикселях. Маски объектов из датасета не используются. Инференс: каждый patch восстанавливается скрытым; большее разрешение особенно дорого для внимания ViT.')
         self._hint(forms['model'], 'Conv: H/W кратны 16; U-Net/residual/ConvNeXt: кратны 8. '
                    'ConvNeXt V2: LayerNorm/GRN; residual: GN/BN. Spatial-модели не имеют skip-обхода z. '
                    'Выход восстанавливает только каналы снимка; edge заново строится из входа.')
@@ -107,7 +116,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
                    ('kl_reduction','Нормировка KL',['mean','sum_per_sample']),('use_gan','PatchGAN',bool),
                    ('gan_start_epoch','Начало GAN, эпоха',(0,100000)),('gan_weight','Вес GAN',(0.,100.)),
                    ('gan_lr','LR дискриминатора',(1e-8,1.)),('discriminator_base','Ширина дискриминатора',(1,256))],
-          'calibration': [('image_percentile','Перцентиль MAE снимков',(0.,100.)),
+          'calibration': [('calibrate_thresholds','Калибровать пороги (только нормальные снимки)',bool),('image_percentile','Перцентиль MAE снимков',(0.,100.)),
                           ('pixel_percentile','Перцентиль MAE пикселей',(0.,100.)),
                           ('calibration_pixels','Макс. пикселей для калибровки',(1,100000000))]}
         for page, entries in specs.items():
@@ -117,9 +126,10 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         forms['calibration'].addRow(self.plots)
         self._hint(forms['augmentation'], 'Геометрия согласована у входа и эталона. Шум добавляется только во вход. '
                    'Границы вычисляются после аугментаций; padding исключается из MAE и калибровки.')
-        self._hint(forms['calibration'], 'Пороги считаются по нормальным снимкам calibration; если split отсутствует — по val. '
+        self._hint(forms['calibration'], 'Отключите калибровку для предобучения на смешанных/дефектных снимках. Пороги: нормальные calibration, иначе val. '
                    'Test используется только для итоговой оценки. Для VAE оценка детерминирована через mu.')
         self._hint(forms['loss'], 'Val сравнивается при фиксированном целевом β, без GAN-составляющей. '
+                   'MAE/FCMAE: MSE только по скрытым полезным пикселям, val с фиксированной маской. '
                    'Низкая ошибка реконструкции сама по себе не доказывает обнаружение дефектов.')
         self.add_buttons()
         self.add_progress_bar()
@@ -179,7 +189,8 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         cfg=TrainConfig.from_dict(raw).to_dict()
         # Validate every numeric control before changing any value; Qt spinboxes
         # otherwise silently clamp imported metadata/configurations.
-        defaults={'latent_dim':128,'latent_channels':8,'blocks_per_stage':2,'skip_mode':'full'}
+        defaults={'latent_dim':128,'latent_channels':8,'blocks_per_stage':2,'skip_mode':'full','patch_size':16,'mask_ratio':.75,'mask_eval_seed':723,
+                  'encoder_dim':192,'encoder_depth':4,'encoder_heads':6,'decoder_dim':128,'decoder_depth':2,'decoder_heads':4}
         assignments=[(widget,cfg['model'].get(key,defaults.get(key))) for key,widget in self.model_controls.items()]
         assignments += [(widget,cfg[key]) for key,widget in self.train_controls.items()]
         for widget,value in assignments:
@@ -189,6 +200,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         try:
             for widget,value in assignments:self._set(widget,value)
         finally: self._applying=False
+        self._last_arch=cfg['model']['arch']
         self._capabilities()
 
     def config(self):
@@ -197,7 +209,11 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         except ValueError as error: raise ValueError('Dilations: целые числа через запятую.') from error
         model.update(preprocessing_version='ae-pil-v1',vae_use_mean=True,
                      model_in_channels=model['in_channels']+int(model['use_edge_channel']),out_channels=model['in_channels'])
-        if model['arch'] not in ('residual','convnext_v2'):model.pop('blocks_per_stage',None)
+        if model['arch'] not in ('residual','convnext_v2','fcmae'):model.pop('blocks_per_stage',None)
+        masked=model['arch'] in ('mae','fcmae')
+        for key in ('patch_size','mask_ratio','mask_eval_seed','encoder_dim','encoder_depth','encoder_heads','decoder_dim','decoder_depth','decoder_heads'):
+            if not masked:model.pop(key,None)
+        if masked:model['latent_channels']=model['encoder_dim'] if model['arch']=='mae' else model['base']*8
         if model['arch'] not in ('unet','unet_v2'):model.pop('skip_mode',None)
         model.pop('latent_channels' if model['arch'] in ('conv','conv_gn') else 'latent_dim',None)
         return TrainConfig.from_dict(dict(model=model,**{key:self._value(widget) for key,widget in self.train_controls.items()})).to_dict()
@@ -206,15 +222,32 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         if self._applying: return
         controls=self.model_controls;train=self.train_controls
         arch=controls['arch'].currentData();vae=controls['model_type'].currentData()=='vae'
+        masked=arch in ('mae','fcmae');mae=arch=='mae';fcmae=arch=='fcmae'
+        if masked and arch!=getattr(self,'_last_arch',arch):train['calibrate_thresholds'].setChecked(False)
+        self._last_arch=arch
+        if masked:
+            self._applying=True
+            try:
+                controls['model_type'].setCurrentIndex(controls['model_type'].findData('ae'))
+                for key,value in dict(loss_kind='mse',l1_weight=1,use_ssim=False,grad_loss_w=0,edge_weighted_l1=False,use_gan=False,beta_vae_target=0).items():self._set(train[key],value)
+                if fcmae:controls['patch_size'].setValue(32)
+            finally:self._applying=False
+        vae=controls['model_type'].currentData()=='vae'
+        self.pages.widget(2).setEnabled(masked and not self.resume.text().strip())
+        controls['model_type'].setEnabled(not masked)
+        for key in ('patch_size','mask_ratio','mask_eval_seed','encoder_dim','encoder_depth','encoder_heads','decoder_dim','decoder_depth','decoder_heads'):
+            controls[key].setEnabled(masked and (not key.startswith('encoder_') or mae) and (key!='decoder_heads' or mae) and (key!='patch_size' or not fcmae))
+        for key in ('loss_kind','l1_weight','use_ssim','grad_loss_w','edge_weighted_l1','use_gan'):train[key].setEnabled(not masked)
+        for key in ('image_percentile','pixel_percentile','calibration_pixels'):train[key].setEnabled(train['calibrate_thresholds'].isChecked())
         v2=arch=='unet_v2';conv=arch in ('conv','conv_gn');spatial=arch in ('residual','convnext_v2')
         if not (v2 or spatial) and controls['use_edge_channel'].isChecked(): controls['use_edge_channel'].setChecked(False)
-        controls['base'].setEnabled(v2 or spatial)
-        controls['blocks_per_stage'].setEnabled(spatial)
+        controls['base'].setEnabled(v2 or spatial or fcmae)
+        controls['blocks_per_stage'].setEnabled(spatial or fcmae)
         controls['skip_mode'].setEnabled(arch in ('unet','unet_v2'))
         controls['bottleneck_dilations'].setEnabled(v2)
         controls['use_edge_channel'].setEnabled(v2 or spatial)
         controls['norm_type'].setEnabled(v2 or arch=='residual' or train['use_gan'].isChecked())
-        controls['latent_dim'].setEnabled(conv);controls['latent_channels'].setEnabled(not conv)
+        controls['latent_dim'].setEnabled(conv);controls['latent_channels'].setEnabled(not conv and not masked)
         edge=(v2 or spatial) and controls['use_edge_channel'].isChecked()
         for key in ('edge_kernel','median_kernel','edge_lo','edge_hi'): controls[key].setEnabled(edge)
         for key in ('logvar_min','logvar_max'): controls[key].setEnabled(vae)
@@ -224,12 +257,17 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         train['ssim_weight'].setEnabled(train['use_ssim'].isChecked())
         l1=train['loss_kind'].currentData()=='l1'
         if not l1 and train['edge_weighted_l1'].isChecked(): train['edge_weighted_l1'].setChecked(False)
-        train['edge_weighted_l1'].setEnabled(l1);train['edge_l1_extra_w'].setEnabled(l1 and train['edge_weighted_l1'].isChecked())
+        train['edge_weighted_l1'].setEnabled(l1 and not masked);train['edge_l1_extra_w'].setEnabled(l1 and train['edge_weighted_l1'].isChecked())
         h,w=controls['img_h'].value(),controls['img_w'].value();channels=controls['in_channels'].currentData()
         latent=str(controls['latent_dim'].value()) if conv else f"{controls['latent_channels'].value()}×{h//8}×{w//8}"
+        if masked:
+            patch=controls['patch_size'].value();count=(h//patch)*(w//patch)
+            hidden=max(1,min(count-1,round(count*controls['mask_ratio'].value()))) if count>1 else 0
+            latent=f"{count} patches, hidden={hidden}; encoder dim={controls['encoder_dim'].value() if mae else controls['base'].value()*8}; blind multi-pass inference"
         self.io_info.setText(f'Вход: N×{channels+int(edge)}×{h}×{w}; выход: N×{channels}×{h}×{w}; z: {latent}. '
                              + (f" Параметров FC bottleneck ≈ {(3 if vae else 2)*(128 if arch=='conv' else 64)*(h//16)*(w//16)*controls['latent_dim'].value():,}." if conv else '')
                              + ('KL отключен: β=0.' if vae and train['beta_vae_target'].value()==0 else ''))
+        self.masked_info.setText(self.io_info.text() if masked else 'Выберите архитектуру mae или fcmae на странице «Модель».')
 
     def _load_profile(self):
         try: self.apply_config(read_json_object(Path(get_project_root())/'settings/autoencoders'/(self.profile.currentText()+'.json')))
@@ -263,7 +301,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
 
     def _source_changed(self):
         if self._source_job: self._source_job.close();self._source_job=None
-        self.source_info.setText('Нажмите «Проверить источники снимков». Разметка не используется; все снимки считаются нормальными.')
+        self.source_info.setText('Нажмите «Проверить источники снимков». Разметка не используется; калибровка требует нормальных снимков.')
 
     def _check_source(self):
         if self._source_job: self._source_job.close()
@@ -277,7 +315,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
             if self._source_job is not job or self.source.text().strip()!=path:return
             counts='; '.join(f'{key}: {len(value)}' for key,value in data['splits'].items())
             self.source_info.setText(counts+('; val будет выделен из train' if data['auto_split'] else '')+
-                                     '. Все снимки считаются нормальными. TXT и маски не читаются.')
+                                     '. Маски объектов не читаются. Для калибровки нужны нормальные снимки.')
         job.result_ready.connect(accepted)
         def failed(text):
             if self._source_job is job:self.source_info.setText('Ошибка источника: '+text)
@@ -298,7 +336,9 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         locked=bool(self.resume.text().strip())
         for index in range(1,self.pages.count()):self.pages.widget(index).setEnabled(not locked)
         for widget in (self.profile,self.apply_profile,self.import_config):widget.setEnabled(not locked)
-        if not locked:self._checkpoint_error=''
+        if not locked:
+            self._checkpoint_error=''
+            self._capabilities()
 
     def _inspect_checkpoint(self, path, resume):
         self._checkpoint_key=(resume,path)

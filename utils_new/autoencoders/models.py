@@ -615,10 +615,13 @@ class ConvNeXtV2Block(nn.Module):
         self.grn = GlobalResponseNorm(channels * 4)
         self.project = nn.Linear(channels * 4, channels)
 
-    def forward(self, x):
+    def forward(self, x, visible=None):
         h = self.norm(self.depthwise(x).permute(0, 2, 3, 1))
-        h = self.project(self.grn(F.gelu(self.expand(h))))
-        return x + h.permute(0, 3, 1, 2)
+        h = F.gelu(self.expand(h))
+        if visible is not None:h = h*visible.permute(0,2,3,1)
+        h = self.project(self.grn(h)).permute(0,3,1,2)
+        result = x+h
+        return result if visible is None else result*visible
 
 
 class SpatialAutoencoder(nn.Module):
@@ -679,6 +682,8 @@ def detect_arch_from_state_dict(state_dict):
     Приоритет: unet_v2 → unet → conv (BN) → conv_gn.
     """
     keys = list(state_dict.keys())
+    if any(k.startswith('mae_encoder.') for k in keys):return 'mae'
+    if any(k.startswith('fcmae_stages.') for k in keys):return 'fcmae'
     if any(k.startswith("encoder_stages.") for k in keys):
         return "convnext_v2" if any(".depthwise." in k for k in keys) else "residual"
     if any(k.startswith("encoder.bottleneck.") for k in keys):
@@ -701,11 +706,11 @@ def detect_arch(cfg, state_dict=None):
     # 1) state_dict — истина в последней инстанции
     if state_dict is not None:
         detected = detect_arch_from_state_dict(state_dict)
-        if detected in ("unet_v2", "unet", "conv", "conv_gn", "residual", "convnext_v2"):
+        if detected in ("unet_v2", "unet", "conv", "conv_gn", "residual", "convnext_v2", 'mae', 'fcmae'):
             return detected
 
     # Modern explicit architectures never existed with historical U-Net tags.
-    if cfg.get('arch') in ('residual', 'convnext_v2'):
+    if cfg.get('arch') in ('residual', 'convnext_v2', 'mae', 'fcmae'):
         return cfg['arch']
 
     if cfg.get("preprocessing_version") and cfg.get("arch") in (
@@ -746,6 +751,9 @@ def _build_model(cfg):
     model_type = cfg["model_type"]
     in_channels = cfg["in_channels"]
     img_h, img_w = cfg["img_h"], cfg["img_w"]
+    if arch in ('mae','fcmae'):
+        from utils_new.autoencoders.masked import ViTMAE, FCMAE
+        return (ViTMAE if arch == 'mae' else FCMAE)(cfg)
 
     if arch in ("residual", "convnext_v2"):
         return SpatialAutoencoder(cfg)

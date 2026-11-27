@@ -44,6 +44,10 @@ def inference_contract(config):
         keys += ('base', 'blocks_per_stage')
         if config['arch'] == 'residual':
             keys += ('norm_type',)
+    if config['arch'] in ('mae','fcmae'):
+        keys += ('patch_size','mask_ratio','mask_eval_seed','decoder_dim','decoder_depth')
+        keys += (('encoder_dim','encoder_depth','encoder_heads','decoder_heads') if config['arch']=='mae'
+                 else ('base','blocks_per_stage'))
     # Preserve old calibrated contracts for the original full-skip models.
     if config.get('skip_mode', 'full') != 'full':
         keys += ('skip_mode',)
@@ -251,9 +255,43 @@ def save_reconstruction_examples(path, model, dataset, device):
                     array = (
                         array[0] if array.shape[0] == 1 else np.moveaxis(array, 0, -1)
                     )
+                    if array.ndim == 3:array = np.clip(array,0,1)  # Display only; losses/scores use raw predictions.
                 axes[row, column].imshow(
                     array, cmap="hot" if row == 2 else "gray", vmin=0, vmax=1
                 )
                 axes[row, column].axis("off")
     with atomic_path(path) as temporary:
         figure.savefig(temporary, format="png", dpi=120)
+
+
+def save_masked_examples(path, model, dataset, device):
+    """Fixed validation masks, visibly separate from dataset object annotation."""
+    import numpy as np
+    import torch
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    count = min(4,len(dataset))
+    figure = Figure(figsize=(3*count,11))
+    FigureCanvasAgg(figure)
+    axes = figure.subplots(5,count,squeeze=False)
+    names = ('Target','Hidden patches (not labels)','Masked input','Filled hidden + visible input','Hidden-pixel absolute error')
+    model.eval()
+    with torch.inference_mode():
+        for column in range(count):
+            item = dataset[column]
+            inputs = item['input'][None].to(device)
+            valid = item['valid'][None].to(device)
+            target = item['target'][None].to(device)
+            mask = model.validation_mask(inputs,valid)
+            predicted,extra = model.forward_masked(inputs,mask,valid)
+            pixels = extra['masked_pixels']
+            filled = torch.where(pixels,predicted,inputs)
+            error = (predicted-target).abs().mean(1,keepdim=True)*pixels*valid
+            for row,value in enumerate((target,pixels,inputs*(~pixels),filled,error)):
+                array = value[0].float().cpu().numpy()
+                array = array[0] if array.shape[0]==1 else np.clip(np.moveaxis(array,0,-1),0,1)
+                axes[row,column].imshow(array,cmap='hot' if row==4 else 'gray',vmin=0,vmax=1)
+                axes[row,column].set_title(names[row],fontsize=8);axes[row,column].axis('off')
+    figure.tight_layout()
+    with atomic_path(path) as temporary:figure.savefig(temporary,format='png',dpi=120)

@@ -283,11 +283,13 @@ python -m unittest discover -s tests -p test_sam_training_roundtrip.py -v
 ![Данные и запуск обучения AE/VAE](image/autoencoder_training.png)
 
 После **«Экспорт модели»** находится **«Обучение VAE/AE»**. Выберите готовый профиль
-или загрузите JSON, затем укажите источник нормальных снимков, папку проекта и имя
+или загрузите JSON, затем укажите источник снимков, папку проекта и имя
 запуска. Занятое имя нового запуска получает суффикс `_2`, `_3` и т. д.
 
-- **Данные:** папка нормальных снимков либо YOLO/MASKS YAML. Используются только
-  изображения; TXT, маски и классы игнорируются. Снимки с дефектами заранее исключите.
+- **Данные:** папка снимков либо YOLO/MASKS YAML. Используются только
+  изображения; TXT, маски объектов и классы игнорируются. Для калибровки порогов
+  аномалий используйте только нормальные снимки; для предобучения MAE/FCMAE
+  на смешанном наборе отключите калибровку (так заданы masked-профили).
   Пути/количество файлов проверяются в фоне, содержимое и утечки — в воркере.
 - **Модель:** Conv/Conv-GN/U-Net/U-Net V2/residual/ConvNeXt V2-based × AE/VAE,
   grayscale/RGB, H/W и размер латентного представления. Spatial-модели имеют
@@ -316,7 +318,7 @@ python -m unittest discover -s tests -p test_sam_training_roundtrip.py -v
 | residual | Пространственный bottleneck H/8×W/8, residual-блоки, GN/BN, SiLU, resize+conv decoder; без обхода z |
 | ConvNeXt V2-based | Depthwise 7×7, LayerNorm, inverted bottleneck, GELU и GRN; пространственный z и resize+conv decoder, без U-Net skip-связей |
 
-Новые backbones — собственные реконструкторы с соответствующими блоками,
+`residual` и `convnext_v2` — собственные реконструкторы с соответствующими блоками,
 не готовые ImageNet-классификаторы и не воспроизведение FCMAE/pretraining из статьи.
 У них число параметров не зависит от разрешения; память активаций зависит.
 Для старых U-Net VAE skip-связи обходят стохастический bottleneck: это условный
@@ -324,15 +326,60 @@ python -m unittest discover -s tests -p test_sam_training_roundtrip.py -v
 его с `skip_mode=none` и spatial AE на независимых нормальных и дефектных снимках.
 Низкий reconstruction loss не доказывает высокое качество обнаружения дефектов.
 
-Современные направления для отдельного сравнения:
-[MAE](https://openaccess.thecvf.com/content/CVPR2022/html/He_Masked_Autoencoders_Are_Scalable_Vision_Learners_CVPR_2022_paper.html)
-обучает восстановление скрытых patches и требует соответствующего masking/loss;
-[ConvNeXt V2/FCMAE](https://openaccess.thecvf.com/content/CVPR2023/html/Woo_ConvNeXt_V2_Co-Designing_and_Scaling_ConvNets_With_Masked_Autoencoders_CVPR_2023_paper.html)
-использует masked pretraining, который здесь не подключён;
-[RAE](https://arxiv.org/abs/2510.11690) сочетает pretrained representation encoder
+Для следующего сравнения [RAE](https://arxiv.org/abs/2510.11690) сочетает pretrained representation encoder
 с обучаемым decoder. Для RAE с [DINOv3](https://ai.meta.com/research/dinov3/)
 нужны локальные веса, точная предобработка и отдельная калибровка feature/reconstruction
 оценок. Они не подменяются текущим pixel-MAE и пока не реализованы.
+
+### MAE / FCMAE
+
+![Параметры masked pretraining](image/masked_pretraining.png)
+
+Во вкладке обучения выберите **`mae_vit_compact`** либо **`fcmae_convnextv2`**,
+нажмите **«Применить профиль»**, загрузите ваш `masks_data.yaml` (или YOLO YAML), укажите папку результата и нажмите
+запуск. При выборе папки ищутся `data.yaml`, затем `masks_data.yaml`; в обучение
+попадают только перечисленные снимки, не PNG из папок масок. Это self-supervised
+предобучение по изображениям: разметка объектов не становится случайной маской скрытия.
+
+- **MAE:** patch embedding, фиксированные 2D sin/cos позиции, CLS token, ViT encoder
+  только по видимым patches, меньший decoder с mask tokens и восстановлением порядка.
+  Настраиваются patch size, доля скрытия, encoder/decoder dim, depth и heads.
+  Dim кратен 4 и heads; H/W кратны patch size; нужны хотя бы два patches.
+- **FCMAE:** ConvNeXt V2 encoder со stride 32, LayerNorm и GRN, маски активных
+  позиций на каждом этапе, mask token и лёгкий convolutional decoder. Patch=32;
+  настраиваются base (от 2), blocks_per_stage, decoder dim/depth и доля скрытия.
+  Плотные tensors имитируют sparse-семантику без вычислительного выигрыша sparse backend.
+- Обучение — **MSE только по скрытым полезным пикселям**, raw pixel targets `[0,1]`,
+  без per-patch target normalization, SSIM, GAN, edge-канала и KL. Padding исключается.
+  Название MAE (Masked Autoencoder) не означает метрику: обучение использует MSE,
+  а карта ошибки/калибровка — mean absolute error.
+  Val использует фиксированную маску по `mask_eval_seed`, не случайную новую каждый раз.
+  Доля округляется до целого числа patches с сохранением минимум одного видимого/скрытого.
+- Начните с 256×256 и batch 2–4. У ViT стоимость внимания растёт с числом patches;
+  разрешение 1024 без проверки VRAM задавать не следует. Это компактные варианты
+  архитектур, без автоматически скачанных pretrained весов.
+
+Checkpoint сохраняет encoder, decoder, маскирующую политику и все параметры. Доступны
+обычные best/last, resume со случайными состояниями, warm start, CSV/JSON, loss plot,
+`recon_examples.png` и **`masked_examples.png`** с исходником, случайной patch-маской,
+скрытым входом, заполненным результатом и ошибкой скрытых пикселей. MAE warm start
+допускает новую H/W-сетку с пересозданием фиксированных позиций; размеры обучаемых
+весов (patch, dim, depth и т. п.) должны совпадать.
+
+Для применения загружайте `weights/best.pt` в **YOLO + AE/VAE**. Инференс делает
+детерминированные проходы со сдвигом скрытых patches и усредняет только скрытые
+предсказания: каждый пиксель был скрыт хотя бы раз, видимые пиксели не копируются
+в карту ошибки. Это дороже одного forward; seed и mask ratio входят в контракт
+калибровки. При выключенной калибровке нет `calibration.json` и готовых порогов
+аномалий; test report содержит ошибку реконструкции без долей «дефектных» снимков.
+
+`loaded.model.encode_features(input_tensor)` возвращает полноконтекстную сетку
+encoder `[N,D,H/patch,W/patch]` для последующего переноса. Это отдельный путь от
+blind reconstruction; автоматического переноса backbone в U-Net/DeepLab пока нет.
+Masked-pretraining не является обучением сегментации по вашим GT-маскам.
+
+Исходные методы: [MAE](https://openaccess.thecvf.com/content/CVPR2022/html/He_Masked_Autoencoders_Are_Scalable_Vision_Learners_CVPR_2022_paper.html),
+[ConvNeXt V2/FCMAE](https://openaccess.thecvf.com/content/CVPR2023/html/Woo_ConvNeXt_V2_Co-Designing_and_Scaling_ConvNets_With_Masked_Autoencoders_CVPR_2023_paper.html).
 
 Пример структуры без разметки:
 
@@ -355,8 +402,10 @@ test: images/test              # необязательно
 
 Поддерживаются также `train_images`/`val_images`, алиасы `valid`/`validation`,
 несколько путей и TXT-списки **снимков**. Папка с `data.yaml` использует его split;
-обычная папка без YAML автоматически делится по seed и val_split. Если val не задан,
-он выделяется только из train. Пустой явно заданный split — ошибка. Одинаковое
+папка с `masks_data.yaml` также использует YAML; обычная папка без YAML автоматически
+делится по seed и val_split. Если val не задан,
+он выделяется только из train. Пустой явно заданный train/val/calibration — ошибка;
+существующая пустая папка test допустима. Одинаковое
 содержимое в разных split запрещено. Обычный VOC-список ID нужно заменить путями снимков.
 
 `best` выбирается по val; пороги считаются по calibration, а при его отсутствии —

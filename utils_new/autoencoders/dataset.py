@@ -24,7 +24,7 @@ def collect_training_images(root, *, exclude=()):
         str(Path(p).resolve())
         for p in collect_image_paths(root, recursive=True)
         if not any(Path(p).resolve().is_relative_to(e) for e in excluded)
-        and Path(p).name.lower() not in ("loss.png", "recon_examples.png")
+        and Path(p).name.lower() not in ("loss.png", "recon_examples.png", "masked_examples.png")
     ]
     if len(files) < 2:
         raise ValueError("Нужны минимум два разных снимка для раздельных train и val.")

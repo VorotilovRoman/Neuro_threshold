@@ -33,7 +33,7 @@ python -m utils_new.training.autoencoder --profile residual_ae --data "normal_im
 ```
 
 Профили: `conv_bn_baseline`, `conv_bn`, `conv_gn`, `unet`, `unet_v2_edge_gan`, `residual_ae`, `residual_vae`,
-`convnext_v2_ae`, `convnext_v2_vae`. Spatial-модели реконструируют через bottleneck
+`convnext_v2_ae`, `convnext_v2_vae`, `mae_vit_compact`, `fcmae_convnextv2`. Spatial-модели реконструируют через bottleneck
 без U-Net skip-связей; профиль по умолчанию в UI и CLI — `residual_ae`.
 Вместо `--profile` можно указать `--config settings/autoencoders/unet.json`.
 Размеры и функции потерь задаются в JSON; `--epochs` и `--batch-size` переопределяют их.
@@ -67,3 +67,15 @@ python -m utils_new.training.autoencoder --data "normal_images" --output "runs/a
 YOLO также загружает NCNN: выберите `.param` в папке `*_ncnn_model` рядом
 с `.bin` и `metadata.yaml`. Нужен `--extra export`; GGUF пока не поддерживается.
 [Экспорт и форматы моделей](yolo_train.md#экспорт-модели).
+
+MAE/FCMAE также загружаются из `weights/best.pt`. Они восстанавливают каждый patch
+в скрытом состоянии за несколько детерминированных проходов; `mask_ratio` и seed
+сохраняются в checkpoint. При выключенной калибровке нет готовых порогов аномалий.
+Для предобучения по вашим снимкам из масочного YAML:
+
+```bash
+python -m utils_new.training.autoencoder --profile mae_vit_compact --data "dataset/masks_data.yaml" --output "runs/mae" --device auto
+```
+
+GT-маски объектов не используются при masked pretraining. Обучение сегментации
+по ним остаётся отдельным сценарием U-Net/DeepLab. См. [параметры MAE/FCMAE](yolo_train.md#mae--fcmae).
