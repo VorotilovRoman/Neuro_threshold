@@ -112,6 +112,18 @@ class BaseTrainWidget(QWidget):
         self.form_layout.addRow(self.settings_tabs)
         for row in footer:add_row(self.form_layout,row)
         self.layout.setStretch(0,1)
+        if hasattr(self,'preset_family'):
+            from ui.training_presets import TrainingPresetBar
+            self.training_preset_bar=TrainingPresetBar(self,self.preset_family)
+            self.form_layout.insertRow(0,self.training_preset_bar)
+
+    def complete_training_params(self,params):
+        try:
+            bar=getattr(self,'training_preset_bar',None)
+            return bar.merge(params) if bar is not None else params
+        except (ValueError,TypeError) as error:
+            QMessageBox.warning(self,'Пресет обучения',str(error))
+            return None
 
     def add_experiment_name_field(self):
         self.experiment_name = QLineEdit()
@@ -227,6 +239,8 @@ class BaseTrainWidget(QWidget):
         self.stop_btn.setEnabled(running)
         if hasattr(self,'settings_tabs'):
             self.settings_tabs.setEnabled(not running)
+        if hasattr(self,'training_preset_bar'):
+            self.training_preset_bar.setEnabled(not running)
         if not running:
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("Готов")
@@ -239,6 +253,7 @@ class BaseTrainWidget(QWidget):
 # YOLO Training Widget
 # =============================================================================
 class YOLOTrainWidget(BaseTrainWidget):
+    preset_family='yolo'
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -463,7 +478,7 @@ class YOLOTrainWidget(BaseTrainWidget):
             )
             return None
 
-        return {
+        return self.complete_training_params({
             "model": model_path,
             "data": data_path,
             "project": self.project_path.text().strip() or None,
@@ -480,13 +495,14 @@ class YOLOTrainWidget(BaseTrainWidget):
             if self.enable_mosaic.isChecked()
             else 0,
             "mosaic": self.mosaic.value() if self.enable_mosaic.isChecked() else 0.0,
-        }
+        })
 
 
 # =============================================================================
 # U-Net Training Widget
 # =============================================================================
 class UNetTrainWidget(BaseTrainWidget):
+    preset_family='unet'
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -838,7 +854,7 @@ class UNetTrainWidget(BaseTrainWidget):
             )
             return None
 
-        return {
+        return self.complete_training_params({
             "dataset_path": dataset_path or None,
             "unet_yaml": unet_yaml or None,
             "model_path": model_path,
@@ -868,4 +884,4 @@ class UNetTrainWidget(BaseTrainWidget):
             "threshold": self.threshold.value(),
             "normalize": self.normalize_checkbox.isChecked(),
             "resize_mode": self._get_resize_mode_value(),
-        }
+        })

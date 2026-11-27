@@ -216,6 +216,26 @@ def is_standard_yolo_model(model_path):
     )
 
 
+YOLO_EXTRA_ARGUMENTS = {'seed','patience','weight_decay','momentum','warmup_epochs','fliplr','flipud',
+                        'degrees','translate','scale','shear','perspective','hsv_h','hsv_s','hsv_v',
+                        'mixup','copy_paste','amp','plots','pretrained','workers'}
+
+
+def validate_yolo_options(params):
+    from math import isfinite
+    for key,value in params.items():
+        if key not in YOLO_EXTRA_ARGUMENTS:raise ValueError(f'Неизвестный параметр YOLO: {key}')
+        if key in ('amp','plots','pretrained'):
+            if type(value) is not bool:raise ValueError(f'{key}: требуется bool.')
+        elif type(value) not in (int,float) or not isfinite(value) or value<0:
+            raise ValueError(f'{key}: требуется конечное неотрицательное число.')
+        elif key in ('seed','patience','workers') and type(value) is not int:
+            raise ValueError(f'{key}: требуется int.')
+        elif key in ('fliplr','flipud','translate','scale','perspective','hsv_h','hsv_s','hsv_v','mixup','copy_paste','momentum') and value>1:
+            raise ValueError(f'{key}: требуется значение 0..1.')
+    return params
+
+
 def build_train_args(params):
     """Validate before loading CUDA. Do not estimate or replace the user's batch."""
     if not isinstance(params, dict):
@@ -283,6 +303,8 @@ def build_train_args(params):
     for name in ("project", "name"):
         if params.get(name):
             args[name] = params[name]
+    extra={name:params[name] for name in YOLO_EXTRA_ARGUMENTS if name in params}
+    args.update(validate_yolo_options(extra))
     if params.get("device") not in (None, "", "auto"):
         args["device"] = params["device"]
     if params.get("disable_aug", False):

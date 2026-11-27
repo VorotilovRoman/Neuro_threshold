@@ -1,0 +1,46 @@
+{
+    "schema_version": 1,
+    "family": "segformer",
+    "presets": [
+        {
+            "schema_version": 1,
+            "family": "segformer",
+            "title": "SegFormer MiT-B0 — конфигурация",
+            "settings": {
+                "device_combo": "auto",
+                "epochs": 100,
+                "batch": 8,
+                "auto_batch": false,
+                "model_from_preset": true,
+                "model_from_file": false,
+                "variant": "mit-b0",
+                "num_classes": 2,
+                "lr": 6e-05,
+                "optimizer": "AdamW"
+            },
+            "worker_parameters": {},
+            "id": "mit_b0",
+            "description": "Профиль формы: backend обучения SegFormer пока не подключён."
+        },
+        {
+            "schema_version": 1,
+            "family": "segformer",
+            "title": "SegFormer MiT-B2 — конфигурация",
+            "settings": {
+                "device_combo": "auto",
+                "epochs": 100,
+                "batch": 4,
+                "auto_batch": false,
+                "model_from_preset": true,
+                "model_from_file": false,
+                "variant": "mit-b2",
+                "num_classes": 2,
+                "lr": 6e-05,
+                "optimizer": "AdamW"
+            },
+            "worker_parameters": {},
+            "id": "mit_b2",
+            "description": "Профиль формы: backend обучения SegFormer пока не подключён."
+        }
+    ]
+}

@@ -1,0 +1,102 @@
+{
+    "schema_version": 1,
+    "family": "sam",
+    "presets": [
+        {
+            "schema_version": 1,
+            "family": "sam",
+            "title": "SAM2.1 Tiny — рамки",
+            "settings": {
+                "model": "sam2.1-tiny",
+                "device_combo": "auto",
+                "epochs": 20,
+                "batch": 1,
+                "auto_batch": false,
+                "accum_steps": 4,
+                "lr": 0.0001,
+                "train_prompt_encoder": false,
+                "use_amp": true,
+                "prompt_type": "box",
+                "positive_points": 1,
+                "negative_points": 1,
+                "max_objects": 8,
+                "max_side": 1024,
+                "seed": 42,
+                "background_id": 0,
+                "ignore_index": 255
+            },
+            "worker_parameters": {
+                "weight_decay": 0.0001,
+                "box_jitter": 0.05,
+                "validation_fraction": 0.2,
+                "grad_clip": 1.0
+            },
+            "id": "sam21_tiny_boxes",
+            "description": "Локальные веса SAM2.1 Tiny; image encoder заморожен. Рамки строятся из GT-масок."
+        },
+        {
+            "schema_version": 1,
+            "family": "sam",
+            "title": "SAM2.1 Small — рамки и точки",
+            "settings": {
+                "model": "sam2.1-small",
+                "device_combo": "auto",
+                "epochs": 30,
+                "batch": 1,
+                "auto_batch": false,
+                "accum_steps": 4,
+                "lr": 5e-05,
+                "train_prompt_encoder": false,
+                "use_amp": true,
+                "prompt_type": "mixed",
+                "positive_points": 2,
+                "negative_points": 2,
+                "max_objects": 8,
+                "max_side": 1024,
+                "seed": 42,
+                "background_id": 0,
+                "ignore_index": 255
+            },
+            "worker_parameters": {
+                "weight_decay": 0.0001,
+                "box_jitter": 0.05,
+                "validation_fraction": 0.2,
+                "grad_clip": 1.0
+            },
+            "id": "sam21_small_mixed",
+            "description": "Локальные SAM2.1 Small. Смешанные подсказки, image encoder заморожен."
+        },
+        {
+            "schema_version": 1,
+            "family": "sam",
+            "title": "SAM ViT-B — точки",
+            "settings": {
+                "model": "sam-vit-b",
+                "device_combo": "auto",
+                "epochs": 30,
+                "batch": 1,
+                "auto_batch": false,
+                "accum_steps": 4,
+                "lr": 1e-05,
+                "train_prompt_encoder": true,
+                "use_amp": true,
+                "prompt_type": "points",
+                "positive_points": 2,
+                "negative_points": 2,
+                "max_objects": 8,
+                "max_side": 1024,
+                "seed": 42,
+                "background_id": 0,
+                "ignore_index": 255
+            },
+            "worker_parameters": {
+                "weight_decay": 0.0001,
+                "box_jitter": 0.05,
+                "validation_fraction": 0.2,
+                "grad_clip": 1.0
+            },
+            "id": "sam_vitb_points",
+            "description": "Локальные SAM ViT-B. Декодер и prompt encoder; нужны GT-маски объектов."
+        }
+    ]
+}

@@ -13,6 +13,7 @@ from ui.DL_train_settings_base import BaseTrainWidget
 # DeepLabV3 / DeepLabV3+ Training Widget
 # =============================================================================
 class DeepLabV3TrainWidget(BaseTrainWidget):
+    preset_family='deeplab'
     HIGH_RES_PRESET = {
         "architecture": "deeplabv3plus",
         "backbone": "resnet101",
@@ -170,7 +171,9 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         preset_layout.addWidget(self.save_preset_btn)
 
         preset_layout.addStretch()
-        self.form_layout.addRow(preset_group)
+        preset_group.setParent(self)
+        preset_group.hide()
+        self.legacy_preset_group=preset_group
 
     def _browse_preset_file(self):
         path, _ = source_dialogs.get_open_file(self, "preset")
@@ -247,7 +250,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         arch_layout.addWidget(self.architecture)
 
         self.backbone = QComboBox()
-        self.backbone.addItems(["resnet50", "resnet101", "mobilenet_v3", "xception"])
+        self.backbone.addItems(["resnet50", "resnet101", "mobilenet_v2", "xception"])
         arch_layout.addWidget(QLabel("  Backbone:"))
         arch_layout.addWidget(self.backbone)
 
@@ -954,7 +957,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
             )
             return None
 
-        return {
+        return self.complete_training_params({
             "model_path": model_path,
             "dataset_path": dataset_path or None,
             "deeplab_yaml": deeplab_yaml or None,
@@ -1015,13 +1018,14 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
                 "scale": self.aug_scale.isChecked(),
                 "noise": self.aug_noise.isChecked(),
             },
-        }
+        })
 
 
 # =============================================================================
 # SegFormer Training Widget
 # =============================================================================
 class SegFormerTrainWidget(BaseTrainWidget):
+    preset_family='segformer'
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -1143,7 +1147,7 @@ class SegFormerTrainWidget(BaseTrainWidget):
             QMessageBox.warning(self, "Ошибка", "Не указана папка датасета")
             return None
 
-        return {
+        return self.complete_training_params({
             "model_path": model_path,
             "dataset_path": dataset_path,
             "project_path": self.project_path.text().strip() or None,
@@ -1155,4 +1159,4 @@ class SegFormerTrainWidget(BaseTrainWidget):
             "lr": self.lr.value(),
             "variant": self.variant.currentText(),
             "num_classes": self.num_classes.value(),
-        }
+        })

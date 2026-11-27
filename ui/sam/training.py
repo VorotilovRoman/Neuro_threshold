@@ -12,6 +12,7 @@ from utils_new.import_export.training import read_model_meta
 
 
 class SAMTrainWidget(BaseTrainWidget):
+    preset_family='sam'
     def __init__(self, parent=None):
         super().__init__(parent)
         self.form_layout.setSpacing(8)
@@ -34,7 +35,7 @@ class SAMTrainWidget(BaseTrainWidget):
         self.form_layout.addRow(note)
         self.model = QComboBox()
         for key, value in MODELS.items():
-            if key != "sam3":
+            if not key.startswith("sam3"):
                 self.model.addItem(value.name, key)
         self.model.setCurrentIndex(self.model.findData("sam2.1-tiny"))
         self.form_layout.addRow("Архитектура:", self.model)
@@ -159,6 +160,9 @@ class SAMTrainWidget(BaseTrainWidget):
             if self.model.findData(cfg["model_key"]) < 0:
                 raise ValueError("Архитектура checkpoint не поддерживает обучение.")
             self._resume_defaults = cfg
+            if hasattr(self,'training_preset_bar'):
+                from utils_new.configuration.presets_store import TRAINING_WORKER_DEFAULTS
+                self.training_preset_bar.worker_parameters={key:cfg[key] for key in TRAINING_WORKER_DEFAULTS['sam']}
             self.model.setCurrentIndex(self.model.findData(cfg["model_key"]))
             self.weights.setText(cfg["model_path"])
             for name in ("source", "val_source"):
@@ -187,7 +191,8 @@ class SAMTrainWidget(BaseTrainWidget):
         if params["ignore_index"] == -1:
             params["ignore_index"] = None
         try:
-            return sam_training_config(params)
+            params=self.complete_training_params(params)
+            return sam_training_config(params) if params is not None else None
         except ValueError as error:
             QMessageBox.warning(self, "Параметры SAM", str(error))
             return None

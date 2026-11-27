@@ -7,6 +7,10 @@ from PyQt5.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel, QLayout
 
 # Stable action keys; one caption/filter/meaning across every consumer.
 ACTIONS = {
+    'training_preset': (
+        'Пресет обучения…', 'Загрузить полный пресет обучения', 'JSON (*.json)', False,
+        'Все страницы параметров и дополнительные настройки воркера; семейство модели должно совпадать.',
+    ),
     'ae_images_yaml': (
         'YOLO / MASKS YAML…', 'Выберите YAML со снимками для AE/VAE', 'YAML (*.yaml *.yml)', False,
         'Только снимки train/val/calibration/test. TXT и маски объектов не читаются; нормальные снимки нужны при включённой калибровке.',
@@ -183,7 +187,7 @@ ACTIONS = {
     ),
 }
 ORDER = (
-    'ae_images_yaml', 'ae_training_config',
+    'ae_images_yaml', 'ae_training_config', 'training_preset',
     "images",
     "folder",
     "dataset_root",

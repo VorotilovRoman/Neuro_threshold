@@ -21,8 +21,8 @@ def sam_training_config(params):
     if unknown:
         raise ValueError(f"Неизвестные параметры SAM: {sorted(unknown)}")
     cfg.update(params)
-    if cfg["model_key"] not in MODELS or cfg["model_key"] == "sam3":
-        raise ValueError("Обучение поддерживает SAM и SAM2/2.1; SAM3 — только применение.")
+    if cfg["model_key"] not in MODELS or str(cfg["model_key"]).startswith("sam3"):
+        raise ValueError("Обучение поддерживает SAM и SAM2/2.1; обучение SAM3/3.1 не реализовано.")
     for key in ("epochs", "accum_steps", "positive_points", "max_objects", "max_side"):
         _int(cfg[key], key)
     if cfg["max_side"] < 32:
