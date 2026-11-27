@@ -125,6 +125,49 @@ class TaskDatasetContracts(unittest.TestCase):
                 export_task_dataset(data, root / "cancel", cancel=stop)
             self.assertFalse((root / "cancel").exists())
 
+    def test_invalid_lazy_txt_never_enters_cache(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = fixture(root)
+            sample = data.samples[0]
+            sample.poses = None
+            label = root / "bad.txt"
+            label.write_text("99 .5 .5 .5 .5 " + "0 0 0 " * 4, encoding="utf-8")
+            sample.label_path = str(label)
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "неизвестный класс"):
+                    data.load_poses(sample)
+                self.assertIsNone(sample.poses)
+
+    def test_coco_empty_background_survives_project_merge_and_export(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = fixture(root)
+            data.samples[0].poses = []
+            data.samples[0].classification = ImageClassification(None, False)
+            data.samples[0].pose_labeled = True
+            export_task_dataset(data, root / "coco", coco=True)
+            loaded = load_task_dataset(root / "coco/annotations.json", "pose")
+            self.assertTrue(loaded.samples[0].has_pose_labels)
+            self.assertFalse(loaded.samples[0].classification.reviewed)
+            save_task_project(loaded, root / "session.json")
+            loaded = load_task_dataset(root / "session.json", "pose")
+            export_task_dataset(loaded, root / "yolo")
+            self.assertEqual(
+                len(load_task_dataset(root / "yolo/data.yaml", "pose").samples), 5
+            )
+            from copy import deepcopy
+
+            unlabelled = deepcopy(loaded)
+            unlabelled.samples[0].pose_labeled = False
+            merged = merge_task_datasets(unlabelled, loaded)
+            self.assertTrue(merged.samples[0].pose_labeled)
+            cfg = json.loads((root / "coco/annotations.json").read_text())
+            cfg["images"].append(dict(cfg["images"][0]))
+            (root / "bad.json").write_text(json.dumps(cfg))
+            with self.assertRaisesRegex(ValueError, "ID снимка"):
+                load_task_dataset(root / "bad.json", "pose")
+
     def test_classification_folder_export_preserves_names_mapping_and_unlabelled(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -287,7 +330,8 @@ with TemporaryDirectory() as directory:
  for i in range(3):
   path=root/f'{i}.png';write_image(path,np.full((100,160,3),60+i,np.uint8));paths.append(str(path))
  p.dataset.schema=PoseSchema(('left','right','center','tip'),((0,2),(2,1),(2,3)),(1,0,2,3))
- p.load_images(paths);wait(p);assert p.image.shape==(100,160,3),p.status.text()
+ p.load_images(paths);wait(p);assert p.dirty
+ assert p.image.shape==(100,160,3),p.status.text()
  p.add_bbox((10,10,150,90))
  from PyQt5.QtCore import QPointF
  p.set_tool('points');position=p.view.mapFromScene(QPointF(25,30))
@@ -300,6 +344,9 @@ with TemporaryDirectory() as directory:
  p.undo(True);assert p.dataset.samples[0].poses[0].keypoints[1,2]==2
  p.table.setCurrentCell(1,0);p.set_point_visibility(1);assert p.dataset.samples[0].poses[0].keypoints[1,2]==1
  p.view.viewport().update();app.processEvents()
+ # Removing the final object is an explicitly labeled empty image, including undo.
+ p.delete_pose();assert p.dataset.samples[0].has_pose_labels and not p.dataset.samples[0].poses
+ p.undo();assert len(p.dataset.samples[0].poses)==1
  p.navigate(1);wait(p);assert not p.dataset.samples[1].poses
  p.navigate(0);wait(p);assert len(p.dataset.samples[0].poses)==1
  from utils_new.import_export.task_datasets import save_task_project
@@ -311,6 +358,21 @@ with TemporaryDirectory() as directory:
  c.class_combo.setCurrentIndex(1);c.assign_class()
  assert c.dataset.samples[0].classification.class_id==1 and c.dataset.samples[1].classification.class_id==1
  c.undo();assert c.dataset.samples[0].classification.class_id is None
+ c.append.setChecked(True);c.load_images([paths[2]]);wait(c)
+ assert c.dirty and c.dataset.samples[1].classification.class_id==1
+ # Cancelled image reads must not mutate a live sample through a worker.
+ from threading import Event
+ import ui.task_annotations as task_ui
+ started=Event();release=Event();original=task_ui.read_image_with_fallback
+ def slow_read(path):
+  started.set();release.wait(5);return original(path)
+ task_ui.read_image_with_fallback=slow_read
+ p.dataset.samples[1].poses=None
+ p.navigate(1)
+ assert started.wait(5)
+ p.cancel_job();release.set();QTest.qWait(100)
+ assert p.dataset.samples[1].poses is None
+ task_ui.read_image_with_fallback=original
  c.dirty=False;v.dirty=False
  a.task_modes.selector.setCurrentIndex(0);assert not a.current_annotations
  a.close();b.close();app.processEvents()

@@ -159,6 +159,16 @@ class TaskSample:
     label_dims: int = 3
     poses: list | None = None
     size: ImageSize | None = None
+    pose_labeled: bool = False
+
+    @property
+    def has_pose_labels(self):
+        return bool(
+            self.pose_labeled
+            or self.label_path
+            or self.poses
+            or self.classification.reviewed
+        )
 
 
 @dataclass
@@ -220,7 +230,7 @@ class TaskDataset:
                 self.schema.flip_idx,
                 sample.label_dims,
             )
-            sample.poses = (
+            poses = (
                 decode_pose(
                     Path(sample.label_path).read_text(encoding="utf-8-sig"),
                     sample.size,
@@ -229,8 +239,9 @@ class TaskDataset:
                 if sample.label_path
                 else []
             )
-            if any(p.bbox.class_id not in self.classes for p in sample.poses):
+            if any(p.bbox.class_id not in self.classes for p in poses):
                 raise ValueError("В TXT есть неизвестный класс.")
+            sample.poses = poses
         return sample.poses
 
 
@@ -275,6 +286,7 @@ def load_task_dataset(path, task, *, cancel=None, progress=None):
                         row.get("label_dims", 3),
                         poses,
                         size,
+                        row.get("pose_labeled", False),
                     )
                 )
             return TaskDataset(task, cfg["classes"], samples, sch, str(path))
@@ -361,6 +373,7 @@ def save_task_project(dataset, path, *, cancel=None, progress=None):
                 split=s.split,
                 label_path=s.label_path,
                 label_dims=s.label_dims,
+                pose_labeled=s.pose_labeled,
                 classification=asdict(s.classification),
                 size=asdict(s.size) if s.size else None,
                 poses=(
@@ -403,11 +416,7 @@ def export_task_dataset(
     if not dataset.samples:
         raise ValueError("Нет снимков.")
     usable = (
-        [
-            s
-            for s in dataset.samples
-            if (s.label_path is not None or bool(s.poses) or s.classification.reviewed)
-        ]
+        [s for s in dataset.samples if s.has_pose_labels]
         if dataset.task == "pose"
         else [s for s in dataset.samples if s.classification.class_id is not None]
     )
@@ -574,6 +583,8 @@ def load_coco_pose(cfg, path, cancel=None):
     classes = {}
     mapping = {}
     for i, c in enumerate(categories):
+        if c["id"] in mapping:
+            raise ValueError("COCO: повторяется ID категории.")
         names = c.get("keypoints")
         if not names:
             raise ValueError("В COCO категории отсутствуют keypoints.")
@@ -589,10 +600,21 @@ def load_coco_pose(cfg, path, cancel=None):
         classes[i] = c["name"]
         mapping[c["id"]] = i
     if cfg.get("neuro_pose_schema"):
-        schema = PoseSchema(**cfg["neuro_pose_schema"])
+        declared = PoseSchema(**cfg["neuro_pose_schema"])
+        if (
+            schema is None
+            or declared.names != schema.names
+            or declared.edges != schema.edges
+        ):
+            raise ValueError(
+                "COCO: схема проекта противоречит keypoints / skeleton категорий."
+            )
+        schema = declared
     samples = {}
     for img in cfg["images"]:
         check(cancel)
+        if img["id"] in samples:
+            raise ValueError("COCO: повторяется ID снимка.")
         filename = Path(img["file_name"])
         image = filename if filename.is_absolute() else path.parent / filename
         samples[img["id"]] = TaskSample(
@@ -600,11 +622,20 @@ def load_coco_pose(cfg, path, cancel=None):
             img.get("split", "train"),
             poses=[],
             size=ImageSize(img["width"], img["height"]),
+            pose_labeled=True,
         )
+    annotation_ids = set()
     for a in cfg["annotations"]:
         check(cancel)
+        if a["id"] in annotation_ids:
+            raise ValueError("COCO: повторяется ID аннотации.")
+        annotation_ids.add(a["id"])
+        if a["image_id"] not in samples or a["category_id"] not in mapping:
+            raise ValueError("COCO: аннотация ссылается на неизвестный снимок / класс.")
         sample = samples[a["image_id"]]
         x, y, w, h = a["bbox"]
+        if not (np.isfinite([x, y, w, h]).all() and w > 0 and h > 0):
+            raise ValueError("COCO: рамка должна иметь положительные размеры.")
         pts = np.array(a["keypoints"], dtype=float).reshape(-1, 3)
         if len(pts) != len(schema.names):
             raise ValueError("COCO: число точек не совпадает со схемой.")
@@ -674,8 +705,8 @@ def merge_task_datasets(current, incoming, *, cancel=None):
                 old.classification = s.classification
         else:
             old_poses = result.load_poses(old)
-            old_known = bool(old.label_path or old_poses or old.classification.reviewed)
-            new_known = bool(s.label_path or s.poses or s.classification.reviewed)
+            old_known = old.has_pose_labels
+            new_known = s.has_pose_labels
             if old_known and new_known:
                 if len(old_poses) != len(s.poses) or any(
                     a.bbox.class_id != b.bbox.class_id
@@ -689,4 +720,5 @@ def merge_task_datasets(current, incoming, *, cancel=None):
                 old.size = s.size
                 old.label_path = s.label_path
                 old.label_dims = s.label_dims
+                old.pose_labeled = s.pose_labeled
     return result

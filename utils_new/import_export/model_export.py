@@ -255,12 +255,21 @@ def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-
                 graph = onnx.load(str(exported), load_external_data=False)
                 properties = {item.key: item.value for item in graph.metadata_props}
                 properties['neuro_export'] = json.dumps(options)
+                if metadata.get('pose_schema'):
+                    properties['neuro_pose_schema'] = json.dumps(metadata['pose_schema'])
                 onnx.helper.set_model_props(graph, properties)
                 onnx.save(graph, str(exported))
             if options['nms']:
                 from ultralytics.engine.exporter import NMSModel
 
                 reference = NMSModel(reference, arguments)
+            if format == 'NCNN' and metadata.get('pose_schema'):
+                import yaml
+
+                meta_file = exported / 'metadata.yaml'
+                portable_meta = yaml.safe_load(meta_file.read_text(encoding='utf-8'))
+                portable_meta['neuro_pose_schema'] = metadata['pose_schema']
+                meta_file.write_text(yaml.safe_dump(portable_meta, allow_unicode=True), encoding='utf-8')
             _validate_yolo_export(reference, exported, size, format)
             from utils_new.import_export.training import save_model_meta
 

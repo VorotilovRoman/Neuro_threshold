@@ -201,6 +201,50 @@ class NativePortableModels(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
             self.assertFalse((root / 'source.onnx').exists())
 
+    def test_pose_and_classification_portable_results_and_embedded_schema(self):
+        from ultralytics import YOLO
+        import ultralytics
+        from dataclasses import asdict
+        from utils_new.annotations.model import PoseSchema
+
+        cfgroot = Path(ultralytics.__file__).parent / 'cfg/models/11'
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for task, suffix in (('pose', 'pose'), ('classify', 'cls')):
+                import yaml
+
+                cfg = yaml.safe_load((cfgroot / f'yolo11-{suffix}.yaml').read_text())
+                if task == 'pose':
+                    cfg['kpt_shape'] = [4, 3]
+                cfg['scale'] = 'n'
+                local_cfg = root / f'yolo11n-{suffix}.yaml'
+                local_cfg.write_text(yaml.safe_dump(cfg))
+                model = YOLO(str(local_cfg), task=task)
+                schema = PoseSchema(('tip', 'base', 'center', 'control'), ((0,2),(2,1),(2,3)))
+                if task == 'pose':
+                    model.model.neuro_pose_schema = asdict(schema)
+                path = root / f'{task}.pt'
+                model.save(path)
+                original = path.read_bytes()
+                for format in ('ONNX', 'NCNN'):
+                    bundle = Path(export_model('YOLO', path, format, root, size=64))
+                    artifact = next(bundle.glob('*.onnx' if format == 'ONNX' else '*.param'))
+                    # A portable artifact must retain landmark meaning without its JSON sidecar.
+                    for sidecar in bundle.glob('*_meta.json'):
+                        sidecar.unlink()
+                    loaded = load_yolo(artifact)
+                    self.assertEqual(loaded.task, task)
+                    if task == 'pose':
+                        self.assertEqual(PoseSchema(**loaded.neuro_metadata['pose_schema']), schema)
+                    result = loaded.predict(np.zeros((47,61,3),np.uint8), imgsz=64, device='cpu', verbose=False)[0]
+                    if task == 'classify':
+                        self.assertIsNotNone(result.probs)
+                        self.assertIsNone(result.boxes)
+                    else:
+                        self.assertIsNotNone(result.keypoints)
+                        self.assertEqual(result.keypoints.data.shape[-2], 4)
+                self.assertEqual(path.read_bytes(), original)
+
 
 @unittest.skipUnless(os.environ.get('NEURO_RUN_GUI_TESTS') == '1', 'opt-in Qt')
 class ExportGuiTests(unittest.TestCase):

@@ -60,6 +60,7 @@ from utils_new.import_export.task_datasets import (
     export_task_dataset,
     classes_dict,
     merge_task_datasets,
+    check,
 )
 from utils_new.import_export.images import read_image_with_fallback, collect_image_paths
 
@@ -699,13 +700,20 @@ class TaskAnnotationWidget(QWidget):
             [TaskSample(str(Path(p).resolve())) for p in dict.fromkeys(paths)],
             self.dataset.schema,
         )
+
+        def accepted(data):
+            self.accept_dataset(data)
+            self.dirty = True
+
         if self.append.isChecked():
-            try:
-                incoming = merge_task_datasets(self.dataset, incoming)
-            except ValueError as error:
-                self.error(error)
-                return
-        self.accept_dataset(incoming)
+            current = deepcopy(self.dataset)
+            self.run_job(
+                "Добавление снимков…",
+                lambda cancel: merge_task_datasets(current, incoming, cancel=cancel),
+                accepted,
+            )
+        else:
+            accepted(incoming)
 
     def choose_source(self):
         path, _ = sources.get_open_file(self, "task_project")
@@ -827,7 +835,7 @@ class TaskAnnotationWidget(QWidget):
             unlabelled = (
                 (s.classification.class_id is None)
                 if self.task == "classify"
-                else not (s.label_path or s.poses or s.classification.reviewed)
+                else not s.has_pose_labels
             )
             show = (
                 value is None
@@ -863,14 +871,19 @@ class TaskAnnotationWidget(QWidget):
         self.objects.clear()
         self.table.setRowCount(0)
 
+        snapshot = deepcopy(sample)
+        dataset = self.dataset
+
         def compute(cancel):
-            image = read_image_with_fallback(sample.path)
+            image = read_image_with_fallback(snapshot.path)
             if image is None:
                 raise ValueError(f"Не удалось прочитать {sample.path}")
-            poses = self.dataset.load_poses(sample) if self.task == "pose" else []
+            poses = dataset.load_poses(snapshot) if self.task == "pose" else []
             return image, poses
 
         def accept(result):
+            if self.task == "pose":
+                sample.poses = result[1]
             self.image = result[0]
             sample.size = ImageSize(self.image.shape[1], self.image.shape[0])
             self.view.set_pixmap(numpy_to_qpixmap(self.image))
@@ -983,7 +996,9 @@ class TaskAnnotationWidget(QWidget):
             return
         sample = sample or self.dataset.samples[self.index]
         self._history.setdefault(sample.path, []).append(
-            deepcopy((sample.poses, sample.classification, sample.split))
+            deepcopy(
+                (sample.poses, sample.classification, sample.split, sample.pose_labeled)
+            )
         )
         self._history[sample.path] = self._history[sample.path][-100:]
         self._redo[sample.path] = []
@@ -1000,9 +1015,13 @@ class TaskAnnotationWidget(QWidget):
         if not stack:
             return
         dst.setdefault(sample.path, []).append(
-            deepcopy((sample.poses, sample.classification, sample.split))
+            deepcopy(
+                (sample.poses, sample.classification, sample.split, sample.pose_labeled)
+            )
         )
-        sample.poses, sample.classification, sample.split = stack.pop()
+        sample.poses, sample.classification, sample.split, sample.pose_labeled = (
+            stack.pop()
+        )
         self.dirty = True
         self.refresh_images()
         self.render()
@@ -1022,6 +1041,7 @@ class TaskAnnotationWidget(QWidget):
             np.zeros((len(self.dataset.schema.names), 3)),
         )
         sample.poses.append(pose)
+        sample.pose_labeled = True
         self.render(len(sample.poses) - 1)
         self.set_tool("points")
 
@@ -1062,11 +1082,12 @@ class TaskAnnotationWidget(QWidget):
                 and 0 <= values[1] <= sample.size.height
             ):
                 raise ValueError("Точка вне снимка.")
-            self.remember()
             pose = sample.poses[obj]
             points = pose.keypoints.copy()
             points[row] = values
-            sample.poses[obj] = PoseAnnotation(pose.bbox, points)
+            updated = PoseAnnotation(pose.bbox, points)
+            self.remember()
+            sample.poses[obj] = updated
             self.render(obj)
         except (ValueError, AttributeError) as error:
             self.error(error)
@@ -1092,6 +1113,7 @@ class TaskAnnotationWidget(QWidget):
             return
         self.remember()
         self.dataset.samples[self.index].poses.pop(obj)
+        self.dataset.samples[self.index].pose_labeled = True
         self.render(obj - 1)
 
     def selected_samples(self):
@@ -1204,6 +1226,7 @@ class TaskAnnotationWidget(QWidget):
         def compute(cancel):
             cache = {}
             for sample in snapshot.samples:
+                check(cancel)
                 matches = sidecar_matches(
                     folder, Path(sample.path).name, cache, basename_fallback=True
                 )
@@ -1214,10 +1237,16 @@ class TaskAnnotationWidget(QWidget):
                 sample.label_path = str(matches[0]) if matches else None
                 sample.label_dims = snapshot.schema.dims
                 sample.poses = None
+                sample.pose_labeled = False
             return snapshot
 
         if self.discard_ok():
-            self.run_job("Поиск TXT…", compute, self.accept_dataset)
+
+            def accepted(data):
+                self.accept_dataset(data)
+                self.dirty = True
+
+            self.run_job("Поиск TXT…", compute, accepted)
 
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -1437,6 +1466,7 @@ class TaskAnnotationWidget(QWidget):
                 sample.classification = ImageClassification(match, False)
             else:
                 sample.poses = value
+                sample.pose_labeled = True
                 sample.classification = replace(sample.classification, reviewed=False)
             self.refresh_images()
             self.render(0)
