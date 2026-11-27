@@ -870,7 +870,9 @@ class ONNXSegmentor(BaseSegmentor):
         if not isinstance(sidecar, dict) or embedded is not None and not isinstance(embedded, dict):
             raise ValueError('Метаданные модели должны быть JSON-объектом.')
         embedded = embedded or {}
-        for key in ('normalize', 'resize_mode', 'input_size', 'num_classes', 'output_kind', 'annotation_class_offset'):
+        for key in ('normalize', 'resize_mode', 'inference_resize_mode', 'input_size', 'num_classes',
+                    'output_kind', 'annotation_class_offset', 'mask_class_offset', 'foreground_class_id',
+                    'class_names', 'threshold'):
             if key in embedded and key in sidecar and embedded[key] != sidecar[key]:
                 raise ValueError(f'JSON не соответствует встроенным метаданным ONNX: {key}')
         self.metadata = dict(embedded, **sidecar)
@@ -887,12 +889,20 @@ class ONNXSegmentor(BaseSegmentor):
         size = self.metadata['input_size']
         dimensions = (size, size) if isinstance(size, int) else size
         if (not isinstance(dimensions, (tuple, list)) or len(dimensions) != 2
-                or any(not isinstance(value, int) or value < 1 for value in dimensions)):
+                or any(type(value) is not int or value < 1 for value in dimensions)):
             raise ValueError("input_size: положительное целое число или [H, W].")
         if not isinstance(self.metadata['normalize'], bool):
             raise ValueError("normalize должен быть true или false.")
         if self.metadata['output_kind'] not in ('logits', 'probabilities', 'labels'):
             raise ValueError("output_kind: logits, probabilities или labels.")
+        classes = self.metadata.get('num_classes')
+        if classes is not None and (type(classes) is not int or classes < 1):
+            raise ValueError('num_classes должен быть положительным целым.')
+        mode = self.metadata['resize_mode']
+        if mode == 'random_crop':
+            mode = self.metadata.get('inference_resize_mode', 'keep_aspect_pad')
+        if mode not in VALID_INFERENCE_RESIZE_MODES:
+            raise ValueError('resize_mode инференса: hard или keep_aspect_pad.')
 
     def load(self, model_path):
         from utils_new.import_export.model_load import reject_gguf
@@ -959,6 +969,13 @@ class ONNXSegmentor(BaseSegmentor):
             prepared = (prepared - np.array([.485, .456, .406], np.float32)) / np.array([.229, .224, .225], np.float32)
         tensor = np.ascontiguousarray(prepared.transpose(2, 0, 1)[None])
         output = self._run_tensor(tensor)
+        if self.metadata['output_kind'] != 'labels':
+            values = np.asarray(output)
+            if values.ndim != 4 or values.shape[0] != 1 or min(values.shape[1:]) < 1:
+                raise ValueError('Семантическая ONNX/NCNN модель должна вернуть [1,C,H,W], не detection-выход.')
+            classes = self.metadata.get('num_classes')
+            if classes is not None and values.shape[1] != classes:
+                raise ValueError('Число каналов выхода не соответствует num_classes в метаданных.')
         threshold = self.metadata.get('threshold', .5) if threshold is None else threshold
         mask = decode_output(output, output_kind=self.metadata['output_kind'], threshold=threshold,
                              target_shape=(h_in, w_in))

@@ -221,8 +221,13 @@ def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-
         raise ValueError('Классификатору YOLO NMS не применяется.')
     metadata = dict(metadata, export_parameters=options, source_weights=str(Path(path).resolve()),
                     export_date=datetime.now().isoformat())
-    with tempfile.TemporaryDirectory(prefix=".export-", dir=work_dir or destination) as temporary:
+    native_yolo = kind == 'YOLO' and format == 'NCNN'
+    with tempfile.TemporaryDirectory(prefix=".export-", dir=None if native_yolo else work_dir or destination) as temporary:
         stage = Path(temporary)
+        if native_yolo:
+            from utils_new.import_export.model_load import _native_path_unsafe
+            if _native_path_unsafe(stage):
+                raise ValueError('PNNX: задайте TEMP/TMP короткой папкой с латинским именем.')
         if kind == "YOLO":
             # Ultralytics writes next to its input: export a copy, never the original.
             source_dir = stage / 'source'
@@ -279,8 +284,15 @@ def export_model(kind, path, format, output_dir, *, size=640, model_key="sam2.1-
             shutil.rmtree(cache)
         name = f"{Path(path).stem}_{uuid.uuid4().hex[:8]}{suffix}"
         published = destination / name
-        # Staging is on the destination volume: publishing is one atomic rename.
-        bundle.rename(published)
+        # Native YOLO conversion uses a short system temp path. Copy the checked
+        # bundle onto the destination volume before the final atomic rename.
+        if native_yolo:
+            with tempfile.TemporaryDirectory(prefix='.publish-', dir=destination) as copying:
+                ready = Path(copying) / 'bundle'
+                shutil.copytree(bundle, ready)
+                ready.rename(published)
+        else:
+            bundle.rename(published)
     return str(published)
 
 

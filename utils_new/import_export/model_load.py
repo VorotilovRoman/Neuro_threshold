@@ -15,6 +15,11 @@ def reject_gguf(path):
         raise ValueError(GGUF_UNSUPPORTED)
 
 
+def _native_path_unsafe(path):
+    import sys
+    return sys.platform == 'win32' and (not str(path).isascii() or len(str(path)) >= 240)
+
+
 def ncnn_param(path):
     path = Path(path).expanduser().resolve(strict=True)
     reject_gguf(path)
@@ -51,9 +56,8 @@ class NCNNRuntime:
         param = ncnn_param(path)
         # The native NCNN filename API uses narrow paths on Windows. Parse the
         # text from Python and stage only weights when the native path is unsafe.
-        import sys
         binary = param.with_suffix('.bin')
-        if sys.platform == 'win32' and (not str(binary).isascii() or len(str(binary)) >= 240):
+        if _native_path_unsafe(binary):
             import shutil
             import tempfile
             with tempfile.TemporaryDirectory(prefix='neuro-ncnn-') as directory:
@@ -73,8 +77,10 @@ class NCNNRuntime:
     def run(self, tensor):
         import numpy as np
 
-        if tensor.ndim != 4 or tensor.shape[0] != 1:
-            raise ValueError("NCNN: поддерживается batch=1, NCHW.")
+        if (not isinstance(tensor, np.ndarray) or tensor.ndim != 4
+                or tensor.shape[:2] != (1, 3) or min(tensor.shape[2:]) < 1
+                or tensor.dtype != np.float32 or not np.isfinite(tensor).all()):
+            raise ValueError("NCNN: нужен конечный float32 массив [1,3,H,W] с положительными H/W.")
         with self.net.create_extractor() as extractor:
             status = extractor.input(self.inputs[0], self.ncnn.Mat(np.ascontiguousarray(tensor[0])))
             if status != 0:
@@ -95,6 +101,7 @@ def load_yolo(path, **kwargs):
     configure_ultralytics()
     reject_gguf(path)
     candidate = Path(path).expanduser()
+    path = str(candidate.resolve())
     graph_metadata = {}
     meta_target = candidate
     if not candidate.exists():
@@ -130,7 +137,31 @@ def load_yolo(path, **kwargs):
     from ultralytics import YOLO
     from utils_new.import_export.training import read_model_meta
 
-    model = YOLO(str(path), **kwargs)
+    temporary = None
+    if candidate.is_dir() or candidate.suffix.lower() == '.param':
+        if _native_path_unsafe(Path(path)):
+            import shutil
+            import tempfile
+            temporary = tempfile.TemporaryDirectory(prefix='neuro-yolo-ncnn-')
+            local = Path(temporary.name) / 'model_ncnn_model'
+            if _native_path_unsafe(local):
+                temporary.cleanup()
+                raise ValueError('NCNN: задайте TEMP/TMP короткой папкой с латинским именем.')
+            try:
+                shutil.copytree(path, local)
+            except BaseException:
+                temporary.cleanup()
+                raise
+            path = str(local)
+    try:
+        model = YOLO(str(path), **kwargs)
+    except BaseException:
+        if temporary:
+            temporary.cleanup()
+        raise
+    # Ultralytics loads the native backend lazily on first predict().
+    if temporary:
+        model._neuro_runtime_directory = temporary
     sidecar = read_model_meta(meta_target)
     task = getattr(model, 'task', None)
     if sidecar.get('task') and sidecar['task'] != task:

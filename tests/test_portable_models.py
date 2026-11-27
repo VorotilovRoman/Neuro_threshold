@@ -69,6 +69,37 @@ class PortableContracts(unittest.TestCase):
 @unittest.skipUnless(all(find_spec(name) for name in ('torch', 'onnx', 'onnxruntime', 'pnnx', 'ncnn')),
                      'optional export profile')
 class NativePortableModels(unittest.TestCase):
+    def test_semantic_metadata_and_native_input_contracts_are_strict(self):
+        import json
+        from utils_new.import_export.model_load import NCNNRuntime
+        from utils_new.segmentation.backends.deep_learning import ONNXSegmentor
+
+        runtime = NCNNRuntime.__new__(NCNNRuntime)
+        for invalid in (np.ones((1,3,4,4), np.float64), np.ones((1,1,4,4), np.float32),
+                        np.full((1,3,4,4), np.nan, np.float32), np.ones((1,3,0,4), np.float32)):
+            with self.assertRaisesRegex(ValueError, 'float32'):
+                runtime.run(invalid)  # Must fail before accessing the native net.
+        model = ONNXSegmentor()
+        meta = dict(input_size=32, num_classes=2, normalize=False, resize_mode='hard', output_kind='logits')
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'graph.onnx'
+            sidecar = path.with_name('graph_meta.json')
+            for invalid in (dict(meta,input_size=True), dict(meta,num_classes=0), dict(meta,resize_mode='typo')):
+                sidecar.write_text(json.dumps(invalid))
+                with self.assertRaises(ValueError):
+                    model._load_metadata(str(path))
+            for field, value in (('threshold', .8), ('inference_resize_mode', 'hard'), ('class_names', ['a','b'])):
+                embedded = dict(meta,threshold=.5,inference_resize_mode='keep_aspect_pad',class_names=['bg','object'])
+                sidecar.write_text(json.dumps(dict(embedded, **{field:value})))
+                with self.assertRaisesRegex(ValueError, 'JSON'):
+                    model._load_metadata(str(path), embedded)
+            sidecar.write_text(json.dumps(meta));model._load_metadata(str(path))
+            model._input_shape = lambda: [1,3,32,32]
+            for output in (np.zeros((1,84,100), np.float32), np.zeros((1,3,32,32), np.float32)):
+                model._run_tensor = lambda tensor, result=output: result
+                with self.assertRaises(ValueError):
+                    model.predict(np.zeros((11,19,3), np.uint8))
+
     def test_ncnn_unicode_paths_use_stream_trace_relative_converter_and_windows_weight_staging(self):
         import torch
         import subprocess
@@ -148,7 +179,8 @@ class NativePortableModels(unittest.TestCase):
         from ultralytics import YOLO
 
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory) / 'Северная заря (модели YOLO)'
+            root.mkdir()
             path = root / 'source.pt'
             model = YOLO('yolo11n-seg.yaml')  # packaged architecture, no downloads
             model.save(str(path))
@@ -157,12 +189,15 @@ class NativePortableModels(unittest.TestCase):
             for format in ('ONNX', 'NCNN'):
                 bundle = Path(export_model('YOLO', path, format, root, size=64))
                 artifact = next(bundle.glob('*.onnx' if format == 'ONNX' else '*.param'))
-                loaded = load_yolo(artifact)
+                with patch('utils_new.import_export.model_load._native_path_unsafe',
+                           side_effect=lambda path: 'Северная' in str(path)):
+                    loaded = load_yolo(artifact)
                 self.assertEqual(loaded.task, 'segment')
                 result = loaded.predict(image, imgsz=64, device='cpu', verbose=False)
                 self.assertEqual(result[0].orig_shape, image.shape[:2])
                 if format == 'NCNN':
                     self.assertTrue((bundle / 'metadata.yaml').is_file())
+                    self.assertTrue(Path(loaded._neuro_runtime_directory.name).is_dir())
             self.assertEqual(path.read_bytes(), before)
             self.assertFalse((root / 'source.onnx').exists())
 
