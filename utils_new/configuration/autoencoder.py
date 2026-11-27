@@ -4,8 +4,9 @@ from dataclasses import asdict, dataclass, field, fields
 from math import isfinite
 
 PREPROCESSING_VERSIONS = ("ae-pil-v1", "legacy-opencv-v1")
-ARCHITECTURES = ("conv", "conv_gn", "unet", "unet_v2")
-AE_PROFILES = ('conv_bn_baseline', 'conv_bn', 'conv_gn', 'unet', 'unet_v2_edge_gan')
+ARCHITECTURES = ("conv", "conv_gn", "unet", "unet_v2", "residual", "convnext_v2")
+AE_PROFILES = ('conv_bn_baseline', 'conv_bn', 'conv_gn', 'unet', 'unet_v2_edge_gan',
+               'residual_ae', 'residual_vae', 'convnext_v2_ae', 'convnext_v2_vae')
 
 
 def _integer(value, name, low=1):
@@ -33,6 +34,13 @@ def normalize_model_config(values, *, arch=None):
     cfg["arch"] = arch or cfg.get("arch", "conv")
     if cfg["arch"] not in ARCHITECTURES or cfg.get("model_type") not in ("ae", "vae"):
         raise ValueError("Неизвестная архитектура или model_type AE/VAE.")
+    if cfg['arch'] in ('residual', 'convnext_v2'):
+        cfg.setdefault('blocks_per_stage', 2)
+        _integer(cfg['blocks_per_stage'], 'blocks_per_stage')
+    if cfg['arch'] in ('unet', 'unet_v2'):
+        cfg.setdefault('skip_mode', 'full')
+        if cfg['skip_mode'] not in ('full', 'none'):
+            raise ValueError('skip_mode: full или none.')
     stride = 16 if cfg["arch"] in ("conv", "conv_gn") else 8
     for key in ("img_h", "img_w"):
         if _integer(cfg.get(key), key, stride) % stride:
@@ -76,11 +84,11 @@ def normalize_model_config(values, *, arch=None):
     edge_channels = cfg["model_in_channels"] - cfg["in_channels"]
     if edge_channels not in (0, 1) or bool(edge_channels) != cfg["use_edge_channel"]:
         raise ValueError("Число входных каналов не согласовано с use_edge_channel.")
-    if (cfg["use_edge_channel"] and cfg["arch"] != "unet_v2") or cfg[
+    if (cfg["use_edge_channel"] and cfg["arch"] not in ("unet_v2", "residual", "convnext_v2")) or cfg[
         "out_channels"
     ] != cfg["in_channels"]:
         raise ValueError(
-            "Edge поддерживает только unet_v2; выход содержит только каналы снимка."
+            "Edge поддерживают unet_v2/residual/convnext_v2; выход содержит только каналы снимка."
         )
     if cfg["norm_type"] not in ("gn", "bn") or cfg["edge_kernel"] not in (
         "scharr",

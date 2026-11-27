@@ -107,7 +107,10 @@ def train_epoch(
         checkpoint(cancel)
         inputs, target, valid = _batch(item, device)
         optimizer.zero_grad(set_to_none=True)
-        reconstruction, extra = model(inputs)
+        # BatchNorm cannot estimate statistics for a single deepest spatial value.
+        from utils_new.training.optimization import singleton_batchnorm
+        with singleton_batchnorm(model, len(inputs)):
+            reconstruction, extra = model(inputs)
         loss, recon, kl = training_objective(
             reconstruction, target, valid, extra, criterion, beta
         )

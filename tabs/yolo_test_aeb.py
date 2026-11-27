@@ -1115,7 +1115,7 @@ class YoloInspectWindow(QMainWindow):
 
             # Собираем сводку по модели для лога.
             n_params = sum(p.numel() for p in model.parameters())
-            if arch in ("unet", "unet_v2"):
+            if arch in ("unet", "unet_v2", "residual", "convnext_v2"):
                 latent_info = f"latent_channels={cfg['latent_channels']}"
                 if "img_h" in cfg and "img_w" in cfg:
                     lh = int(cfg["img_h"]) // 8
@@ -1128,13 +1128,17 @@ class YoloInspectWindow(QMainWindow):
                     )
             else:
                 latent_info = f"latent_dim={cfg['latent_dim']}"
-            if arch == "unet_v2" and cfg.get("use_edge_channel"):
+            if cfg.get("use_edge_channel"):
                 self.log(
                     f"[AE/VAE] edge-канал: kernel={cfg.get('edge_kernel')}, "
                     f"median={cfg.get('median_kernel')}, "
                     f"lo={cfg.get('edge_lo')}, hi={cfg.get('edge_hi')}"
                 )
 
+            if arch in ("residual", "convnext_v2"):
+                self.log(f"[AE/VAE] spatial bottleneck, base={cfg['base']}, blocks_per_stage={cfg['blocks_per_stage']}; без U-Net skip-связей")
+            elif arch in ("unet", "unet_v2"):
+                self.log(f"[AE/VAE] skip_mode={cfg.get('skip_mode', 'full')}")
             self.log(f"[AE/VAE] {path}")
             metadata = getattr(loaded, 'metadata', None) or {}
             if metadata.get('epoch'):

@@ -40,6 +40,13 @@ def inference_contract(config):
     )
     if config["arch"] == "unet_v2":
         keys += ("base", "norm_type", "bottleneck_dilations")
+    if config['arch'] in ('residual', 'convnext_v2'):
+        keys += ('base', 'blocks_per_stage')
+        if config['arch'] == 'residual':
+            keys += ('norm_type',)
+    # Preserve old calibrated contracts for the original full-skip models.
+    if config.get('skip_mode', 'full') != 'full':
+        keys += ('skip_mode',)
     return {
         key: list(config[key]) if isinstance(config[key], tuple) else config[key]
         for key in keys

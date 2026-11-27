@@ -1,4 +1,4 @@
-"""Four checkpoint-compatible AE/VAE architectures; model parameters have one owner."""
+"""Checkpoint-compatible AE/VAE architectures; model parameters have one owner."""
 
 import torch
 from torch import nn
@@ -334,6 +334,8 @@ class UNetAE(nn.Module):
         f0, f1, f2, f3 = self.encoder(x)
         z = self.compress(f3)
         h = self.expand(z)
+        if getattr(self, "skip_mode", "full") == "none":
+            f0, f1, f2 = (torch.zeros_like(f) for f in (f0, f1, f2))
         recon = self.decoder(h, f0, f1, f2)
         return recon, None
 
@@ -370,6 +372,8 @@ class UNetVAE(nn.Module):
         logvar = self.fc_logvar(f3)
         z, logvar_c = self.reparameterize(mu, logvar)
         h = self.expand(z)
+        if getattr(self, "skip_mode", "full") == "none":
+            f0, f1, f2 = (torch.zeros_like(f) for f in (f0, f1, f2))
         recon = self.decoder(h, f0, f1, f2)
         return recon, (mu, logvar_c)
 
@@ -518,6 +522,8 @@ class UNetAEV2(nn.Module):
         f0, f1, f2, f3 = self.encoder(x)
         z = self.compress(f3)
         h = self.expand(z)
+        if getattr(self, "skip_mode", "full") == "none":
+            f0, f1, f2 = (torch.zeros_like(f) for f in (f0, f1, f2))
         recon = self.decoder(h, f0, f1, f2)
         return recon, None
 
@@ -566,8 +572,105 @@ class UNetVAEV2(nn.Module):
         logvar = self.fc_logvar(f3)
         z, logvar_c = self.reparameterize(mu, logvar)
         h = self.expand(z)
+        if getattr(self, "skip_mode", "full") == "none":
+            f0, f1, f2 = (torch.zeros_like(f) for f in (f0, f1, f2))
         recon = self.decoder(h, f0, f1, f2)
         return recon, (mu, logvar_c)
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, channels, norm_type):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
+        def norm():
+            return (_gn(channels, min(8, max(1, channels // 2)))
+                    if norm_type == 'gn' else nn.BatchNorm2d(channels))
+        self.norm1 = norm()
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.norm2 = norm()
+
+    def forward(self, x):
+        return x + self.norm2(self.conv2(F.silu(self.norm1(self.conv1(x)))))
+
+
+class GlobalResponseNorm(nn.Module):
+    """ConvNeXt V2 GRN on channels-last features; identity at initialization."""
+    def __init__(self, channels):
+        super().__init__()
+        self.gamma = nn.Parameter(torch.zeros(1, 1, 1, channels))
+        self.beta = nn.Parameter(torch.zeros(1, 1, 1, channels))
+
+    def forward(self, x):
+        response = torch.linalg.vector_norm(x, dim=(1, 2), keepdim=True)
+        normalized = response / (response.mean(dim=-1, keepdim=True) + 1e-6)
+        return x + self.gamma * (x * normalized) + self.beta
+
+
+class ConvNeXtV2Block(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.depthwise = nn.Conv2d(channels, channels, 7, padding=3, groups=channels)
+        self.norm = nn.LayerNorm(channels, eps=1e-6)
+        self.expand = nn.Linear(channels, channels * 4)
+        self.grn = GlobalResponseNorm(channels * 4)
+        self.project = nn.Linear(channels * 4, channels)
+
+    def forward(self, x):
+        h = self.norm(self.depthwise(x).permute(0, 2, 3, 1))
+        h = self.project(self.grn(F.gelu(self.expand(h))))
+        return x + h.permute(0, 3, 1, 2)
+
+
+class SpatialAutoencoder(nn.Module):
+    """Spatial AE/VAE: every reconstructed pixel passes through z, no U-Net skips.
+
+    Custom reconstruction backbones using residual or ConvNeXt V2 blocks,
+    not pretrained ImageNet classifiers or a reproduction of FCMAE training.
+    """
+    def __init__(self, cfg):
+        super().__init__()
+        self.model_type = cfg['model_type']
+        self.logvar_min, self.logvar_max = cfg['logvar_min'], cfg['logvar_max']
+        self.deterministic_eval = cfg['vae_use_mean']
+        widths = [cfg['base'] * factor for factor in (1, 2, 4, 8)]
+        def stage(channels):
+            return nn.Sequential(*[
+                ConvNeXtV2Block(channels) if cfg['arch'] == 'convnext_v2'
+                else ResidualBlock(channels, cfg['norm_type'])
+                for _ in range(cfg['blocks_per_stage'])])
+        self.stem = nn.Conv2d(cfg['model_in_channels'], widths[0], 3, padding=1)
+        self.encoder_stages = nn.ModuleList([stage(c) for c in widths])
+        self.down = nn.ModuleList([nn.Conv2d(a, b, 2, stride=2) for a, b in zip(widths, widths[1:])])
+        if self.model_type == 'vae':
+            self.fc_mu = nn.Conv2d(widths[-1], cfg['latent_channels'], 1)
+            self.fc_logvar = nn.Conv2d(widths[-1], cfg['latent_channels'], 1)
+        else:
+            self.compress = nn.Conv2d(widths[-1], cfg['latent_channels'], 1)
+        self.expand = nn.Conv2d(cfg['latent_channels'], widths[-1], 1)
+        self.up = nn.ModuleList([nn.Conv2d(a, b, 3, padding=1) for a, b in zip(widths[:0:-1], widths[-2::-1])])
+        self.decoder_stages = nn.ModuleList([stage(c) for c in reversed(widths)])
+        self.head = nn.Conv2d(widths[0], cfg['out_channels'], 3, padding=1)
+
+    def encode(self, x):
+        h = self.encoder_stages[0](self.stem(x))
+        for down, stage in zip(self.down, self.encoder_stages[1:]):
+            h = stage(down(h))
+        if self.model_type == 'ae':
+            return self.compress(h), None
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h).clamp(self.logvar_min, self.logvar_max)
+        z = mu if not self.training and self.deterministic_eval else mu + torch.randn_like(mu) * (0.5 * logvar).exp()
+        return z, (mu, logvar)
+
+    def decode(self, z):
+        h = self.decoder_stages[0](self.expand(z))
+        for up, stage in zip(self.up, self.decoder_stages[1:]):
+            h = stage(up(F.interpolate(h, scale_factor=2, mode='nearest')))
+        return self.head(h).sigmoid()
+
+    def forward(self, x):
+        z, statistics = self.encode(x)
+        return self.decode(z), statistics
 
 
 def detect_arch_from_state_dict(state_dict):
@@ -576,6 +679,8 @@ def detect_arch_from_state_dict(state_dict):
     Приоритет: unet_v2 → unet → conv (BN) → conv_gn.
     """
     keys = list(state_dict.keys())
+    if any(k.startswith("encoder_stages.") for k in keys):
+        return "convnext_v2" if any(".depthwise." in k for k in keys) else "residual"
     if any(k.startswith("encoder.bottleneck.") for k in keys):
         return "unet_v2"
     if any(k.startswith("encoder.enc0.net.") for k in keys):
@@ -596,14 +701,20 @@ def detect_arch(cfg, state_dict=None):
     # 1) state_dict — истина в последней инстанции
     if state_dict is not None:
         detected = detect_arch_from_state_dict(state_dict)
-        if detected in ("unet_v2", "unet", "conv", "conv_gn"):
+        if detected in ("unet_v2", "unet", "conv", "conv_gn", "residual", "convnext_v2"):
             return detected
+
+    # Modern explicit architectures never existed with historical U-Net tags.
+    if cfg.get('arch') in ('residual', 'convnext_v2'):
+        return cfg['arch']
 
     if cfg.get("preprocessing_version") and cfg.get("arch") in (
         "unet_v2",
         "unet",
         "conv",
         "conv_gn",
+        "residual",
+        "convnext_v2",
     ):
         return cfg["arch"]
 
@@ -618,7 +729,7 @@ def detect_arch(cfg, state_dict=None):
 
     # 3) явный arch
     arch = cfg.get("arch")
-    if arch in ("unet_v2", "unet", "conv", "conv_gn"):
+    if arch in ("unet_v2", "unet", "conv", "conv_gn", "residual", "convnext_v2"):
         return arch
 
     # 4) latent_channels без маркеров → старый unet
@@ -635,6 +746,9 @@ def _build_model(cfg):
     model_type = cfg["model_type"]
     in_channels = cfg["in_channels"]
     img_h, img_w = cfg["img_h"], cfg["img_w"]
+
+    if arch in ("residual", "convnext_v2"):
+        return SpatialAutoencoder(cfg)
 
     # ---- unet_v2 (новый U-Net с edge-каналом и dilated bottleneck) ----
     if arch == "unet_v2":
@@ -698,6 +812,7 @@ def build_ae_model_from_cfg(cfg, arch=None):
     model = _build_model(cfg)
     model.logvar_min, model.logvar_max = cfg["logvar_min"], cfg["logvar_max"]
     model.deterministic_eval = cfg["vae_use_mean"]
+    model.skip_mode = cfg.get("skip_mode", "full")
     return model
 
 

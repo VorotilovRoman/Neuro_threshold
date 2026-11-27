@@ -81,7 +81,7 @@ def main(argv=None):
             path = args.config or Path(__file__).resolve().parents[
                 2
             ] / "settings/autoencoders" / (
-                (args.profile or "unet_v2_edge_gan") + ".json"
+                (args.profile or "residual_ae") + ".json"
             )
             raw = read_json_object(path)
         if data is None or output is None:

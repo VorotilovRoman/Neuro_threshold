@@ -9,7 +9,7 @@ from path_setup import get_project_root
 from ui import dataset_source as sources
 from ui.DL_train_settings_base import BaseTrainWidget
 from ui.segmentation.jobs import BackgroundTask
-from utils_new.configuration.autoencoder import AE_PROFILES, TrainConfig, training_request
+from utils_new.configuration.autoencoder import AE_PROFILES, ARCHITECTURES, TrainConfig, training_request
 from utils_new.import_export.json_objects import read_json_object, write_json_atomic
 
 
@@ -25,7 +25,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         row = QHBoxLayout()
         self.profile = QComboBox()
         self.profile.addItems(AE_PROFILES)
-        self.profile.setCurrentText('unet_v2_edge_gan')
+        self.profile.setCurrentText('residual_ae')
         self.apply_profile = QPushButton('Применить профиль')
         self.import_config = QPushButton('JSON…')
         self.export_config = QPushButton('Сохранить JSON…')
@@ -69,23 +69,25 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         forms['data'].addRow('Устройство:', self.device_combo)
 
         model_spec = [
-            ('arch', 'Архитектура', ['conv','conv_gn','unet','unet_v2']),
+            ('arch', 'Архитектура', list(ARCHITECTURES)),
             ('model_type', 'Режим', ['ae','vae']), ('in_channels', 'Снимок', [('Grayscale',1),('RGB',3)]),
             ('img_h','Высота H, px',(8,4096)), ('img_w','Ширина W, px',(8,4096)),
             ('latent_dim','Латентный вектор (Conv)',(1,8192)),
-            ('latent_channels','Латентные каналы (U-Net)',(1,1024)),
-            ('base','Ширина base (только V2)',(1,256)), ('norm_type','Нормализация V2/GAN',['gn','bn']),
+            ('latent_channels','Латентные каналы (spatial)',(1,1024)),
+            ('base','Ширина base (V2 / spatial)',(1,256)),
+            ('blocks_per_stage','Блоков на stage (spatial)',(1,16)),
+            ('skip_mode','U-Net skip-связи',[('Включены (реконструкция)', 'full'), ('Отключены (через z)', 'none')]), ('norm_type','Нормализация residual/V2/GAN',['gn','bn']),
             ('bottleneck_dilations','Dilations V2, через запятую','text'),
             ('keep_aspect','Сохранять пропорции',bool), ('pad_value','Padding 0–255',(0,255)),
-            ('use_edge_channel','Дополнительный канал границ (V2)',bool),
+            ('use_edge_channel','Дополнительный канал границ (V2 / spatial)',bool),
             ('edge_kernel','Оператор границ',['scharr','sobel']), ('median_kernel','Медианный фильтр, px',(1,31)),
             ('edge_lo','Нижний порог границ',(0.,10.)), ('edge_hi','Верхний порог границ',(0.,10.)),
             ('logvar_min','Нижняя граница logvar',(-80.,80.)), ('logvar_max','Верхняя граница logvar',(-80.,80.))]
         for key,label,spec in model_spec:
             self.model_controls[key] = self._field(forms['model'], label, spec)
         self.io_info = self._hint(forms['model'], '')
-        self._hint(forms['model'], 'Conv: H/W кратны 16, U-Net: кратны 8. '
-                   'У conv/unet фиксирован BatchNorm, у conv_gn — GroupNorm. '
+        self._hint(forms['model'], 'Conv: H/W кратны 16; U-Net/residual/ConvNeXt: кратны 8. '
+                   'ConvNeXt V2: LayerNorm/GRN; residual: GN/BN. Spatial-модели не имеют skip-обхода z. '
                    'Выход восстанавливает только каналы снимка; edge заново строится из входа.')
 
         specs = {
@@ -168,16 +170,24 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         if isinstance(widget,QCheckBox): widget.setChecked(value)
         elif isinstance(widget,QComboBox): widget.setCurrentIndex(widget.findData(value))
         elif isinstance(widget,QLineEdit): widget.setText(', '.join(map(str,value)) if isinstance(value,(tuple,list)) else str(value))
-        else: widget.setValue(value)
+        else:
+            if not widget.minimum() <= value <= widget.maximum():
+                raise ValueError(f'Значение {value} вне диапазона формы [{widget.minimum()}, {widget.maximum()}]. Используйте CLI или измените JSON.')
+            widget.setValue(value)
 
     def apply_config(self, raw):
         cfg=TrainConfig.from_dict(raw).to_dict()
+        # Validate every numeric control before changing any value; Qt spinboxes
+        # otherwise silently clamp imported metadata/configurations.
+        defaults={'latent_dim':128,'latent_channels':8,'blocks_per_stage':2,'skip_mode':'full'}
+        assignments=[(widget,cfg['model'].get(key,defaults.get(key))) for key,widget in self.model_controls.items()]
+        assignments += [(widget,cfg[key]) for key,widget in self.train_controls.items()]
+        for widget,value in assignments:
+            if isinstance(widget,(QSpinBox,QDoubleSpinBox)) and not widget.minimum() <= value <= widget.maximum():
+                raise ValueError(f'Значение {value} вне диапазона формы [{widget.minimum()}, {widget.maximum()}]. Используйте CLI или измените JSON.')
         self._applying=True
         try:
-            for key,widget in self.model_controls.items():
-                default=128 if key=='latent_dim' else 8 if key=='latent_channels' else None
-                self._set(widget,cfg['model'].get(key,default))
-            for key,widget in self.train_controls.items(): self._set(widget,cfg[key])
+            for widget,value in assignments:self._set(widget,value)
         finally: self._applying=False
         self._capabilities()
 
@@ -187,6 +197,8 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         except ValueError as error: raise ValueError('Dilations: целые числа через запятую.') from error
         model.update(preprocessing_version='ae-pil-v1',vae_use_mean=True,
                      model_in_channels=model['in_channels']+int(model['use_edge_channel']),out_channels=model['in_channels'])
+        if model['arch'] not in ('residual','convnext_v2'):model.pop('blocks_per_stage',None)
+        if model['arch'] not in ('unet','unet_v2'):model.pop('skip_mode',None)
         model.pop('latent_channels' if model['arch'] in ('conv','conv_gn') else 'latent_dim',None)
         return TrainConfig.from_dict(dict(model=model,**{key:self._value(widget) for key,widget in self.train_controls.items()})).to_dict()
 
@@ -194,12 +206,16 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         if self._applying: return
         controls=self.model_controls;train=self.train_controls
         arch=controls['arch'].currentData();vae=controls['model_type'].currentData()=='vae'
-        v2=arch=='unet_v2';conv=arch in ('conv','conv_gn')
-        if not v2 and controls['use_edge_channel'].isChecked(): controls['use_edge_channel'].setChecked(False)
-        for key in ('base','bottleneck_dilations','use_edge_channel'): controls[key].setEnabled(v2)
-        controls['norm_type'].setEnabled(v2 or train['use_gan'].isChecked())
+        v2=arch=='unet_v2';conv=arch in ('conv','conv_gn');spatial=arch in ('residual','convnext_v2')
+        if not (v2 or spatial) and controls['use_edge_channel'].isChecked(): controls['use_edge_channel'].setChecked(False)
+        controls['base'].setEnabled(v2 or spatial)
+        controls['blocks_per_stage'].setEnabled(spatial)
+        controls['skip_mode'].setEnabled(arch in ('unet','unet_v2'))
+        controls['bottleneck_dilations'].setEnabled(v2)
+        controls['use_edge_channel'].setEnabled(v2 or spatial)
+        controls['norm_type'].setEnabled(v2 or arch=='residual' or train['use_gan'].isChecked())
         controls['latent_dim'].setEnabled(conv);controls['latent_channels'].setEnabled(not conv)
-        edge=v2 and controls['use_edge_channel'].isChecked()
+        edge=(v2 or spatial) and controls['use_edge_channel'].isChecked()
         for key in ('edge_kernel','median_kernel','edge_lo','edge_hi'): controls[key].setEnabled(edge)
         for key in ('logvar_min','logvar_max'): controls[key].setEnabled(vae)
         for key in ('beta_vae_target','beta_vae_warmup_epochs','kl_reduction'): train[key].setEnabled(vae)
@@ -212,6 +228,7 @@ class AutoencoderTrainWidget(BaseTrainWidget):
         h,w=controls['img_h'].value(),controls['img_w'].value();channels=controls['in_channels'].currentData()
         latent=str(controls['latent_dim'].value()) if conv else f"{controls['latent_channels'].value()}×{h//8}×{w//8}"
         self.io_info.setText(f'Вход: N×{channels+int(edge)}×{h}×{w}; выход: N×{channels}×{h}×{w}; z: {latent}. '
+                             + (f" Параметров FC bottleneck ≈ {(3 if vae else 2)*(128 if arch=='conv' else 64)*(h//16)*(w//16)*controls['latent_dim'].value():,}." if conv else '')
                              + ('KL отключен: β=0.' if vae and train['beta_vae_target'].value()==0 else ''))
 
     def _load_profile(self):
@@ -308,7 +325,9 @@ class AutoencoderTrainWidget(BaseTrainWidget):
             raw=meta['training'] if meta['training'] else self.config()
             raw=dict(raw,model=dict(meta['model']))
             if not resume:raw['model'].update(preprocessing_version='ae-pil-v1',vae_use_mean=True)
-            self.apply_config(raw)
+            try:self.apply_config(raw)
+            except (TypeError,ValueError) as error:
+                failed(str(error));return
             if resume:
                 folder=Path(path).parent
                 if folder.name=='weights':folder=folder.parent

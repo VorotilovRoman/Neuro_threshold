@@ -29,10 +29,12 @@
 [форма, структура YAML и результаты](yolo_train.md#обучение-vaeae). CLI использует тот же тренер:
 
 ```bash
-python -m utils_new.training.autoencoder --profile unet_v2_edge_gan --data "normal_images" --output "runs/ae_run" --device auto
+python -m utils_new.training.autoencoder --profile residual_ae --data "normal_images" --output "runs/ae_run" --device auto
 ```
 
-Профили: `conv_bn_baseline`, `conv_bn`, `conv_gn`, `unet`, `unet_v2_edge_gan`.
+Профили: `conv_bn_baseline`, `conv_bn`, `conv_gn`, `unet`, `unet_v2_edge_gan`, `residual_ae`, `residual_vae`,
+`convnext_v2_ae`, `convnext_v2_vae`. Spatial-модели реконструируют через bottleneck
+без U-Net skip-связей; профиль по умолчанию в UI и CLI — `residual_ae`.
 Вместо `--profile` можно указать `--config settings/autoencoders/unet.json`.
 Размеры и функции потерь задаются в JSON; `--epochs` и `--batch-size` переопределяют их.
 Данные — папка нормальных снимков без дефектов или YOLO/MASKS YAML без требования

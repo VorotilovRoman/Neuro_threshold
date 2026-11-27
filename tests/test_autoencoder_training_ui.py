@@ -142,13 +142,19 @@ for name in AE_PROFILES:
  raw=json.loads((Path('settings/autoencoders')/(name+'.json')).read_text())
  widget.apply_config(raw)
  assert widget.config()==TrainConfig.from_dict(raw).to_dict(),name
-for arch in ('conv','conv_gn','unet','unet_v2'):
+for arch in ('conv','conv_gn','unet','unet_v2','residual','convnext_v2'):
  widget.model_controls['arch'].setCurrentIndex(widget.model_controls['arch'].findData(arch))
  for kind in ('ae','vae'):
   widget.model_controls['model_type'].setCurrentIndex(widget.model_controls['model_type'].findData(kind))
   assert widget.config()['model']['model_type']==kind
   assert widget.model_controls['latent_dim'].isEnabled()==(arch in ('conv','conv_gn'))
   assert widget.train_controls['beta_vae_target'].isEnabled()==(kind=='vae')
+state=widget.config()
+try:
+ widget.apply_config(dict(state,epochs=100001))
+ raise AssertionError('oversized setting was silently clamped')
+except ValueError:pass
+assert widget.config()==state
 sys.path.insert(0,str(Path.cwd()/'tests'))
 from test_autoencoder_training_ui import config
 with TemporaryDirectory() as directory:

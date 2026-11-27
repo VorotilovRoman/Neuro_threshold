@@ -289,9 +289,11 @@ python -m unittest discover -s tests -p test_sam_training_roundtrip.py -v
 - **Данные:** папка нормальных снимков либо YOLO/MASKS YAML. Используются только
   изображения; TXT, маски и классы игнорируются. Снимки с дефектами заранее исключите.
   Пути/количество файлов проверяются в фоне, содержимое и утечки — в воркере.
-- **Модель:** Conv/Conv-GN/U-Net/U-Net V2 × AE/VAE, grayscale/RGB, H/W и размер
-  латентного представления. Только V2 поддерживает настраиваемые base, нормализацию,
-  dilations и edge-канал. Форма показывает реальные вход/выход NCHW; edge не восстанавливается.
+- **Модель:** Conv/Conv-GN/U-Net/U-Net V2/residual/ConvNeXt V2-based × AE/VAE,
+  grayscale/RGB, H/W и размер латентного представления. Spatial-модели имеют
+  настраиваемые base и blocks_per_stage; edge доступен у них и U-Net V2.
+  Dilations настраиваются у U-Net V2. Форма показывает реальные вход/выход NCHW;
+  edge не восстанавливается. У Conv показывается оценка размера FC bottleneck.
 - **Обучение и аугментации:** AdamW, cosine LR, batch FP32, early stopping, seed;
   повороты/сдвиги/яркость/контраст/отражения согласованы у входа и эталона,
   шум добавляется только во вход. AutoBatch/AMP здесь не используются.
@@ -301,6 +303,36 @@ python -m unittest discover -s tests -p test_sam_training_roundtrip.py -v
   VAE используют mu. Параметры можно сохранить в переносимый JSON.
 
 ![Архитектура, каналы и латентное представление](image/autoencoder_model.png)
+
+Для новых экспериментов профиль по умолчанию — **residual_ae**, без GAN, с GN.
+`residual_vae`, `convnext_v2_ae`, `convnext_v2_vae` используют тот же тракт данных,
+обучения и применения. В VAE-профилях KL включён с β=0.0001 и warmup 20 эпох;
+β=0 отключает регуляризацию распределения, что форма отмечает явно.
+
+| Семейство | Архитектура и ограничения |
+| --- | --- |
+| Conv / Conv-GN | Классические свёртки и FC bottleneck; число параметров растёт с H/W |
+| U-Net / U-Net V2 | Skip-связи по умолчанию включены для старых весов; режим `none` подаёт нули вместо skip-признаков, заставляя реконструкцию проходить через z |
+| residual | Пространственный bottleneck H/8×W/8, residual-блоки, GN/BN, SiLU, resize+conv decoder; без обхода z |
+| ConvNeXt V2-based | Depthwise 7×7, LayerNorm, inverted bottleneck, GELU и GRN; пространственный z и resize+conv decoder, без U-Net skip-связей |
+
+Новые backbones — собственные реконструкторы с соответствующими блоками,
+не готовые ImageNet-классификаторы и не воспроизведение FCMAE/pretraining из статьи.
+У них число параметров не зависит от разрешения; память активаций зависит.
+Для старых U-Net VAE skip-связи обходят стохастический bottleneck: это условный
+реконструктор, а не генератор изображения только из z. Для поиска дефектов сравните
+его с `skip_mode=none` и spatial AE на независимых нормальных и дефектных снимках.
+Низкий reconstruction loss не доказывает высокое качество обнаружения дефектов.
+
+Современные направления для отдельного сравнения:
+[MAE](https://openaccess.thecvf.com/content/CVPR2022/html/He_Masked_Autoencoders_Are_Scalable_Vision_Learners_CVPR_2022_paper.html)
+обучает восстановление скрытых patches и требует соответствующего masking/loss;
+[ConvNeXt V2/FCMAE](https://openaccess.thecvf.com/content/CVPR2023/html/Woo_ConvNeXt_V2_Co-Designing_and_Scaling_ConvNets_With_Masked_Autoencoders_CVPR_2023_paper.html)
+использует masked pretraining, который здесь не подключён;
+[RAE](https://arxiv.org/abs/2510.11690) сочетает pretrained representation encoder
+с обучаемым decoder. Для RAE с [DINOv3](https://ai.meta.com/research/dinov3/)
+нужны локальные веса, точная предобработка и отдельная калибровка feature/reconstruction
+оценок. Они не подменяются текущим pixel-MAE и пока не реализованы.
 
 Пример структуры без разметки:
 
