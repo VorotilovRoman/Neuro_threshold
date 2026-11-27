@@ -108,7 +108,7 @@ class TrainingPresetBar(QWidget):
         defaults=TRAINING_WORKER_DEFAULTS[self.family]
         if not isinstance(worker,dict) or set(worker)-set(defaults):raise ValueError('Неизвестные дополнительные параметры воркера.')
         # Reuse pure backend validation without requiring a selected dataset.
-        if self.family in ('unet','deeplab'):
+        if self.family in ('unet','deeplab','segformer'):
             from utils_new.configuration.training import semantic_config
             semantic_config(worker,self.family)
         elif self.family=='yolo':

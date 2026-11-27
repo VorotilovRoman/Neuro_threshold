@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, Q
 
 from ui import dataset_source as source_dialogs
 
-from ui.DL_train_settings_base import BaseTrainWidget
+from ui.DL_train_settings_base import BaseTrainWidget, UNetTrainWidget
 
 
 # =============================================================================
@@ -1024,139 +1024,60 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
 # =============================================================================
 # SegFormer Training Widget
 # =============================================================================
-class SegFormerTrainWidget(BaseTrainWidget):
-    preset_family='segformer'
-    def __init__(self, parent=None):
-        super().__init__(parent)
+class SegFormerTrainWidget(UNetTrainWidget):
+    """Shared semantic data/training form with MiT and SegFormer head settings."""
+    preset_family = 'segformer'
+    family_title = 'SegFormer'
 
-        hint = (
-            "<b>📁 Структура датасета SegFormer:</b><br>"
-            "dataset/<br>"
-            "├── img_dir/<br>"
-            "│   ├── train/<br>"
-            "│   └── val/<br>"
-            "└── ann_dir/<br>"
-            "    ├── train/   # маски PNG, значения = класс<br>"
-            "    └── val/"
-        )
-        self.add_dataset_structure_hint(hint)
+    def _add_preset_unet_fields(self):
+        self.encoder = QComboBox()
+        self.encoder.addItems([f'mit_b{i}' for i in range(6)])
+        self.preset_layout.addRow('MiT backbone:', self.encoder)
+        self.architecture = QComboBox()
+        self.architecture.addItem('SegFormer')
+        self.preset_layout.addRow('Архитектура:', self.architecture)
+        self.input_size = QComboBox()
+        self.input_size.addItems(['256', '512', '1024'])
+        self.input_size.setCurrentText('512')
+        self.preset_layout.addRow('Размер входа:', self.input_size)
 
-        self.dataset_source = source_dialogs.DatasetSourceWidget(
-            ("dataset_root",), profile="yolo_train"
-        )
-        self.dataset_path = QLineEdit()
-        self.dataset_source.add_path_field("Папка:", self.dataset_path)
-        self.browse_dataset_btn = self.dataset_source.button("dataset_root")
-        self.browse_dataset_btn.clicked.connect(self._browse_dataset)
-        self.form_layout.addRow(self.dataset_source)
-
-        self.add_project_field()
-        self.add_experiment_name_field()
-        self.add_device_field()
-        self.add_common_training_params()
-        self._add_model_selection()
-        self._add_segformer_specific()
-        self.add_buttons()
-        self.add_progress_bar()
-        self.organize_training_stages()
-
-    def _browse_dataset(self):
-        path = source_dialogs.get_directory(self, "dataset_root")
-        if path:
-            self.dataset_path.setText(path)
-
-    def _add_model_selection(self):
-        group = QGroupBox("Источник модели")
-        layout = QVBoxLayout()
-        self.model_from_preset = QRadioButton(
-            "Использовать предустановленную SegFormer"
-        )
-        self.model_from_file = QRadioButton("Загрузить свою модель (.pth)")
-        self.model_from_preset.setChecked(True)
-        layout.addWidget(self.model_from_preset)
-        layout.addWidget(self.model_from_file)
-        group.setLayout(layout)
-        self.form_layout.addRow(group)
-
-        self.preset_widget = QWidget()
-        self.preset_layout = QFormLayout(self.preset_widget)
-        self.form_layout.addRow(self.preset_widget)
-
-        self.file_widget = QWidget()
-        file_row = QHBoxLayout(self.file_widget)
-        self.custom_model_path = QLineEdit()
-        self.custom_model_path.setPlaceholderText("Путь к .pth файлу")
-        self.browse_custom_btn = source_dialogs.make_source_button("model_torch", self)
-        file_row.addWidget(self.custom_model_path)
-        file_row.addWidget(self.browse_custom_btn)
-        self.form_layout.addRow(self.file_widget)
-
-        self.preset_widget.setVisible(True)
-        self.file_widget.setVisible(False)
-
-        self.model_from_preset.toggled.connect(self._toggle_model_source)
-        self.model_from_file.toggled.connect(self._toggle_model_source)
-        self.browse_custom_btn.clicked.connect(self._browse_custom_model)
-
-        self._add_preset_segformer_fields()
-
-    def _toggle_model_source(self, checked):
-        is_preset = self.model_from_preset.isChecked()
-        self.preset_widget.setVisible(is_preset)
-        self.file_widget.setVisible(not is_preset)
-
-    def _browse_custom_model(self):
-        path, _ = source_dialogs.get_open_file(self, "model_torch")
-        if path:
-            self.custom_model_path.setText(path)
-
-    def _add_preset_segformer_fields(self):
-        self.variant = QComboBox()
-        self.variant.addItems(
-            ["mit-b0", "mit-b1", "mit-b2", "mit-b3", "mit-b4", "mit-b5"]
-        )
-        self.preset_layout.addRow("Variant:", self.variant)
-
-    def _add_segformer_specific(self):
-        self.num_classes = QSpinBox()
-        self.num_classes.setRange(1, 100)
-        self.num_classes.setValue(1)
-        self.form_layout.addRow("Number of classes:", self.num_classes)
-
-        self.lr = QDoubleSpinBox()
-        self.lr.setRange(0.00001, 0.1)
-        self.lr.setValue(0.0001)
-        self.lr.setSingleStep(0.00001)
+    def _add_unet_specific(self):
+        super()._add_unet_specific()
+        self.num_classes.setMaximum(4096)
+        self.loss.addItems(['CrossEntropy', 'CrossEntropy+Dice'])
+        self.loss.setCurrentText('CrossEntropy+Dice')
+        self.optimizer.setCurrentText('AdamW')
         self.lr.setDecimals(6)
-        self.form_layout.addRow("Learning rate:", self.lr)
-
-        self.optimizer = QComboBox()
-        self.optimizer.addItems(["AdamW", "Adam", "SGD"])
-        self.form_layout.addRow("optimizer:", self.optimizer)
+        self.lr.setSingleStep(.00001)
+        self.lr.setValue(.00006)
+        self.scheduler.addItem('Poly')
+        self.scheduler.setCurrentText('Poly')
+        self.resize_mode_combo.setCurrentIndex(1)
+        self.decoder_segmentation_channels = QSpinBox()
+        self.decoder_segmentation_channels.setRange(8, 1024)
+        self.decoder_segmentation_channels.setValue(256)
+        self.form_layout.addRow('Каналы MLP-декодера:', self.decoder_segmentation_channels)
+        self.pretrained_checkbox = QCheckBox('ImageNet-веса MiT (скачивание при первом запуске)')
+        self.pretrained_checkbox.setChecked(True)
+        self.pretrained_checkbox.setToolTip('Выключите для обучения с нуля без сети. Свой checkpoint проекта загружается локально и не скачивает веса.')
+        self.form_layout.addRow(self.pretrained_checkbox)
+        self.ignore_index = QSpinBox()
+        self.ignore_index.setRange(-1, 65535)
+        self.ignore_index.setSpecialValueText('Нет')
+        self.ignore_index.setValue(255)
+        self.form_layout.addRow('Ignore ID (-1 = нет):', self.ignore_index)
+        self.use_amp = QCheckBox('AMP на CUDA')
+        self.use_amp.setChecked(True)
+        self.form_layout.addRow(self.use_amp)
+        self.accum_steps = QSpinBox()
+        self.accum_steps.setRange(1, 128)
+        self.form_layout.addRow('Накопление градиентов:', self.accum_steps)
 
     def get_params(self):
-        if self.model_from_preset.isChecked():
-            model_path = None
-        else:
-            model_path = self.custom_model_path.text().strip()
-            if not model_path:
-                QMessageBox.warning(self, "Ошибка", "Не указан файл модели SegFormer")
-                return None
-        dataset_path = self.dataset_path.text().strip()
-        if not dataset_path:
-            QMessageBox.warning(self, "Ошибка", "Не указана папка датасета")
-            return None
-
-        return self.complete_training_params({
-            "model_path": model_path,
-            "dataset_path": dataset_path,
-            "project_path": self.project_path.text().strip() or None,
-            "name": self.experiment_name.text().strip() or None,
-            "epochs": self.epochs.value(),
-            "batch_size": -1 if self.auto_batch.isChecked() else self.batch.value(),
-            "device": self.device_combo.currentText(),
-            "optimizer": self.optimizer.currentText(),
-            "lr": self.lr.value(),
-            "variant": self.variant.currentText(),
-            "num_classes": self.num_classes.value(),
-        })
+        params = super().get_params()
+        if params is not None:
+            params.update(decoder_segmentation_channels=self.decoder_segmentation_channels.value(),
+                          pretrained=self.pretrained_checkbox.isChecked(),
+                          ignore_index=None if self.ignore_index.value() == -1 else self.ignore_index.value(),
+                          use_amp=self.use_amp.isChecked(), accum_steps=self.accum_steps.value())
+        return params

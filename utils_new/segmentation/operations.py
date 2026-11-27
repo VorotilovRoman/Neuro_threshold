@@ -192,7 +192,7 @@ def load_dl(name, path, device, cancel):
 
     checkpoint(cancel)
     model = create_segmentor(name, device=device)
-    if name in ("U-Net", "DeepLabV3", "DeepLabV3+"):
+    if name in ("U-Net", "DeepLabV3", "DeepLabV3+", "SegFormer"):
         model.load(weights_path=path)
     else:
         model.load(model_path=path)

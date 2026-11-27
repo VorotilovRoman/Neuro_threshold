@@ -387,6 +387,8 @@ class DeepLearningPresetManager(MethodPresetManager):
         model="model_combo",
         device="device_combo",
         unet_model_path="unet_settings._model_path",
+        segformer_model_path="segformer_settings._model_path",
+        segformer_threshold="segformer_settings._threshold",
         deeplab_model_path="deeplab_settings._model_path",
         yolo_model_path="yolo_settings._model_path",
         onnx_model_path="custom_settings._model_path",
@@ -428,6 +430,7 @@ class DeepLearningPresetManager(MethodPresetManager):
             return
         paths = {
             "U-Net": "unet_model_path",
+            "SegFormer": "segformer_model_path",
             "DeepLabV3+": "deeplab_model_path",
             "YOLO-seg": "yolo_model_path",
             "ONNX / NCNN": "onnx_model_path",

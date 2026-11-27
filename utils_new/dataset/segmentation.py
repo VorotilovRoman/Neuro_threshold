@@ -1,4 +1,4 @@
-"""One paired image/index-mask dataset for U-Net and DeepLab training."""
+"""One paired image/index-mask dataset for U-Net, DeepLab and SegFormer training."""
 
 from pathlib import Path
 import numpy as np

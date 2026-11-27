@@ -35,9 +35,9 @@ def generate_combinations(parameters):
 
 
 def run_experiments(kind, grid, output, *, limit=None, log=print, dry_run=False):
-    if kind not in ("yolo", "unet", "deeplab"):
+    if kind not in ("yolo", "unet", "deeplab", "segformer"):
         raise ValueError(
-            "Сетка поддерживает YOLO, U-Net и DeepLab; AE имеет собственный конфиг."
+            "Сетка поддерживает YOLO, U-Net, DeepLab и SegFormer; AE имеет собственный конфиг."
         )
     if limit is not None and (type(limit) is not int or limit < 1):
         raise ValueError("limit должен быть положительным.")
@@ -128,7 +128,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Сетка экспериментов без локальных путей в коде."
     )
-    parser.add_argument("--kind", choices=["yolo", "unet", "deeplab"], required=True)
+    parser.add_argument("--kind", choices=["yolo", "unet", "deeplab", "segformer"], required=True)
     parser.add_argument("--grid", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--limit", type=int)

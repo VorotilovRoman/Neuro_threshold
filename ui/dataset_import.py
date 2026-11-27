@@ -148,7 +148,7 @@ class DatasetImportDialog(QDialog):
             if self.base["kind"] == "coco"
             else "Пути можно редактировать; несколько путей разделяйте точкой с запятой. "
             "Снимки без меток/масок загружаются. Пустой TXT — размеченный фон; отсутствующий файл — без разметки. "
-            "При обучении U-Net/DeepLab снимки без масок не используются."
+            "При обучении U-Net/DeepLab/SegFormer снимки без масок не используются."
         )
         hint = QLabel(help_text)
         hint.setWordWrap(True)

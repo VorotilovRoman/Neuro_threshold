@@ -258,8 +258,10 @@ class DeepLearningWindow(QMainWindow):
             self.custom_settings._model_path,
             self.custom_settings._threshold,
             self.unet_settings._threshold,
+            self.segformer_settings._threshold,
             self.deeplab_settings._threshold,
         ]
+        self.segformer_settings.override_changed.connect(self.on_any_setting_changed)
         # Override-поля U-Net теперь внутри виджета — подключаемся к сигналу
         try:
             self.unet_settings.override_changed.connect(self.on_any_setting_changed)

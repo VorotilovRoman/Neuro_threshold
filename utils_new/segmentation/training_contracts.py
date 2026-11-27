@@ -36,3 +36,45 @@ def apply_decoder_dropout(model, probability):
                 output, p=probability, training=module.training
             )
         )
+
+
+def build_semantic_model(cfg):
+    """Same SMP architecture for training and checkpoint inference, no activation."""
+    import segmentation_models_pytorch as smp
+
+    weights = (
+        cfg["encoder_weights"] if cfg["pretrained"] and not cfg["model_path"] else None
+    )
+    common = dict(
+        encoder_name=cfg["encoder"] if cfg["kind"] in ("unet", "segformer") else cfg["backbone"],
+        encoder_weights=weights,
+        in_channels=3,
+        classes=cfg["num_classes"],
+    )
+    if cfg["architecture"] in ("unet", "unetplusplus"):
+        constructor = (
+            smp.UnetPlusPlus if cfg["architecture"] == "unetplusplus" else smp.Unet
+        )
+        model = constructor(
+            **common,
+            decoder_channels=cfg["decoder_channels"],
+            decoder_use_batchnorm=True,
+        )
+        apply_decoder_dropout(model, cfg["dropout"])
+    elif cfg["architecture"] == "segformer":
+        model = smp.Segformer(
+            **common, decoder_segmentation_channels=cfg["decoder_segmentation_channels"]
+        )
+        apply_decoder_dropout(model, cfg["dropout"])
+    else:
+        constructor = (
+            smp.DeepLabV3Plus
+            if cfg["architecture"] == "deeplabv3plus"
+            else smp.DeepLabV3
+        )
+        model = constructor(
+            **common,
+            encoder_output_stride=cfg["output_stride"],
+            decoder_atrous_rates=cfg["atrous_rates"],
+        )
+    return model

@@ -684,23 +684,37 @@ class YoloTrainWindow(QMainWindow):
     def on_stop_deeplab(self):
         self._request_training_stop("deeplab")
 
-    # ===================== SegFormer (заглушка) =====================
+    # ===================== SegFormer =====================
     def _run_segformer_training(self, params):
-        """Запуск обучения SegFormer (пока заглушка)."""
+        from utils_new.configuration.training import semantic_config
+
+        if self.segformer_process and self.segformer_process.state() != QProcess.NotRunning:
+            self.log("Обучение SegFormer уже запущено.")
+            return
+        try:
+            params = semantic_config(params, "segformer")
+        except (ValueError, TypeError, OSError) as error:
+            QMessageBox.warning(self, "Параметры SegFormer", str(error))
+            self.segformer_train_widget.set_running(False)
+            return
         self.log("=== Параметры обучения SegFormer ===")
-        for key, val in params.items():
-            self.log(f"{key}: {val}")
-        self.log("=" * 30)
-        QMessageBox.information(
-            self,
-            "Информация",
-            "Обучение SegFormer будет доступно в следующих версиях.\n"
-            "Параметры переданы в лог.",
-        )
+        self.log(json.dumps(params, ensure_ascii=False, indent=2))
+        process = QProcess(self)
+        self.segformer_process = process
+        process.setWorkingDirectory(get_project_root())
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(lambda: self._read_training_output("segformer"))
+        process.finished.connect(lambda code, status: self._semantic_finished("segformer", code, status))
+        self.segformer_train_widget.set_running(True)
+        self._start_worker("segformer", process, params)
+        if not process.waitForStarted(3000):
+            self.log("Не удалось запустить воркер SegFormer: " + process.errorString())
+            self.segformer_train_widget.set_running(False)
+            self._cleanup_worker("segformer")
+            self.segformer_process = None
 
     def on_stop_segformer(self):
-        """Остановка обучения SegFormer (заглушка)."""
-        self.log("Остановка обучения SegFormer (не реализовано)")
+        self._request_training_stop("segformer")
 
     # ===================== SAM / SAM2 =====================
     def _run_sam_training(self, params):
@@ -777,7 +791,7 @@ class YoloTrainWindow(QMainWindow):
             else (
                 kind + "_process",
                 kind + "_train_widget",
-                {"unet": "U-Net", "sam": "SAM", 'autoencoder':'AE/VAE'}.get(kind, "DeepLab"),
+                {"unet": "U-Net", "segformer": "SegFormer", "sam": "SAM", 'autoencoder':'AE/VAE'}.get(kind, "DeepLab"),
             )
         )
 
@@ -893,7 +907,7 @@ class YoloTrainWindow(QMainWindow):
         self._closing_training = True
         busy = self.model_export_widget.shutdown()
         self.autoencoder_train_widget.close_jobs()
-        for kind in ("yolo", "unet", "deeplab", "sam", 'autoencoder'):
+        for kind in ("yolo", "unet", "deeplab", "segformer", "sam", 'autoencoder'):
             attr, _, _ = self._training_parts(kind)
             process = getattr(self, attr, None)
             if process is not None and process.state() != QProcess.NotRunning:

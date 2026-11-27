@@ -1,4 +1,4 @@
-"""One semantic-segmentation trainer for U-Net/U-Net++ and DeepLabV3/V3+."""
+"""Shared semantic-segmentation training for U-Net, DeepLab and SegFormer."""
 
 from concurrent.futures import CancelledError
 from datetime import datetime
@@ -28,7 +28,6 @@ from utils_new.segmentation.model_metrics import (
     metrics_from_confusion,
     prediction_labels,
 )
-from utils_new.segmentation.training_contracts import apply_decoder_dropout
 from utils_new.training.losses import get_loss_function
 from utils_new.training.optimization import (
     ModelEMA,
@@ -53,38 +52,9 @@ def stop_check(stop):
 
 
 def build_model(cfg):
-    import segmentation_models_pytorch as smp
+    from utils_new.segmentation.training_contracts import build_semantic_model
 
-    weights = (
-        cfg["encoder_weights"] if cfg["pretrained"] and not cfg["model_path"] else None
-    )
-    common = dict(
-        encoder_name=cfg["encoder"] if cfg["kind"] == "unet" else cfg["backbone"],
-        encoder_weights=weights,
-        in_channels=3,
-        classes=cfg["num_classes"],
-    )
-    if cfg["architecture"] in ("unet", "unetplusplus"):
-        constructor = (
-            smp.UnetPlusPlus if cfg["architecture"] == "unetplusplus" else smp.Unet
-        )
-        model = constructor(
-            **common,
-            decoder_channels=cfg["decoder_channels"],
-            decoder_use_batchnorm=True,
-        )
-        apply_decoder_dropout(model, cfg["dropout"])
-    else:
-        constructor = (
-            smp.DeepLabV3Plus
-            if cfg["architecture"] == "deeplabv3plus"
-            else smp.DeepLabV3
-        )
-        model = constructor(
-            **common,
-            encoder_output_stride=cfg["output_stride"],
-            decoder_atrous_rates=cfg["atrous_rates"],
-        )
+    model = build_semantic_model(cfg)
     if cfg["model_path"]:
         model.load_state_dict(read_weights(cfg["model_path"]), strict=True)
     return model
@@ -304,6 +274,7 @@ def run_training(params, kind, *, stop=None, log=print):
         "encoder",
         "backbone",
         "decoder_channels",
+        "decoder_segmentation_channels",
         "dropout",
         "input_size",
         "num_classes",

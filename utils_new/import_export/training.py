@@ -66,7 +66,7 @@ def read_semantic_checkpoint(path, *, require_metadata=True):
     """New checkpoints are self-contained; raw state_dict requires its sidecar."""
     state, embedded = read_weights(path, with_metadata=True)
     sidecar = read_model_meta(path)
-    critical = ('architecture', 'encoder', 'backbone', 'num_classes', 'decoder_channels',
+    critical = ('kind', 'decoder_segmentation_channels', 'architecture', 'encoder', 'backbone', 'num_classes', 'decoder_channels',
                 'output_stride', 'atrous_rates', 'input_size', 'normalize', 'resize_mode',
                 'inference_resize_mode', 'mask_class_offset', 'annotation_class_offset')
     conflicts = [key for key in critical if key in sidecar and key in embedded and sidecar[key] != embedded[key]]

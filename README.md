@@ -21,7 +21,7 @@ python main.py
 
 В Windows вместо `source` выполните `.venv\Scripts\activate`.
 По умолчанию устанавливается **CUDA 13.0 (`cu130`)**, в том числе вместо уже
-установленной CPU-сборки. Для RTX 5090 и обучения U-Net/DeepLab:
+установленной CPU-сборки. Для RTX 5090 и обучения U-Net/DeepLab/SegFormer:
 
 ```powershell
 python install.py --extra training
@@ -61,7 +61,7 @@ python main.py
 
 | Дополнение `--extra` | Функции и библиотеки |
 | --- | --- |
-| `training` | U-Net/DeepLab: segmentation-models-pytorch, psutil |
+| `training` | U-Net/DeepLab/SegFormer: segmentation-models-pytorch, psutil |
 | `audit` | ImageHash, OpenCLIP, Transformers, UMAP, HDBSCAN |
 | `sahi` | Нарезка датасетов SAHI |
 | `export` | Экспорт/применение ONNX и NCNN, TIFF: onnx, ncnn, pnnx, psutil, tifffile |
@@ -97,7 +97,7 @@ python dependency_health.py --load --extra all
 | [Градиентные методы](docs/gradient.md) | Границы, заполнение маски и автоподбор |
 | [Интерактивные методы](docs/interactive.md) | Сегментация по рамке и меткам объекта/фона |
 | [Традиционные методы ML](docs/traditional_ml.md) | Кластеризация и обучение классификаторов |
-| [Deep Learning](docs/deep_learning.md) | YOLO, U-Net, DeepLab, ONNX/NCNN и SAM/SAM2/SAM3 |
+| [Deep Learning](docs/deep_learning.md) | YOLO, U-Net, DeepLab, SegFormer, ONNX/NCNN и SAM/SAM2/SAM3 |
 | [Анализ отчётов](docs/reports.md) | Выбор методов по ручной эталонной разметке |
 | [Добавить аннотации](docs/labeler.md) | Ручная разметка, авторазметка YOLO и SAM |
 | [Просмотр аннотаций](docs/test.md) | Просмотр, наложение масок и проверка дублей |
@@ -112,7 +112,7 @@ python dependency_health.py --load --extra all
 
 Каждая инструкция содержит актуальный скриншот. Они сняты с текущего приложения
 на демонстрационных данных; вид окна зависит от ОС, темы и масштаба.
-Снимки интерфейса не подтверждают качество моделей. Новые веса U-Net/DeepLab
+Снимки интерфейса не подтверждают качество моделей. Новые веса U-Net/DeepLab/SegFormer
 и ONNX-экспорты проекта содержат метаданные внутри файла; [форматы и ограничения
 загрузки](docs/yolo_train.md#веса-результаты-и-метаданные) описаны отдельно.
 

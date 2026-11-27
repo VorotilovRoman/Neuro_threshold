@@ -120,10 +120,6 @@ def run_dl(owner):
     name = owner.model_combo.currentText()
     parameters = {}
     overrides = {}
-    if not errors.require(
-        owner, name != "SegFormer", f"Модель {name} ещё не реализована."
-    ):
-        return
     if name == "YOLO-seg":
         widget = owner.yolo_settings
         parameters = dict(
@@ -135,8 +131,9 @@ def run_dl(owner):
         )
     if name == "ONNX / NCNN":
         parameters["threshold"] = owner.custom_settings._threshold.value()
-    if name in ("U-Net", "DeepLabV3+", "DeepLabV3"):
-        widget = owner.unet_settings if name == "U-Net" else owner.deeplab_settings
+    if name in ("U-Net", "DeepLabV3+", "DeepLabV3", "SegFormer"):
+        widget = (owner.unet_settings if name == "U-Net" else
+                  owner.segformer_settings if name == "SegFormer" else owner.deeplab_settings)
         valid, message = widget.validate_for_prediction()
         if not errors.require(owner, valid, message):
             return
@@ -324,7 +321,7 @@ def load_dl(owner, name):
     }
     if not errors.require(
         owner,
-        name in widgets and name != "SegFormer",
+        name in widgets,
         "Выбранная модель ещё не реализована.",
     ):
         return
@@ -350,6 +347,8 @@ def load_dl(owner, name):
                 )
             if metadata and name == "U-Net":
                 owner._update_unet_ui_from_metadata(metadata)
+            elif metadata and name == "SegFormer":
+                owner.segformer_settings.apply_metadata(metadata)
             elif metadata and name in ("DeepLabV3", "DeepLabV3+"):
                 owner._update_deeplab_ui_from_metadata(metadata)
         finally:

@@ -11,7 +11,7 @@
 YOLO принимает PT/ONNX/engine и NCNN при наличии backend. Для NCNN выберите
 `.param` из папки `*_ncnn_model`: рядом нужны одноимённый `.bin` и `metadata.yaml`.
 Тип задачи YOLO ONNX/NCNN читается из метаданных, а не имени файла.
-Новые U-Net/DeepLab содержат метаданные в checkpoint; старому raw state_dict нужен
+Новые U-Net/DeepLab/SegFormer содержат метаданные в checkpoint; старому raw state_dict нужен
 `*_meta.json`. Загрузчик проверяет соответствие JSON и встроенных метаданных.
 Раздел **ONNX / NCNN** ожидает один RGB float32 NCHW-вход и один выход
 семантической сегментации с метаданными. Для NCNN выберите `.param` рядом с `.bin`
@@ -34,7 +34,15 @@ ID объектов восстанавливаются с `annotation_class_offs
 Detect/OBB + Otsu — отдельно включаемый гибрид. Общий предпросмотр — бинарная маска;
 инверсия выделяет общий фон, без присвоения ему классов исходных объектов.
 Маски сохраняют отверстия; обычные Segment-полигоны передают внешние контуры.
-SegFormer пока не реализован. Алгоритмы — `utils_new/segmentation/backends/`.
+SegFormer поддерживает MiT-B0…B5 и MLP-декодер SMP. Используйте веса проекта
+из [обучения SegFormer](yolo_train.md#segformer); encoder, размер входа, классы,
+нормализация и resize читаются из checkpoint. Для raw state_dict нужен его
+`*_meta.json`; несовместимые веса/метаданные отклоняются. Результат — бинарная
+маска или карта ID классов, затем общие морфология и BBox/OBB/Segment.
+
+![Загрузка и параметры SegFormer](image/segformer_inference.png)
+
+Алгоритмы — `utils_new/segmentation/backends/`.
 
 ## SAM, SAM2/2.1 и SAM3
 

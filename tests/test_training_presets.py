@@ -46,7 +46,7 @@ with TemporaryDirectory() as directory:
    if cls==YOLOTrainWidget:
     cfg=build_train_args(params)
     for key,value in preset['worker_parameters'].items():assert cfg[key]==value,(key,cfg[key],value)
-   elif cls in (UNetTrainWidget,DeepLabV3TrainWidget):
+   elif cls in (UNetTrainWidget,DeepLabV3TrainWidget,SegFormerTrainWidget):
     cfg=semantic_config(params,bar.family)
     for key,value in preset['worker_parameters'].items():assert cfg[key]==value,(key,cfg[key],value)
    else:
@@ -91,7 +91,7 @@ with TemporaryDirectory() as directory:
   widget.set_running(True);assert not bar.isEnabled()
   widget.set_running(False);assert bar.isEnabled()
   widget.close()
- assert count==20,count
+ assert count==21,count
  assert not errors,errors
 '''
         result = subprocess.run([sys.executable, '-c', code], cwd=ROOT,

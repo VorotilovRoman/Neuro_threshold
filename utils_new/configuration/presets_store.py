@@ -24,7 +24,10 @@ TRAINING_WORKER_DEFAULTS = {
     'deeplab': dict(num_workers=0, seed=42, patience=25, grad_clip=5., plots=True,
                     pretrained=True, encoder_weights='imagenet',pr_pixels=200000),
     'sam': dict(weight_decay=.0001,box_jitter=.05,validation_fraction=.2,grad_clip=1.),
-    'segformer': {},
+    'segformer': dict(num_workers=0, seed=42, patience=25, grad_clip=1., plots=True,
+                      encoder_weights='imagenet', weight_decay=.01, momentum=.9,
+                      use_ema=False, ema_decay=.999, pr_pixels=200000, poly_power=.9,
+                      use_layerwise_lr=False, layerwise_decay=.1),
 }
 
 
@@ -32,7 +35,7 @@ def training_worker_defaults(family):
     """Actual backend defaults for saving an unmodified form, not suggested recipes."""
     from copy import deepcopy
     keys=TRAINING_WORKER_DEFAULTS[family]
-    if family in ('unet','deeplab'):
+    if family in ('unet','deeplab','segformer'):
         from utils_new.configuration.training import semantic_config
         actual=semantic_config({},family)
         return {key:deepcopy(actual[key]) for key in keys}

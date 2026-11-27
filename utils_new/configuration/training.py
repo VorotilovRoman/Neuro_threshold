@@ -23,21 +23,21 @@ def _float(value, name, minimum=0.0, maximum=None):
 
 
 def semantic_config(params, kind):
-    if kind not in ("unet", "deeplab") or not isinstance(params, dict):
-        raise ValueError("Нужны параметры U-Net или DeepLab.")
+    if kind not in ("unet", "deeplab", "segformer") or not isinstance(params, dict):
+        raise ValueError("Нужны параметры U-Net, DeepLab или SegFormer.")
     defaults = dict(
         dataset_path=None,
         model_path=None,
         project_path=None,
         name=None,
-        architecture="unet" if kind == "unet" else "deeplabv3plus",
-        encoder="resnet50",
+        architecture={"unet":"unet", "deeplab":"deeplabv3plus", "segformer":"segformer"}[kind],
+        encoder="mit_b0" if kind == "segformer" else "resnet50",
         backbone="resnet50",
         input_size=512,
         num_classes=2,
-        optimizer="Adam" if kind == "unet" else "SGD",
+        optimizer="AdamW" if kind == "segformer" else "Adam" if kind == "unet" else "SGD",
         loss="BCE+Dice" if kind == "unet" else "CrossEntropy",
-        lr=0.0001 if kind == "unet" else 0.007,
+        lr=0.00006 if kind == "segformer" else 0.0001 if kind == "unet" else 0.007,
         batch_size=8,
         auto_batch=False,
         epochs=100,
@@ -47,7 +47,7 @@ def semantic_config(params, kind):
         device="auto",
         threshold=0.5,
         num_workers=0,
-        normalize=False,
+        normalize=(kind == "segformer"),
         resize_mode="hard",
         ignore_index=None,
         decoder_channels=[256, 128, 64, 32, 16],
@@ -66,7 +66,7 @@ def semantic_config(params, kind):
         unfreeze_epochs=0,
         unfreeze_last_n_stages=None,
         freeze_bn_second_phase=True,
-        use_amp=(kind == "deeplab"),
+        use_amp=(kind != "unet"),
         accum_steps=1,
         use_ema=(kind == "deeplab"),
         ema_decay=0.999,
@@ -82,6 +82,8 @@ def semantic_config(params, kind):
         pr_pixels=200000,
         output_activation="argmax",
     )
+    if kind == "segformer":
+        defaults["decoder_segmentation_channels"] = 256
     cfg = deepcopy(defaults)
     cfg.update(deepcopy(params))
     cfg.pop('export_onnx', None)
@@ -91,9 +93,15 @@ def semantic_config(params, kind):
         str(cfg["architecture"]).lower(), str(cfg["architecture"]).lower()
     )
     if cfg["architecture"] not in (
-        ("unet", "unetplusplus") if kind == "unet" else ("deeplabv3", "deeplabv3plus")
+        {"unet": ("unet", "unetplusplus"), "deeplab": ("deeplabv3", "deeplabv3plus"),
+         "segformer": ("segformer",)}[kind]
     ):
         raise ValueError("Архитектура не соответствует воркеру.")
+    if kind == "segformer":
+        if cfg["encoder"] not in tuple(f"mit_b{i}" for i in range(6)):
+            raise ValueError("SegFormer: выберите encoder mit_b0…mit_b5.")
+        _int(cfg["decoder_segmentation_channels"], "decoder_segmentation_channels")
+        cfg["backbone"] = cfg["encoder"]
     for key in (
         "input_size",
         "num_classes",

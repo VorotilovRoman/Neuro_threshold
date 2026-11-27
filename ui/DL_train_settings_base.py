@@ -60,7 +60,7 @@ class BaseTrainWidget(QWidget):
             ('data','Данные',('dataset_source','ignore_index','background_id')),
             ('model','Модель',('model_from_preset','model_from_file','preset_widget','file_widget',
                               'model','weights','resume','imgsz','input_size','num_classes','architecture',
-                              'encoder','variant','dropout','normalize_checkbox','resize_mode_combo','atrous_rates','max_side')),
+                              'encoder','variant','decoder_segmentation_channels','pretrained_checkbox','dropout','normalize_checkbox','resize_mode_combo','atrous_rates','max_side')),
             ('training','Обучение',('device_combo','epochs','batch','lr','lr0','lrf','optimizer','scheduler',
                                    'preset_path','two_phase_check','freeze_epochs','freeze_bn_second_phase',
                                    'accum_steps','train_prompt_encoder','use_amp','max_objects','seed')),
@@ -503,6 +503,7 @@ class YOLOTrainWidget(BaseTrainWidget):
 # =============================================================================
 class UNetTrainWidget(BaseTrainWidget):
     preset_family='unet'
+    family_title='U-Net'
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -522,7 +523,7 @@ class UNetTrainWidget(BaseTrainWidget):
             "<b>«Количество классов» в форме — ВКЛЮЧАЯ фон.</b><br>"
             "Пример: фон + 1 объект → 2; фон + 3 объекта → 4."
         )
-        self.add_dataset_structure_hint(hint)
+        self.add_dataset_structure_hint(hint.replace("U‑Net", self.family_title))
 
         # --- Папка датасета ---
         self.dataset_source = source_dialogs.DatasetSourceWidget(
@@ -611,7 +612,7 @@ class UNetTrainWidget(BaseTrainWidget):
         group = QGroupBox("Источник модели")
         layout = QVBoxLayout()
         self.model_from_preset = QRadioButton(
-            "Использовать предустановленную U-Net (backbone)"
+            f"Новая {self.family_title} (backbone)"
         )
         self.model_from_file = QRadioButton("Загрузить свою модель (.pth)")
         self.model_from_preset.setChecked(True)
@@ -829,7 +830,7 @@ class UNetTrainWidget(BaseTrainWidget):
         else:
             model_path = self.custom_model_path.text().strip()
             if not model_path:
-                QMessageBox.warning(self, "Ошибка", "Не указан файл модели U-Net")
+                QMessageBox.warning(self, "Ошибка", f"Не указан файл модели {self.family_title}")
                 return None
 
         dataset_path = self.dataset_path.text().strip()
@@ -866,9 +867,8 @@ class UNetTrainWidget(BaseTrainWidget):
             "optimizer": self.optimizer.currentText(),
             "lr": self.lr.value(),
             "encoder": self.encoder.currentText(),
-            "architecture": "unet++"
-            if self.architecture.currentText() == "U-Net++"
-            else "unet",
+            "architecture": {"U-Net": "unet", "U-Net++": "unet++",
+                             "SegFormer": "segformer"}[self.architecture.currentText()],
             "input_size": int(self.input_size.currentText()),
             "num_classes": self.num_classes.value(),
             "loss": self.loss.currentText(),

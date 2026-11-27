@@ -345,7 +345,7 @@ class UNetSegmentor(TorchSegmentor):
         train_resize_mode = self.metadata.get('resize_mode', '?')
         resize_mode = self._resolve_resize_mode()
 
-        _log(f"[UNet predict] Начало: shape={image.shape}, "
+        _log(f"[{getattr(self, 'log_name', 'UNet')} predict] Начало: shape={image.shape}, "
              f"num_classes={num_classes}, threshold={threshold}, "
              f"train_resize_mode={train_resize_mode}, "
              f"inference_resize_mode={resize_mode}")
@@ -361,23 +361,64 @@ class UNetSegmentor(TorchSegmentor):
         with torch.no_grad():
             logits = self.model(tensor)   # [1, C, H, W]
             if logits.ndim != 4 or logits.shape[1] != num_classes:
-                raise ValueError("Выход U-Net не соответствует num_classes из метаданных.")
+                raise ValueError("Выход семантической модели не соответствует num_classes из метаданных.")
             if tuple(logits.shape[-2:]) != (nh, nw):
                 logits = torch.nn.functional.interpolate(logits, size=(nh, nw), mode='bilinear', align_corners=False)
             mask_np = decode_output(logits[..., :h_in, :w_in].cpu().numpy(), threshold=threshold,
                                     target_shape=(h_in, w_in))
 
-        _log(f"[UNet predict] Предсказание shape={mask_np.shape}, "
+        _log(f"[{getattr(self, 'log_name', 'UNet')} predict] Предсказание shape={mask_np.shape}, "
              f"min={mask_np.min()}, max={mask_np.max()}")
 
         # Обратный ресайз к исходному размеру (без center crop)
         mask_np = self._postprocess_mask(mask_np, orig_size, pad_info, resize_mode)
 
         elapsed = time.time() - start_time
-        _log(f"[UNet predict] Готово за {elapsed:.3f} сек. "
+        _log(f"[{getattr(self, 'log_name', 'UNet')} predict] Готово за {elapsed:.3f} сек. "
              f"Выходная маска shape={mask_np.shape}")
         return mask_np
 
+
+
+class SegFormerSegmentor(UNetSegmentor):
+    """SMP MiT + SegFormer MLP head; shared semantic preprocessing/decoding."""
+    log_name = "SegFormer"
+
+    def load(self, weights_path=None, model_path=None):
+        from utils_new.configuration.training import semantic_config
+        from utils_new.import_export.training import read_semantic_checkpoint
+        from utils_new.segmentation.training_contracts import build_semantic_model
+        from utils_new.training.optimization import resolve_device
+
+        path = weights_path or model_path or self.model_path
+        if not path or not os.path.isfile(path):
+            raise FileNotFoundError(f"Файл SegFormer не найден: {path}")
+        state, meta = read_semantic_checkpoint(path)
+        required = ('architecture', 'encoder', 'decoder_segmentation_channels',
+                    'num_classes', 'input_size', 'normalize', 'resize_mode')
+        if any(key not in meta for key in required):
+            raise ValueError('SegFormer: нужны метаданные архитектуры, MiT, декодера и предобработки. Используйте checkpoint проекта или raw state_dict с *_meta.json от обучения.')
+        # Training source paths and optimizer state are provenance, not inputs
+        # to inference. A moved/deleted dataset must not prevent loading weights.
+        architecture = {key: meta[key] for key in (*required, 'dropout') if key in meta}
+        cfg = semantic_config(dict(architecture, model_path=str(path), pretrained=False), 'segformer')
+        model = build_semantic_model(cfg)
+        model.load_state_dict(state, strict=True)
+        self.device = str(resolve_device(self.device))
+        model.to(self._get_device())
+        model.eval()
+        self.model = model
+        self.model_path = str(path)
+        self.metadata = dict(meta, model_type='SegFormer', output_kind='logits')
+        if meta['resize_mode'] == 'random_crop':
+            self.metadata.setdefault('inference_resize_mode', 'keep_aspect_pad')
+        _log(f"[SegFormer] Загружена {cfg['encoder']}, classes={cfg['num_classes']}, input_size={cfg['input_size']}, device={self.device}")
+
+    def _get_device(self):
+        # Preserve explicit device indices (cuda:1, etc.) rather than silently
+        # routing an unsupported device name to CPU.
+        from utils_new.training.optimization import resolve_device
+        return resolve_device(self.device)
 
 
 class DeepLabV3Segmentor(TorchSegmentor):
@@ -1032,7 +1073,7 @@ def create_segmentor(model_type, **kwargs):
         'U-Net': UNetSegmentor,
         'DeepLabV3+': DeepLabV3Segmentor,
         'DeepLabV3': DeepLabV3Segmentor,      # <--- добавить
-        'SegFormer': None,
+        'SegFormer': SegFormerSegmentor,
         'YOLOv8-seg': YOLOSegmentor,
         'YOLO-seg': YOLOSegmentor,
         'ONNX / NCNN': PortableSegmentor,

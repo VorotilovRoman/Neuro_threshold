@@ -889,41 +889,29 @@ class DeepLabV3InferenceSettings(BaseInferenceSettings):
         }
 
 
-class SegFormerInferenceSettings(BaseInferenceSettings):
-    model_path_changed = pyqtSignal(str)
-    variant_changed = pyqtSignal(str)
-
+class SegFormerInferenceSettings(UNetInferenceSettings):
+    """Same metadata/override/threshold controls as other semantic models."""
     def __init__(self, parent=None):
-        super().__init__("Параметры SegFormer", parent)
+        super().__init__(parent)
+        self.setTitle('Параметры SegFormer')
+        self._num_classes_override.setMaximum(4096)
+        self._encoder.clear()
+        self._encoder.addItems([f'mit_b{i}' for i in range(6)])
+        self._encoder.setEnabled(False)
+        self._input_size.setEnabled(False)
 
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        path_layout = QHBoxLayout()
-        self._model_path = QLineEdit()
-        self._model_path.setPlaceholderText("Выберите файл .pth")
-        self._browse_btn = source_dialogs.make_source_button("model_torch", self)
-        path_layout.addWidget(self._model_path)
-        path_layout.addWidget(self._browse_btn)
-        layout.addLayout(path_layout)
-
-        self._variant = QComboBox()
-        self._variant.addItems(
-            ["mit-b0", "mit-b1", "mit-b2", "mit-b3", "mit-b4", "mit-b5"]
-        )
-        layout.addLayout(self._row("Вариант", self._variant))
-
-        self._model_path.textChanged.connect(self.model_path_changed.emit)
-        self._browse_btn.clicked.connect(self._browse_file)
-        self._variant.currentTextChanged.connect(self.variant_changed.emit)
-
-    def _browse_file(self):
-        path, _ = source_dialogs.get_open_file(self, "model_torch")
-        if path:
-            self._model_path.setText(path)
-
-    def get_params(self):
-        return {"model_path": self._model_path.text()}
+    def apply_metadata(self, metadata):
+        result = super().apply_metadata(metadata)
+        for control, key in ((self._encoder, 'encoder'), (self._input_size, 'input_size')):
+            if key in metadata:
+                value = str(metadata[key])
+                if control.findText(value) < 0:
+                    control.addItem(value)
+                control.setCurrentText(value)
+            control.setEnabled(False)
+        if 'threshold' in metadata:
+            self._threshold.setValue(float(metadata['threshold']))
+        return result
 
 
 class CustomONNXInferenceSettings(BaseInferenceSettings):
