@@ -78,7 +78,8 @@ class ImageMaskDataset(Dataset):
 
     def __getitem__(self, index):
         image_path, mask_path = self.pairs[index]
-        with Image.open(image_path) as source:
+        from utils_new.import_export.images import open_pillow_image
+        with open_pillow_image(image_path) as source:
             image = np.array(source.convert("RGB"))
         mask = read_index_mask(mask_path, ignore_index=self.ignore_index)
         if self.num_classes == 1:

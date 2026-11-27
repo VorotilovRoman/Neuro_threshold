@@ -61,7 +61,8 @@ class DuplicateDetector:
         if not IMAGEHASH_AVAILABLE:
             return None
         try:
-            with Image.open(path) as img:
+            from utils_new.import_export.images import open_pillow_image
+            with open_pillow_image(path) as img:
                 import imagehash
 
                 return imagehash.phash(img.convert("RGB"), hash_size=hash_size)

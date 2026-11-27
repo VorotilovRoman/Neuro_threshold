@@ -141,7 +141,8 @@ class LossInspectionJob:
                     zero_pred_logged += 1
                 h, w = r.orig_shape if hasattr(r, "orig_shape") else (0, 0)
                 if h == 0 or w == 0:
-                    with Image.open(img_path) as im:
+                    from utils_new.import_export.images import open_pillow_image
+                    with open_pillow_image(img_path) as im:
                         w, h = im.size
                 size, gt_objects = read_objects(
                     pair, self.dataset_type, self.input_format

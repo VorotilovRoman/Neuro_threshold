@@ -7,10 +7,11 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
 
 class LazyImageCache:
     def __init__(
-        self, paths, loader, window=8, prefetch_ahead=4, max_resident=16, max_workers=2
+        self, paths, loader, window=8, prefetch_ahead=4, max_resident=16, max_workers=2, max_bytes=256 * 1024 * 1024
     ):
         for name, value, minimum in [
             ("window", window, 1),
+            ("max_bytes", max_bytes, 1),
             ("prefetch_ahead", prefetch_ahead, 0),
             ("max_resident", max_resident, 1),
             ("max_workers", max_workers, 1),
@@ -22,6 +23,8 @@ class LazyImageCache:
         self.window = window
         self.prefetch_ahead = prefetch_ahead
         self.max_resident = max_resident
+        self.max_bytes = max_bytes
+        self.max_workers = max_workers
         self._cache = OrderedDict()
         self._errors = {}
         self._pending = {}
@@ -44,7 +47,11 @@ class LazyImageCache:
             if item is None:
                 error = OSError(f"Loader returned None for {self.paths[idx]}")
         except Exception as exc:
-            error = exc
+            # A traceback can retain the entire failed decoded frame. Cache
+            # the diagnostic, not the loader stack and its large arrays.
+            error = exc.with_traceback(None)
+            error.__context__ = None
+            error.__cause__ = None
         finally:
             with self._lock:
                 active = self._pending.get(idx) is future
@@ -56,13 +63,26 @@ class LazyImageCache:
                     elif item is not None:
                         self._cache[idx] = item
                         self._cache.move_to_end(idx)
-                        while len(self._cache) > self.max_resident:
+                        while len(self._cache) > 1 and (len(self._cache) > self.max_resident or self.resident_bytes > self.max_bytes):
                             self._cache.popitem(last=False)
                         self._errors.pop(idx, None)
                 if not future.done():
                     future.set_result(
                         item if not self._shutdown and error is None else None
                     )
+
+    @staticmethod
+    def _item_bytes(item):
+        if isinstance(item, dict):
+            return sum(LazyImageCache._item_bytes(value) for value in item.values())
+        if isinstance(item, (list, tuple)):
+            return sum(LazyImageCache._item_bytes(value) for value in item)
+        return int(getattr(item, 'nbytes', 0))
+
+    @property
+    def resident_bytes(self):
+        with self._lock:
+            return sum(self._item_bytes(item) for item in self._cache.values())
 
     def is_loaded(self, idx):
         with self._lock:
@@ -100,9 +120,13 @@ class LazyImageCache:
                 pass
         return None
 
-    def prefetch(self, indices):
+    def prefetch(self, indices, *, required=False):
         with self._lock:
             if self._shutdown:
+                return
+            # An oversized current frame may be used, but must not trigger
+            # speculative decoding of multiple equally large neighbours.
+            if not required and self.resident_bytes >= self.max_bytes // 2:
                 return
             for idx in indices:
                 if (
@@ -112,6 +136,8 @@ class LazyImageCache:
                     or idx in self._errors
                 ):
                     continue
+                if not required and len(self._pending) >= self.max_workers:
+                    break
                 future = self._pending[idx] = Future()
                 # Submission and shutdown are serialized by this lock.
                 self._pool.submit(self._load, idx, future)
@@ -158,7 +184,7 @@ class CachedImageJob:
 
     def run(self):
         self.cache.retry_error(self.index)
-        self.cache.prefetch([self.index])
+        self.cache.prefetch([self.index], required=True)
         item = (
             None
             if self.cancelled
@@ -167,7 +193,6 @@ class CachedImageJob:
         if self.cancelled:
             return {"cancelled": True}
         if item is None:
-            raise OSError(
-                f"Не удалось прочитать снимок: {self.cache.paths[self.index]}"
-            )
+            error = self.cache.get_error(self.index)
+            raise OSError(f"Не удалось прочитать снимок: {self.cache.paths[self.index]}. {error or ''}")
         return {"item": item}

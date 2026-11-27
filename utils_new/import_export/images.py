@@ -2,6 +2,8 @@
 """Filesystem image I/O, Unicode-safe and independent of Qt."""
 
 from pathlib import Path
+from functools import wraps
+import threading
 
 import cv2
 import numpy as np
@@ -9,11 +11,65 @@ import numpy as np
 from utils_new.annotations.masks import normalize_index_mask_shape
 
 
+# Header inspection is cheap even for very large local radiographs. Keep a
+# finite project limit and restore Pillow's process setting immediately.
+MAX_IMAGE_PIXELS = 512_000_000
+MAX_DECODE_BYTES = 1024 * 1024 * 1024
+_pillow_lock = threading.RLock()
+_decode_lock = threading.RLock()
+
+
+def open_pillow_image(path):
+    from PIL import Image
+
+    with _pillow_lock:
+        previous = Image.MAX_IMAGE_PIXELS
+        try:
+            Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+            image = Image.open(path)
+        finally:
+            Image.MAX_IMAGE_PIXELS = previous
+    if image.width * image.height > MAX_IMAGE_PIXELS:
+        image.close()
+        raise OSError(f"Снимок превышает лимит {MAX_IMAGE_PIXELS:,} пикселей: {path}")
+    return image
+
+
+def _check_decode_size(path, color=False):
+    try:
+        with open_pillow_image(path) as image:
+            channels = 3 if color else len(image.getbands())
+            itemsize = 1 if color else (4 if image.mode in ('I', 'F') else 2 if '16' in image.mode else 1)
+            required = image.width * image.height * channels * itemsize
+    except (ImportError, SyntaxError, ValueError):
+        return  # Let OpenCV try formats not understood by Pillow.
+    except OSError as error:
+        if str(error).startswith('Снимок превышает'):
+            raise
+        return
+    if required > MAX_DECODE_BYTES:
+        raise OSError(f"Для декодирования снимка нужно около {required / 2**20:.0f} МиБ; "
+                      f"лимит одного снимка — {MAX_DECODE_BYTES / 2**20:.0f} МиБ. "
+                      f"Уменьшите снимок или разделите его на тайлы: {path}")
+
+
+def _serialized_decode(function):
+    @wraps(function)
+    def read(path, *args, **kwargs):
+        # Different tabs/caches must not decode several huge sources at once.
+        with _decode_lock:
+            _check_decode_size(path, color=function.__name__ == 'read_image')
+            return function(path, *args, **kwargs)
+    return read
+
+
 def _read_with_fallback(path, flags):
     """Read image/mask with Unicode-path fallback (notably Windows Cyrillic)."""
     path = str(path)
     try:
-        image = cv2.imread(path, flags)
+        # OpenCV filename APIs on Windows cannot reliably open Unicode paths.
+        import os
+        image = None if os.name == "nt" and not path.isascii() else cv2.imread(path, flags)
     except cv2.error:
         image = None
     if image is not None:
@@ -25,6 +81,7 @@ def _read_with_fallback(path, flags):
         return None
 
 
+@_serialized_decode
 def read_image(path):
     """Read BGR image, keeping existing generator's 3-channel convention."""
     image = _read_with_fallback(path, cv2.IMREAD_COLOR)
@@ -33,13 +90,14 @@ def read_image(path):
     return image
 
 
+@_serialized_decode
 def read_index_mask(path, *, ignore_index=None):
     """Read indexed PNG as 2D integer array; accept decoder's (H,W,1)."""
     # Palette PNG stores class IDs; decoding its RGB palette would destroy them.
     try:
         from PIL import Image
 
-        with Image.open(path) as source:
+        with open_pillow_image(path) as source:
             if source.mode in ("P", "I", "I;16", "1"):
                 value = np.array(source)
                 if value.dtype == np.bool_:
@@ -74,6 +132,7 @@ def write_image(path, image):
 # Unlike read_image(), these functions do not discard source bit depth.
 
 
+@_serialized_decode
 def read_image_with_fallback(path):
     """Read image with original depth, TIFF and Unicode-path support.
 
@@ -86,7 +145,7 @@ def read_image_with_fallback(path):
         try:
             from PIL import Image
 
-            with Image.open(path) as source:
+            with open_pillow_image(path) as source:
                 arr = np.asarray(source)
             if arr.ndim == 2:
                 return arr
@@ -102,7 +161,7 @@ def read_image_with_fallback(path):
     try:
         from PIL import Image
 
-        with Image.open(path) as source:
+        with open_pillow_image(path) as source:
             arr = np.asarray(source)
         if arr.ndim == 3 and arr.shape[2] == 4:
             return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
@@ -126,7 +185,7 @@ def image_size_from_file(path):
     try:
         from PIL import Image
 
-        with Image.open(path) as image:
+        with open_pillow_image(path) as image:
             return int(image.width), int(image.height)
     except (ImportError, OSError, ValueError):
         image = read_image_with_fallback(path)

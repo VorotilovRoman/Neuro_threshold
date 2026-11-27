@@ -70,7 +70,9 @@ class ImageStats:
         if img.dtype == np.uint8:
             return img
         if img.dtype == np.uint16:
-            return (img / 256.0).clip(0, 255).astype(np.uint8)
+            result = np.empty(img.shape, dtype=np.uint8)
+            np.right_shift(img, 8, out=result, casting="unsafe")
+            return result
         if (
             img.dtype in (np.float32, np.float64)
             and img.size > 0
@@ -176,7 +178,9 @@ def segmentation_uint8(image):
     if image.dtype == np.uint8:
         return image
     if image.dtype == np.uint16:
-        return (image / 256).astype(np.uint8)
+        result = np.empty(image.shape, dtype=np.uint8)
+        np.right_shift(image, 8, out=result, casting="unsafe")
+        return result
     if image.dtype in (np.float32, np.float64) and image.size and image.max() <= 1:
         return (image * 255).astype(np.uint8)
     return image.astype(np.uint8)

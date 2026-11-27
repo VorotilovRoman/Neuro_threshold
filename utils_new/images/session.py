@@ -33,8 +33,10 @@ def load_one_image_item(
         return None
     if image.ndim == 3 and image.shape[2] not in (1, 3, 4):
         return None
-    if not np.isfinite(image).all():
-        return None
+    if np.issubdtype(image.dtype, np.inexact):
+        for row in range(0, image.shape[0], 128):
+            if not np.isfinite(image[row:row + 128]).all():
+                return None
     source_h, source_w = image.shape[:2]
     segmentation = normalization_policy == "legacy-segmentation-v1"
     image = segmentation_uint8(image) if segmentation else normalize_to_uint8(image)

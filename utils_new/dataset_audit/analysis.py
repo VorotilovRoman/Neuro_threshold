@@ -346,7 +346,8 @@ class ResolutionAnalyzer:
                 cancelled = True
                 break
             try:
-                with Image.open(pair[0]) as img:
+                from utils_new.import_export.images import open_pillow_image
+                with open_pillow_image(pair[0]) as img:
                     w, h = img.size
                 widths.append(w)
                 heights.append(h)
