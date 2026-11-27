@@ -81,22 +81,25 @@ class SAMTrainWidget(BaseTrainWidget):
         self.advanced_button.toggled.connect(self.advanced.setVisible)
         self.positive_points = self._integer("Точек объекта:", 1, 64, 1)
         self.negative_points = self._integer("Точек фона:", 0, 64, 1)
-        self.max_objects = self._integer("Объектов/снимок на эпоху (train):", 1, 10000, 8)
+        self.max_objects = self._integer("Объектов/снимок на эпоху (train):", 1, 10000, 8, form=self.form_layout)
         self.max_objects.setToolTip("Случайная выборка в train; валидация проверяет все объекты.")
-        self.max_side = self._integer("Макс. сторона рабочих снимков:", 32, 16384, 1024)
+        self.max_side = self._integer("Макс. сторона рабочих снимков:", 32, 16384, 1024, form=self.form_layout)
         self.max_side.setToolTip("Размер для масок и метрик. Внутренний размер выбранной SAM остаётся штатным.")
-        self.seed = self._integer("Seed:", 0, 2147483647, 42)
-        self.background_id = self._integer("Pixel ID фона (индексные маски):", 0, 65535, 0)
-        self.ignore_index = self._integer("Игнорируемый Pixel ID (-1 = нет):", -1, 65535, 255)
+        self.seed = self._integer("Seed:", 0, 2147483647, 42, form=self.form_layout)
+        self.background_id = self._integer("Pixel ID фона (индексные маски):", 0, 65535, 0, form=self.form_layout)
+        self.ignore_index = self._integer("Игнорируемый Pixel ID (-1 = нет):", -1, 65535, 255, form=self.form_layout)
         self.add_buttons()
         self.add_progress_bar()
         self._find_weights()
+        self.advanced_button.setChecked(True)
+        self.advanced_button.hide()
+        self.organize_training_stages()
 
-    def _integer(self, label, minimum, maximum, value):
+    def _integer(self, label, minimum, maximum, value, *, form=None):
         widget = QSpinBox()
         widget.setRange(minimum, maximum)
         widget.setValue(value)
-        getattr(self, "advanced_form", self.form_layout).addRow(label, widget)
+        (form if form is not None else getattr(self, "advanced_form", self.form_layout)).addRow(label, widget)
         return widget
 
     def set_running(self, running):

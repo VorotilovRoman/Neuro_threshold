@@ -17,6 +17,8 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSpinBox,
+    QTabWidget,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -46,6 +48,70 @@ class BaseTrainWidget(QWidget):
         hint_widget.setWordWrap(True)
         # hint_widget.setStyleSheet("background-color: #f0f0f0; padding: 8px; border-radius: 4px; font-family: monospace;")
         self.form_layout.addRow(hint_widget)
+
+    def organize_training_stages(self, extra=None):
+        """Move intact form rows by widget identity, retaining all signal bindings.
+
+        Each stage owns its scroll area. Controls/progress remain outside pages;
+        layouts and model-source groups are moved whole, never reconstructed.
+        """
+        from collections import OrderedDict
+        stages = OrderedDict((key, (title, names)) for key,title,names in (
+            ('data','Данные',('dataset_source','ignore_index','background_id')),
+            ('model','Модель',('model_from_preset','model_from_file','preset_widget','file_widget',
+                              'model','weights','resume','imgsz','input_size','num_classes','architecture',
+                              'encoder','variant','dropout','normalize_checkbox','resize_mode_combo','atrous_rates','max_side')),
+            ('training','Обучение',('device_combo','epochs','batch','lr','lr0','lrf','optimizer','scheduler',
+                                   'preset_path','two_phase_check','freeze_epochs','freeze_bn_second_phase',
+                                   'accum_steps','train_prompt_encoder','use_amp','max_objects','seed')),
+            ('augmentation','Аугментации',('enable_mosaic','close_mosaic','mosaic','disable_aug',
+                                          'aug_hflip','aug_vflip','aug_rotate','aug_scale','aug_noise')),
+            ('loss','Потери',('loss','class_weights_mode')),
+            ('validation','Валидация',('threshold','multi_scale_infer','infer_scales')),
+            ('advanced','Дополнительно',('use_ema','use_layerwise_lr')),
+            ('prompts','Подсказки',('prompt_type','positive_points','negative_points','advanced_button')),
+        ))
+        # Specialized rows/groups can override the common anchor membership.
+        for key,names in (extra or {}).items():
+            title,old = stages[key]
+            stages[key] = title,tuple(names)+old
+        def contains(item,widget):
+            if widget is None or item is None:return False
+            owner = item.widget()
+            if owner is not None:return owner is widget or owner.isAncestorOf(widget)
+            layout = item.layout()
+            return layout is not None and any(contains(layout.itemAt(i),widget) for i in range(layout.count()))
+        rows,footer = {key:[] for key in stages},[]
+        while self.form_layout.rowCount():
+            row = self.form_layout.takeRow(0)
+            if any(contains(row.fieldItem,getattr(self,name,None)) for name in ('buttons_widget','status_label','progress_bar')):
+                footer.append(row);continue
+            selected = 'data'
+            # Advanced groups may contain optimization controls as well as EMA.
+            for key in ('advanced','prompts','augmentation','loss','validation','model','training','data'):
+                if any(contains(row.fieldItem,getattr(self,name,None)) for name in stages[key][1]):
+                    selected = key;break
+            rows[selected].append(row)
+        self.settings_tabs = QTabWidget()
+        self.stage_forms,self.stage_widgets = {},{}
+        def add_row(form,row):
+            field = row.fieldItem.widget() or row.fieldItem.layout()
+            if row.labelItem is not None:form.addRow(row.labelItem.widget(),field)
+            else:form.addRow(field)
+        for key,(title,_) in stages.items():
+            if not rows[key]:continue
+            content = QWidget()
+            form = QFormLayout(content)
+            form.setSpacing(10);form.setFormAlignment(Qt.AlignTop)
+            form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+            for row in rows[key]:add_row(form,row)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True);scroll.setWidget(content)
+            self.stage_forms[key],self.stage_widgets[key] = form,content
+            self.settings_tabs.addTab(scroll,title)
+        self.form_layout.addRow(self.settings_tabs)
+        for row in footer:add_row(self.form_layout,row)
+        self.layout.setStretch(0,1)
 
     def add_experiment_name_field(self):
         self.experiment_name = QLineEdit()
@@ -159,6 +225,8 @@ class BaseTrainWidget(QWidget):
     def set_running(self, running):
         self.run_btn.setEnabled(not running)
         self.stop_btn.setEnabled(running)
+        if hasattr(self,'settings_tabs'):
+            self.settings_tabs.setEnabled(not running)
         if not running:
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("Готов")
@@ -218,6 +286,7 @@ class YOLOTrainWidget(BaseTrainWidget):
         self.add_buttons()
         self.add_progress_bar()
         self._update_preview()
+        self.organize_training_stages()
 
     def _browse_dataset_folder(self):
         path = source_dialogs.get_directory(self, "dataset_root")
@@ -475,6 +544,7 @@ class UNetTrainWidget(BaseTrainWidget):
 
         # Реагируем на ручное изменение поля YAML
         self.unet_yaml.textChanged.connect(self._on_unet_yaml_changed)
+        self.organize_training_stages()
 
     def _browse_dataset(self):
         path = source_dialogs.get_directory(self, "dataset_root")

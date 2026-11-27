@@ -138,6 +138,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         # Применяем HIGH_RES_PRESET
         self._apply_preset_dict(self.HIGH_RES_PRESET)
         self.preset_path.setText("preset.txt")
+        self.organize_training_stages()
 
     # ------------------------------------------------------------------
     # Пресет (вверху окна)
@@ -456,7 +457,6 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         sched_layout = QHBoxLayout()
         self.scheduler = QComboBox()
         self.scheduler.addItems(["Poly", "Step", "Cosine", "ReduceLROnPlateau", "None"])
-        sched_layout.addWidget(QLabel("Scheduler:"))
         sched_layout.addWidget(self.scheduler)
 
         self.poly_power = QDoubleSpinBox()
@@ -475,10 +475,9 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
                 "sigmoid" if value == 1 else "softmax" if value == 2 else "argmax"
             )
         )
-        sched_layout.addWidget(QLabel("  Классов:"))
-        sched_layout.addWidget(self.num_classes)
         sched_layout.addStretch()
-        self.form_layout.addRow("Прочее:", sched_layout)
+        self.form_layout.addRow("Scheduler:", sched_layout)
+        self.form_layout.addRow("Количество классов (вкл. фон):", self.num_classes)
 
     def _add_preprocessing_fields(self):
         prep_layout = QHBoxLayout()
@@ -529,6 +528,10 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.layerwise_decay.setValue(0.1)
         adv_layout.addRow("Layer-wise decay:", self.layerwise_decay)
 
+        self.form_layout.addRow(adv_group)
+        validation_group = QGroupBox("Валидация")
+        adv_layout = QFormLayout(validation_group)
+
         self.multi_scale_infer = QCheckBox("Multi-scale inference на валидации")
         self.multi_scale_infer.setChecked(False)
         adv_layout.addRow(self.multi_scale_infer)
@@ -544,7 +547,7 @@ class DeepLabV3TrainWidget(BaseTrainWidget):
         self.threshold.setValue(0.5)
         adv_layout.addRow("Threshold:", self.threshold)
 
-        self.form_layout.addRow(adv_group)
+        self.form_layout.addRow(validation_group)
 
     def _add_augmentation_fields(self):
         aug_group = QGroupBox("Аугментации")
@@ -1051,6 +1054,7 @@ class SegFormerTrainWidget(BaseTrainWidget):
         self._add_segformer_specific()
         self.add_buttons()
         self.add_progress_bar()
+        self.organize_training_stages()
 
     def _browse_dataset(self):
         path = source_dialogs.get_directory(self, "dataset_root")
