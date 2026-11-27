@@ -99,8 +99,8 @@ python dependency_health.py --load --extra all
 | [Традиционные методы ML](docs/traditional_ml.md) | Кластеризация и обучение классификаторов |
 | [Deep Learning](docs/deep_learning.md) | YOLO, U-Net, DeepLab, SegFormer, ONNX/NCNN и SAM/SAM2/SAM3 |
 | [Анализ отчётов](docs/reports.md) | Выбор методов по ручной эталонной разметке |
-| [Добавить аннотации](docs/labeler.md) | Ручная разметка, авторазметка YOLO и SAM |
-| [Просмотр аннотаций](docs/test.md) | Просмотр, наложение масок и проверка дублей |
+| [Добавить аннотации](docs/labeler.md) | BBox/OBB/Segment, Pose, Classification; авторазметка YOLO и SAM |
+| [Просмотр аннотаций](docs/test.md) | Просмотр геометрии, Pose и классов снимка; маски и дубли |
 | [Подготовка датасета](docs/dataset.md) | Отбор, аугментации, split и экспорт |
 | [Анализ датасета](docs/dataset_analysis.md) | Качество, классы, повторы и утечки |
 | [SAHI](docs/sahi.md) | Нарезка изображений вместе с разметкой |
