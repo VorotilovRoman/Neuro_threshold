@@ -6,8 +6,8 @@ UI-слой вкладки YOLO + AE/VAE.
   • ImageNavigationWidget — загрузка/навигация;
   • в верхней панели сразу после блока загрузки — кнопки
     «Сохранить снимок» и «Сохранить карту дефектов»;
-  • 3 × SmartGraphicsView: сверху — YOLO-результат на всю ширину,
-    снизу слева — обработанный снимок, снизу справа — карта ошибок;
+  • 4 × DatasetReviewGraphicsView, сетка 2×2: снимок, кроп,
+    реконструкция и результат с маской/картой ошибок;
   • правая панель управления в QScrollArea;
   • лог с кнопкой переключения — в правой половине, под настройками.
 """
@@ -55,7 +55,7 @@ def setup_yolo_ae_vae_ui(parent):
     # Кнопки сохранения — сразу после блока загрузки изображений.
     parent.btn_save_image = QPushButton("💾 Сохранить снимок")
     parent.btn_save_image.setToolTip(
-        "Сохранить итоговое изображение из третьего окна:\n"
+        "Сохранить обработанный кроп из второго окна:\n"
         "после авто-обрезки, авто-доворота, ручных поворотов,\n"
         "морфологии по контуру объекта и инверсии."
     )
@@ -107,34 +107,47 @@ def setup_yolo_ae_vae_ui(parent):
     # ---------- Основной сплиттер ----------
     main_splitter = QSplitter(Qt.Horizontal)
 
-    # ----- Левая часть: 3 SmartGraphicsView (1 сверху, 2 снизу) -----
+    # ----- Результаты: исходный снимок / кроп / реконструкция / маска -----
     left_widget = QWidget()
     left_layout = QVBoxLayout(left_widget)
     left_layout.setContentsMargins(0, 0, 0, 0)
     grid = QGridLayout()
     grid.setSpacing(10)
 
-    # Верх: YOLO-результат — на всю ширину.
+    def add_result(view, title, row, column):
+        panel = QGroupBox(title)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(view)
+        grid.addWidget(panel, row, column)
+
+    # Верх слева: исходный снимок и найденные объекты YOLO.
     parent.yolo_view = DatasetReviewGraphicsView()
     parent.yolo_view.setMinimumSize(400, 300)
     parent.yolo_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    grid.addWidget(parent.yolo_view, 0, 0, 1, 2)
+    add_result(parent.yolo_view, "1. Исходный снимок", 0, 0)
 
-    # Низ слева: обработанный снимок.
+    # Верх справа: кроп с выбранными преобразованиями, вход AE/VAE.
     parent.transformed_view = DatasetReviewGraphicsView()
     parent.transformed_view.selection_enabled = (
         False  # only pan/zoom, not object selection
     )
     parent.transformed_view.setMinimumSize(400, 300)
     parent.transformed_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    grid.addWidget(parent.transformed_view, 1, 0)
+    add_result(parent.transformed_view, "2. Кроп объекта / вход AE/VAE", 0, 1)
+
+    parent.reconstruction_view = DatasetReviewGraphicsView()
+    parent.reconstruction_view.selection_enabled = False
+    parent.reconstruction_view.setMinimumSize(400, 300)
+    parent.reconstruction_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    add_result(parent.reconstruction_view, "3. Реконструкция AE/VAE", 1, 0)
 
     # Низ справа: карта ошибок AE/VAE.
     parent.error_view = DatasetReviewGraphicsView()
     parent.error_view.selection_enabled = False  # only pan/zoom, not object selection
     parent.error_view.setMinimumSize(400, 300)
     parent.error_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    grid.addWidget(parent.error_view, 1, 1)
+    add_result(parent.error_view, "4. Результат с маской / карта ошибок", 1, 1)
 
     grid.setRowStretch(0, 1)
     grid.setRowStretch(1, 1)
@@ -214,11 +227,11 @@ def setup_yolo_ae_vae_ui(parent):
     yolo_params.addWidget(parent.device_combo, 3, 1)
     controls_layout.addLayout(yolo_params)
 
-    parent.chk_show_boxes = QCheckBox("Показывать боксы YOLO на втором снимке")
+    parent.chk_show_boxes = QCheckBox("Показывать боксы YOLO на исходном снимке")
     parent.chk_show_boxes.setChecked(True)
     parent.chk_show_boxes.setToolTip(
-        "Влияет только на второй снимок (результат YOLO).\n"
-        "На третьем и четвёртом снимке боксы не рисуются."
+        "Влияет только на исходный снимок (окно 1).\n"
+        "На кропе, реконструкции и карте ошибок боксы не рисуются."
     )
     controls_layout.addWidget(parent.chk_show_boxes)
 

@@ -353,9 +353,12 @@ with tempfile.TemporaryDirectory() as directory:
  w._load_images([str(good),str(bad)]);w.update_timer.stop();w.ae_model=Identity();w.ae_cfg=dict(in_channels=3,img_h=32,img_w=48)
  w.btn_apply_ae.click();until(lambda:w._ae_task is None)
  assert w._ae_err_hw.shape==(32,48) and w._error_bgr is not None
+ assert not w.reconstruction_view.pixmap_item.pixmap().isNull()
+ assert w.reconstruction_view.pixmap_item.pixmap().width()==w.displayed_image.shape[1]
+ assert w.reconstruction_view.pixmap_item.pixmap().height()==w.displayed_image.shape[0]
  w.ae_model=Bad();w.btn_apply_ae.click();until(lambda:w._ae_task is None)
  assert 'Выход AE/VAE' in w.processing_status.text() and w._ae_err_hw is None
- assert w.btn_apply_ae.isEnabled()
+ assert w.btn_apply_ae.isEnabled() and w.reconstruction_view.pixmap_item.pixmap().isNull()
  w.goto_image(2)
  assert w.original_image is None and w.displayed_image is None and w._error_bgr is None
  assert w.yolo_view.pixmap_item.pixmap().isNull() and not w.current_detections

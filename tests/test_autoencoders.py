@@ -69,6 +69,36 @@ def write_dataset(root, count=5):
 
 
 class AutoencoderContracts(unittest.TestCase):
+    def test_reconstruction_display_preserves_color_geometry_and_raw_error(self):
+        class Identity(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :channels], None
+
+        for channels in (1, 3):
+            for version in ('legacy-opencv-v1', 'ae-pil-v1'):
+                for aspect in (False, True):
+                    with self.subTest(channels=channels, version=version, aspect=aspect):
+                        image = np.full((12, 70, 3), 73, np.uint8)
+                        if channels == 3:
+                            image[:] = (21, 87, 149)  # BGR, not RGB
+                        cfg = dict(in_channels=channels, out_channels=channels,
+                                   img_h=32, img_w=48, keep_aspect=aspect,
+                                   preprocessing_version=version, pad_value=255,
+                                   use_edge_channel=True, model_in_channels=channels+1)
+                        result = infer_autoencoder(image, Identity(), cfg, 'cpu')
+                        self.assertEqual(result['reconstruction_bgr'].dtype, np.uint8)
+                        np.testing.assert_array_equal(result['reconstruction_bgr'], image)
+                        self.assertEqual(result['image_score'], 0)
+
+        class Unbounded(torch.nn.Module):
+            def forward(self, x):
+                return torch.full_like(x, 2)
+
+        result = infer_autoencoder(np.zeros((12, 70, 3), np.uint8), Unbounded(),
+                                   dict(in_channels=3, img_h=32, img_w=48), 'cpu')
+        self.assertTrue(np.all(result['reconstruction_bgr'] == 255))
+        self.assertEqual(result['image_score'], 2)  # display clipping cannot alter MAE
+
     def test_all_model_state_schemas_match_original_training_scripts(self):
         fixtures = json.loads(
             (ROOT / "tests/fixtures/autoencoder_architectures.json").read_text()

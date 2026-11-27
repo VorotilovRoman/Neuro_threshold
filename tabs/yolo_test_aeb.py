@@ -470,7 +470,7 @@ class YoloInspectWindow(QMainWindow):
         self.current_detections = []
         self._manual_ops = []
         self._clear_ae_view()
-        for view in (self.yolo_view, self.transformed_view, self.error_view):
+        for view in (self.yolo_view, self.transformed_view, self.reconstruction_view, self.error_view):
             view.set_annotations([], 0, 0)
             view.set_pixmap(numpy_to_qpixmap(None))
         self._sync_processing_state()
@@ -479,7 +479,7 @@ class YoloInspectWindow(QMainWindow):
         self.update_navigation_state()
 
     def reset_all_zooms(self):
-        for view in (self.yolo_view, self.transformed_view, self.error_view):
+        for view in (self.yolo_view, self.transformed_view, self.reconstruction_view, self.error_view):
             view.reset_view()
 
     def closeEvent(self, event):
@@ -744,9 +744,10 @@ class YoloInspectWindow(QMainWindow):
             f"aeb_transformed_{base_name}{suf}"
         )
         self.error_view.set_suggested_save_name(f"aeb_errmap_{base_name}{suf}")
+        self.reconstruction_view.set_suggested_save_name(f"aeb_reconstruction_{base_name}{suf}")
 
     # --------------------------------------------------------
-    # 2-й снимок: YOLO-вид
+    # 1-й снимок: YOLO-вид
     # --------------------------------------------------------
     def _detections_to_unified(self, img_w, img_h):
         """Translate YOLO dictionaries to class-ID-based shared annotations."""
@@ -798,7 +799,7 @@ class YoloInspectWindow(QMainWindow):
             self._syncing_yolo_selection = False
 
     # --------------------------------------------------------
-    # 3-й снимок: итоговое изображение без боксов
+    # 2-й снимок: обработанный кроп без боксов
     # --------------------------------------------------------
     def _rebuild_displayed(self):
         self._cancel_task("_ae_task")
@@ -1226,6 +1227,7 @@ class YoloInspectWindow(QMainWindow):
         self._ae_base_bgr = None
         self._ae_threshold = float("nan")
         self.ae_score_label.setText("Ошибка снимка: —")
+        self.reconstruction_view.set_pixmap(numpy_to_qpixmap(None))
         self.error_view.set_pixmap(numpy_to_qpixmap(None))
 
     def apply_ae(self, silent=False):
@@ -1264,6 +1266,7 @@ class YoloInspectWindow(QMainWindow):
             self._ae_err_hw = result["error"]
             self._ae_valid_region = result["valid_region"]
             self._ae_base_bgr = image
+            self.reconstruction_view.set_pixmap(numpy_to_qpixmap(result["reconstruction_bgr"]))
             self._ae_threshold = self._compute_threshold()
             score = result["image_score"]
             text = f"Средняя ошибка снимка (MAE): {score:.6f}"

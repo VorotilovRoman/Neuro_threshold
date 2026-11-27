@@ -1,5 +1,6 @@
 """Validated reconstruction, pixel anomaly maps and image scores; no Qt."""
 
+import cv2
 import numpy as np
 import torch
 from utils_new.autoencoders.preprocessing import preprocess_image_for_ae
@@ -32,7 +33,8 @@ def infer_autoencoder(image, model, cfg, device, cancel=None):
         in_channels = int(cfg.get("in_channels", 3))
         expected = int(cfg.get("out_channels", in_channels))
         if (
-            reconstruction.shape[1] != expected
+            expected not in (1, 3)
+            or reconstruction.shape[1] != expected
             or expected > in_channels
             or reconstruction.shape[2:] != x.shape[1:]
         ):
@@ -52,7 +54,20 @@ def infer_autoencoder(image, model, cfg, device, cancel=None):
     if not np.isfinite(error).all():
         raise ValueError("Карта ошибки содержит NaN/Inf.")
     x0, y0, x1, y1 = valid_region
+    # Display the image channels only, without letterbox padding. Keep the
+    # unmodified float output above for MAE; clipping is display-only.
+    reconstructed = reconstruction[0, :, y0:y1, x0:x1].permute(1, 2, 0).numpy()
+    reconstructed = np.rint(np.clip(reconstructed, 0, 1) * 255).astype(np.uint8)
+    reconstructed = cv2.cvtColor(
+        reconstructed,
+        cv2.COLOR_GRAY2BGR if expected == 1 else cv2.COLOR_RGB2BGR,
+    )
+    reconstructed = cv2.resize(
+        reconstructed, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR
+    )
+    checkpoint()
     return {
+        "reconstruction_bgr": reconstructed,
         "image_score": float(error[y0:y1, x0:x1].mean()),
         "error_metric": "mae",
         "error": error,
