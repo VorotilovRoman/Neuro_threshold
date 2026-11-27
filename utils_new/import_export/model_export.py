@@ -145,15 +145,26 @@ def export_semantic(model, metadata, size, target, format, *, options=None):
         actual = session.run(None, {"input": example.numpy()})[0]
     elif format == "NCNN":
         import pnnx
+        import subprocess
         from utils_new.import_export.model_load import NCNNRuntime
 
         target.mkdir()
-        pnnx.export(model, inputs=example, device="cpu", fp16=False,
-                    ptpath=str(target / "trace.pt"),
-                    pnnxparam=str(target / "trace.pnnx.param"), pnnxbin=str(target / "trace.pnnx.bin"),
-                    pnnxpy=str(target / "trace_pnnx.py"), pnnxonnx=str(target / "trace.onnx"),
-                    ncnnparam=str(target / "model.ncnn.param"), ncnnbin=str(target / "model.ncnn.bin"),
-                    ncnnpy=str(target / "trace_ncnn.py"))
+        # TorchScript's native filename API can reject existing Unicode/long
+        # Windows paths. Python opens the file; PNNX sees only relative names.
+        traced = torch.jit.trace(model, example)
+        with (target / 'trace.pt').open('wb') as stream:
+            torch.jit.save(traced, stream)
+        command = [pnnx.EXEC_PATH, 'trace.pt', f'inputshape=[1,3,{size},{size}]',
+                   'device=cpu', 'fp16=0', 'pnnxparam=trace.pnnx.param',
+                   'pnnxbin=trace.pnnx.bin', 'pnnxpy=trace_pnnx.py',
+                   'pnnxonnx=trace.onnx', 'ncnnparam=model.ncnn.param',
+                   'ncnnbin=model.ncnn.bin', 'ncnnpy=trace_ncnn.py']
+        converted = subprocess.run(command, cwd=target, capture_output=True)
+        if converted.returncode:
+            diagnostic = (converted.stderr + converted.stdout).decode('utf-8', errors='replace')
+            raise RuntimeError(f'PNNX conversion failed ({converted.returncode}):\n{diagnostic[-12000:]}')
+        if not all((target / name).is_file() for name in ('model.ncnn.param', 'model.ncnn.bin')):
+            raise RuntimeError('PNNX не создал файлы графа и весов NCNN.')
         runtime = NCNNRuntime(target / "model.ncnn.param")
         if len(runtime.inputs) != 1 or len(runtime.outputs) != 1:
             raise ValueError("NCNN: ожидался один вход и один выход семантической модели.")

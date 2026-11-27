@@ -69,6 +69,46 @@ class PortableContracts(unittest.TestCase):
 @unittest.skipUnless(all(find_spec(name) for name in ('torch', 'onnx', 'onnxruntime', 'pnnx', 'ncnn')),
                      'optional export profile')
 class NativePortableModels(unittest.TestCase):
+    def test_ncnn_unicode_paths_use_stream_trace_relative_converter_and_windows_weight_staging(self):
+        import torch
+        import subprocess
+        from utils_new.import_export.model_export import export_semantic
+        from utils_new.import_export.model_load import NCNNRuntime
+
+        torch.set_num_threads(1)
+        model = torch.nn.Conv2d(3, 2, 1).eval()
+        metadata = dict(input_size=32, normalize=False, resize_mode='hard',
+                        output_kind='logits', model_type='U-Net', num_classes=2)
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'Северная заря (модели)'
+            root.mkdir()
+            target = root / 'model_ncnn_model'
+            before = Path.cwd()
+            with patch('torch.jit.save', wraps=torch.jit.save) as save, \
+                    patch('subprocess.run', wraps=subprocess.run) as convert:
+                export_semantic(model, metadata, 32, target, 'NCNN')
+            self.assertTrue(hasattr(save.call_args.args[1], 'write'))
+            self.assertEqual(convert.call_args.args[0][1], 'trace.pt')
+            self.assertEqual(convert.call_args.kwargs['cwd'], target)
+            self.assertEqual(Path.cwd(), before)
+            with patch('sys.platform', 'win32'):
+                runtime = NCNNRuntime(target / 'model.ncnn.param')
+            data = np.ones((1, 3, 32, 32), np.float32)
+            with torch.inference_mode():
+                expected = model(torch.from_numpy(data)).numpy()
+            np.testing.assert_allclose(runtime.run(data)[0], expected, rtol=2e-3, atol=2e-4)
+            self.assertFalse(list(target.glob('trace*')))
+
+    def test_ncnn_converter_failure_preserves_diagnostics(self):
+        import torch
+        import subprocess
+        from utils_new.import_export.model_export import export_semantic
+        with TemporaryDirectory() as directory, \
+                patch('subprocess.run', return_value=subprocess.CompletedProcess([], 9, b'', b'unsupported layer')):
+            with self.assertRaisesRegex(RuntimeError, 'unsupported layer'):
+                export_semantic(torch.nn.Conv2d(3, 2, 1), dict(normalize=False, resize_mode='hard'),
+                                32, Path(directory) / 'ncnn', 'NCNN')
+
     def test_semantic_logits_and_masks_roundtrip_for_both_formats(self):
         import torch
         from utils_new.import_export.model_export import export_semantic

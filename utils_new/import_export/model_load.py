@@ -49,7 +49,23 @@ class NCNNRuntime:
         self.net.opt.use_fp16_storage = False
         self.net.opt.use_fp16_arithmetic = False
         param = ncnn_param(path)
-        if self.net.load_param(str(param)) != 0 or self.net.load_model(str(param.with_suffix(".bin"))) != 0:
+        # The native NCNN filename API uses narrow paths on Windows. Parse the
+        # text from Python and stage only weights when the native path is unsafe.
+        import sys
+        binary = param.with_suffix('.bin')
+        if sys.platform == 'win32' and (not str(binary).isascii() or len(str(binary)) >= 240):
+            import shutil
+            import tempfile
+            with tempfile.TemporaryDirectory(prefix='neuro-ncnn-') as directory:
+                local = Path(directory) / 'weights.bin'
+                if not str(local).isascii() or len(str(local)) >= 240:
+                    raise ValueError('NCNN: задайте TEMP/TMP короткой папкой с латинским именем для загрузки весов.')
+                shutil.copyfile(binary, local)
+                status = self.net.load_param_mem(param.read_text(encoding='utf-8'))
+                status = status or self.net.load_model(str(local))
+        else:
+            status = self.net.load_param(str(param)) or self.net.load_model(str(binary))
+        if status != 0:
             raise ValueError("NCNN не смог прочитать граф или веса.")
         self.inputs = list(self.net.input_names())
         self.outputs = list(self.net.output_names())
